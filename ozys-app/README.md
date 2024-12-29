@@ -5,7 +5,7 @@ A desktop app for connecting to OZYS PCBs and visualizing real-time strain gauge
 ## Getting Started
 
 ### Prerequisites
-Make sure you have installed nvm, yarn and Rust.
+Make sure you have installed nvm.
 
 ### Installing
 
@@ -26,5 +26,5 @@ yarn install
 
 To run the app:
 ```
-yarn tauri dev
+yarn dev
 ```
