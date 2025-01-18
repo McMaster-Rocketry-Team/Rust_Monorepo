@@ -8,7 +8,7 @@ import {
 } from 'flexlayout-react'
 import 'flexlayout-react/style/light.css'
 
-import {Devices} from './devices/Devices'
+import { Devices } from './devices/Devices'
 import { MouseEvent, useEffect, useMemo, useRef, useState } from 'react'
 
 import addIcon from '../assets/add.svg'
@@ -16,6 +16,7 @@ import { defaultLayout } from '../workspace/defaultLayout'
 import { onAllowDrop } from '../workspace/onAllowDrop'
 import { TabIdProvider } from '../workspace/useTabId'
 import { StrainGraph } from './straingraph/StrainGraph'
+import { Spectrogram } from './spectrogram/Spectrogram'
 import { useDebounce } from 'rooks'
 import { WebUSBDebugTab } from './webusb_debug/WebUSBDebugTab'
 
@@ -54,7 +55,8 @@ export default function FlexLayout() {
     } else if (tab === 'Strain Graph') {
       component = <StrainGraph />
     } else if (tab === 'Spectrogram') {
-      component = <button>{node.getName()}</button>
+      // component = <button>{node.getName()}</button>
+      component = <Spectrogram />
     } else if (tab === 'WebUSB Debug') {
       component = <WebUSBDebugTab />
     } else {
