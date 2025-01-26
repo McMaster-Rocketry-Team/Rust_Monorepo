@@ -77,11 +77,51 @@ export class SpectrogramCanvas {
       const player = this.players.get(channelId)
       if (!player) return
       const newData = await player.getNewData()
-      console.log(`Channel ${channelId} Data:`, newData)
-    })
 
+      if (newData.length > 0) {
+        console.log(
+          `Channel ${channelId} Data:`,
+          newData,
+          // JSON.stringify(newData),
+        )
+
+        const color = this.getColor(newData[0]?.fft[30] ?? 0)
+
+        this.ctx.fillStyle = color
+        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height)
+      }
+    })
     await Promise.all(promises)
     this.isDrawing = false
+  }
+
+  getColor(value: number): string {
+    const high = 200
+    const low = 0
+
+    value = Math.abs(value)
+    // value from 0 to 200
+
+    // assign colours (rainbow)
+    let r = 0
+    let g = 0
+    let b = 0
+
+    if (value < 85) {
+      r = 255
+      g = Math.round((255 * value) / 85)
+      b = 0
+    } else if (value < 170) {
+      r = Math.round(255 - ((255 * (value - 85)) / 85))
+      g = 255
+      b = 0
+    } else {
+      r = 0
+      g = 255
+      b = Math.round((255 * (value - 170)) / 85)
+    }
+
+    return `rgba(${r}, ${g}, ${b}, 1)`
   }
 
   dispose() {

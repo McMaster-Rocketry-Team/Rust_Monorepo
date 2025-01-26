@@ -115,6 +115,8 @@ export class StrainGraphCanvas {
 
       const readings = player.readings
 
+      // console.log(readings)
+
       this.ctx.beginPath()
       this.ctx.strokeStyle = color
       this.ctx.lineWidth = 1
