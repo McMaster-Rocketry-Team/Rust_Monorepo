@@ -20,6 +20,9 @@ export class SpectrogramCanvas {
   private isDrawing = false
   private resizeObserver: ResizeObserver
 
+  private tempCanvas: HTMLCanvasElement
+  private tempCtx: CanvasRenderingContext2D
+
   constructor(
     private msPerPixel: number,
     private container: HTMLDivElement,
@@ -30,6 +33,15 @@ export class SpectrogramCanvas {
     this.canvas.height = container.clientHeight
     container.appendChild(this.canvas)
     this.ctx = this.canvas.getContext('2d')!
+
+    this.tempCanvas = document.createElement('canvas')
+    this.tempCanvas.width = this.canvas.width
+    this.tempCanvas.height = this.canvas.height
+    const tempCtx = this.tempCanvas.getContext('2d')
+    if (!tempCtx) {
+      throw new Error('Failed to get temp context')
+    }
+    this.tempCtx = tempCtx
 
     this.resizeObserver = new ResizeObserver(debounce(() => this.resize(), 100))
     this.resizeObserver.observe(container)
@@ -47,10 +59,11 @@ export class SpectrogramCanvas {
       this.selectedChannels,
       selectedChannels,
     )
+
     this.selectedChannels = selectedChannels
 
     if (channelsDiff.changed !== 0) {
-      this.playersMutex.runExclusive(async () => {
+      await this.playersMutex.runExclusive(async () => {
         for (const { channelId } of channelsDiff.added) {
           const player =
             await this.devicesManager.createRealtimeSpectrogramPlayer(
@@ -76,49 +89,90 @@ export class SpectrogramCanvas {
     const promises = selectedChannels.map(async ({ channelId }) => {
       const player = this.players.get(channelId)
       if (!player) return
-      const newData = await player.getNewData()
 
+      const newData = await player.getNewData()
       if (newData.length > 0) {
-        console.log(
-          `Channel ${channelId} Data:`,
-          newData,
-          // JSON.stringify(newData),
+        const freqWidth = 0.05 * this.msPerPixel
+        const shiftAmount = newData.length * freqWidth
+
+        if (
+          this.tempCanvas.width !== this.canvas.width ||
+          this.tempCanvas.height !== this.canvas.height
+        ) {
+          this.tempCanvas.width = this.canvas.width
+          this.tempCanvas.height = this.canvas.height
+        }
+
+        // save previous data
+        this.tempCtx.clearRect(
+          0,
+          0,
+          this.tempCanvas.width,
+          this.tempCanvas.height,
+        )
+        this.tempCtx.drawImage(this.canvas, 0, 0)
+
+        // shift to left
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
+        this.ctx.drawImage(
+          this.tempCanvas,
+          shiftAmount,
+          0,
+          this.canvas.width - shiftAmount,
+          this.canvas.height,
+          0,
+          0,
+          this.canvas.width - shiftAmount,
+          this.canvas.height,
         )
 
-        const color = this.getColor(newData[0]?.fft[30] ?? 0)
+        // draw new block of data
+        for (let i = 0; i < newData.length; i++) {
+          const data = newData[i]
+          if (data?.fft) {
+            for (let j = 0; j < data.fft.length; j++) {
+              const freq = data.fft[j]
+              const freqHeight = this.canvas.height / data.fft.length
+              const color = this.getColor(freq)
 
-        this.ctx.fillStyle = color
-        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height)
+              this.ctx.fillStyle = color
+
+              this.ctx.fillRect(
+                this.canvas.width - shiftAmount + i * freqWidth,
+                this.canvas.height - j * freqHeight,
+                freqWidth,
+                freqHeight,
+              )
+            }
+          }
+        }
       }
     })
     await Promise.all(promises)
     this.isDrawing = false
   }
 
+  // Temporary colour assignments
   getColor(value: number): string {
-    const high = 200
-    const low = 0
-
+    // value from 0 to 200 for mic fft
     value = Math.abs(value)
-    // value from 0 to 200
 
-    // assign colours (rainbow)
     let r = 0
     let g = 0
     let b = 0
 
     if (value < 85) {
       r = 255
-      g = Math.round((255 * value) / 85)
+      g = Math.round((255 * value) / 100)
       b = 0
     } else if (value < 170) {
-      r = Math.round(255 - ((255 * (value - 85)) / 85))
+      r = Math.round(255 - (255 * (value - 85)) / 100)
       g = 255
       b = 0
     } else {
       r = 0
       g = 255
-      b = Math.round((255 * (value - 170)) / 85)
+      b = Math.round((255 * (value - 170)) / 100)
     }
 
     return `rgba(${r}, ${g}, ${b}, 1)`
@@ -139,6 +193,7 @@ export class SpectrogramCanvas {
   setMsPerPixel(msPerPixel: number) {
     if (msPerPixel === this.msPerPixel) return
     this.msPerPixel = msPerPixel
+    console.log(msPerPixel)
   }
 
   private diffSelectedChannels(

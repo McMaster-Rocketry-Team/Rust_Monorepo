@@ -3,33 +3,28 @@ import { useOzysDevicesManager } from '../../device/OzysDevicesManager'
 import { useEffect, useRef, useState } from 'react'
 import { useRaf } from 'rooks'
 import { observer } from 'mobx-react-lite'
-import { produce } from 'immer'
 import { SelectedChannel, SpectrogramCanvas } from './SpectrogramCanvas'
 
 export const Spectrogram = observer(() => {
   const devicesManager = useOzysDevicesManager()
-  const [selectedChannels, setSelectedChannels] = useTabAtom<SelectedChannel[]>(
-    'selectedChannels',
-    [],
-  )
+  const [selectedChannel, setSelectedChannel] =
+    useTabAtom<SelectedChannel | null>('selectedChannel', null)
   const [msPerPixel, setMsPerPixel] = useTabAtom('msPerPixel', 10)
 
   const canvasContainerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<SpectrogramCanvas | null>(null)
-  const [hoverInfo, setHoverInfo] = useState<{
-    x: number
-    dataIndex: number | null
-  } | null>(null)
   const [isMenuOpen, setIsMenuOpen] = useTabAtom('isMenuOpen', false)
 
   useEffect(() => {
-    canvasRef.current = new SpectrogramCanvas(
-      msPerPixel,
-      canvasContainerRef.current!,
-      devicesManager,
-    )
+    if (canvasContainerRef.current) {
+      canvasRef.current = new SpectrogramCanvas(
+        msPerPixel,
+        canvasContainerRef.current,
+        devicesManager,
+      )
+    }
     return () => {
-      canvasRef.current!.dispose()
+      canvasRef.current?.dispose()
     }
   }, [])
 
@@ -38,8 +33,8 @@ export const Spectrogram = observer(() => {
   }, [msPerPixel])
 
   useRaf(() => {
-    if (canvasRef.current) {
-      canvasRef.current.draw(selectedChannels)
+    if (canvasRef.current && selectedChannel) {
+      canvasRef.current.draw([selectedChannel])
     }
   }, true)
 
@@ -47,7 +42,6 @@ export const Spectrogram = observer(() => {
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-      
       <button
         onClick={toggleMenu}
         style={{
@@ -72,65 +66,57 @@ export const Spectrogram = observer(() => {
             zIndex: 10,
           }}
         >
-          <h4>Data Configurations</h4>
-          {devicesManager.activeChannels.map(({ device, channel }) => {
-            const selectedChannel = selectedChannels.find(
-              (c) => c.channelId === channel.id,
-            )
-            return (
-              <div key={channel.id} className='mt-2 flex gap-2'>
-                <input
-                  type='checkbox'
-                  checked={!!selectedChannel}
-                  onChange={(e) => {
-                    if (e.target.checked) {
-                      setSelectedChannels((prev) => [
-                        ...prev,
-                        { channelId: channel.id, color: '#000000' },
-                      ])
-                    } else {
-                      setSelectedChannels((prev) =>
-                        prev.filter((c) => c.channelId !== channel.id),
-                      )
-                    }
-                  }}
-                />
-                <p>
-                  {device.deviceInfo.name} - {channel.name}
-                </p>
-                <input
-                  type='color'
-                  value={selectedChannel?.color || '#000000'}
-                  onChange={(e) => {
-                    setSelectedChannels((prev) =>
-                      produce(prev, (draft) => {
-                        draft.find((c) => c.channelId === channel.id)!.color =
-                          e.target.value
-                      }),
-                    )
-                  }}
-                />
-              </div>
-            )
-          })}
+          <h4>Select Channel</h4>
+
+          {devicesManager.activeChannels.map(({ device, channel }) => (
+            <div key={channel.id} className='mt-2 flex gap-2'>
+              <input
+                type='radio'
+                name='channel'
+                checked={selectedChannel?.channelId === channel.id}
+                onChange={() =>
+                  setSelectedChannel({
+                    channelId: channel.id,
+                    color: '#000000',
+                  })
+                }
+              />
+              <p>
+                {device.deviceInfo.name} - {channel.name}
+              </p>
+            </div>
+          ))}
         </div>
       )}
 
-      <div
-        ref={canvasContainerRef}
-        style={{
-          display: 'block',
-          width: '100%',
-          height: '100%',
-          overflow: 'hidden',
-        }}
-        onWheel={(e) => {
-          setMsPerPixel((prev) => {
-            const newMsPerPixel = prev * (1 + e.deltaY / 1000)
-            return newMsPerPixel
-          })
-        }}
-      />
+      <div className='w-full h-full flex flex-row items-center'>
+        {/* Need to add frequency scale */}
+        <div className='mx-4'>Frequency 0 - 20kHz</div>
+        <div className='h-full w-full pt-12 pb-20 mr-12'>
+          <div className='h-full w-full'>
+            <div
+              ref={canvasContainerRef}
+              style={{
+                display: 'block',
+                width: '100%',
+                height: '100%',
+                overflow: 'hidden',
+              }}
+              className='border-[#E2E2E2] border-2'
+              // Scroll to change speed -need to link to respective channel for strain
+              onWheel={(e) => {
+                setMsPerPixel((prev) => {
+                  const newMsPerPixel = prev * (1 + e.deltaY / 1000)
+                  return newMsPerPixel
+                })
+              }}
+            />
+          </div>
+
+          {/* Need to add time scale */}
+          <div className='text-center'>Time</div>
+        </div>
+      </div>
     </div>
   )
 })
