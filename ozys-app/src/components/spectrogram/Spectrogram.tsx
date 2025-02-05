@@ -74,12 +74,12 @@ export const Spectrogram = observer(() => {
                 type='radio'
                 name='channel'
                 checked={selectedChannel?.channelId === channel.id}
-                onChange={() =>
+                onChange={() => {
                   setSelectedChannel({
                     channelId: channel.id,
                     color: '#000000',
                   })
-                }
+                }}
               />
               <p>
                 {device.deviceInfo.name} - {channel.name}
