@@ -12,7 +12,7 @@ export const DeviceCard = observer((props: { device: OzysDevice }) => {
   const [menuOpen, setMenuOpen] = useState(false)
   const [renameInput, setRenameInput] = useState(false)
   const [renameValue, setRenameValue] = useState(deviceInfo.name)
-
+  
   const toggleMenu = () => {
     setMenuOpen(!menuOpen)
     console.log('Menu Open:', deviceInfo.id)

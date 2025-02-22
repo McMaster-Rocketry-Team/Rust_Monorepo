@@ -25,9 +25,14 @@ export default function ChannelCard(props: {
   }
 
   const renameChannel = async () => {
-    props.device.renameChannel(channelId, renameValue)
+    await props.device.renameChannel(channelId, renameValue)
     setRenameInput(false)
     setMenuOpen(false)
+  }
+
+  const toggleChannel = async () => {
+    await props.device.controlChannel(channelId, !props.sensorData.enabled)
+    console.log(props.sensorData.enabled)
   }
 
   const closePopup = () => {
@@ -38,7 +43,7 @@ export default function ChannelCard(props: {
 
   return (
     <div
-      className='w-full h-24 bg-[#F5F5F5] rounded-lg p-2'
+      className='w-full h-24 bg-[#F5F5F5] rounded-lg p-3'
       onClick={closePopup}
     >
       <div className='flex justify-between'>
@@ -60,7 +65,14 @@ export default function ChannelCard(props: {
             </button>
           </form>
         ) : (
-          <h1 className='text-lg'>{name}</h1>
+          <h1 className='text-lg flex flex-row gap-3 items-center'>
+            {name}{' '}
+            <div
+              className={`${
+                props.sensorData.enabled ? 'bg-green-500' : 'bg-red-500'
+              } w-2 h-2 rounded-full`}
+            ></div>
+          </h1>
         )}
         <div className='h-6 w-6'>
           <button onClick={toggleMenu}>
@@ -75,7 +87,15 @@ export default function ChannelCard(props: {
                 className='px-2 py-1 w-full text-center hover:bg-[#E2E2E2]'
                 onClick={() => setRenameInput(true)}
               >
-                Rename Device
+                Rename Channel
+              </button>
+              <button
+                className='px-2 py-1 w-full text-center hover:bg-[#E2E2E2]'
+                onClick={toggleChannel}
+              >
+                {props.sensorData.enabled
+                  ? 'Disable Channel'
+                  : 'Enable Channel'}
               </button>
             </div>
           ) : (
