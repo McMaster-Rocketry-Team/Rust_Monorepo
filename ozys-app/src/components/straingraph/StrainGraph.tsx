@@ -34,8 +34,8 @@ export const StrainGraph = observer(() => {
   }, [])
 
   useEffect(() => {
-    canvasRef.current?.setMsPerPixel(msPerPixel)
-  }, [msPerPixel])
+    canvasRef.current?.setMsPerPixel(devicesManager.chartScale)
+  }, [devicesManager.chartScale])
 
   useRaf(() => {
     if (canvasRef.current) {
@@ -172,6 +172,7 @@ export const StrainGraph = observer(() => {
           left: '10px',
           zIndex: 10,
         }}
+        className='bg-white border-gray-200 border-2 rounded-lg px-4 py-1 hover:hover:bg-[#E2E2E2]'
       >
         {isMenuOpen ? 'Close Menu' : 'Open Menu'}
       </button>
@@ -181,13 +182,9 @@ export const StrainGraph = observer(() => {
         <div
           style={{
             position: 'absolute',
-            top: '40px',
-            left: '10px',
-            padding: '10px',
-            border: '1px solid black',
-            backgroundColor: 'white',
-            zIndex: 10,
+            zIndex: 12,
           }}
+          className='max-h-[40%] min-h-48 overflow-y-auto overflow-x-hidden bg-white border-gray-200 border-2 rounded-lg p-4 top-16 left-3 bg-opacity-90'
         >
           <h4>Data Configurations</h4>
           {devicesManager.activeChannels.map(({ device, channel }) => {
@@ -234,21 +231,23 @@ export const StrainGraph = observer(() => {
       )}
 
       {/* Graph Canvas */}
-      <div
-        ref={canvasContainerRef}
-        style={{
-          display: 'block',
-          width: '100%',
-          height: '100%',
-          overflow: 'hidden',
-        }}
-        onWheel={(e) => {
-          setMsPerPixel((prev) => {
-            const newMsPerPixel = prev * (1 + e.deltaY / 1000)
-            return newMsPerPixel
-          })
-        }}
-      />
+      <div className='w-auto h-full mr-12 ml-24'>
+        <div
+          ref={canvasContainerRef}
+          style={{
+            display: 'block',
+            width: '100%',
+            height: '100%',
+          }}
+          onWheel={(e) => {
+            setMsPerPixel((prev) => {
+              const newMsPerPixel = prev * (1 + e.deltaY / 1000)
+              devicesManager.setScale(newMsPerPixel)
+              return newMsPerPixel
+            })
+          }}
+        />
+      </div>
     </div>
   )
 })

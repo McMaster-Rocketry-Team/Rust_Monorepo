@@ -90,9 +90,16 @@ export class SpectrogramCanvas {
       const player = this.players.get(channelId)
       if (!player) return
 
-      const newData = await player.getNewData()
+      let newData = await player.getNewData()
+      // console.log(newData)
       if (newData.length > 0) {
-        const freqWidth = 0.05 * this.msPerPixel
+        // if (true) {
+
+        // if(newData.length == 0){
+        //   newData = [{timestamp: Date.now(), fft: new Float32Array(10)}]
+        // }
+
+        const freqWidth = 0.93 / this.msPerPixel
         const shiftAmount = newData.length * freqWidth
 
         if (
@@ -193,7 +200,6 @@ export class SpectrogramCanvas {
   setMsPerPixel(msPerPixel: number) {
     if (msPerPixel === this.msPerPixel) return
     this.msPerPixel = msPerPixel
-    console.log(msPerPixel)
   }
 
   private diffSelectedChannels(
@@ -217,6 +223,13 @@ export class SpectrogramCanvas {
 
   private resize() {
     if (this.disposed) return
+    if (
+      this.canvas.width == this.container.clientWidth &&
+      this.canvas.height == this.container.clientHeight
+    ) {
+      return
+    }
+
     this.canvas.width = this.container.clientWidth
     this.canvas.height = this.container.clientHeight
   }

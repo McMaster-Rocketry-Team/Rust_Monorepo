@@ -17,6 +17,7 @@ export class OzysDevicesManager {
   public devices: OzysDevice[] = []
   private dbWorkerScript = new DatabaseWorker()
   private dbWorker = Comlink.wrap<DatabaseWorkerType>(this.dbWorkerScript)
+  public chartScale: number  = 10
 
   get activeChannels() {
     const result = []
@@ -42,6 +43,7 @@ export class OzysDevicesManager {
       addDevice: action,
       disconnectDevice: action,
       disconnectAllDevices: action,
+      chartScale: observable
     })
     console.log('OzysDevicesManager created')
   }
@@ -99,6 +101,10 @@ export class OzysDevicesManager {
     options: SpectrogramPlayerOptions,
   ) {
     return await this.dbWorker.createRealtimeSpectrogramPlayer(channelId, options)
+  }
+
+  setScale(newScale: number) {
+    this.chartScale = newScale;
   }
 }
 
