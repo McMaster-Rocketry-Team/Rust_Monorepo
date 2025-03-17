@@ -10,39 +10,51 @@ mod fmt;
 #[packed_struct(bit_numbering = "lsb0", size_bytes = "1")]
 pub struct ServoStatus {
     #[packed_field(bits = "0")]
-    is_under_over_voltage: bool,
+    pub is_under_over_voltage: bool,
     #[packed_field(bits = "1")]
-    is_over_current: bool,
+    pub is_over_current: bool,
     #[packed_field(bits = "2")]
-    is_over_temperature: bool,
+    pub is_over_temperature: bool,
     #[packed_field(bits = "3")]
-    is_over_loaded: bool,
+    pub is_over_loaded: bool,
     #[packed_field(bits = "4")]
-    is_hardware_failure: bool,
+    pub is_hardware_failure: bool,
     #[packed_field(bits = "5")]
-    last_command_corrupted: bool,
+    pub last_command_corrupted: bool,
     #[packed_field(bits = "6")]
-    last_command_failed: bool,
+    pub last_command_failed: bool,
     #[packed_field(bits = "7")]
-    is_turning: bool,
+    pub is_turning: bool,
+}
+
+impl ServoStatus {
+    pub fn is_ok(&self) -> bool {
+        !self.is_under_over_voltage
+            && !self.is_over_current
+            && !self.is_over_temperature
+            && !self.is_over_loaded
+            && !self.is_hardware_failure
+            && !self.last_command_corrupted
+            && !self.last_command_failed
+    }
 }
 
 #[derive(Debug, defmt::Format)]
 pub struct Measurements {
     /// in degrees
-    angle: f32,
+    pub angle: f32,
 
     /// in degrees per second
-    angular_velocity: i16,
+    pub angular_velocity: i16,
 
     /// in A
-    current: f32,
+    pub current: f32,
 
     /// in 0-1
-    pwm_duty_cycle: f32,
+    pub pwm_duty_cycle: f32,
 
     /// in C
-    temperature: i16,
+    pub temperature: i16,
 }
 
 impl From<MeasurementsRaw> for Measurements {
@@ -112,22 +124,27 @@ where
 
     pub async fn init(&mut self, enable_protections: bool) -> Result<(), DSPowerServoError<S>> {
         // break on by default
-        self.overwrite_register_if_different(0x11, &[0b0000_0011]).await?;
+        self.overwrite_register_if_different(0x11, &[0b0000_0011])
+            .await?;
 
         // Do not wait before sending responses
         self.overwrite_register_if_different(0x12, &[0, 0]).await?;
 
         // Max current: 5A
-        self.overwrite_register_if_different(0x14, &(5000u16.to_le_bytes())).await?;
+        self.overwrite_register_if_different(0x14, &(5000u16.to_le_bytes()))
+            .await?;
 
         // Max speed: 10000 deg/s
-        self.overwrite_register_if_different(0x15, &(10000u16.to_le_bytes())).await?;
+        self.overwrite_register_if_different(0x15, &(10000u16.to_le_bytes()))
+            .await?;
 
         // Max duty cycle while not moving: 100%
-        self.overwrite_register_if_different(0x1C, &(1000u16.to_le_bytes())).await?;
+        self.overwrite_register_if_different(0x1C, &(1000u16.to_le_bytes()))
+            .await?;
 
         if enable_protections {
-            self.overwrite_register_if_different(0x32, &[0b0000_1111]).await?;
+            self.overwrite_register_if_different(0x32, &[0b0000_1111])
+                .await?;
         } else {
             self.overwrite_register_if_different(0x32, &[0]).await?;
         }
@@ -447,6 +464,103 @@ mod tests {
             let measurements = servo.batch_read_measurements().await.unwrap();
 
             println!("{:?}", measurements);
+        }
+
+        #[tokio::test]
+        async fn run_benchmark() {
+            use core::f32::consts::PI;
+            use csv::Writer;
+            use itertools::izip;
+            use tokio::time::{self, Duration};
+
+            init_logger();
+
+            let mut csv_writer = Writer::from_path("output.csv").unwrap();
+
+            let serial = tokio_serial::new("/dev/ttyUSB0", 115200)
+                .open_native_async()
+                .unwrap();
+            let mut servo = DSPowerServo::new(SerialWrapper(serial));
+
+            servo.init(true).await.unwrap();
+
+            let mut interval = time::interval(Duration::from_millis(10));
+
+            let mut angles: Vec<f32> = Vec::new();
+
+            // reset to zero
+            angles.append(&mut vec![0.0; 100]);
+
+            // step inputs
+            for angle in [10, 30, 50, 70, 90, 110, 130].iter() {
+                angles.append(&mut vec![0.0; 100]);
+                angles.append(&mut vec![*angle as f32; 100]);
+            }
+
+            // frequency sweeps
+            for amplitude in [10, 30, 50, 70].iter() {
+                angles.append(&mut vec![0.0; 100]);
+
+                let mut t = 0.0f32;
+                while t < 40.0 {
+                    let angle =
+                        (t * PI * (1.1f32.powf(t)) / 10.0).sin() * (*amplitude as f32 / 2.0);
+                    angles.push(angle);
+
+                    t += 0.01;
+                }
+            }
+
+            angles.append(&mut vec![0.0; 100]);
+
+            let mut timestamps: Vec<f32> = Vec::new();
+            let mut commanded_angles: Vec<f32> = Vec::new();
+            let mut measurements_list: Vec<Measurements> = Vec::new();
+            for (i, angle) in angles.iter().enumerate() {
+                servo.move_to(*angle).await.unwrap();
+                let measurements = servo.batch_read_measurements().await.unwrap();
+                let status = servo.get_status().await.unwrap();
+                if !status.is_ok() {
+                    log_warn!("Servo status: {:?}", status);
+                    log_warn!("Measurements: {:?}", measurements);
+                }
+
+                let t = i as f32 * 0.01 - 1.0;
+                if t > 0.0 {
+                    timestamps.push(t);
+                    commanded_angles.push(*angle);
+                    measurements_list.push(measurements);
+                }
+
+                interval.tick().await;
+            }
+
+            csv_writer
+                .write_record(&[
+                    "timestamp",
+                    "commanded_angle",
+                    "actual_angle",
+                    "angular_velocity",
+                    "current",
+                    "pwm_duty_cycle",
+                    "temperature",
+                ])
+                .unwrap();
+            for (timestamp, commanded_angle, measurements) in
+                izip!(timestamps, commanded_angles, measurements_list)
+            {
+                csv_writer
+                    .write_record(&[
+                        timestamp.to_string(),
+                        commanded_angle.to_string(),
+                        measurements.angle.to_string(),
+                        measurements.angular_velocity.to_string(),
+                        measurements.current.to_string(),
+                        measurements.pwm_duty_cycle.to_string(),
+                        measurements.temperature.to_string(),
+                    ])
+                    .unwrap();
+            }
         }
     }
 }
