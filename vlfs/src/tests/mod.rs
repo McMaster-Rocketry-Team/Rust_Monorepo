@@ -12,7 +12,7 @@ fn init_logger() {
     let _ = env_logger::builder()
         .filter_level(LevelFilter::Error)
         .filter(Some("vlfs"), LevelFilter::Trace)
-        .filter(Some("vlfs-host"), LevelFilter::Trace)
+        .filter(Some("vlfs_host"), LevelFilter::Trace)
         .is_test(true)
         .try_init();
 }

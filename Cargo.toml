@@ -9,7 +9,8 @@ members = [
     "vl-cli",
     # "vl-simulink-bridge", 
     "calculate-required-bits", 
-    "vl-host-lib",
+    "vl-host-lib", 
+    "dspower-servo",
     # "launch-simulator",
 ]
 resolver = "2"

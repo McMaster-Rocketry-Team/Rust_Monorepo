@@ -1,0 +1,24 @@
+[package]
+name = "dspower-servo"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+log = ["dep:log"]
+defmt = []
+
+[dependencies]
+embedded-io-async = "0.6.1"
+defmt = { version = "0.3" }
+packed_struct = { version = "0.10.1", default-features = false }
+log = { version = "0.4", optional = true }
+
+[dev-dependencies]
+dspower-servo = { version = "*", path = ".", features = [
+    "log",
+] }
+embedded-io-async = { version = "0.6.1", features = ["std"] }
+tokio-serial = "5.4.5"
+tokio = { version = "1.38.0", features = ["full"] }
+env_logger = "0.11.3"
