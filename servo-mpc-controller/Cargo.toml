@@ -1,0 +1,16 @@
+[package]
+name = "servo-mpc-controller"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dspower-servo = { version = "*", path = "../dspower-servo", features = [
+    "log",
+] }
+osqp = "0.6.3"
+tokio = { version = "1.38.0", features = ["full"] }
+tokio-serial = "5.4.5"
+embedded-io-async = { version = "0.6.1", features = ["std"] }
+env_logger = "0.11.7"
+log = "0.4.26"
+nalgebra = "0.33.2"

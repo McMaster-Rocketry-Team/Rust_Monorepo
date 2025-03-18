@@ -313,7 +313,7 @@ where
         }
         if !sum != buf[buf.len() - 1] {
             Err(DSPowerServoError::ChecksumError {
-                expected: sum,
+                expected: !sum,
                 actual: buf[buf.len() - 1],
             })
         } else {
