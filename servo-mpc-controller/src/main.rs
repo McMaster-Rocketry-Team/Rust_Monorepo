@@ -101,6 +101,9 @@ async fn main() {
         let measurements = servo.batch_read_measurements().await.unwrap();
         servo.move_to(angle).await.unwrap();
 
+        z = Matrix1::new(measurements.angle);
+        u = Some(Matrix1::new(angle));
+
         let t = i as f32 * 0.01 - 1.0;
         if t >= 0.0 {
             csv_writer
@@ -115,13 +118,6 @@ async fn main() {
                 ])
                 .unwrap();
         }
-    }
-
-    let mut t = 0;
-    loop {
-        let angle = if (t % 200) < 100 { 0.0 } else { 10.0 };
-
-        t += 1;
     }
 }
 
