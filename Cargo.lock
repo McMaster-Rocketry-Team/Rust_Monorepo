@@ -2623,6 +2623,7 @@ dependencies = [
 name = "servo-mpc-controller"
 version = "0.1.0"
 dependencies = [
+ "csv",
  "dspower-servo",
  "embedded-io-async",
  "env_logger",
