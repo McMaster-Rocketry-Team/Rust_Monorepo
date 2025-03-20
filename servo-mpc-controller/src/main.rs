@@ -1,10 +1,14 @@
-use std::{array, f32::consts::PI, time::Duration};
+#![allow(non_upper_case_globals)]
+#![allow(non_snake_case)]
+
+use std::{array, cmp::min, f32::consts::PI, time::Duration};
 
 use csv::Writer;
-use dspower_servo::DSPowerServo;
+use dspower_servo::{DSPowerServo, Measurements};
 use embedded_io_async::{ErrorType, Read, Write};
 use log::{info, LevelFilter};
-use nalgebra::{Matrix1, Matrix1x2, Matrix2, Matrix2x1, Matrix3x4};
+use nalgebra::{Matrix1, Matrix1x2, Matrix2, Matrix2x1, SMatrix};
+use osqp::{CscMatrix, Problem};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     time,
@@ -30,6 +34,39 @@ impl Write for SerialWrapper {
     }
 }
 
+struct MockServo {
+    A: Matrix2<f32>,
+    B: Matrix2x1<f32>,
+    C: Matrix1x2<f32>,
+    x: Matrix2x1<f32>,
+}
+
+impl MockServo {
+    fn new() -> Self {
+        let A = Matrix2::new(0.9394f32, 0.06012, -0.2254, 0.7754);
+        let B = Matrix2x1::new(-1.055e-5f32, 0.0003027);
+        let C = Matrix1x2::new(1635.0f32, 39.75);
+        let x = Matrix2x1::new(0.0f32, 0.0);
+
+        Self { A, B, C, x }
+    }
+
+    async fn batch_read_measurements(&self) -> Result<Measurements, ()> {
+        Ok(Measurements {
+            angle: (self.C * self.x)[0],
+            angular_velocity: 0,
+            current: 0.0,
+            pwm_duty_cycle: 0.0,
+            temperature: 0,
+        })
+    }
+
+    async fn move_to(&mut self, angle: f32) -> Result<(), ()> {
+        self.x = self.A * self.x + self.B * angle;
+        Ok(())
+    }
+}
+
 #[tokio::main]
 async fn main() {
     env_logger::builder()
@@ -41,6 +78,7 @@ async fn main() {
     csv_writer
         .write_record(&[
             "timestamp",
+            "tracking_angle",
             "commanded_angle",
             "actual_angle",
             "angular_velocity",
@@ -50,13 +88,14 @@ async fn main() {
         ])
         .unwrap();
 
-    let serial = tokio_serial::new("/dev/ttyUSB0", 115200)
-        .open_native_async()
-        .unwrap();
-    let mut servo = DSPowerServo::new(SerialWrapper(serial));
-    servo.init(true).await.unwrap();
+    // let serial = tokio_serial::new("/dev/ttyUSB0", 115200)
+    //     .open_native_async()
+    //     .unwrap();
+    // let mut servo = DSPowerServo::new(SerialWrapper(serial));
+    // servo.init(true).await.unwrap();
+    let mut servo = MockServo::new();
 
-    // State space model of the servo
+    // ======================== State space model of the servo
     // https://www.notion.so/mcmasterrocketry/Servo-Simulink-Model-51e64ae3558446ad83d20f000c16cc0b
     let A = Matrix2::new(0.9394f32, 0.06012, -0.2254, 0.7754);
     let At = A.transpose();
@@ -64,6 +103,7 @@ async fn main() {
     let C = Matrix1x2::new(1635.0f32, 39.75);
     let Ct = C.transpose();
 
+    // ======================== Values needed for Kalman filter
     // Sensor noise (variance)
     let r = Matrix1::new(0.01f32);
 
@@ -79,9 +119,65 @@ async fn main() {
     // Last input
     let mut u: Option<Matrix1<f32>> = None;
 
+    // ======================== Values needed for MPC
+    // Prediction horizon
+    const Np: usize = 20;
+    // Control horizon
+    const Nc: usize = 10;
+
+    let mut F = SMatrix::<f32, Np, 2>::zeros();
+    let mut Phi = SMatrix::<f32, Np, Np>::zeros();
+    let mut A_power = Matrix2::identity();
+    for i in 0..Np {
+        let value = C * A_power * B;
+        let value = value[0];
+        for j in 0..(Np - i) {
+            Phi[(i + j, j)] = value;
+        }
+
+        A_power = A_power * A;
+
+        let row = C * A_power;
+        F.row_mut(i).copy_from(&row);
+    }
+
+    let w_q = 1.0; // Output tracking weight
+    let w_r = 0.005; // Control effort weight
+
+    let mut Q_bar = SMatrix::<f32, Np, Np>::zeros();
+    for i in 0..Np {
+        Q_bar[(i, i)] = w_q;
+    }
+
+    let mut R_bar = SMatrix::<f32, Nc, Nc>::zeros();
+    for i in 0..Nc {
+        R_bar[(i, i)] = w_r;
+    }
+
+    let mut T = SMatrix::<f32, Np, Nc>::zeros();
+    for i in 0..Np {
+        let j = min(i, Nc - 1);
+        T[(i, j)] = 1.0;
+    }
+
+    let Phi = Phi * T;
+    let Phi_t = Phi.transpose();
+
+    // Define problem for OSQP
+    let P_osqp = (Phi_t * Q_bar * Phi + R_bar) * 2.0;
+    let P_osqp: [[f64; Nc]; Nc] = array::from_fn(|i| array::from_fn(|j| P_osqp[(i, j)] as f64));
+    let P_osqp = CscMatrix::from(&P_osqp).into_upper_tri();
+    let A_osqp = SMatrix::<f32, Nc, Nc>::identity();
+    let A_osqp: [[f64; Nc]; Nc] = array::from_fn(|i| array::from_fn(|j| A_osqp[(i, j)] as f64));
+    let l_osqp = [-120.0f64; Nc];
+    let u_osqp = [120.0f64; Nc];
+
+    let osqp_settings = osqp::Settings::default().verbose(false);
+
+    // ======================== Main loop
     let angle_commands = create_angle_commands();
     let mut interval = time::interval(Duration::from_millis(10));
-    for (i, angle) in angle_commands.iter().enumerate() {
+    for (i, tracking_angle) in angle_commands.iter().enumerate() {
         // Combine estimated state with sensor measurement
         let K = P * Ct * (C * P * Ct + r).try_inverse().unwrap();
         x = x + K * (z - C * x);
@@ -94,9 +190,16 @@ async fn main() {
         }
 
         // Calculate next input
-        let angle = *angle;
+        let r_bar = SMatrix::<f32, Np, 1>::from_element(*tracking_angle);
+        let q_osqp = (Phi_t * Q_bar * (F * x - r_bar)) * 2.0;
+        let q_osqp: [f64; Nc] = array::from_fn(|i| q_osqp[i] as f64);
+        let mut qp =
+            Problem::new(&P_osqp, &q_osqp, &A_osqp, &l_osqp, &u_osqp, &osqp_settings).unwrap();
+        let result = qp.solve();
+        let angle = result.x().unwrap()[0] as f32;
+        // let angle = *tracking_angle;
 
-        interval.tick().await;
+        // interval.tick().await;
 
         let measurements = servo.batch_read_measurements().await.unwrap();
         servo.move_to(angle).await.unwrap();
@@ -109,6 +212,7 @@ async fn main() {
             csv_writer
                 .write_record(&[
                     t.to_string(),
+                    (*tracking_angle).to_string(),
                     angle.to_string(),
                     measurements.angle.to_string(),
                     measurements.angular_velocity.to_string(),
@@ -134,7 +238,9 @@ fn create_angle_commands() -> Vec<f32> {
     }
 
     // frequency sweeps
-    for amplitude in [10, 30, 50, 70].iter() {
+    for amplitude in [30
+    // , 30, 50, 70
+    ].iter() {
         angles.append(&mut vec![0.0; 100]);
 
         let mut t = 0.0f32;
