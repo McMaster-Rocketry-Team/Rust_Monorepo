@@ -123,12 +123,19 @@ where
     }
 
     pub async fn init(&mut self, enable_protections: bool) -> Result<(), DSPowerServoError<S>> {
+        // Save settings to flash
+        self.overwrite_register_if_different(0x04, &[0]).await?;
+
         // break on by default
         self.overwrite_register_if_different(0x11, &[0b0000_0011])
             .await?;
 
         // Do not wait before sending responses
         self.overwrite_register_if_different(0x12, &[0, 0]).await?;
+
+        // Max duty cycle: 100%
+        self.overwrite_register_if_different(0x13, &(1000u16.to_le_bytes()))
+            .await?;
 
         // Max current: 5A
         self.overwrite_register_if_different(0x14, &(5000u16.to_le_bytes()))
@@ -148,6 +155,36 @@ where
         } else {
             self.overwrite_register_if_different(0x32, &[0]).await?;
         }
+
+        Ok(())
+    }
+
+    pub async fn reduce_torque(&mut self) -> Result<(), DSPowerServoError<S>> {
+        // Don't save settings to flash
+        self.overwrite_register_if_different(0x04, &[1]).await?;
+
+        // Max duty cycle: 20%
+        self.overwrite_register_if_different(0x13, &(200u16.to_le_bytes()))
+            .await?;
+
+        // Max duty cycle while not moving: 20%
+        self.overwrite_register_if_different(0x1C, &(200u16.to_le_bytes()))
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn restore_torque(&mut self) -> Result<(), DSPowerServoError<S>> {
+        // Max duty cycle: 100%
+        self.overwrite_register_if_different(0x13, &(1000u16.to_le_bytes()))
+            .await?;
+
+        // Max duty cycle while not moving: 100%
+        self.overwrite_register_if_different(0x1C, &(1000u16.to_le_bytes()))
+            .await?;
+
+        // Save settings to flash
+        self.overwrite_register_if_different(0x04, &[0]).await?;
 
         Ok(())
     }

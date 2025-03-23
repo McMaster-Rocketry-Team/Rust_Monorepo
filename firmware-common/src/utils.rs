@@ -1,9 +1,9 @@
 use core::future::Future;
 
+use embassy_futures::select::{select, Either};
 use embassy_sync::blocking_mutex::raw::RawMutex;
 use embassy_sync::signal::Signal;
 use embedded_hal_async::delay::DelayNs;
-use embassy_futures::select::{select, Either};
 
 use crate::driver::clock::Clock;
 
@@ -17,7 +17,7 @@ macro_rules! try_or_warn {
 }
 
 pub async fn run_with_timeout<F: Future>(
-    delay:&mut impl DelayNs,
+    delay: &mut impl DelayNs,
     ms: f64,
     future: F,
 ) -> Result<F::Output, f64> {
