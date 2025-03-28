@@ -10,7 +10,7 @@ members = [
     # "vl-simulink-bridge", 
     "calculate-required-bits", 
     "vl-host-lib", 
-    "dspower-servo", "servo-mpc-controller",
+    "dspower-servo", "servo-mpc-controller", "can-bus",
     # "launch-simulator",
 ]
 resolver = "2"

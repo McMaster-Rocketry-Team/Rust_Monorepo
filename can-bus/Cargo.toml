@@ -1,0 +1,10 @@
+[package]
+name = "can-bus"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+packed_struct = { version = "0.10.1", default-features = false }
+heapless = { version = "0.8.0", features = [
+    "defmt-03",
+], default-features = false }
