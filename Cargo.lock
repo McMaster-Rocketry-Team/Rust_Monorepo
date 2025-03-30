@@ -309,6 +309,7 @@ version = "0.1.0"
 dependencies = [
  "heapless 0.8.0",
  "packed_struct",
+ "serde",
 ]
 
 [[package]]
@@ -1919,6 +1920,8 @@ checksum = "36b29691432cc9eff8b282278473b63df73bea49bc3ec5e67f31a3ae9c3ec190"
 dependencies = [
  "bitvec",
  "packed_struct_codegen",
+ "serde",
+ "serde_derive",
 ]
 
 [[package]]

@@ -3,6 +3,7 @@ use packed_struct::prelude::*;
 use super::message::CanBusMessage;
 
 #[derive(PackedStruct, Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "6")]
 pub struct UnixTimeMessage {
     /// Current milliseconds since Unix epoch, floored to the nearest ms
@@ -16,6 +17,7 @@ impl CanBusMessage for UnixTimeMessage {
 }
 
 #[derive(PackedStruct, Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "1")]
 pub struct AvionicsStatusMessage {
     #[packed_field(bits = "0")]
@@ -31,6 +33,7 @@ impl CanBusMessage for AvionicsStatusMessage {
 }
 
 #[derive(PrimitiveEnum_u8, Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum FlightEvent {
     Ignition = 0,
     Coast = 1,
@@ -39,6 +42,7 @@ pub enum FlightEvent {
 }
 
 #[derive(PackedStruct, Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "7")]
 pub struct FlightEventMessage {
     /// Current milliseconds since Unix epoch, floored to the nearest ms
@@ -56,6 +60,7 @@ impl CanBusMessage for FlightEventMessage {
 }
 
 #[derive(PrimitiveEnum_u8, Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum HealthState {
     Healthy = 0,
     Degraded = 1,
@@ -63,6 +68,7 @@ pub enum HealthState {
 }
 
 #[derive(PackedStruct, Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "1")]
 pub struct HealthMessage {
     #[packed_field(bits = "0..=1", ty = "enum")]
@@ -76,6 +82,7 @@ impl CanBusMessage for HealthMessage {
 }
 
 #[derive(PackedStruct, Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "1")]
 pub struct ResetMessage {
 }
