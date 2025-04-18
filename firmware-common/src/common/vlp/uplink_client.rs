@@ -108,7 +108,7 @@ impl VLPUplinkClient {
                 };
             };
             if let Err(e) = result {
-                log_error!("Error in VLP uplink client: {:?}", e);
+                log_error!("Error in VLP uplink client");
                 delay.delay_ms(1000.0).await;
             }
         }

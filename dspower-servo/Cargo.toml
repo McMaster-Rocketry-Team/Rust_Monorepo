@@ -10,6 +10,7 @@ defmt = ["dep:defmt"]
 
 [dependencies]
 embedded-io-async = "0.6.1"
+embedded-hal-async = "1.0.0"
 defmt = { version = "0.3", optional = true}
 packed_struct = { version = "0.10.1", default-features = false }
 log = { version = "0.4", optional = true }

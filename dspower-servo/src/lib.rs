@@ -4,6 +4,7 @@
 #[cfg(feature = "defmt")]
 use defmt::info;
 
+use embedded_hal_async::delay::DelayNs;
 use embedded_io_async::{ErrorType, Read, ReadExactError, Write};
 use packed_struct::prelude::*;
 
@@ -127,6 +128,16 @@ where
         }
     }
 
+    // FIXME doesn't seem to work
+    pub async fn reset(&mut self, mut delay: impl DelayNs) -> Result<(), DSPowerServoError<S>> {
+        log_info!("Resetting servo");
+
+        self.write_register(0x02, &[0xE1, 0xE2, 0xE3, 0xE4]).await?;
+        delay.delay_ms(20).await;
+
+        Ok(())
+    }
+
     pub async fn init(&mut self, enable_protections: bool) -> Result<(), DSPowerServoError<S>> {
         log_info!("Initializing servo");
         // Save settings to flash
@@ -137,7 +148,8 @@ where
             .await?;
 
         // Wait 200us before sending responses
-        self.overwrite_register_if_different(0x12, &(200u16.to_le_bytes())).await?;
+        self.overwrite_register_if_different(0x12, &(0u16.to_le_bytes()))
+            .await?;
 
         // Max duty cycle: 100%
         self.overwrite_register_if_different(0x13, &(1000u16.to_le_bytes()))
@@ -195,6 +207,7 @@ where
         Ok(())
     }
 
+    /// angle is in degrees
     pub async fn move_to(&mut self, angle: f32) -> Result<(), DSPowerServoError<S>> {
         let angle = (angle * 10.0) as i16;
         log_info!("Moving to angle {}", angle);
@@ -238,7 +251,10 @@ where
             .write_all(&self.buffer[..request_len])
             .await
             .map_err(DSPowerServoError::SerialError)?;
-        self.serial.flush().await.map_err(DSPowerServoError::SerialError)?;
+        self.serial
+            .flush()
+            .await
+            .map_err(DSPowerServoError::SerialError)?;
 
         let response_buffer = &mut self.buffer[..6];
         self.serial
@@ -261,7 +277,10 @@ where
             .write_all(&self.buffer[..request_len])
             .await
             .map_err(DSPowerServoError::SerialError)?;
-        self.serial.flush().await.map_err(DSPowerServoError::SerialError)?;
+        self.serial
+            .flush()
+            .await
+            .map_err(DSPowerServoError::SerialError)?;
 
         let response_buffer = &mut self.buffer[..19];
         self.serial
@@ -286,7 +305,10 @@ where
             .write_all(&self.buffer[..request_len])
             .await
             .map_err(DSPowerServoError::SerialError)?;
-        self.serial.flush().await.map_err(DSPowerServoError::SerialError)?;
+        self.serial
+            .flush()
+            .await
+            .map_err(DSPowerServoError::SerialError)?;
 
         let response_buffer = &mut self.buffer[..(7 + buf.len())];
         self.serial
@@ -311,7 +333,10 @@ where
             .write_all(&self.buffer[..request_len])
             .await
             .map_err(DSPowerServoError::SerialError)?;
-        self.serial.flush().await.map_err(DSPowerServoError::SerialError)?;
+        self.serial
+            .flush()
+            .await
+            .map_err(DSPowerServoError::SerialError)?;
         log_info!("Wrote register 0x{:X} with value {:?}", address, value);
 
         // The servo won't send any response because we are using the Super ID
@@ -331,7 +356,10 @@ where
             .write_all(&self.buffer[..request_len])
             .await
             .map_err(DSPowerServoError::SerialError)?;
-        self.serial.flush().await.map_err(DSPowerServoError::SerialError)?;
+        self.serial
+            .flush()
+            .await
+            .map_err(DSPowerServoError::SerialError)?;
         log_info!("write done");
 
         let response_buffer = &mut self.buffer[..(7 + value.len())];
@@ -427,7 +455,8 @@ mod tests {
 
             let mut servo = DSPowerServo::new(MockSerial);
 
-            let len = servo.craft_request(Command::WriteRegister, Some(0x12), &(200u16.to_le_bytes()));
+            let len =
+                servo.craft_request(Command::WriteRegister, Some(0x12), &(200u16.to_le_bytes()));
             assert_eq!(len, 6);
             assert_eq!(&servo.buffer[0..len], &[0xF9, 0xFF, 253, 2, 1, 255]);
         }

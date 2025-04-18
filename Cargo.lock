@@ -692,6 +692,7 @@ dependencies = [
  "csv",
  "defmt",
  "dspower-servo",
+ "embedded-hal-async",
  "embedded-io-async",
  "env_logger",
  "itertools 0.14.0",

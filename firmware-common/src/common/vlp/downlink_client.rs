@@ -128,7 +128,7 @@ impl VLPDownlinkClient {
                 }
             };
             if let Err(e) = result {
-                log_error!("Error in VLP downlink client: {:?}", e);
+                log_error!("Error in VLP downlink client");
                 delay.delay_ms(1000.0).await;
             }
         }
