@@ -1,6 +1,9 @@
 // only use std when feature = "std" is enabled or during testing
 #![cfg_attr(not(test), no_std)]
 
+#[cfg(feature = "defmt")]
+use defmt::info;
+
 use embedded_io_async::{ErrorType, Read, ReadExactError, Write};
 use packed_struct::prelude::*;
 
@@ -39,7 +42,8 @@ impl ServoStatus {
     }
 }
 
-#[derive(Debug, defmt::Format)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Debug)]
 pub struct Measurements {
     /// in degrees
     pub angle: f32,
@@ -88,7 +92,8 @@ where
     buffer: [u8; 19],
 }
 
-#[derive(Debug, defmt::Format)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Debug)]
 pub enum DSPowerServoError<S: ErrorType> {
     SerialError(S::Error),
     UnexpectedEof,
@@ -123,6 +128,7 @@ where
     }
 
     pub async fn init(&mut self, enable_protections: bool) -> Result<(), DSPowerServoError<S>> {
+        log_info!("Initializing servo");
         // Save settings to flash
         self.overwrite_register_if_different(0x04, &[0]).await?;
 
@@ -130,8 +136,8 @@ where
         self.overwrite_register_if_different(0x11, &[0b0000_0011])
             .await?;
 
-        // Do not wait before sending responses
-        self.overwrite_register_if_different(0x12, &[0, 0]).await?;
+        // Wait 200us before sending responses
+        self.overwrite_register_if_different(0x12, &(200u16.to_le_bytes())).await?;
 
         // Max duty cycle: 100%
         self.overwrite_register_if_different(0x13, &(1000u16.to_le_bytes()))
@@ -221,6 +227,7 @@ where
         }
         self.buffer[len - 1] = !sum;
 
+        log_info!("request crafted: {:?}", &self.buffer[..len]);
         len
     }
 
@@ -228,9 +235,10 @@ where
         let request_len = self.craft_request(Command::GetStatus, None, &[]);
 
         self.serial
-            .write(&self.buffer[..request_len])
+            .write_all(&self.buffer[..request_len])
             .await
             .map_err(DSPowerServoError::SerialError)?;
+        self.serial.flush().await.map_err(DSPowerServoError::SerialError)?;
 
         let response_buffer = &mut self.buffer[..6];
         self.serial
@@ -250,9 +258,10 @@ where
         );
 
         self.serial
-            .write(&self.buffer[..request_len])
+            .write_all(&self.buffer[..request_len])
             .await
             .map_err(DSPowerServoError::SerialError)?;
+        self.serial.flush().await.map_err(DSPowerServoError::SerialError)?;
 
         let response_buffer = &mut self.buffer[..19];
         self.serial
@@ -274,9 +283,10 @@ where
         let request_len = self.craft_request(Command::ReadRegister, Some(address), &[]);
 
         self.serial
-            .write(&self.buffer[..request_len])
+            .write_all(&self.buffer[..request_len])
             .await
             .map_err(DSPowerServoError::SerialError)?;
+        self.serial.flush().await.map_err(DSPowerServoError::SerialError)?;
 
         let response_buffer = &mut self.buffer[..(7 + buf.len())];
         self.serial
@@ -298,9 +308,10 @@ where
         let request_len = self.craft_request(Command::WriteRegister, Some(address), value);
 
         self.serial
-            .write(&self.buffer[..request_len])
+            .write_all(&self.buffer[..request_len])
             .await
             .map_err(DSPowerServoError::SerialError)?;
+        self.serial.flush().await.map_err(DSPowerServoError::SerialError)?;
         log_info!("Wrote register 0x{:X} with value {:?}", address, value);
 
         // The servo won't send any response because we are using the Super ID
@@ -315,16 +326,20 @@ where
     ) -> Result<(), DSPowerServoError<S>> {
         let request_len = self.craft_request(Command::ReadRegister, Some(address), &[]);
 
+        log_info!("writing");
         self.serial
-            .write(&self.buffer[..request_len])
+            .write_all(&self.buffer[..request_len])
             .await
             .map_err(DSPowerServoError::SerialError)?;
+        self.serial.flush().await.map_err(DSPowerServoError::SerialError)?;
+        log_info!("write done");
 
         let response_buffer = &mut self.buffer[..(7 + value.len())];
         self.serial
             .read_exact(response_buffer)
             .await
             .map_err(DSPowerServoError::from_read_exact_error)?;
+        log_info!("read done");
         Self::verify_checksum(response_buffer)?;
 
         let existing_value = &response_buffer[6..(6 + value.len())];
@@ -402,6 +417,17 @@ mod tests {
             let mut servo = DSPowerServo::new(MockSerial);
 
             let len = servo.craft_request(Command::GetStatus, None, &[]);
+            assert_eq!(len, 6);
+            assert_eq!(&servo.buffer[0..len], &[0xF9, 0xFF, 253, 2, 1, 255]);
+        }
+
+        #[test]
+        fn test_craft_result2() {
+            init_logger();
+
+            let mut servo = DSPowerServo::new(MockSerial);
+
+            let len = servo.craft_request(Command::WriteRegister, Some(0x12), &(200u16.to_le_bytes()));
             assert_eq!(len, 6);
             assert_eq!(&servo.buffer[0..len], &[0xF9, 0xFF, 253, 2, 1, 255]);
         }
