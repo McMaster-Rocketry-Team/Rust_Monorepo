@@ -1,0 +1,30 @@
+[package]
+name = "firmware-common-new"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+log = ["dep:log"]
+defmt = ["dep:defmt", "heapless/defmt-03"]
+
+[dependencies]
+embedded-io-async = "0.6.1"
+embedded-hal-async = "1.0.0"
+defmt = { version = "1.0.1", optional = true}
+packed_struct = { version = "0.10.1", default-features = false }
+log = { version = "0.4", optional = true }
+nmea = { version = "0.7.0", default-features = false, features = [
+    "GGA",
+    "GLL",
+    "GSA",
+    "GSV",
+    "RMC",
+] }
+chrono = { version = "0.4.26", default-features = false }
+serde = { version = "1.0.219", default-features = false }
+heapless = { version = "0.8.0", features = [
+    "serde",
+], default-features = false }
+postcard = {version = "1.1.1"}
+embassy-futures = "0.1.1"
