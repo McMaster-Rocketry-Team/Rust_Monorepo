@@ -8,6 +8,7 @@ use embedded_io_async::Read;
 use heapless::String;
 use nmea::Nmea;
 use serde::{Deserialize, Serialize};
+use crate::fmt::Debug2DefmtWrapper;
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Serialize, Deserialize, Debug, Clone)]

@@ -420,6 +420,10 @@ mod test {
 
     #[test]
     fn print_telemetry_packet_length() {
+        println!(
+            "Telemetry Packet Struct Length: {}",
+            size_of::<TelemetryPacket>() * 8
+        );
         println!("Telemetry Packet Length: {}", TelemetryPacket::len_bits());
     }
 }

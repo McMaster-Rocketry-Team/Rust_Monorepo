@@ -1,6 +1,14 @@
 #![macro_use]
 #![allow(unused_macros)]
 
+#[cfg(feature = "defmt")]
+#[derive(defmt::Format, Debug)]
+pub struct Debug2DefmtWrapper<T: core::fmt::Debug>(#[defmt(Debug2Format)] pub T);
+
+#[cfg(not(feature = "defmt"))]
+#[derive(Debug)]
+pub struct Debug2DefmtWrapper<T: core::fmt::Debug>(pub T);
+
 macro_rules! log_trace {
     ($s:literal $(, $x:expr)* $(,)?) => {
         {
