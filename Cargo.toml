@@ -8,9 +8,11 @@ members = [
     # "vl8-ctrl-protocol", 
     "vl-cli",
     # "vl-simulink-bridge", 
-    "calculate-required-bits", 
-    "vl-host-lib", 
-    "dspower-servo", "servo-mpc-controller", "can-bus", "firmware-common-new",
+    "calculate-required-bits",
+    "vl-host-lib",
+    "dspower-servo",
+    "servo-mpc-controller",
+    "firmware-common-new",
     # "launch-simulator",
 ]
 resolver = "2"

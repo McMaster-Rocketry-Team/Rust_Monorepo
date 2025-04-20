@@ -304,15 +304,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "can-bus"
-version = "0.1.0"
-dependencies = [
- "heapless 0.8.0",
- "packed_struct",
- "serde",
-]
-
-[[package]]
 name = "cc"
 version = "1.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
