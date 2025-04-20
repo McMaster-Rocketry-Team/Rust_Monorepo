@@ -950,6 +950,8 @@ dependencies = [
  "embedded-hal-async",
  "embedded-io-async",
  "heapless 0.8.0",
+ "icao-isa",
+ "icao-units",
  "log",
  "nmea 0.7.0",
  "packed_struct",

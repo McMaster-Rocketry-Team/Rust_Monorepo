@@ -5,27 +5,24 @@ use super::CanBusMessage;
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PackedStruct, Clone, Debug, Serialize, Deserialize)]
-#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "6")]
-pub struct UnixTimeMessage {
-    /// Current milliseconds since Unix epoch, floored to the nearest ms
-    pub timestamp: Integer<u64, packed_bits::Bits<48>>,
+#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "2")]
+pub struct BulkheadStatusMessage {
+    pub brightness: u16,
 }
 
-impl UnixTimeMessage {
-    pub fn new(timestamp: f64) -> Self {
-        Self {
-            timestamp: (timestamp as u64).into(),
-        }
+impl BulkheadStatusMessage {
+    pub fn new(brightness: u16) -> Self {
+        Self { brightness }
     }
 }
 
-impl CanBusMessage for UnixTimeMessage {
+impl CanBusMessage for BulkheadStatusMessage {
     fn len() -> usize {
-        6
+        2
     }
 
     fn priority(&self) -> u8 {
-        6
+        5
     }
 
     fn serialize(self, buffer: &mut [u8]) {

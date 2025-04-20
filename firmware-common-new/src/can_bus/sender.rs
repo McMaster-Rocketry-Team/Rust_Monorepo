@@ -7,7 +7,7 @@ use crate::can_bus::messages::CanBusMessageEnum;
 use super::{id::CanBusExtendedId, messages::CanBusMessage, CanBusTX};
 use packed_struct::prelude::*;
 
-pub const MAX_CAN_MESSAGE_SIZE: usize = 256;
+pub const MAX_CAN_MESSAGE_SIZE: usize = 64;
 
 #[derive(PackedStruct)]
 #[packed_struct]
@@ -78,9 +78,9 @@ impl<M: RawMutex, const N: usize> CanSender<M, N> {
         let mut buffer = [0u8; MAX_CAN_MESSAGE_SIZE];
         assert!(T::len() <= buffer.len());
 
+        let id = CanBusExtendedId::new(message.priority(), CanBusMessageEnum::get_message_type::<T>().unwrap(), 0, 0);
         message.serialize(&mut buffer);
         let mut buffer = &buffer[..T::len()];
-        let id = CanBusExtendedId::new(T::priority(), CanBusMessageEnum::get_message_type::<T>().unwrap(), 0, 0);
 
         if buffer.len() <= 7 {
             let mut message = RawCanMessage::new(id);

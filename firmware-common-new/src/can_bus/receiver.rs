@@ -6,7 +6,7 @@ use core::{
 use embassy_futures::yield_now;
 use embassy_sync::{
     blocking_mutex::raw::RawMutex,
-    pubsub::{PubSubBehavior, PubSubChannel},
+    pubsub::{PubSubBehavior, PubSubChannel, Subscriber},
 };
 use heapless::Vec;
 use packed_struct::PackedStructSlice;
@@ -205,5 +205,11 @@ impl<M: RawMutex, const N: usize, const SUBS: usize, const Q: usize> CanReceiver
                 }
             }
         }
+    }
+
+    pub async fn subscriber(
+        &self,
+    ) -> Option<Subscriber<M, SensorReading<BootTimestamp, CanBusMessageEnum>, N, SUBS, 1>> {
+        self.channel.subscriber().ok()
     }
 }

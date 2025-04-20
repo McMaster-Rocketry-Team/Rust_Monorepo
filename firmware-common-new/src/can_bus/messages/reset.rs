@@ -5,34 +5,30 @@ use super::CanBusMessage;
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PackedStruct, Clone, Debug, Serialize, Deserialize)]
-#[packed_struct]
-pub struct AmpControlMessage {
-    pub out1_enable: bool,
-    pub out2_enable: bool,
-    pub out3_enable: bool,
-    pub out4_enable: bool,
-    _padding: ReservedZero<packed_bits::Bits<4>>,
+#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "2")]
+pub struct ResetMessage {
+    pub node_id: Integer<u16, packed_bits::Bits<12>>,
+    pub reset_all: bool,
+    _padding: ReservedZero<packed_bits::Bits<3>>,
 }
 
-impl AmpControlMessage {
-    pub fn new(out1_enable: bool, out2_enable: bool, out3_enable: bool, out4_enable: bool) -> Self {
+impl ResetMessage {
+    pub fn new(node_id: u16, reset_all: bool) -> Self {
         Self {
-            out1_enable,
-            out2_enable,
-            out3_enable,
-            out4_enable,
+            node_id: node_id.into(),
+            reset_all,
             _padding: Default::default(),
         }
     }
 }
 
-impl CanBusMessage for AmpControlMessage {
+impl CanBusMessage for ResetMessage {
     fn len() -> usize {
-        1
+        2
     }
 
     fn priority(&self) -> u8 {
-        5
+        0
     }
 
     fn serialize(self, buffer: &mut [u8]) {
