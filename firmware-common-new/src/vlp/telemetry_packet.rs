@@ -12,6 +12,9 @@ fixed_point_factory!(FreeSpaceFac, f32, 0.0, 67108864.0, 40960.0);
 fixed_point_factory!(AltitudeFac, f32, -100.0, 5000.0, 5.0);
 fixed_point_factory!(AirSpeedFac, f32, -400.0, 400.0, 2.0);
 
+fixed_point_factory!(PayloadVoltageFac, f32, 2.0, 4.5, 0.05);
+fixed_point_factory!(PayloadCurrentFac, f32, 0.0, 2.0, 0.1);
+
 // #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 // #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 // pub struct TelemetryPacket {
