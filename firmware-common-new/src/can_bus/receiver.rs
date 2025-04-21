@@ -10,6 +10,7 @@ use embassy_sync::{
 };
 use heapless::Vec;
 use packed_struct::PackedStructSlice;
+use serde::{Deserialize, Serialize};
 
 use crate::{sensor_reading::SensorReading, time::BootTimestamp};
 
@@ -20,8 +21,15 @@ use super::{
     CanBusRX, CanBusRawMessage,
 };
 
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ReceivedCanBusMessage {
+    crc: u16,
+    message: CanBusMessageEnum,
+}
+
 pub struct CanReceiver<M: RawMutex, const N: usize, const SUBS: usize, const Q: usize> {
-    channel: PubSubChannel<M, SensorReading<BootTimestamp, CanBusMessageEnum>, N, SUBS, 1>,
+    channel: PubSubChannel<M, SensorReading<BootTimestamp, ReceivedCanBusMessage>, N, SUBS, 1>,
 }
 
 enum StateMachine {
@@ -54,7 +62,7 @@ impl StateMachine {
     fn process_frame(
         &mut self,
         frame: &impl CanBusRawMessage,
-    ) -> Option<SensorReading<BootTimestamp, CanBusMessageEnum>> {
+    ) -> Option<SensorReading<BootTimestamp, ReceivedCanBusMessage>> {
         let frame_id = CanBusExtendedId::from_raw(frame.id());
         let frame_data = frame.data();
         match self {
@@ -74,8 +82,17 @@ impl StateMachine {
                     }
 
                     let data = &frame_data[..tail_byte_i];
-                    return CanBusMessageEnum::deserialize(frame_id.message_type, data)
-                        .map(|message| SensorReading::new(frame.timestamp(), message));
+                    return CanBusMessageEnum::deserialize(frame_id.message_type, data).map(
+                        |message| {
+                            SensorReading::new(
+                                frame.timestamp(),
+                                ReceivedCanBusMessage {
+                                    crc: CAN_CRC.checksum(data),
+                                    message,
+                                },
+                            )
+                        },
+                    );
                 } else {
                     // expect the first frame of a multi-frame message
                     let tail_byte = TailByte::unpack_from_slice(&[frame_data[7]]).ok()?;
@@ -138,8 +155,16 @@ impl StateMachine {
                         return None;
                     }
 
-                    let message = CanBusMessageEnum::deserialize(id.message_type, &data)
-                        .map(|message| SensorReading::new(*first_frame_timestamp, message));
+                    let message =
+                        CanBusMessageEnum::deserialize(id.message_type, &data).map(|message| {
+                            SensorReading::new(
+                                *first_frame_timestamp,
+                                ReceivedCanBusMessage {
+                                    crc: calculated_crc,
+                                    message,
+                                },
+                            )
+                        });
                     *self = StateMachine::Empty;
                     return message;
                 } else {
@@ -209,7 +234,8 @@ impl<M: RawMutex, const N: usize, const SUBS: usize, const Q: usize> CanReceiver
 
     pub async fn subscriber(
         &self,
-    ) -> Option<Subscriber<M, SensorReading<BootTimestamp, CanBusMessageEnum>, N, SUBS, 1>> {
+    ) -> Option<Subscriber<M, SensorReading<BootTimestamp, ReceivedCanBusMessage>, N, SUBS, 1>>
+    {
         self.channel.subscriber().ok()
     }
 }

@@ -1,7 +1,9 @@
+use ack::AckMessage;
 use core::{
     any::{Any, TypeId},
     fmt::Debug,
 };
+use data_transfer::DataTransferMessage;
 use serde::{Deserialize, Serialize};
 
 pub use amp_control::AmpControlMessage;
@@ -17,11 +19,13 @@ pub use reset::ResetMessage;
 pub use tempurature_measurement::TempuratureMeasurementMessage;
 pub use unix_time::UnixTimeMessage;
 
+mod ack;
 mod amp_control;
 mod amp_status;
 mod avionics_status;
 mod baro_measurement;
 mod bulkhead_status;
+mod data_transfer;
 mod icarus_status;
 mod imu_measurement;
 mod node_status;
@@ -48,6 +52,9 @@ pub enum CanBusMessageEnum {
     IcarusStatus(IcarusStatusMessage),
     BulkheadStatus(BulkheadStatusMessage),
     PayloadActivationStatus(PayloadActivationStatusMessage),
+
+    DataTransfer(DataTransferMessage),
+    Ack(AckMessage),
 }
 
 impl CanBusMessageEnum {
@@ -68,6 +75,9 @@ impl CanBusMessageEnum {
             9 => Some(IcarusStatusMessage::len()),
             10 => Some(BulkheadStatusMessage::len()),
             11 => Some(PayloadActivationStatusMessage::len()),
+
+            12 => Some(DataTransferMessage::len()),
+            13 => Some(AckMessage::len()),
             _ => None,
         }
     }
@@ -98,6 +108,10 @@ impl CanBusMessageEnum {
             Some(10)
         } else if t_id == TypeId::of::<PayloadActivationStatusMessage>() {
             Some(11)
+        } else if t_id == TypeId::of::<DataTransferMessage>() {
+            Some(12)
+        } else if t_id == TypeId::of::<AckMessage>() {
+            Some(13)
         } else {
             None
         }
@@ -128,6 +142,9 @@ impl CanBusMessageEnum {
                 .map(CanBusMessageEnum::BulkheadStatus),
             11 => <PayloadActivationStatusMessage as CanBusMessage>::deserialize(data)
                 .map(CanBusMessageEnum::PayloadActivationStatus),
+            12 => <DataTransferMessage as CanBusMessage>::deserialize(data)
+                .map(CanBusMessageEnum::DataTransfer),
+            13 => <AckMessage as CanBusMessage>::deserialize(data).map(CanBusMessageEnum::Ack),
             _ => None,
         }
     }
