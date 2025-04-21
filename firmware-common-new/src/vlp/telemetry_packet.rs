@@ -6,11 +6,11 @@ use serde::{Serialize,Deserialize};
 
 use crate::fixed_point_factory;
 
-// fixed_point_factory!(BatteryVFac, f32, 6.0, 9.0, 0.001);
-// fixed_point_factory!(TemperatureFac, f32, -30.0, 85.0, 0.1);
-// fixed_point_factory!(FreeSpaceFac, f32, 0.0, 67108864.0, 40960.0);
-// fixed_point_factory!(AltitudeFac, f32, -100.0, 5000.0, 5.0);
-// fixed_point_factory!(AirSpeedFac, f32, -400.0, 400.0, 2.0);
+fixed_point_factory!(BatteryVFac, f32, 6.0, 9.0, 0.001);
+fixed_point_factory!(TemperatureFac, f32, -30.0, 85.0, 0.1);
+fixed_point_factory!(FreeSpaceFac, f32, 0.0, 67108864.0, 40960.0);
+fixed_point_factory!(AltitudeFac, f32, -100.0, 5000.0, 5.0);
+fixed_point_factory!(AirSpeedFac, f32, -400.0, 400.0, 2.0);
 
 // #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 // #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]

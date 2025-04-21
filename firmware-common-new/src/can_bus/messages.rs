@@ -4,6 +4,8 @@ use core::{
     fmt::Debug,
 };
 use data_transfer::DataTransferMessage;
+use payload_control::PayloadControlMessage;
+use payload_self_test::PayloadSelfTestMessage;
 use serde::{Deserialize, Serialize};
 
 pub use amp_control::AmpControlMessage;
@@ -14,7 +16,7 @@ pub use bulkhead_status::BulkheadStatusMessage;
 pub use icarus_status::IcarusStatusMessage;
 pub use imu_measurement::IMUMeasurementMessage;
 pub use node_status::NodeStatusMessage;
-pub use payload_activation_status::PayloadActivationStatusMessage;
+pub use payload_status::PayloadStatusMessage;
 pub use reset::ResetMessage;
 pub use tempurature_measurement::TempuratureMeasurementMessage;
 pub use unix_time::UnixTimeMessage;
@@ -29,7 +31,9 @@ mod data_transfer;
 mod icarus_status;
 mod imu_measurement;
 mod node_status;
-mod payload_activation_status;
+mod payload_control;
+mod payload_self_test;
+mod payload_status;
 mod reset;
 mod tempurature_measurement;
 mod unix_time;
@@ -48,10 +52,13 @@ pub enum CanBusMessageEnum {
     AmpStatus(AmpStatusMessage),
     AmpControl(AmpControlMessage),
 
+    PayloadStatus(PayloadStatusMessage),
+    PayloadControl(PayloadControlMessage),
+    PayloadSelfTest(PayloadSelfTestMessage),
+
     AvionicsStatus(AvionicsStatusMessage),
     IcarusStatus(IcarusStatusMessage),
     BulkheadStatus(BulkheadStatusMessage),
-    PayloadActivationStatus(PayloadActivationStatusMessage),
 
     DataTransfer(DataTransferMessage),
     Ack(AckMessage),
@@ -71,13 +78,16 @@ impl CanBusMessageEnum {
             6 => Some(AmpStatusMessage::len()),
             7 => Some(AmpControlMessage::len()),
 
-            8 => Some(AvionicsStatusMessage::len()),
-            9 => Some(IcarusStatusMessage::len()),
-            10 => Some(BulkheadStatusMessage::len()),
-            11 => Some(PayloadActivationStatusMessage::len()),
+            8 => Some(PayloadStatusMessage::len()),
+            9 => Some(PayloadControlMessage::len()),
+            10 => Some(PayloadSelfTestMessage::len()),
 
-            12 => Some(DataTransferMessage::len()),
-            13 => Some(AckMessage::len()),
+            11 => Some(AvionicsStatusMessage::len()),
+            12 => Some(IcarusStatusMessage::len()),
+            13 => Some(BulkheadStatusMessage::len()),
+
+            14 => Some(DataTransferMessage::len()),
+            15 => Some(AckMessage::len()),
             _ => None,
         }
     }
@@ -100,18 +110,22 @@ impl CanBusMessageEnum {
             Some(6)
         } else if t_id == TypeId::of::<AmpControlMessage>() {
             Some(7)
-        } else if t_id == TypeId::of::<AvionicsStatusMessage>() {
+        } else if t_id == TypeId::of::<PayloadStatusMessage>() {
             Some(8)
-        } else if t_id == TypeId::of::<IcarusStatusMessage>() {
+        } else if t_id == TypeId::of::<PayloadControlMessage>() {
             Some(9)
-        } else if t_id == TypeId::of::<BulkheadStatusMessage>() {
+        } else if t_id == TypeId::of::<PayloadSelfTestMessage>() {
             Some(10)
-        } else if t_id == TypeId::of::<PayloadActivationStatusMessage>() {
+        } else if t_id == TypeId::of::<AvionicsStatusMessage>() {
             Some(11)
-        } else if t_id == TypeId::of::<DataTransferMessage>() {
+        } else if t_id == TypeId::of::<IcarusStatusMessage>() {
             Some(12)
-        } else if t_id == TypeId::of::<AckMessage>() {
+        } else if t_id == TypeId::of::<BulkheadStatusMessage>() {
             Some(13)
+        } else if t_id == TypeId::of::<DataTransferMessage>() {
+            Some(14)
+        } else if t_id == TypeId::of::<AckMessage>() {
+            Some(15)
         } else {
             None
         }
@@ -134,17 +148,21 @@ impl CanBusMessageEnum {
                 .map(CanBusMessageEnum::AmpStatus),
             7 => <AmpControlMessage as CanBusMessage>::deserialize(data)
                 .map(CanBusMessageEnum::AmpControl),
-            8 => <AvionicsStatusMessage as CanBusMessage>::deserialize(data)
+            8 => <PayloadStatusMessage as CanBusMessage>::deserialize(data)
+                .map(CanBusMessageEnum::PayloadStatus),
+            9 => <PayloadControlMessage as CanBusMessage>::deserialize(data)
+                .map(CanBusMessageEnum::PayloadControl),
+            10 => <PayloadSelfTestMessage as CanBusMessage>::deserialize(data)
+                .map(CanBusMessageEnum::PayloadSelfTest),
+            11 => <AvionicsStatusMessage as CanBusMessage>::deserialize(data)
                 .map(CanBusMessageEnum::AvionicsStatus),
-            9 => <IcarusStatusMessage as CanBusMessage>::deserialize(data)
+            12 => <IcarusStatusMessage as CanBusMessage>::deserialize(data)
                 .map(CanBusMessageEnum::IcarusStatus),
-            10 => <BulkheadStatusMessage as CanBusMessage>::deserialize(data)
+            13 => <BulkheadStatusMessage as CanBusMessage>::deserialize(data)
                 .map(CanBusMessageEnum::BulkheadStatus),
-            11 => <PayloadActivationStatusMessage as CanBusMessage>::deserialize(data)
-                .map(CanBusMessageEnum::PayloadActivationStatus),
-            12 => <DataTransferMessage as CanBusMessage>::deserialize(data)
+            14 => <DataTransferMessage as CanBusMessage>::deserialize(data)
                 .map(CanBusMessageEnum::DataTransfer),
-            13 => <AckMessage as CanBusMessage>::deserialize(data).map(CanBusMessageEnum::Ack),
+            15 => <AckMessage as CanBusMessage>::deserialize(data).map(CanBusMessageEnum::Ack),
             _ => None,
         }
     }
