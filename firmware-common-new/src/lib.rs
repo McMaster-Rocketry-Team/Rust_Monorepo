@@ -7,7 +7,9 @@ compile_error!("Feature 'defmt' and 'log' are mutually exclusive and cannot be e
 
 mod fmt;
 
+pub(crate) mod fixed_point;
 pub mod can_bus;
 pub mod gps;
 pub mod sensor_reading;
 pub mod time;
+pub mod vlp;

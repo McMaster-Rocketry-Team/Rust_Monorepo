@@ -933,6 +933,8 @@ dependencies = [
 name = "firmware-common-new"
 version = "0.1.0"
 dependencies = [
+ "approx",
+ "calculate-required-bits",
  "chrono",
  "crc",
  "defmt 1.0.1",
@@ -943,9 +945,12 @@ dependencies = [
  "heapless 0.8.0",
  "icao-isa",
  "icao-units",
+ "libm 0.2.8",
  "log",
  "nmea 0.7.0",
+ "num-traits",
  "packed_struct",
+ "paste",
  "postcard",
  "serde",
 ]

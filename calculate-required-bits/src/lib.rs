@@ -63,6 +63,73 @@ pub fn calculate_required_bits(input: TokenStream) -> TokenStream {
 }
 
 #[proc_macro]
+pub fn calculate_packed_type(input: TokenStream) -> TokenStream {
+    let Args {
+        mode,
+        min,
+        max,
+        max_error,
+    } = parse_macro_input!(input as Args);
+
+    let bits = if mode == "minmax" {
+        let range = max - min;
+        (range / max_error).log2().ceil() as usize
+    } else if mode == "slope" {
+        let threshold_slope = min;
+        let sample_time_ms = max;
+
+        let range = threshold_slope * sample_time_ms / 1000.0 * 2.0;
+        (range / max_error).log2().ceil() as usize
+    } else {
+        panic!("Invalid mode, expected 'minmax' or 'slope'");
+    };
+
+    let base_type =  match bits {
+        1..=8 => quote! { u8 },
+        9..=16 => quote! { u16 },
+        17..=32 => quote! { u32 },
+        33..=64 => quote! { u64 },
+        _ => panic!("Bits out of range, expected 1 to 64"),
+    };
+    let expanded = quote! {
+        packed_struct::prelude::Integer<#base_type, packed_struct::prelude::packed_bits::Bits<#bits>>
+    };
+    TokenStream::from(expanded)
+}
+
+#[proc_macro]
+pub fn calculate_base_type(input: TokenStream) -> TokenStream {
+    let Args {
+        mode,
+        min,
+        max,
+        max_error,
+    } = parse_macro_input!(input as Args);
+
+    let bits = if mode == "minmax" {
+        let range = max - min;
+        (range / max_error).log2().ceil() as usize
+    } else if mode == "slope" {
+        let threshold_slope = min;
+        let sample_time_ms = max;
+
+        let range = threshold_slope * sample_time_ms / 1000.0 * 2.0;
+        (range / max_error).log2().ceil() as usize
+    } else {
+        panic!("Invalid mode, expected 'minmax' or 'slope'");
+    };
+
+    let base_type =  match bits {
+        1..=8 => quote! { u8 },
+        9..=16 => quote! { u16 },
+        17..=32 => quote! { u32 },
+        33..=64 => quote! { u64 },
+        _ => panic!("Bits out of range, expected 1 to 64"),
+    };
+    TokenStream::from(base_type)
+}
+
+#[proc_macro]
 pub fn calculate_min(input: TokenStream) -> TokenStream {
     let Args {
         mode,
