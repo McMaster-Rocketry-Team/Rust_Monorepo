@@ -5,6 +5,7 @@ use super::CanBusMessage;
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PrimitiveEnum_u8, Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(u8)]
 pub enum EPSOutputStatusEnum {
     Disabled = 0,
     PowerGood = 1,
@@ -52,8 +53,21 @@ pub struct PayloadStatusMessage {
 }
 
 impl PayloadStatusMessage {
-    pub fn new(payload_esp_connected: bool) -> Self {
-        todo!()
+    pub fn new(
+        eps1: EPSStatus,
+        eps2: EPSStatus,
+        eps1_node_id: u16,
+        eps2_node_id: u16,
+        payload_esp_node_id: u16,
+    ) -> Self {
+        Self {
+            eps1,
+            eps2,
+            eps1_node_id: eps1_node_id.into(),
+            eps2_node_id: eps2_node_id.into(),
+            payload_esp_node_id: payload_esp_node_id.into(),
+            _padding: Default::default(),
+        }
     }
 }
 
@@ -72,5 +86,57 @@ impl CanBusMessage for PayloadStatusMessage {
 
     fn deserialize(data: &[u8]) -> Option<Self> {
         Self::unpack_from_slice(data).ok()
+    }
+}
+
+#[cfg(test)]
+mod tests{
+    use super::*;
+
+    #[test]
+    fn test_payload_status_message() {
+        let mut buffer = [0u8; 25];
+        
+        let message = PayloadStatusMessage::new(
+            EPSStatus {
+                battery1_mv: 1,
+                battery2_mv: 2,
+                output_3v3: EPSOutputStatus {
+                    current_ma: 3.into(),
+                    status: EPSOutputStatusEnum::Disabled,
+                },
+                output_5v: EPSOutputStatus {
+                    current_ma: 4.into(),
+                    status: EPSOutputStatusEnum::PowerGood,
+                },
+                output_9v: EPSOutputStatus {
+                    current_ma: 5.into(),
+                    status: EPSOutputStatusEnum::PowerBad,
+                },
+            },
+            EPSStatus {
+                battery1_mv: 6,
+                battery2_mv: 7,
+                output_3v3: EPSOutputStatus {
+                    current_ma: 8.into(),
+                    status: EPSOutputStatusEnum::Disabled,
+                },
+                output_5v: EPSOutputStatus {
+                    current_ma: 9.into(),
+                    status: EPSOutputStatusEnum::PowerGood,
+                },
+                output_9v: EPSOutputStatus {
+                    current_ma: 10.into(),
+                    status: EPSOutputStatusEnum::PowerBad,
+                },
+            },
+            11,
+            12,
+            13,
+        );
+
+        message.serialize(&mut buffer);
+
+        println!("{:?}", buffer);
     }
 }

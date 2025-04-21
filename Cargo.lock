@@ -930,6 +930,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "firmware-common-ffi"
+version = "0.1.0"
+dependencies = [
+ "firmware-common-new",
+]
+
+[[package]]
 name = "firmware-common-new"
 version = "0.1.0"
 dependencies = [

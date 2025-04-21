@@ -1,0 +1,11 @@
+[package]
+name = "firmware-common-ffi"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+firmware-common-new = { path = "../firmware-common-new", default-features = false }
+
+[lib]
+name = "firmware_common_ffi"
+crate-type = ["staticlib"]

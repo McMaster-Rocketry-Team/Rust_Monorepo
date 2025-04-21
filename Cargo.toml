@@ -12,7 +12,8 @@ members = [
     "vl-host-lib",
     "dspower-servo",
     "servo-mpc-controller",
-    "firmware-common-new",
+    "firmware-common-new", 
+    "firmware-common-ffi",
     # "launch-simulator",
 ]
 resolver = "2"

@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 #[macro_export]
 macro_rules! fixed_point_factory {
     ($name:ident, f32, $min:literal, $max:literal, $max_error:literal) => {
@@ -18,6 +16,7 @@ macro_rules! fixed_point_factory {
             type [<$name Base>] = calculate_required_bits::calculate_base_type!($mode, $min, $max, $max_error);
 
             impl $name {
+                #[allow(dead_code)]
                 fn to_fixed_point(value: $source) -> Option<[<$name Packed>]> {
                     if value < calculate_required_bits::calculate_min!($mode, $min, $max, $max_error) as $source || value > calculate_required_bits::calculate_max!($mode, $min, $max, $max_error) as $source{
                         return None;
@@ -32,6 +31,7 @@ macro_rules! fixed_point_factory {
                     )
                 }
 
+                #[allow(dead_code)]
                 fn to_fixed_point_capped(value: $source) -> [<$name Packed>] {
                     let value = if value < calculate_required_bits::calculate_min!($mode, $min, $max, $max_error) as $source{
                         calculate_required_bits::calculate_min!($mode, $min, $max, $max_error)as $source
@@ -43,6 +43,7 @@ macro_rules! fixed_point_factory {
                     return Self::to_fixed_point(value).unwrap();
                 }
 
+                #[allow(dead_code)]
                 fn to_float(value: [<$name Packed>]) -> $source {
                     let value: [<$name Base>] = value.into();
                     let value = value as $source;
@@ -51,10 +52,12 @@ macro_rules! fixed_point_factory {
                     value + calculate_required_bits::calculate_min!($mode, $min, $max, $max_error)as $source
                 }
 
+                #[allow(dead_code)]
                 fn max() -> $source {
                     calculate_required_bits::calculate_max!($mode, $min, $max, $max_error) as $source
                 }
 
+                #[allow(dead_code)]
                 fn min() -> $source {
                     calculate_required_bits::calculate_min!($mode, $min, $max, $max_error) as $source
                 }
@@ -93,7 +96,6 @@ macro_rules! fixed_point_factory_slope {
 
 #[cfg(test)]
 mod test {
-    use super::*;
     use approx::assert_relative_eq;
 
     #[test]

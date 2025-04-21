@@ -21,22 +21,22 @@ pub use reset::ResetMessage;
 pub use tempurature_measurement::TempuratureMeasurementMessage;
 pub use unix_time::UnixTimeMessage;
 
-mod ack;
-mod amp_control;
-mod amp_status;
-mod avionics_status;
-mod baro_measurement;
-mod bulkhead_status;
-mod data_transfer;
-mod icarus_status;
-mod imu_measurement;
-mod node_status;
-mod payload_control;
-mod payload_self_test;
-mod payload_status;
-mod reset;
-mod tempurature_measurement;
-mod unix_time;
+pub mod ack;
+pub mod amp_control;
+pub mod amp_status;
+pub mod avionics_status;
+pub mod baro_measurement;
+pub mod bulkhead_status;
+pub mod data_transfer;
+pub mod icarus_status;
+pub mod imu_measurement;
+pub mod node_status;
+pub mod payload_control;
+pub mod payload_self_test;
+pub mod payload_status;
+pub mod reset;
+pub mod tempurature_measurement;
+pub mod unix_time;
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
