@@ -1,14 +1,25 @@
 #![no_std]
 
+use firmware_common_new::can_bus::id::CanBusExtendedId;
 pub use firmware_common_new::can_bus::messages::payload_status::{
     EPSOutputStatus, EPSOutputStatusEnum, EPSStatus,
 };
-use firmware_common_new::can_bus::messages::{CanBusMessage, PayloadStatusMessage};
+pub use firmware_common_new::can_bus::messages::{CanBusMessage, PayloadStatusMessage};
+use firmware_common_new::can_bus::sender::CanBusMultiFrameEncoder;
 
+#[repr(C)]
+pub struct CanMessage {
+    len: usize,
+    id: u32,
+}
+
+/// TODO comment
 #[no_mangle]
 pub extern "C" fn create_payload_status_message(
     buffer: *mut u8,
     buffer_length: usize,
+    self_node_type: u8,
+    self_node_id: u16,
     eps1_battery1_mv: u16,
     eps1_battery2_mv: u16,
     eps1_output_3v3_current_ma: u16,
@@ -28,7 +39,7 @@ pub extern "C" fn create_payload_status_message(
     eps1_node_id: u16,
     eps2_node_id: u16,
     payload_esp_node_id: u16,
-) -> usize {
+) -> CanMessage {
     let buffer = unsafe { core::slice::from_raw_parts_mut(buffer, buffer_length) };
 
     let message = PayloadStatusMessage::new(
@@ -69,8 +80,25 @@ pub extern "C" fn create_payload_status_message(
         payload_esp_node_id,
     );
 
-    message.serialize(buffer);
-    PayloadStatusMessage::len()
+    let id = CanBusExtendedId::from_message(&message, self_node_type, self_node_id);
+
+    let multi_frame_encoder = CanBusMultiFrameEncoder::new(message);
+    let mut i = 0;
+    for data in multi_frame_encoder {
+        if i + data.len() > buffer_length {
+            return CanMessage {
+                len: 0, // Buffer too small
+                id: id.into(),
+            };
+        }
+        buffer[i..i + data.len()].copy_from_slice(&data);
+        i += data.len();
+    }
+
+    CanMessage {
+        len: i,
+        id: id.into(),
+    }
 }
 
 #[cfg(any(target_os = "none", target_os = "espidf"))]

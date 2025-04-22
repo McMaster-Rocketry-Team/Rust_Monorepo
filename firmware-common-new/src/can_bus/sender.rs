@@ -1,7 +1,7 @@
 use crc::Crc;
 use embassy_futures::yield_now;
 use embassy_sync::{blocking_mutex::raw::RawMutex, channel::Channel};
-use heapless::Vec;
+use heapless::{Deque, Vec};
 
 use crate::can_bus::messages::CanBusMessageEnum;
 
@@ -43,20 +43,81 @@ struct RawCanMessage {
     data: Vec<u8, 8>,
 }
 
-impl RawCanMessage {
-    fn new(id: CanBusExtendedId) -> Self {
-        Self {
-            id,
-            data: Vec::new(),
-        }
-    }
-}
-
 pub struct CanSender<M: RawMutex, const N: usize> {
     channel: Channel<M, RawCanMessage, N>,
 }
 
 pub(super) const CAN_CRC: Crc<u16> = Crc::<u16>::new(&crc::CRC_16_IBM_3740);
+
+pub struct CanBusMultiFrameEncoder {
+    deserialized_message: [u8; MAX_CAN_MESSAGE_SIZE],
+    offset: usize,
+    message_len: usize,
+    toggle: bool,
+}
+
+impl CanBusMultiFrameEncoder {
+    pub fn new<T: CanBusMessage>(message: T) -> Self {
+        let mut deserialized_message = [0u8; MAX_CAN_MESSAGE_SIZE];
+        message.serialize(&mut deserialized_message);
+
+        Self {
+            deserialized_message,
+            offset: 0,
+            message_len: T::len(),
+            toggle: false,
+        }
+    }
+}
+
+impl Iterator for CanBusMultiFrameEncoder {
+    type Item = Vec<u8, 8>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.offset >= self.message_len {
+            return None;
+        }
+
+        let mut data = Vec::new();
+        if self.offset == 0 && self.message_len <= 7 {
+            // Single frame message
+            data.extend_from_slice(&self.deserialized_message[..self.message_len])
+                .unwrap();
+            data.push(TailByte::new(true, true, false).into()).unwrap();
+            self.offset += self.message_len;
+        } else {
+            // Multi-frame message
+            if self.offset == 0 {
+                // First frame
+                let crc = CAN_CRC.checksum(&self.deserialized_message);
+                data.extend_from_slice(&crc.to_le_bytes()).unwrap();
+                data.extend_from_slice(&self.deserialized_message[..5])
+                    .unwrap();
+                data.push(TailByte::new(true, false, self.toggle).into())
+                    .unwrap();
+                self.offset += 5;
+            } else if self.offset + 7 >= self.message_len {
+                // Last frame
+                data.extend_from_slice(&self.deserialized_message[self.offset..])
+                    .unwrap();
+                data.push(TailByte::new(false, true, self.toggle).into())
+                    .unwrap();
+                self.offset = self.message_len;
+            } else {
+                // Middle frame
+                data.extend_from_slice(&self.deserialized_message[self.offset..self.offset + 7])
+                    .unwrap();
+                data.push(TailByte::new(false, false, self.toggle).into())
+                    .unwrap();
+                self.offset += 7;
+            }
+
+            self.toggle = !self.toggle;
+        }
+
+        Some(data)
+    }
+}
 
 impl<M: RawMutex, const N: usize> CanSender<M, N> {
     pub fn new() -> Self {
@@ -79,64 +140,17 @@ impl<M: RawMutex, const N: usize> CanSender<M, N> {
     }
 
     pub async fn send<T: CanBusMessage>(&self, message: T) {
-        let mut buffer = [0u8; MAX_CAN_MESSAGE_SIZE];
-        assert!(T::len() <= buffer.len());
-
         let id = CanBusExtendedId::new(
             message.priority(),
             CanBusMessageEnum::get_message_type::<T>().unwrap(),
             0,
             0,
         );
-        message.serialize(&mut buffer);
-        let mut buffer = &buffer[..T::len()];
 
-        if buffer.len() <= 7 {
-            let mut message = RawCanMessage::new(id);
-            message.data.extend_from_slice(buffer).unwrap();
-            message
-                .data
-                .push(TailByte::new(true, true, false).into())
-                .unwrap();
+        let multi_frame_encoder = CanBusMultiFrameEncoder::new(message);
+        for data in multi_frame_encoder {
+            let message = RawCanMessage { id, data };
             self.channel.send(message).await;
-        } else {
-            let mut i = 0u32;
-            while buffer.len() > 0 {
-                let mut message = RawCanMessage::new(id);
-                if i == 0 {
-                    // first frame
-                    let crc = CAN_CRC.checksum(buffer);
-                    message.data.extend_from_slice(&crc.to_le_bytes()).unwrap();
-                    message.data.extend_from_slice(&buffer[..5]).unwrap();
-                    message
-                        .data
-                        .push(TailByte::new(true, false, i % 2 == 0).into())
-                        .unwrap();
-
-                    buffer = &buffer[5..];
-                } else if buffer.len() <= 7 {
-                    // last frame
-                    message.data.extend_from_slice(buffer).unwrap();
-                    message
-                        .data
-                        .push(TailByte::new(false, true, i % 2 == 0).into())
-                        .unwrap();
-
-                    buffer = &[]
-                } else {
-                    // middle frame
-                    message.data.extend_from_slice(buffer).unwrap();
-                    message
-                        .data
-                        .push(TailByte::new(false, false, i % 2 == 0).into())
-                        .unwrap();
-
-                    buffer = &buffer[7..];
-                }
-
-                self.channel.send(message).await;
-                i += 1;
-            }
         }
     }
 }

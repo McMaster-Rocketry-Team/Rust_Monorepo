@@ -1,6 +1,8 @@
 use core::fmt::Debug;
 use packed_struct::prelude::*;
 
+use super::messages::{CanBusMessage, CanBusMessageEnum};
+
 #[derive(PackedStruct, Default, Clone, Copy, Debug, PartialEq, Eq)]
 #[packed_struct(endian = "msb", size_bytes = "4")]
 pub struct CanBusExtendedId {
@@ -20,6 +22,15 @@ impl CanBusExtendedId {
             node_type: node_type.into(),
             node_id: node_id.into(),
         }
+    }
+
+    pub fn from_message<T: CanBusMessage>(message: &T, node_type: u8, node_id: u16) -> Self {
+        Self::new(
+            message.priority(),
+            CanBusMessageEnum::get_message_type::<T>().unwrap(),
+            node_type,
+            node_id,
+        )
     }
 
     pub fn from_raw(raw: u32) -> Self {

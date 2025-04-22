@@ -5,7 +5,7 @@ use super::CanBusMessage;
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PrimitiveEnum_u8, Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[repr(u8)]
+#[repr(C)]
 pub enum EPSOutputStatusEnum {
     Disabled = 0,
     PowerGood = 1,
@@ -15,6 +15,7 @@ pub enum EPSOutputStatusEnum {
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PackedStruct, Clone, Debug, Serialize, Deserialize)]
 #[packed_struct(bit_numbering = "msb0", endian = "msb")]
+#[repr(C)]
 pub struct EPSOutputStatus {
     #[packed_field(bits = "0..14")]
     pub current_ma: Integer<u16, packed_bits::Bits<14>>,
@@ -25,6 +26,7 @@ pub struct EPSOutputStatus {
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PackedStruct, Clone, Debug, Serialize, Deserialize)]
 #[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "10")]
+#[repr(C)]
 pub struct EPSStatus {
     #[packed_field(bits = "0..16")]
     pub battery1_mv: u16,
@@ -41,6 +43,7 @@ pub struct EPSStatus {
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PackedStruct, Clone, Debug, Serialize, Deserialize)]
 #[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "25")]
+#[repr(C)]
 pub struct PayloadStatusMessage {
     #[packed_field(element_size_bytes = "10")]
     pub eps1: EPSStatus,
