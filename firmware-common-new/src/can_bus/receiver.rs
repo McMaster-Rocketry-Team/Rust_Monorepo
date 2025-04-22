@@ -87,11 +87,14 @@ impl StateMachine {
                     return None;
                 }
 
+                let mut data = Vec::new();
+                data.extend_from_slice(&frame_data[2..frame_data.len() - 1])
+                    .unwrap();
                 *self = StateMachine::MultiFrame {
                     id: frame_id,
                     first_frame_timestamp: frame.timestamp(),
                     crc: u16::from_le_bytes([frame_data[0], frame_data[1]]),
-                    data: Vec::new(),
+                    data,
                 };
                 None
             }
@@ -233,5 +236,89 @@ impl<M: RawMutex, const N: usize, const SUBS: usize> CanReceiver<M, N, SUBS> {
     ) -> Option<Subscriber<M, SensorReading<BootTimestamp, ReceivedCanBusMessage>, N, SUBS, 1>>
     {
         self.channel.subscriber().ok()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::can_bus::{
+        messages::{
+            amp_status::PowerOutputStatus,
+            payload_status::{EPSOutputStatus, EPSStatus},
+            CanBusMessage, PayloadStatusMessage,
+        },
+        sender::CanBusMultiFrameEncoder,
+    };
+
+    use super::*;
+
+    #[test]
+    fn multi_frame_encode_and_decode() {
+        #[cfg(feature = "log")]
+        use log::LevelFilter;
+
+        #[cfg(feature = "log")]
+        let _ = env_logger::builder()
+            .filter_level(LevelFilter::Warn)
+            .filter(Some("firmware_common_new"), LevelFilter::Trace)
+            .is_test(true)
+            .try_init();
+
+        let message = PayloadStatusMessage::new(
+            EPSStatus {
+                battery1_mv: 1,
+                battery2_mv: 2,
+                output_3v3: EPSOutputStatus {
+                    current_ma: 3,
+                    status: PowerOutputStatus::Disabled,
+                },
+                output_5v: EPSOutputStatus {
+                    current_ma: 4,
+                    status: PowerOutputStatus::PowerGood,
+                },
+                output_9v: EPSOutputStatus {
+                    current_ma: 5,
+                    status: PowerOutputStatus::PowerBad,
+                },
+            },
+            EPSStatus {
+                battery1_mv: 6,
+                battery2_mv: 7,
+                output_3v3: EPSOutputStatus {
+                    current_ma: 8,
+                    status: PowerOutputStatus::Disabled,
+                },
+                output_5v: EPSOutputStatus {
+                    current_ma: 9,
+                    status: PowerOutputStatus::PowerGood,
+                },
+                output_9v: EPSOutputStatus {
+                    current_ma: 10,
+                    status: PowerOutputStatus::PowerBad,
+                },
+            },
+            11,
+            12,
+            13,
+        );
+
+        let id = CanBusExtendedId::new(
+            message.priority(),
+            CanBusMessageEnum::get_message_type::<PayloadStatusMessage>().unwrap(),
+            0,
+            1,
+        );
+        let id: u32 = id.into();
+        let encoder = CanBusMultiFrameEncoder::new(message);
+
+        let mut decoder = CanBusMultiFrameDecoder::<1>::new();
+        let mut decoded_message: Option<SensorReading<BootTimestamp, ReceivedCanBusMessage>> = None;
+        for data in encoder {
+            let frame = (0.0f64, id, data.as_slice());
+            decoded_message = decoder.process_frame(&frame);
+        }
+
+        assert!(decoded_message.is_some());
+        log_info!("Decoded message: {:?}", decoded_message);
     }
 }

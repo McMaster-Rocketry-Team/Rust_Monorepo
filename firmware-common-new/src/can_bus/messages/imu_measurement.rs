@@ -46,7 +46,7 @@ impl CanBusMessage for IMUMeasurementMessage {
     }
 
     fn serialize(self, buffer: &mut [u8]) {
-        self.pack_to_slice(buffer).unwrap();
+        self.pack_to_slice(&mut buffer[..Self::len()]).unwrap();
     }
 
     fn deserialize(data: &[u8]) -> Option<Self> {

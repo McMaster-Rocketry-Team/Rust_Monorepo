@@ -82,7 +82,7 @@ impl Iterator for CanBusMultiFrameEncoder {
             // Multi-frame message
             if self.offset == 0 {
                 // First frame
-                let crc = CAN_CRC.checksum(&self.deserialized_message);
+                let crc = CAN_CRC.checksum(&self.deserialized_message[..self.message_len]);
                 data.extend_from_slice(&crc.to_le_bytes()).unwrap();
                 data.extend_from_slice(&self.deserialized_message[..5])
                     .unwrap();
@@ -91,7 +91,7 @@ impl Iterator for CanBusMultiFrameEncoder {
                 self.offset += 5;
             } else if self.offset + 7 >= self.message_len {
                 // Last frame
-                data.extend_from_slice(&self.deserialized_message[self.offset..])
+                data.extend_from_slice(&self.deserialized_message[self.offset..self.message_len])
                     .unwrap();
                 data.push(TailByte::new(false, true, self.toggle).into())
                     .unwrap();
