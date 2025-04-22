@@ -1,4 +1,5 @@
 use ack::AckMessage;
+use brightness_measurement::BrightnessMeasurementMessage;
 use core::{
     any::{Any, TypeId},
     fmt::Debug,
@@ -12,7 +13,6 @@ pub use amp_control::AmpControlMessage;
 pub use amp_status::AmpStatusMessage;
 pub use avionics_status::AvionicsStatusMessage;
 pub use baro_measurement::BaroMeasurementMessage;
-pub use bulkhead_status::BulkheadStatusMessage;
 pub use icarus_status::IcarusStatusMessage;
 pub use imu_measurement::IMUMeasurementMessage;
 pub use node_status::NodeStatusMessage;
@@ -26,7 +26,7 @@ pub mod amp_control;
 pub mod amp_status;
 pub mod avionics_status;
 pub mod baro_measurement;
-pub mod bulkhead_status;
+pub mod brightness_measurement;
 pub mod data_transfer;
 pub mod icarus_status;
 pub mod imu_measurement;
@@ -49,6 +49,7 @@ pub enum CanBusMessageEnum {
     BaroMeasurement(BaroMeasurementMessage),
     IMUMeasurement(IMUMeasurementMessage),
     TempuratureMeasurement(TempuratureMeasurementMessage),
+    BrightnessMeasurement(BrightnessMeasurementMessage),
 
     AmpStatus(AmpStatusMessage),
     AmpControl(AmpControlMessage),
@@ -59,7 +60,6 @@ pub enum CanBusMessageEnum {
 
     AvionicsStatus(AvionicsStatusMessage),
     IcarusStatus(IcarusStatusMessage),
-    BulkheadStatus(BulkheadStatusMessage),
 
     DataTransfer(DataTransferMessage),
     Ack(AckMessage),
@@ -94,7 +94,7 @@ impl CanBusMessageEnum {
             Some(11)
         } else if t_id == TypeId::of::<IcarusStatusMessage>() {
             Some(12)
-        } else if t_id == TypeId::of::<BulkheadStatusMessage>() {
+        } else if t_id == TypeId::of::<BrightnessMeasurementMessage>() {
             Some(13)
         } else if t_id == TypeId::of::<DataTransferMessage>() {
             Some(14)
@@ -132,8 +132,8 @@ impl CanBusMessageEnum {
                 .map(CanBusMessageEnum::AvionicsStatus),
             12 => <IcarusStatusMessage as CanBusMessage>::deserialize(data)
                 .map(CanBusMessageEnum::IcarusStatus),
-            13 => <BulkheadStatusMessage as CanBusMessage>::deserialize(data)
-                .map(CanBusMessageEnum::BulkheadStatus),
+            13 => <BrightnessMeasurementMessage as CanBusMessage>::deserialize(data)
+                .map(CanBusMessageEnum::BrightnessMeasurement),
             14 => <DataTransferMessage as CanBusMessage>::deserialize(data)
                 .map(CanBusMessageEnum::DataTransfer),
             15 => <AckMessage as CanBusMessage>::deserialize(data).map(CanBusMessageEnum::Ack),

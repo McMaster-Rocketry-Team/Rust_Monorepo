@@ -104,7 +104,7 @@ pub extern "C" fn encode_can_bus_message(
         CanBusMessageEnum::IcarusStatus(m) => {
             encode_can_bus_message_inner(buffer, m, self_node_type, self_node_id)
         }
-        CanBusMessageEnum::BulkheadStatus(m) => {
+        CanBusMessageEnum::BrightnessMeasurement(m) => {
             encode_can_bus_message_inner(buffer, m, self_node_type, self_node_id)
         }
         CanBusMessageEnum::DataTransfer(m) => {
@@ -143,7 +143,7 @@ fn encode_can_bus_message_inner(
     }
 }
 
-static mut CAN_DECODER: Option<CanBusMultiFrameDecoder<4>> = None;
+static mut CAN_DECODER: Option<CanBusMultiFrameDecoder<8>> = None;
 
 #[repr(C)]
 pub struct ReceivedCanBusMessage {
