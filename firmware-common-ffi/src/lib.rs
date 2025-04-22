@@ -148,6 +148,7 @@ static mut CAN_DECODER: Option<CanBusMultiFrameDecoder<8>> = None;
 #[repr(C)]
 pub struct ReceivedCanBusMessage {
     timestamp: f64,
+    id: CanBusExtendedId,
     crc: u16,
     message: CanBusMessageEnum,
 }
@@ -156,7 +157,7 @@ pub struct ReceivedCanBusMessage {
 /// 
 /// # Parameters
 /// - `timestamp`: The timestamp indicating when the frame was received.
-/// - `id`: The identifier of the received CAN bus frame.
+/// - `id`: The ID of the received CAN bus frame.
 /// - `data`: A pointer to the buffer containing the frame's data payload.
 /// - `data_length`: The size of the data buffer in bytes.
 /// - `result`: A pointer to a `ReceivedCanBusMessage` structure where the extracted message will be stored.
@@ -193,6 +194,7 @@ pub extern "C" fn process_can_bus_frame(
         Some(m) => {
             unsafe {
                 (*result).timestamp = m.timestamp;
+                (*result).id = CanBusExtendedId::from_raw(id);
                 (*result).crc = m.data.crc;
                 (*result).message = m.data.message;
             }

@@ -5,22 +5,30 @@ use super::messages::{CanBusMessage, CanBusMessageEnum};
 
 #[derive(PackedStruct, Default, Clone, Copy, Debug, PartialEq, Eq)]
 #[packed_struct(endian = "msb", size_bytes = "4")]
+#[repr(C)]
 pub struct CanBusExtendedId {
-    _reserved: ReservedZero<packed_bits::Bits<3>>,
-    pub priority: Integer<u8, packed_bits::Bits<3>>,
+    #[packed_field(element_size_bits = "3")]
+    _reserved: u8,
+
+    #[packed_field(element_size_bits = "3")]
+    pub priority: u8,
+
     pub message_type: u8,
-    pub node_type: Integer<u8, packed_bits::Bits<6>>,
-    pub node_id: Integer<u16, packed_bits::Bits<12>>,
+    #[packed_field(element_size_bits = "6")]
+    pub node_type: u8,
+
+    #[packed_field(element_size_bits = "12")]
+    pub node_id: u16,
 }
 
 impl CanBusExtendedId {
     pub fn new(priority: u8, message_type: u8, node_type: u8, node_id: u16) -> Self {
         Self {
-            _reserved: ReservedZero::default(),
-            priority: priority.into(),
-            message_type: message_type.into(),
-            node_type: node_type.into(),
-            node_id: node_id.into(),
+            _reserved: Default::default(),
+            priority: priority,
+            message_type: message_type,
+            node_type: node_type,
+            node_id: node_id,
         }
     }
 
