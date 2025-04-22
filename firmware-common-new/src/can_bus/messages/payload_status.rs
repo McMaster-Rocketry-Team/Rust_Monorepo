@@ -45,7 +45,7 @@ pub struct PayloadStatusMessage {
     #[packed_field(element_size_bits = "12")]
     pub eps2_node_id: u16,
     #[packed_field(element_size_bits = "12")]
-    pub payload_esp_node_id: u16,
+    pub rocket_wifi_node_id: u16,
 
     #[packed_field(element_size_bits = "4")]
     _padding: u8,
@@ -57,14 +57,14 @@ impl PayloadStatusMessage {
         eps2: EPSStatus,
         eps1_node_id: u16,
         eps2_node_id: u16,
-        payload_esp_node_id: u16,
+        rocket_wifi_node_id: u16,
     ) -> Self {
         Self {
             eps1,
             eps2,
             eps1_node_id: eps1_node_id.into(),
             eps2_node_id: eps2_node_id.into(),
-            payload_esp_node_id: payload_esp_node_id.into(),
+            rocket_wifi_node_id: rocket_wifi_node_id.into(),
             _padding: Default::default(),
         }
     }

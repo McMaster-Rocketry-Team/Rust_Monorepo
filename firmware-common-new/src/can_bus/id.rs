@@ -14,6 +14,7 @@ pub struct CanBusExtendedId {
     pub priority: u8,
 
     pub message_type: u8,
+    
     #[packed_field(element_size_bits = "6")]
     pub node_type: u8,
 

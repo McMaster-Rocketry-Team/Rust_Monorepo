@@ -88,8 +88,11 @@ impl StateMachine {
                 }
 
                 let mut data = Vec::new();
-                data.extend_from_slice(&frame_data[2..frame_data.len() - 1])
-                    .unwrap();
+                let result = data.extend_from_slice(&frame_data[2..frame_data.len() - 1]);
+                if result.is_err() {
+                    // buffer overflow
+                    return None;
+                }
                 *self = StateMachine::MultiFrame {
                     id: frame_id,
                     first_frame_timestamp: frame.timestamp(),
@@ -122,8 +125,12 @@ impl StateMachine {
                     return None;
                 }
 
-                data.extend_from_slice(&frame_data[..frame_data.len() - 1])
-                    .unwrap();
+                let result = data.extend_from_slice(&frame_data[..frame_data.len() - 1]);
+                if result.is_err() {
+                    // buffer overflow
+                    *self = StateMachine::Empty;
+                    return None;
+                }
                 if tail_byte.end_of_transfer {
                     // last frame, parse the message
                     let calculated_crc = CAN_CRC.checksum(&data);
