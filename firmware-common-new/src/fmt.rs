@@ -15,7 +15,7 @@ macro_rules! log_trace {
             #[cfg(feature = "log")]
             ::log::trace!($s $(, $x)*);
 
-            #[cfg(feature = "defmt")]
+            #[cfg(all(feature = "defmt", not(feature = "log")))]
             ::defmt::trace!($s $(, $x)*);
         }
     };
@@ -27,7 +27,7 @@ macro_rules! log_debug {
             #[cfg(feature = "log")]
             ::log::debug!($s $(, $x)*);
 
-            #[cfg(feature = "defmt")]
+            #[cfg(all(feature = "defmt", not(feature = "log")))]
             ::defmt::debug!($s $(, $x)*);
         }
     };
@@ -39,7 +39,7 @@ macro_rules! log_info {
             #[cfg(feature = "log")]
             ::log::info!($s $(, $x)*);
 
-            #[cfg(feature = "defmt")]
+            #[cfg(all(feature = "defmt", not(feature = "log")))]
             ::defmt::info!($s $(, $x)*);
         }
     };
@@ -51,7 +51,7 @@ macro_rules! log_warn {
             #[cfg(feature = "log")]
             ::log::warn!($s $(, $x)*);
 
-            #[cfg(feature = "defmt")]
+            #[cfg(all(feature = "defmt", not(feature = "log")))]
             ::defmt::warn!($s $(, $x)*);
         }
     };
@@ -63,7 +63,7 @@ macro_rules! log_error {
             #[cfg(feature = "log")]
             ::log::error!($s $(, $x)*);
 
-            #[cfg(feature = "defmt")]
+            #[cfg(all(feature = "defmt", not(feature = "log")))]
             ::defmt::error!($s $(, $x)*);
         }
     };
@@ -76,7 +76,7 @@ macro_rules! log_panic {
             #[cfg(feature = "log")]
             ::core::panic!($s $(, $x)*);
 
-            #[cfg(feature = "defmt")]
+            #[cfg(all(feature = "defmt", not(feature = "log")))]
             ::defmt::panic!($s $(, $x)*);
 
             ::core::panic!();
@@ -91,7 +91,7 @@ macro_rules! log_unreachable {
             #[cfg(feature = "log")]
             ::core::panic!("unreachable");
 
-            #[cfg(feature = "defmt")]
+            #[cfg(all(feature = "defmt", not(feature = "log")))]
             ::defmt::unreachable!();
 
             ::core::panic!("unreachable");

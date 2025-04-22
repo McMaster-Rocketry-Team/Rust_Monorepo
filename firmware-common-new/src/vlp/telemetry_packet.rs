@@ -1,50 +1,133 @@
-
 use core::cell::{RefCell, RefMut};
 use embassy_sync::blocking_mutex::{raw::NoopRawMutex, Mutex as BlockingMutex};
 use packed_struct::prelude::*;
-use serde::{Serialize,Deserialize};
+use serde::{Deserialize, Serialize};
 
-use crate::fixed_point_factory;
-
-fixed_point_factory!(BatteryVFac, f32, 6.0, 9.0, 0.001);
-fixed_point_factory!(TemperatureFac, f32, -30.0, 85.0, 0.1);
-fixed_point_factory!(FreeSpaceFac, f32, 0.0, 67108864.0, 40960.0);
-fixed_point_factory!(AltitudeFac, f32, -100.0, 5000.0, 5.0);
-fixed_point_factory!(AirSpeedFac, f32, -400.0, 400.0, 2.0);
+use crate::{can_bus::messages::{amp_status::PowerOutputStatus, avionics_status::FlightStage}, fixed_point_factory};
 
 fixed_point_factory!(PayloadVoltageFac, f32, 2.0, 4.5, 0.05);
 fixed_point_factory!(PayloadCurrentFac, f32, 0.0, 2.0, 0.1);
 
-// #[cfg_attr(feature = "defmt", derive(defmt::Format))]
-// #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-// pub struct TelemetryPacket {
-//     unix_clock_ready: bool,
-//     timestamp: u32, // seconds since unix epoch / seconds since boot
-//     num_of_fix_satellites: Integer<u8, packed_bits::Bits<5>>,
-//     lat_lon: (f64, f64),
-//     battery_v: BatteryVFacPacked,
-//     temperature: TemperatureFacPacked,
-//     hardware_armed: bool,
-//     software_armed: bool,
-//     disk_free_space: FreeSpaceFacPacked,
+type A = Integer<u8, packed_bits::Bits<6>>;
 
-//     pyro_main_continuity: bool,
-//     pyro_drogue_continuity: bool,
+type U = u8;
+const B: usize = 6;
 
-//     altitude: AltitudeFacPacked,
-//     max_altitude: AltitudeFacPacked,
-//     backup_max_altitude: AltitudeFacPacked,
+fn test(){
+    let a:Integer<u8, packed_bits::Bits<6>> = 1.into();
+}
 
-//     air_speed: AirSpeedFacPacked,
-//     max_air_speed: AirSpeedFacPacked,
-//     backup_max_air_speed: AirSpeedFacPacked,
+#[derive(PackedStruct, Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bits = 66)]
+pub struct PayloadTelemetry {
+    #[packed_field(element_size_bits = "6", bits = "0..6")]
+    eps1_battery1_v: Integer<PayloadVoltageFacBase, packed_bits::Bits<PAYLOAD_VOLTAGE_FAC_BITS>>,
+    #[packed_field(element_size_bits = "6")]
+    eps1_battery2_v: Integer<PayloadVoltageFacBase, packed_bits::Bits<PAYLOAD_VOLTAGE_FAC_BITS>>,
+    #[packed_field(element_size_bits = "5")]
+    eps1_output_3v3_current: Integer<PayloadCurrentFacBase, packed_bits::Bits<PAYLOAD_CURRENT_FAC_BITS>>,
+    #[packed_field(element_size_bits = "2", ty = "enum")]
+    eps1_output_3v3_status: PowerOutputStatus,
+    #[packed_field(element_size_bits = "5")]
+    eps1_output_5v_current: Integer<PayloadCurrentFacBase, packed_bits::Bits<PAYLOAD_CURRENT_FAC_BITS>>,
+    #[packed_field(element_size_bits = "2", ty = "enum")]
+    eps1_output_5v_status: PowerOutputStatus,
+    #[packed_field(element_size_bits = "5")]
+    eps1_output_9v_current: Integer<PayloadCurrentFacBase, packed_bits::Bits<PAYLOAD_CURRENT_FAC_BITS>>,
+    #[packed_field(element_size_bits = "2", ty = "enum")]
+    eps1_output_9v_status: PowerOutputStatus,
+    #[packed_field(element_size_bits = "6")]
+    eps2_battery1_v: Integer<PayloadVoltageFacBase, packed_bits::Bits<PAYLOAD_VOLTAGE_FAC_BITS>>,
+    #[packed_field(element_size_bits = "6")]
+    eps2_battery2_v: Integer<PayloadVoltageFacBase, packed_bits::Bits<PAYLOAD_VOLTAGE_FAC_BITS>>,
+    #[packed_field(element_size_bits = "5")]
+    eps2_output_3v3_current: Integer<PayloadCurrentFacBase, packed_bits::Bits<PAYLOAD_CURRENT_FAC_BITS>>,
+    #[packed_field(element_size_bits = "2", ty = "enum")]
+    eps2_output_3v3_status: PowerOutputStatus,
+    #[packed_field(element_size_bits = "5")]
+    eps2_output_5v_current: Integer<PayloadCurrentFacBase, packed_bits::Bits<PAYLOAD_CURRENT_FAC_BITS>>,
+    #[packed_field(element_size_bits = "2", ty = "enum")]
+    eps2_output_5v_status: PowerOutputStatus,
+    #[packed_field(element_size_bits = "5")]
+    eps2_output_9v_current: Integer<PayloadCurrentFacBase, packed_bits::Bits<PAYLOAD_CURRENT_FAC_BITS>>,
+    #[packed_field(element_size_bits = "2", ty = "enum")]
+    eps2_output_9v_status: PowerOutputStatus,
+}
 
-//     flight_core_state: Integer<u8, packed_bits::Bits<3>>,
-//     backup_flight_core_state: Integer<u8, packed_bits::Bits<3>>,
+fixed_point_factory!(BatteryVFac, f32, 5.0, 8.5, 0.001);
+fixed_point_factory!(TemperatureFac, f32, -30.0, 85.0, 0.1);
+fixed_point_factory!(AltitudeFac, f32, -100.0, 5000.0, 5.0);
+fixed_point_factory!(AirSpeedFac, f32, -100.0, 400.0, 2.0);
+fixed_point_factory!(AirBrakesExtensionInchFac, f32, 0.0, 0.9, 0.04);
 
-//     drogue_deployed: bool,
-//     main_deployed: bool,
-// }
+#[derive(PackedStruct, Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "45")]
+pub struct TelemetryPacket {
+    #[packed_field(bits = "0..1")]
+    unix_clock_ready: bool,
+    timestamp: u32, // seconds since unix epoch / seconds since boot
+
+    num_of_fix_satellites: Integer<u8, packed_bits::Bits<5>>,
+    lat: u64,
+    lon: u64,
+
+    #[packed_field(element_size_bits = "12")]
+    shared_battery_v: Integer<BatteryVFacBase, packed_bits::Bits<BATTERY_V_FAC_BITS>>,
+    #[packed_field(element_size_bits = "12")]
+    vl_battery_v: Integer<BatteryVFacBase, packed_bits::Bits<BATTERY_V_FAC_BITS>>,
+    #[packed_field(element_size_bits = "11")]
+    air_temperature: Integer<TemperatureFacBase, packed_bits::Bits<TEMPERATURE_FAC_BITS>>,
+
+    pyro_main_continuity: bool,
+    pyro_drogue_continuity: bool,
+
+    /// above ground level
+    #[packed_field(element_size_bits = "10")]
+    altitude: Integer<AltitudeFacBase, packed_bits::Bits<ALTITUDE_FAC_BITS>>,
+    #[packed_field(element_size_bits = "10")]
+    max_altitude: Integer<AltitudeFacBase, packed_bits::Bits<ALTITUDE_FAC_BITS>>,
+    #[packed_field(element_size_bits = "10")]
+    backup_max_altitude: Integer<AltitudeFacBase, packed_bits::Bits<ALTITUDE_FAC_BITS>>,
+
+    #[packed_field(element_size_bits = "8")]
+    air_speed: Integer<AirSpeedFacBase, packed_bits::Bits<AIR_SPEED_FAC_BITS>>,
+    #[packed_field(element_size_bits = "8")]
+    max_air_speed: Integer<AirSpeedFacBase, packed_bits::Bits<AIR_SPEED_FAC_BITS>>,
+    #[packed_field(element_size_bits = "8")]
+    backup_max_air_speed: Integer<AirSpeedFacBase, packed_bits::Bits<AIR_SPEED_FAC_BITS>>,
+
+    // flight_core_state: Integer<u8, packed_bits::Bits<3>>,
+    // backup_flight_core_state: Integer<u8, packed_bits::Bits<3>>,
+
+    drogue_deployed: bool,
+    main_deployed: bool,
+
+    amp_online: bool,
+    #[packed_field(element_size_bits = "2", ty = "enum")]
+    amp_out1: PowerOutputStatus,
+    #[packed_field(element_size_bits = "2", ty = "enum")]
+    amp_out2: PowerOutputStatus,
+    #[packed_field(element_size_bits = "2", ty = "enum")]
+    amp_out3: PowerOutputStatus,
+    #[packed_field(element_size_bits = "2", ty = "enum")]
+    amp_out4: PowerOutputStatus,
+
+    icarus_online: bool,
+    #[packed_field(element_size_bits = "5")]
+    air_brakes_extention_inch: Integer<AirBrakesExtensionInchFacBase, packed_bits::Bits<AIR_BRAKES_EXTENSION_INCH_FAC_BITS>>,
+    #[packed_field(element_size_bits = "11")]
+    air_brakes_servo_temp: Integer<TemperatureFacBase, packed_bits::Bits<TEMPERATURE_FAC_BITS>>,
+
+    payload_activation_online: bool,
+    ozys1_online: bool,
+    ozys2_online: bool,
+    main_bulkhead_online: bool,
+    drogue_bulkhead_online: bool,
+    aero_rust_online: bool,
+
+    #[packed_field(element_size_bits = "66")]
+    payload: PayloadTelemetry,
+}
 
 // impl TelemetryPacket {
 //     pub fn new(

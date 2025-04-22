@@ -15,6 +15,11 @@ macro_rules! fixed_point_factory {
             type [<$name Packed>] = calculate_required_bits::calculate_packed_type!($mode, $min, $max, $max_error);
             type [<$name Base>] = calculate_required_bits::calculate_base_type!($mode, $min, $max, $max_error);
 
+            #[allow(dead_code)]
+            const [<$name:snake:upper _BITS>] : usize = calculate_required_bits::calculate_required_bits!(
+                $mode, $min, $max, $max_error
+            ); 
+
             impl $name {
                 #[allow(dead_code)]
                 fn to_fixed_point(value: $source) -> Option<[<$name Packed>]> {

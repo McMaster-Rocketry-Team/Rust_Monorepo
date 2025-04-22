@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-firmware-common-new = { path = "../firmware-common-new", default-features = false }
+firmware-common-new = { path = "../firmware-common-new", default-features = false, features = ["defmt"] }
 
 [lib]
 name = "firmware_common_ffi"
