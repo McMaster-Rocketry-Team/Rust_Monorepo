@@ -19,7 +19,9 @@ pub trait CanBusTX {
     #[cfg(not(feature = "defmt"))]
     type Error: core::fmt::Debug;
 
-    fn send(&mut self, id: u32, data: &[u8; 8]) -> impl Future<Output = Result<(), Self::Error>>;
+    /// Send a message with the given ID and data. data must be
+    /// not empty and not more than 8 bytes.
+    fn send(&mut self, id: u32, data: &[u8]) -> impl Future<Output = Result<(), Self::Error>>;
 }
 
 pub trait CanBusRX {

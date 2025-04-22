@@ -1,7 +1,4 @@
-use core::{
-    array,
-    cmp::{min, Ordering},
-};
+use core::{array, cmp::Ordering};
 
 use embassy_futures::yield_now;
 use embassy_sync::{
@@ -39,7 +36,6 @@ enum StateMachine {
         first_frame_timestamp: f64,
         crc: u16,
         data: Vec<u8, MAX_CAN_MESSAGE_SIZE>,
-        message_len: usize,
     },
 }
 
@@ -55,72 +51,59 @@ impl StateMachine {
         }
     }
 
-    fn tail_byte_i(message_len: usize, received_len: usize) -> usize {
-        min(message_len - received_len, 7)
-    }
-
     fn process_frame(
         &mut self,
         frame: &impl CanBusRawMessage,
     ) -> Option<SensorReading<BootTimestamp, ReceivedCanBusMessage>> {
         let frame_id = CanBusExtendedId::from_raw(frame.id());
         let frame_data = frame.data();
+        if frame_data.len() == 0 {
+            // empty frame, ignore
+            return None;
+        }
+
+        let tail_byte = TailByte::unpack_from_slice(&[frame_data[frame_data.len() - 1]]).ok()?;
+        if tail_byte.start_of_transfer && tail_byte.end_of_transfer {
+            // Single frame message
+            if tail_byte.toggle {
+                // Invalid tail byte
+                return None;
+            }
+
+            let data = &frame_data[..frame_data.len() - 1];
+            return CanBusMessageEnum::deserialize(frame_id.message_type, data).map(|message| {
+                SensorReading::new(
+                    frame.timestamp(),
+                    ReceivedCanBusMessage {
+                        crc: CAN_CRC.checksum(data),
+                        message,
+                    },
+                )
+            });
+        }
+
         match self {
             StateMachine::Empty => {
-                let message_len = CanBusMessageEnum::get_message_len(frame_id.message_type)?;
-                if message_len <= 7 {
-                    // the entire message fits in the first frame
-                    let tail_byte_i = Self::tail_byte_i(message_len, 0);
-                    let tail_byte = TailByte::unpack_from_slice(&[frame_data[tail_byte_i]]).ok()?;
-
-                    if !(tail_byte.start_of_transfer
-                        && tail_byte.end_of_transfer
-                        && !tail_byte.toggle)
-                    {
-                        // Invalid tail byte
-                        return None;
-                    }
-
-                    let data = &frame_data[..tail_byte_i];
-                    return CanBusMessageEnum::deserialize(frame_id.message_type, data).map(
-                        |message| {
-                            SensorReading::new(
-                                frame.timestamp(),
-                                ReceivedCanBusMessage {
-                                    crc: CAN_CRC.checksum(data),
-                                    message,
-                                },
-                            )
-                        },
-                    );
-                } else {
-                    // expect the first frame of a multi-frame message
-                    let tail_byte = TailByte::unpack_from_slice(&[frame_data[7]]).ok()?;
-
-                    if !(tail_byte.start_of_transfer
-                        && !tail_byte.end_of_transfer
-                        && !tail_byte.toggle)
-                    {
-                        // Invalid tail byte
-                        return None;
-                    }
-
-                    *self = StateMachine::MultiFrame {
-                        id: frame_id,
-                        first_frame_timestamp: frame.timestamp(),
-                        crc: u16::from_le_bytes([frame_data[0], frame_data[1]]),
-                        data: Vec::new(),
-                        message_len,
-                    };
-                    None
+                // expect the first frame of a multi-frame message
+                if !(tail_byte.start_of_transfer && !tail_byte.end_of_transfer && !tail_byte.toggle)
+                {
+                    // Invalid tail byte
+                    return None;
                 }
+
+                *self = StateMachine::MultiFrame {
+                    id: frame_id,
+                    first_frame_timestamp: frame.timestamp(),
+                    crc: u16::from_le_bytes([frame_data[0], frame_data[1]]),
+                    data: Vec::new(),
+                };
+                None
             }
             StateMachine::MultiFrame {
                 id,
                 first_frame_timestamp,
                 crc,
                 data,
-                message_len,
             } => {
                 if *id != frame_id {
                     // reset state machine
@@ -128,10 +111,6 @@ impl StateMachine {
                     return self.process_frame(frame);
                 }
 
-                let tail_byte_i = Self::tail_byte_i(*message_len, data.len());
-                let tail_byte = TailByte::unpack_from_slice(&[frame_data[tail_byte_i]]).ok()?;
-
-                let is_last_frame = *message_len - data.len() <= 7;
                 let expected_toggle_bit = ((data.len() - 5) / 7) % 2 == 0;
 
                 if tail_byte.toggle != expected_toggle_bit {
@@ -139,15 +118,15 @@ impl StateMachine {
                     return None;
                 }
 
-                if tail_byte.start_of_transfer || tail_byte.end_of_transfer != is_last_frame {
+                if tail_byte.start_of_transfer {
                     // invalid tail byte
-                    *self = StateMachine::Empty;
                     return None;
                 }
 
-                data.extend_from_slice(&frame_data[..tail_byte_i]).unwrap();
-                if is_last_frame {
-                    // last frame, process the message
+                data.extend_from_slice(&frame_data[..frame_data.len() - 1])
+                    .unwrap();
+                if tail_byte.end_of_transfer {
+                    // last frame, parse the message
                     let calculated_crc = CAN_CRC.checksum(&data);
                     if calculated_crc != *crc {
                         // invalid CRC
@@ -167,10 +146,9 @@ impl StateMachine {
                         });
                     *self = StateMachine::Empty;
                     return message;
-                } else {
-                    // not the last frame, continue receiving
-                    return None;
                 }
+
+                None
             }
         }
     }

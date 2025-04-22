@@ -1,6 +1,7 @@
 use crc::Crc;
 use embassy_futures::yield_now;
 use embassy_sync::{blocking_mutex::raw::RawMutex, channel::Channel};
+use heapless::Vec;
 
 use crate::can_bus::messages::CanBusMessageEnum;
 
@@ -39,12 +40,15 @@ impl Into<u8> for TailByte {
 #[derive(Clone, Debug)]
 struct RawCanMessage {
     id: CanBusExtendedId,
-    data: [u8; 8],
+    data: Vec<u8, 8>,
 }
 
 impl RawCanMessage {
     fn new(id: CanBusExtendedId) -> Self {
-        Self { id, data: [0; 8] }
+        Self {
+            id,
+            data: Vec::new(),
+        }
     }
 }
 
@@ -78,14 +82,22 @@ impl<M: RawMutex, const N: usize> CanSender<M, N> {
         let mut buffer = [0u8; MAX_CAN_MESSAGE_SIZE];
         assert!(T::len() <= buffer.len());
 
-        let id = CanBusExtendedId::new(message.priority(), CanBusMessageEnum::get_message_type::<T>().unwrap(), 0, 0);
+        let id = CanBusExtendedId::new(
+            message.priority(),
+            CanBusMessageEnum::get_message_type::<T>().unwrap(),
+            0,
+            0,
+        );
         message.serialize(&mut buffer);
         let mut buffer = &buffer[..T::len()];
 
         if buffer.len() <= 7 {
             let mut message = RawCanMessage::new(id);
-            message.data.copy_from_slice(buffer);
-            message.data[T::len()] = TailByte::new(true, true, false).into();
+            message.data.extend_from_slice(buffer).unwrap();
+            message
+                .data
+                .push(TailByte::new(true, true, false).into())
+                .unwrap();
             self.channel.send(message).await;
         } else {
             let mut i = 0u32;
@@ -94,20 +106,32 @@ impl<M: RawMutex, const N: usize> CanSender<M, N> {
                 if i == 0 {
                     // first frame
                     let crc = CAN_CRC.checksum(buffer);
-                    message.data.copy_from_slice(&crc.to_le_bytes());
-                    message.data[2..7].copy_from_slice(&buffer[..5]);
+                    message.data.extend_from_slice(&crc.to_le_bytes()).unwrap();
+                    message.data.extend_from_slice(&buffer[..5]).unwrap();
+                    message
+                        .data
+                        .push(TailByte::new(true, false, i % 2 == 0).into())
+                        .unwrap();
+
                     buffer = &buffer[5..];
-                    message.data[7] = TailByte::new(true, false, i % 2 == 0).into();
                 } else if buffer.len() <= 7 {
                     // last frame
-                    message.data[0..buffer.len()].copy_from_slice(buffer);
-                    buffer = &buffer[buffer.len()..];
-                    message.data[buffer.len()] = TailByte::new(false, true, i % 2 == 0).into();
+                    message.data.extend_from_slice(buffer).unwrap();
+                    message
+                        .data
+                        .push(TailByte::new(false, true, i % 2 == 0).into())
+                        .unwrap();
+
+                    buffer = &[]
                 } else {
                     // middle frame
-                    message.data[0..7].copy_from_slice(buffer);
+                    message.data.extend_from_slice(buffer).unwrap();
+                    message
+                        .data
+                        .push(TailByte::new(false, false, i % 2 == 0).into())
+                        .unwrap();
+
                     buffer = &buffer[7..];
-                    message.data[7] = TailByte::new(false, false, i % 2 == 0).into();
                 }
 
                 self.channel.send(message).await;
