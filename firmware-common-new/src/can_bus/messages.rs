@@ -40,6 +40,7 @@ pub mod unix_time;
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[repr(C)]
 pub enum CanBusMessageEnum {
     UnixTime(UnixTimeMessage),
     NodeStatus(NodeStatusMessage),
@@ -65,33 +66,6 @@ pub enum CanBusMessageEnum {
 }
 
 impl CanBusMessageEnum {
-    pub(super) fn get_message_len(message_type: u8) -> Option<usize> {
-        match message_type {
-            0 => Some(UnixTimeMessage::len()),
-            1 => Some(NodeStatusMessage::len()),
-            2 => Some(ResetMessage::len()),
-
-            3 => Some(BaroMeasurementMessage::len()),
-            4 => Some(IMUMeasurementMessage::len()),
-            5 => Some(TempuratureMeasurementMessage::len()),
-
-            6 => Some(AmpStatusMessage::len()),
-            7 => Some(AmpControlMessage::len()),
-
-            8 => Some(PayloadStatusMessage::len()),
-            9 => Some(PayloadControlMessage::len()),
-            10 => Some(PayloadSelfTestMessage::len()),
-
-            11 => Some(AvionicsStatusMessage::len()),
-            12 => Some(IcarusStatusMessage::len()),
-            13 => Some(BulkheadStatusMessage::len()),
-
-            14 => Some(DataTransferMessage::len()),
-            15 => Some(AckMessage::len()),
-            _ => None,
-        }
-    }
-
     pub(super) fn get_message_type<T: CanBusMessage>() -> Option<u8> {
         let t_id = TypeId::of::<T>();
         if t_id == TypeId::of::<UnixTimeMessage>() {

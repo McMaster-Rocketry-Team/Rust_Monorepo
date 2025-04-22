@@ -6,6 +6,7 @@ use super::CanBusMessage;
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PackedStruct, Clone, Debug, Serialize, Deserialize)]
 #[packed_struct(bit_numbering = "msb0", endian = "msb")]
+#[repr(C)]
 pub struct EPSSelfTestResult {
     #[packed_field(bits = "0")]
     pub battery1_ok: bool,
@@ -18,17 +19,26 @@ pub struct EPSSelfTestResult {
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PackedStruct, Clone, Debug, Serialize, Deserialize)]
 #[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "2")]
+#[repr(C)]
 pub struct PayloadSelfTestMessage {
     #[packed_field(element_size_bits = "5")]
     pub eps1: EPSSelfTestResult,
     #[packed_field(element_size_bits = "5")]
     pub eps2: EPSSelfTestResult,
-    _padding: ReservedZero<packed_bits::Bits<6>>,
+    #[packed_field(element_size_bits = "6")]
+    _padding: u8,
 }
 
 impl PayloadSelfTestMessage {
-    pub fn new() -> Self {
-        todo!()
+    pub fn new(
+        eps1: EPSSelfTestResult,
+        eps2: EPSSelfTestResult,
+    ) -> Self {
+        Self {
+            eps1,
+            eps2,
+            _padding: Default::default(),
+        }
     }
 }
 

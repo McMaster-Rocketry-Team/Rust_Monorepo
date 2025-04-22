@@ -6,10 +6,14 @@ use super::CanBusMessage;
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PackedStruct, Clone, Debug, Serialize, Deserialize)]
 #[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "2")]
+#[repr(C)]
 pub struct ResetMessage {
-    pub node_id: Integer<u16, packed_bits::Bits<12>>,
+    #[packed_field(element_size_bits = "12")]
+    pub node_id: u16,
     pub reset_all: bool,
-    _padding: ReservedZero<packed_bits::Bits<3>>,
+
+    #[packed_field(element_size_bits = "3")]
+    _padding: u8,
 }
 
 impl ResetMessage {

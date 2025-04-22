@@ -6,6 +6,7 @@ use super::CanBusMessage;
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PackedStruct, Clone, Debug, Serialize, Deserialize)]
 #[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "6")]
+#[repr(C)]
 pub struct IcarusStatusMessage {
     /// Unit: 0.01 inch, e.g. 10 = 0.1 inch
     pub extended_inches: u16,

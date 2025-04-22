@@ -6,14 +6,17 @@ use super::CanBusMessage;
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PackedStruct, Clone, Debug, Serialize, Deserialize)]
 #[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "4")]
+#[repr(C)]
 pub struct AckMessage {
     /// CRC of the message that was acknowledged
     pub crc: u16,
 
     /// Node ID of the sender
-    pub node_id: Integer<u16, packed_bits::Bits<12>>,
+    #[packed_field(element_size_bits = "12")]
+    pub node_id: u16,
 
-    _padding: ReservedZero<packed_bits::Bits<4>>,
+    #[packed_field(element_size_bits = "4")]
+    _padding: u8,
 }
 
 impl AckMessage {

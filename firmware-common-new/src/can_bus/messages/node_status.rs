@@ -5,6 +5,7 @@ use super::CanBusMessage;
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PrimitiveEnum_u8, Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(C)]
 pub enum NodeHealth {
     /// The node is functioning properly.
     Healthy = 0,
@@ -18,6 +19,7 @@ pub enum NodeHealth {
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PrimitiveEnum_u8, Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(C)]
 pub enum NodeMode {
     /// Normal operating mode.
     Operational = 0,
@@ -30,6 +32,7 @@ pub enum NodeMode {
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PackedStruct, Clone, Debug, Serialize, Deserialize)]
 #[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "5")]
+#[repr(C)]
 pub struct NodeStatusMessage {
     pub uptime_s: u32,
     #[packed_field(bits = "32..36", ty = "enum")]

@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PrimitiveEnum_u8, Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(C)]
 pub enum DataType {
     Firmware = 0,
     Data = 1,
@@ -13,6 +14,7 @@ pub enum DataType {
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PackedStruct, Clone, Debug, Serialize, Deserialize)]
 #[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "38")]
+#[repr(C)]
 pub struct DataTransferMessage {
     data: [u8; 32],
     data_len: u8,
@@ -20,7 +22,8 @@ pub struct DataTransferMessage {
     pub end_of_data: bool,
     #[packed_field(bits = "297..299", ty = "enum")]
     pub data_type: DataType,
-    _reserved: ReservedZero<packed_bits::Bits<5>>,
+    #[packed_field(element_size_bits = "5")]
+    _reserved: u8,
 }
 
 impl DataTransferMessage {

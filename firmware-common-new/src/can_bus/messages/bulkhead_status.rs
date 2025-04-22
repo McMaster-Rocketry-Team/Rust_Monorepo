@@ -6,6 +6,7 @@ use super::CanBusMessage;
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PackedStruct, Clone, Debug, Serialize, Deserialize)]
 #[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "2")]
+#[repr(C)]
 pub struct BulkheadStatusMessage {
     pub brightness: u16,
 }

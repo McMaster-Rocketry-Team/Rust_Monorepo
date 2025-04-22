@@ -6,9 +6,11 @@ use super::CanBusMessage;
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PackedStruct, Clone, Debug, Serialize, Deserialize)]
 #[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "6")]
+#[repr(C)]
 pub struct UnixTimeMessage {
     /// Current milliseconds since Unix epoch, floored to the nearest ms
-    pub timestamp: Integer<u64, packed_bits::Bits<48>>,
+    #[packed_field(element_size_bits = "48")]
+    pub timestamp: u64,
 }
 
 impl UnixTimeMessage {
@@ -25,7 +27,7 @@ impl CanBusMessage for UnixTimeMessage {
     }
 
     fn priority(&self) -> u8 {
-        6
+        1
     }
 
     fn serialize(self, buffer: &mut [u8]) {

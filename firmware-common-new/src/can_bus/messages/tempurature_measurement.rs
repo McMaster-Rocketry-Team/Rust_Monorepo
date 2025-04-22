@@ -5,6 +5,7 @@ use super::CanBusMessage;
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PrimitiveEnum_u8, Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(C)]
 pub enum TempuratureSource {
     STM32 = 0,
     Barometer = 1,
@@ -14,6 +15,7 @@ pub enum TempuratureSource {
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PackedStruct, Clone, Debug, Serialize, Deserialize)]
 #[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "3")]
+#[repr(C)]
 pub struct TempuratureMeasurementMessage {
     /// Unit: 0.1C, e.g. 250 = 25C
     pub temperature: u16,

@@ -6,6 +6,7 @@ use super::CanBusMessage;
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PackedStruct, Clone, Debug, Serialize, Deserialize)]
 #[packed_struct]
+#[repr(C)]
 pub struct PayloadControlMessage {
     pub eps1_out_3v3_enable: bool,
     pub eps1_out_5v_enable: bool,
@@ -13,7 +14,8 @@ pub struct PayloadControlMessage {
     pub eps2_out_3v3_enable: bool,
     pub eps2_out_5v_enable: bool,
     pub eps2_out_9v_enable: bool,
-    _padding: ReservedZero<packed_bits::Bits<2>>,
+    #[packed_field(element_size_bits = "2")]
+    _padding: u8,
 }
 
 impl PayloadControlMessage {

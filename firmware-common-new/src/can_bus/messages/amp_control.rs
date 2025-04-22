@@ -6,12 +6,15 @@ use super::CanBusMessage;
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PackedStruct, Clone, Debug, Serialize, Deserialize)]
 #[packed_struct]
+#[repr(C)]
 pub struct AmpControlMessage {
     pub out1_enable: bool,
     pub out2_enable: bool,
     pub out3_enable: bool,
     pub out4_enable: bool,
-    _padding: ReservedZero<packed_bits::Bits<4>>,
+
+    #[packed_field(element_size_bits = "4")]
+    _padding: u8,
 }
 
 impl AmpControlMessage {

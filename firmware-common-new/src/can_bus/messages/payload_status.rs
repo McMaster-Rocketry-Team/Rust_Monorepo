@@ -1,26 +1,17 @@
 use packed_struct::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use super::CanBusMessage;
-
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
-#[derive(PrimitiveEnum_u8, Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[repr(C)]
-pub enum EPSOutputStatusEnum {
-    Disabled = 0,
-    PowerGood = 1,
-    PowerBad = 2,
-}
+use super::{amp_status::PowerOutputStatus, CanBusMessage};
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PackedStruct, Clone, Debug, Serialize, Deserialize)]
-#[packed_struct(bit_numbering = "msb0", endian = "msb")]
+#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "2")]
 #[repr(C)]
 pub struct EPSOutputStatus {
     #[packed_field(bits = "0..14")]
-    pub current_ma: Integer<u16, packed_bits::Bits<14>>,
+    pub current_ma: u16,
     #[packed_field(bits = "14..16", ty = "enum")]
-    pub status: EPSOutputStatusEnum,
+    pub status: PowerOutputStatus,
 }
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
@@ -28,15 +19,14 @@ pub struct EPSOutputStatus {
 #[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "10")]
 #[repr(C)]
 pub struct EPSStatus {
-    #[packed_field(bits = "0..16")]
     pub battery1_mv: u16,
     pub battery2_mv: u16,
 
-    #[packed_field(element_size_bits = "16")]
+    #[packed_field(element_size_bytes = "2")]
     pub output_3v3: EPSOutputStatus,
-    #[packed_field(element_size_bits = "16")]
+    #[packed_field(element_size_bytes = "2")]
     pub output_5v: EPSOutputStatus,
-    #[packed_field(element_size_bits = "16")]
+    #[packed_field(element_size_bytes = "2")]
     pub output_9v: EPSOutputStatus,
 }
 
@@ -49,10 +39,16 @@ pub struct PayloadStatusMessage {
     pub eps1: EPSStatus,
     #[packed_field(element_size_bytes = "10")]
     pub eps2: EPSStatus,
-    pub eps1_node_id: Integer<u16, packed_bits::Bits<12>>,
-    pub eps2_node_id: Integer<u16, packed_bits::Bits<12>>,
-    pub payload_esp_node_id: Integer<u16, packed_bits::Bits<12>>,
-    _padding: ReservedZero<packed_bits::Bits<4>>,
+
+    #[packed_field(element_size_bits = "12")]
+    pub eps1_node_id: u16,
+    #[packed_field(element_size_bits = "12")]
+    pub eps2_node_id: u16,
+    #[packed_field(element_size_bits = "12")]
+    pub payload_esp_node_id: u16,
+
+    #[packed_field(element_size_bits = "4")]
+    _padding: u8,
 }
 
 impl PayloadStatusMessage {
@@ -93,44 +89,44 @@ impl CanBusMessage for PayloadStatusMessage {
 }
 
 #[cfg(test)]
-mod tests{
+mod tests {
     use super::*;
 
     #[test]
     fn test_payload_status_message() {
         let mut buffer = [0u8; 25];
-        
+
         let message = PayloadStatusMessage::new(
             EPSStatus {
                 battery1_mv: 1,
                 battery2_mv: 2,
                 output_3v3: EPSOutputStatus {
-                    current_ma: 3.into(),
-                    status: EPSOutputStatusEnum::Disabled,
+                    current_ma: 3,
+                    status: PowerOutputStatus::Disabled,
                 },
                 output_5v: EPSOutputStatus {
-                    current_ma: 4.into(),
-                    status: EPSOutputStatusEnum::PowerGood,
+                    current_ma: 4,
+                    status: PowerOutputStatus::PowerGood,
                 },
                 output_9v: EPSOutputStatus {
-                    current_ma: 5.into(),
-                    status: EPSOutputStatusEnum::PowerBad,
+                    current_ma: 5,
+                    status: PowerOutputStatus::PowerBad,
                 },
             },
             EPSStatus {
                 battery1_mv: 6,
                 battery2_mv: 7,
                 output_3v3: EPSOutputStatus {
-                    current_ma: 8.into(),
-                    status: EPSOutputStatusEnum::Disabled,
+                    current_ma: 8,
+                    status: PowerOutputStatus::Disabled,
                 },
                 output_5v: EPSOutputStatus {
-                    current_ma: 9.into(),
-                    status: EPSOutputStatusEnum::PowerGood,
+                    current_ma: 9,
+                    status: PowerOutputStatus::PowerGood,
                 },
                 output_9v: EPSOutputStatus {
-                    current_ma: 10.into(),
-                    status: EPSOutputStatusEnum::PowerBad,
+                    current_ma: 10,
+                    status: PowerOutputStatus::PowerBad,
                 },
             },
             11,
