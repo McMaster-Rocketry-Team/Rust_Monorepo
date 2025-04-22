@@ -6,11 +6,24 @@ pub mod node_types;
 pub mod receiver;
 pub mod sender;
 
-pub trait CanBusRawMessage {
+pub trait CanBusFrame {
     fn timestamp(&self) -> f64;
     fn id(&self) -> u32;
-    fn rtr(&self) -> bool;
     fn data(&self) -> &[u8];
+}
+
+impl CanBusFrame for (f64, u32, &[u8]) {
+    fn timestamp(&self) -> f64 {
+        self.0
+    }
+
+    fn id(&self) -> u32 {
+        self.1
+    }
+
+    fn data(&self) -> &[u8] {
+        self.2
+    }
 }
 
 pub trait CanBusTX {
@@ -29,7 +42,7 @@ pub trait CanBusRX {
     type Error: defmt::Format + core::fmt::Debug;
     #[cfg(not(feature = "defmt"))]
     type Error: core::fmt::Debug;
-    type Message: CanBusRawMessage;
+    type Frame: CanBusFrame;
 
-    fn receive(&mut self) -> impl Future<Output = Result<Self::Message, Self::Error>>;
+    fn receive(&mut self) -> impl Future<Output = Result<Self::Frame, Self::Error>>;
 }

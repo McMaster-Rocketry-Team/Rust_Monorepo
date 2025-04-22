@@ -15,18 +15,14 @@ use super::{
     id::CanBusExtendedId,
     messages::CanBusMessageEnum,
     sender::{TailByte, CAN_CRC, MAX_CAN_MESSAGE_SIZE},
-    CanBusRX, CanBusRawMessage,
+    CanBusFrame, CanBusRX,
 };
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ReceivedCanBusMessage {
-    crc: u16,
-    message: CanBusMessageEnum,
-}
-
-pub struct CanReceiver<M: RawMutex, const N: usize, const SUBS: usize, const Q: usize> {
-    channel: PubSubChannel<M, SensorReading<BootTimestamp, ReceivedCanBusMessage>, N, SUBS, 1>,
+    pub crc: u16,
+    pub message: CanBusMessageEnum,
 }
 
 enum StateMachine {
@@ -53,7 +49,7 @@ impl StateMachine {
 
     fn process_frame(
         &mut self,
-        frame: &impl CanBusRawMessage,
+        frame: &impl CanBusFrame,
     ) -> Option<SensorReading<BootTimestamp, ReceivedCanBusMessage>> {
         let frame_id = CanBusExtendedId::from_raw(frame.id());
         let frame_data = frame.data();
@@ -154,52 +150,74 @@ impl StateMachine {
     }
 }
 
-impl<M: RawMutex, const N: usize, const SUBS: usize, const Q: usize> CanReceiver<M, N, SUBS, Q> {
+pub struct CanBusMultiFrameDecoder<const Q: usize> {
+    state_machines: [StateMachine; Q],
+}
+
+impl<const Q: usize> CanBusMultiFrameDecoder<Q> {
+    pub fn new() -> Self {
+        Self {
+            state_machines: array::from_fn(|_| StateMachine::new()),
+        }
+    }
+
+    pub fn process_frame(
+        &mut self,
+        frame: &impl CanBusFrame,
+    ) -> Option<SensorReading<BootTimestamp, ReceivedCanBusMessage>> {
+        let id = CanBusExtendedId::from_raw(frame.id());
+        for state_machine in &mut self.state_machines {
+            if state_machine.has_same_id(id) {
+                if let Some(reading) = state_machine.process_frame(frame) {
+                    return Some(reading);
+                }
+                return None;
+            }
+        }
+
+        let lru_state_machine = self
+            .state_machines
+            .iter_mut()
+            .min_by(|a, b| match (a, b) {
+                (StateMachine::Empty, StateMachine::Empty) => Ordering::Equal,
+                (StateMachine::Empty, StateMachine::MultiFrame { .. }) => Ordering::Less,
+                (StateMachine::MultiFrame { .. }, StateMachine::Empty) => Ordering::Greater,
+                (
+                    StateMachine::MultiFrame {
+                        first_frame_timestamp: ts1,
+                        ..
+                    },
+                    StateMachine::MultiFrame {
+                        first_frame_timestamp: ts2,
+                        ..
+                    },
+                ) => ts1.partial_cmp(ts2).unwrap(),
+            })
+            .unwrap();
+
+        lru_state_machine.process_frame(frame)
+    }
+}
+
+pub struct CanReceiver<M: RawMutex, const N: usize, const SUBS: usize> {
+    channel: PubSubChannel<M, SensorReading<BootTimestamp, ReceivedCanBusMessage>, N, SUBS, 1>,
+}
+
+impl<M: RawMutex, const N: usize, const SUBS: usize> CanReceiver<M, N, SUBS> {
     pub fn new() -> Self {
         Self {
             channel: PubSubChannel::new(),
         }
     }
 
-    pub async fn run_daemon<R: CanBusRX>(&self, rx: &mut R) {
-        let mut state_machines: [StateMachine; Q] = array::from_fn(|_| StateMachine::new());
-        'outer: loop {
-            match rx.receive().await {
-                Ok(message) => {
-                    let id = CanBusExtendedId::from_raw(message.id());
-                    for state_machine in &mut state_machines {
-                        if state_machine.has_same_id(id) {
-                            if let Some(reading) = state_machine.process_frame(&message) {
-                                self.channel.publish_immediate(reading);
-                            }
-                            continue 'outer;
-                        }
-                    }
+    pub async fn run_daemon<R: CanBusRX, const Q: usize>(&self, rx: &mut R) {
+        let mut decoder = CanBusMultiFrameDecoder::<Q>::new();
 
-                    let lru_state_machine = state_machines
-                        .iter_mut()
-                        .min_by(|a, b| match (a, b) {
-                            (StateMachine::Empty, StateMachine::Empty) => Ordering::Equal,
-                            (StateMachine::Empty, StateMachine::MultiFrame { .. }) => {
-                                Ordering::Less
-                            }
-                            (StateMachine::MultiFrame { .. }, StateMachine::Empty) => {
-                                Ordering::Greater
-                            }
-                            (
-                                StateMachine::MultiFrame {
-                                    first_frame_timestamp: ts1,
-                                    ..
-                                },
-                                StateMachine::MultiFrame {
-                                    first_frame_timestamp: ts2,
-                                    ..
-                                },
-                            ) => ts1.partial_cmp(ts2).unwrap(),
-                        })
-                        .unwrap();
-                    if let Some(reading) = lru_state_machine.process_frame(&message) {
-                        self.channel.publish_immediate(reading);
+        loop {
+            match rx.receive().await {
+                Ok(frame) => {
+                    if let Some(message) = decoder.process_frame(&frame) {
+                        self.channel.publish_immediate(message);
                     }
                 }
                 Err(e) => {

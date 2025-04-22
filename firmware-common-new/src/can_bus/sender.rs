@@ -1,7 +1,7 @@
 use crc::Crc;
 use embassy_futures::yield_now;
 use embassy_sync::{blocking_mutex::raw::RawMutex, channel::Channel};
-use heapless::{Deque, Vec};
+use heapless::Vec;
 
 use crate::can_bus::messages::CanBusMessageEnum;
 
@@ -36,15 +36,8 @@ impl Into<u8> for TailByte {
     }
 }
 
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
-#[derive(Clone, Debug)]
-struct RawCanMessage {
-    id: CanBusExtendedId,
-    data: Vec<u8, 8>,
-}
-
 pub struct CanSender<M: RawMutex, const N: usize> {
-    channel: Channel<M, RawCanMessage, N>,
+    channel: Channel<M, (CanBusExtendedId, Vec<u8, 8>), N>,
 }
 
 pub(super) const CAN_CRC: Crc<u16> = Crc::<u16>::new(&crc::CRC_16_IBM_3740);
@@ -128,10 +121,10 @@ impl<M: RawMutex, const N: usize> CanSender<M, N> {
 
     pub async fn run_daemon(&self, tx: &mut impl CanBusTX, node_type: u8, node_id: u16) {
         loop {
-            let mut message = self.channel.receive().await;
-            message.id.node_type = node_type.into();
-            message.id.node_id = node_id.into();
-            let result = tx.send(message.id.into(), &message.data).await;
+            let (mut id, data) = self.channel.receive().await;
+            id.node_type = node_type.into();
+            id.node_id = node_id.into();
+            let result = tx.send(id.into(), &data).await;
             if let Err(e) = result {
                 log_error!("Failed to send CAN frame: {:?}", e);
                 yield_now().await;
@@ -149,8 +142,7 @@ impl<M: RawMutex, const N: usize> CanSender<M, N> {
 
         let multi_frame_encoder = CanBusMultiFrameEncoder::new(message);
         for data in multi_frame_encoder {
-            let message = RawCanMessage { id, data };
-            self.channel.send(message).await;
+            self.channel.send((id, data)).await;
         }
     }
 }
