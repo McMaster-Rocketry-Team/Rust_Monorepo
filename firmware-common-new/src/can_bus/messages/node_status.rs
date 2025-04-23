@@ -27,18 +27,30 @@ pub enum NodeMode {
     Initialization = 1,
     /// E.g. calibration, the bootloader is running, etc.
     Maintainance = 2,
+    /// Mode Offline can be reported by the node to explicitly inform other nodes in
+    /// the network that it is shutting down.
+    /// Additionally, this value is used for telemetry to tell the ground station that
+    /// a node is offline.
+    Offline = 3,
 }
 
+/// Every node in the network should send this message every 1s.
+/// If a node does not send this message for 2s, it is considered offline.
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PackedStruct, Clone, Debug, Serialize, Deserialize)]
 #[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "5")]
 #[repr(C)]
 pub struct NodeStatusMessage {
+    #[packed_field(bits = "0..24")]
     pub uptime_s: u32,
-    #[packed_field(bits = "32..36", ty = "enum")]
+    #[packed_field(bits = "24..26", ty = "enum")]
     pub health: NodeHealth,
-    #[packed_field(bits = "36..40", ty = "enum")]
+    #[packed_field(bits = "26..28", ty = "enum")]
     pub mode: NodeMode,
+    
+    /// Node specific status, only the lower 12 bits are used.
+    #[packed_field(bits = "28..40")]
+    pub custom_status: u16,
 }
 
 impl NodeStatusMessage {
@@ -46,11 +58,13 @@ impl NodeStatusMessage {
         uptime_s: u32,
         health: NodeHealth,
         mode: NodeMode,
+        custom_status: u16,
     ) -> Self {
         Self {
             uptime_s,
             health,
             mode,
+            custom_status,
         }
     }
 }
