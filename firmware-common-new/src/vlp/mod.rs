@@ -1,1 +1,1 @@
-pub mod telemetry_packet;
+pub mod packets;

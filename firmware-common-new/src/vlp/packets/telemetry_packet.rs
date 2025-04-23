@@ -8,15 +8,6 @@ use crate::{can_bus::messages::{amp_status::PowerOutputStatus, avionics_status::
 fixed_point_factory!(PayloadVoltageFac, f32, 2.0, 4.5, 0.05);
 fixed_point_factory!(PayloadCurrentFac, f32, 0.0, 2.0, 0.1);
 
-type A = Integer<u8, packed_bits::Bits<6>>;
-
-type U = u8;
-const B: usize = 6;
-
-fn test(){
-    let a:Integer<u8, packed_bits::Bits<6>> = 1.into();
-}
-
 #[derive(PackedStruct, Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[packed_struct(bit_numbering = "msb0", endian = "msb", size_bits = 66)]
 pub struct PayloadTelemetry {
