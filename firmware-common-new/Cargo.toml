@@ -44,3 +44,5 @@ reed-solomon = "0.2.1"
 [dev-dependencies]
 approx = "0.5.1"
 env_logger = "0.11.8"
+tokio = {version = "1.44.2", features = ["full"]}
+embassy-sync = {version = "0.6.2", features = ["std"] }

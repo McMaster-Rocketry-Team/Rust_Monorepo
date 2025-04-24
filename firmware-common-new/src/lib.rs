@@ -1,6 +1,7 @@
 // only use std when feature = "std" is enabled or during testing
 #![cfg_attr(not(test), no_std)]
 #![feature(let_chains)]
+#![feature(assert_matches)]
 
 mod fmt;
 

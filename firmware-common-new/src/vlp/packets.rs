@@ -1,4 +1,3 @@
-use core::any::{Any, TypeId};
 use core::fmt::Debug;
 
 use ack::AckPacket;
@@ -18,6 +17,7 @@ pub mod telemetry_packet;
 // TODO change
 pub const MAX_VLP_PACKET_SIZE: usize = 100;
 
+#[derive(Clone, Debug)]
 pub enum VLPDownlinkPacket {
     GPSBeacon(GPSBeaconPacket),
     Ack(AckPacket),
@@ -41,8 +41,33 @@ impl VLPDownlinkPacket {
             _ => None,
         }
     }
+
+    pub(super) fn serialize(self, mut buffer: &mut [u8]) -> usize {
+        buffer[0] = match self {
+            VLPDownlinkPacket::GPSBeacon(_) => 0,
+            VLPDownlinkPacket::Ack(_) => 1,
+            VLPDownlinkPacket::LowPowerTelemetry(_) => 2,
+        };
+        buffer = &mut buffer[1..];
+
+        1 + match self {
+            VLPDownlinkPacket::GPSBeacon(packet) => {
+                packet.serialize(buffer);
+                GPSBeaconPacket::len()
+            }
+            VLPDownlinkPacket::Ack(packet) => {
+                packet.serialize(buffer);
+                AckPacket::len()
+            }
+            VLPDownlinkPacket::LowPowerTelemetry(packet) => {
+                packet.serialize(buffer);
+                LowPowerTelemetryPacket::len()
+            }
+        }
+    }
 }
 
+#[derive(Clone, Debug)]
 pub enum VLPUplinkPacket {
     ChangeMode(ChangeModePacket),
 }
@@ -68,7 +93,7 @@ impl VLPUplinkPacket {
         };
         buffer = &mut buffer[1..];
 
-        1+ match self {
+        1 + match self {
             VLPUplinkPacket::ChangeMode(packet) => {
                 packet.serialize(buffer);
                 ChangeModePacket::len()
@@ -77,7 +102,10 @@ impl VLPUplinkPacket {
     }
 }
 
-pub trait VLPPacket: Clone + Debug + Any {
+pub trait VLPPacket: Clone + Debug {
+    /// Note: 
+    /// if a packet's len < 3, no ecc will be added during transmission.
+    /// if a packet's len < 7, ecc will only be able to detect errors, but not correct them.
     fn len() -> usize;
 
     fn serialize(self, buffer: &mut [u8]);
@@ -87,7 +115,7 @@ pub trait VLPPacket: Clone + Debug + Any {
 
 impl<T> VLPPacket for T
 where
-    T: PackedStruct + Debug + Clone + Any,
+    T: PackedStruct + Debug + Clone,
     T::ByteArray: ByteArray,
 {
     fn len() -> usize {

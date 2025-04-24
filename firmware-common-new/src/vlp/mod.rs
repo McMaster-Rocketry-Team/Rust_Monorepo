@@ -1,4 +1,5 @@
 pub mod packets;
-mod lora_phy;
+mod lora;
 pub mod lora_config;
-pub mod downlink_client;
+pub mod client;
+pub mod radio;
