@@ -407,7 +407,8 @@ mod tests {
 
     impl<'a, M: RawMutex> Radio for RadioA<'a, M> {
         async fn tx(&mut self, buffer: &[u8]) -> Result<(), RadioError> {
-            let data = buffer.to_vec();
+            let mut data = buffer.to_vec();
+            data[0] = 0xFF; // simulate a corruption in the first byte
             self.pair.a_to_b_data.signal(data);
             Ok(())
         }
@@ -430,7 +431,8 @@ mod tests {
 
     impl<'a, M: RawMutex> Radio for RadioB<'a, M> {
         async fn tx(&mut self, buffer: &[u8]) -> Result<(), RadioError> {
-            let data = buffer.to_vec();
+            let mut data = buffer.to_vec();
+            data[0] = 0xFF; // simulate a corruption in the first byte
             self.pair.b_to_a_data.signal(data);
             Ok(())
         }

@@ -104,8 +104,8 @@ impl VLPUplinkPacket {
 
 pub trait VLPPacket: Clone + Debug {
     /// Note: 
-    /// if a packet's len < 3, no ecc will be added during transmission.
-    /// if a packet's len < 7, ecc will only be able to detect errors, but not correct them.
+    /// if a downlink packet's len < 3, no ecc will be added during transmission.
+    /// if a downlink packet's len < 7, ecc will only be able to detect errors, but not correct them.
     fn len() -> usize;
 
     fn serialize(self, buffer: &mut [u8]);
