@@ -11,8 +11,28 @@ use sha2::Sha256;
 /// buffer contains data without ecc and free space for ecc
 /// data_len is the length of data in the buffer
 /// returns the length of data with ecc in the buffer
+/// 
+/// | data len | ecc len | total len |
+/// | -------- | ------- | --------- |
+/// | 1        | 2       | 3         |
+/// | 2        | 2       | 4         |
+/// | 3        | 2       | 5         |
+/// | 4        | 2       | 6         |
+/// | 5        | 2       | 7         |
+/// | 6        | 2       | 8         |
+/// | 7        | 2       | 9         |
+/// | 8        | 2       | 10        |
+/// | 9        | 2       | 11        |
+/// | 10       | 2       | 12        |
+/// | 11       | 2       | 13        |
+/// | 12       | 3       | 15        |
+/// | n        | n // 4  | n + n // 4|
 fn encode_ecc(buffer: &mut [u8], data_len: usize) -> usize {
-    let ecc_len = data_len / 4;
+    let ecc_len = if data_len < 12 {
+        2
+    } else {
+        data_len / 4
+    };
     let encoder = reed_solomon::Encoder::new(ecc_len);
     let encoded = encoder.encode(&buffer[..data_len]);
     buffer[data_len..(data_len + ecc_len)].copy_from_slice(&encoded.ecc());
@@ -23,7 +43,11 @@ fn encode_ecc(buffer: &mut [u8], data_len: usize) -> usize {
 /// returns the length of data in the buffer if ecc is correct
 /// returns None if ecc is incorrect
 fn decode_ecc(buffer: &mut [u8]) -> Option<usize> {
-    let ecc_len = buffer.len() / 5;
+    let ecc_len = if buffer.len() < 15 {
+        2
+    } else {
+        buffer.len() / 5
+    };
     let decoder = reed_solomon::Decoder::new(ecc_len);
     if let Ok(recovered) = decoder.correct(buffer, None) {
         let recovered_data = recovered.data();
@@ -137,7 +161,7 @@ impl<'a, 'b, 'c, M: RawMutex, R: Radio> VLPGroundStationDaemon<'a, 'b, 'c, M, R>
         let hash = hasher.finalize();
         self.buffer[offset..(offset + 16)].copy_from_slice(&hash[0..16]);
         offset += 16;
-        let expected_ack_sha = u64::from_be_bytes((&hash[0..8]).try_into().unwrap());
+        let expected_ack_sha = u16::from_be_bytes((&hash[0..2]).try_into().unwrap());
 
         // encode ecc
         offset = encode_ecc(&mut self.buffer, offset);
@@ -308,13 +332,13 @@ impl<'a, 'b, 'c, M: RawMutex, R: Radio> VLPAvionicsDaemon<'a, 'b, 'c, M, R> {
         self.client.rx_signal.signal((packet, packet_status));
 
         // send ack
-        let sha = u64::from_be_bytes((&expected_signature[0..8]).try_into().unwrap());
+        let sha = u16::from_be_bytes((&expected_signature[0..2]).try_into().unwrap());
         self.send_ack(sha).await?;
 
         Ok(())
     }
 
-    async fn send_ack(&mut self, sha: u64) -> Result<(), VLPDaemonError> {
+    async fn send_ack(&mut self, sha: u16) -> Result<(), VLPDaemonError> {
         // construct the ack packet
         let ack_packet = VLPDownlinkPacket::Ack(AckPacket { sha });
 

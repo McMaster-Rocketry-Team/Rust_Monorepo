@@ -7,7 +7,7 @@ fixed_point_factory!(BatteryVFac, f32, 5.0, 8.5, 0.001);
 fixed_point_factory!(TemperatureFac, f32, -30.0, 85.0, 0.1);
 
 #[derive(PackedStruct, Debug, Clone, PartialEq, Deserialize, Serialize)]
-#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "7")]
+#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "4")]
 pub struct LowPowerTelemetryPacket {
     #[packed_field(element_size_bits = "5")]
     num_of_fix_satellites: u8,
