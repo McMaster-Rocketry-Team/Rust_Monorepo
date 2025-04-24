@@ -148,7 +148,7 @@ impl<'a, 'b, 'c, M: RawMutex, R: Radio> VLPGroundStationDaemon<'a, 'b, 'c, M, R>
             .await
             .map_err(VLPTXError::Radio)?;
 
-        match self.radio.rx(&mut self.buffer, Some(100)).await {
+        match self.radio.rx(&mut self.buffer, Some(300)).await {
             Ok((rx_len, packet_status)) => {
                 // decode ecc
                 let rx_len =
@@ -264,7 +264,7 @@ impl<'a, 'b, 'c, M: RawMutex, R: Radio> VLPAvionicsDaemon<'a, 'b, 'c, M, R> {
             .await
             .map_err(VLPDaemonError::Radio)?;
 
-        match self.radio.rx(&mut self.buffer, Some(100)).await {
+        match self.radio.rx(&mut self.buffer, Some(300)).await {
             Ok((rx_len, packet_status)) => {
                 return self
                     .process_rx_and_send_ack(rx_len, packet_status, hasher)

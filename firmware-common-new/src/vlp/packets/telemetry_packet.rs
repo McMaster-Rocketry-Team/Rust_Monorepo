@@ -51,6 +51,7 @@ fixed_point_factory!(AltitudeFac, f32, -100.0, 5000.0, 5.0);
 fixed_point_factory!(AirSpeedFac, f32, -100.0, 400.0, 2.0);
 fixed_point_factory!(AirBrakesExtensionInchFac, f32, 0.0, 0.9, 0.04);
 
+// 49 byte max size to achieve 0.5Hz with 250Mhz bandwidth + 12sf + 8cr lora
 #[derive(PackedStruct, Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "45")]
 pub struct TelemetryPacket {
