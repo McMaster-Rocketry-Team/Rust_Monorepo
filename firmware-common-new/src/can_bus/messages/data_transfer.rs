@@ -13,31 +13,30 @@ pub enum DataType {
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PackedStruct, Clone, Debug, Serialize, Deserialize)]
-#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "38")]
+#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "34")]
 #[repr(C)]
 pub struct DataTransferMessage {
     data: [u8; 32],
     data_len: u8,
-    pub data_start_i: u32,
+    pub start_of_data: bool,
     pub end_of_data: bool,
-    #[packed_field(bits = "297..299", ty = "enum")]
+    #[packed_field(bits = "266..268", ty = "enum")]
     pub data_type: DataType,
-    #[packed_field(element_size_bits = "5")]
-    _reserved: u8,
+    #[packed_field(element_size_bits = "4")]
+    _padding: u8,
 }
 
 impl DataTransferMessage {
-    pub fn new(data_start_i: u32, mut data: Vec<u8, 32>, data_type: DataType, end_of_data: bool) -> Self {
-        for _ in data.len()..32 {
-            data.push(0).unwrap();
-        }
+    pub fn new(mut data: Vec<u8, 32>, data_type: DataType, start_of_data:bool, end_of_data: bool) -> Self {
+        let data_len = data.len() as u8;
+        data.resize_default(32).unwrap();
         Self {
-            data_len: data.len() as u8,
+            data_len,
             data: data.into_array().unwrap(),
             data_type,
-            data_start_i,
+            start_of_data,
             end_of_data,
-            _reserved: Default::default(),
+            _padding: Default::default(),
         }
     }
 

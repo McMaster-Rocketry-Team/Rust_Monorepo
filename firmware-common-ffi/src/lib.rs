@@ -30,6 +30,7 @@ pub static AERO_RUST_NODE_TYPE: u8 = node_types::AERO_RUST_NODE_TYPE;
 pub struct CanBusFrames {
     id: u32,
     len: usize,
+    crc: u16,
 }
 
 /// Encodes a CAN bus message into a buffer for transmission.
@@ -45,6 +46,8 @@ pub struct CanBusFrames {
 /// A `CanBusFrames` struct containing:
 /// - `len`: The number of bytes written to the buffer. If the buffer is too small, this will be 0.
 /// - `id`: The ID of the CAN bus message.
+/// - `crc`: The CRC checksum of the serialized message before encoding, used for comparing against the
+///          `crc` field in the received Ack message.
 ///
 /// # Notes
 /// The caller is responsible for transmitting the encoded message over the CAN bus in 8-byte chunks.
@@ -66,12 +69,14 @@ pub extern "C" fn encode_can_bus_message(
     let id = message.get_id(self_node_type, self_node_id);
 
     let multi_frame_encoder = CanBusMultiFrameEncoder::new(message);
+    let crc = multi_frame_encoder.crc;
     let mut i = 0;
     for data in multi_frame_encoder {
         if i + data.len() > buffer.len() {
             return CanBusFrames {
                 id: id.into(),
                 len: 0,
+                crc: 0,
             }; // Buffer too small
         }
         buffer[i..i + data.len()].copy_from_slice(&data);
@@ -81,6 +86,7 @@ pub extern "C" fn encode_can_bus_message(
     CanBusFrames {
         id: id.into(),
         len: i,
+        crc,
     }
 }
 

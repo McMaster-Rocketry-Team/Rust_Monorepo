@@ -49,6 +49,7 @@ pub struct CanBusMultiFrameEncoder {
     offset: usize,
     message_len: usize,
     toggle: bool,
+    pub crc: u16,
 }
 
 impl CanBusMultiFrameEncoder {
@@ -57,6 +58,7 @@ impl CanBusMultiFrameEncoder {
         let len = message.serialize(&mut deserialized_message);
 
         Self {
+            crc: CAN_CRC.checksum(&deserialized_message[..len]),
             deserialized_message,
             offset: 0,
             message_len: len,
@@ -84,8 +86,7 @@ impl Iterator for CanBusMultiFrameEncoder {
             // Multi-frame message
             if self.offset == 0 {
                 // First frame
-                let crc = CAN_CRC.checksum(&self.deserialized_message[..self.message_len]);
-                data.extend_from_slice(&crc.to_le_bytes()).unwrap();
+                data.extend_from_slice(&self.crc.to_le_bytes()).unwrap();
                 data.extend_from_slice(&self.deserialized_message[..5])
                     .unwrap();
                 data.push(TailByte::new(true, false, self.toggle).into())
@@ -136,12 +137,14 @@ impl<M: RawMutex, const N: usize> CanSender<M, N> {
         }
     }
 
-    pub async fn send(&self, message: CanBusMessageEnum) {
+    pub async fn send(&self, message: CanBusMessageEnum) -> u16 {
         let id = message.get_id(self.node_type, self.node_id);
 
         let multi_frame_encoder = CanBusMultiFrameEncoder::new(message);
+        let crc = multi_frame_encoder.crc;
         for data in multi_frame_encoder {
             self.channel.send((id, data)).await;
         }
+        crc
     }
 }
