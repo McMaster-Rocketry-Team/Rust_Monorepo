@@ -30,19 +30,7 @@ impl AckMessage {
 }
 
 impl CanBusMessage for AckMessage {
-    fn len() -> usize {
-        4
-    }
-
     fn priority(&self) -> u8 {
         1
-    }
-
-    fn serialize(self, buffer: &mut [u8]) {
-        self.pack_to_slice(&mut buffer[..Self::len()]).unwrap();
-    }
-
-    fn deserialize(data: &[u8]) -> Option<Self> {
-        Self::unpack_from_slice(data).ok()
     }
 }

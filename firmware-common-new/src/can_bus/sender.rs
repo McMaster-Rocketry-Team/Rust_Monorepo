@@ -5,7 +5,7 @@ use heapless::Vec;
 
 use crate::can_bus::messages::CanBusMessageEnum;
 
-use super::{id::CanBusExtendedId, messages::CanBusMessage, CanBusTX};
+use super::{id::CanBusExtendedId, CanBusTX};
 use packed_struct::prelude::*;
 
 pub const MAX_CAN_MESSAGE_SIZE: usize = 64;
@@ -38,6 +38,8 @@ impl Into<u8> for TailByte {
 
 pub struct CanSender<M: RawMutex, const N: usize> {
     channel: Channel<M, (CanBusExtendedId, Vec<u8, 8>), N>,
+    node_type: u8,
+    node_id: u16,
 }
 
 pub(super) const CAN_CRC: Crc<u16> = Crc::<u16>::new(&crc::CRC_16_IBM_3740);
@@ -50,14 +52,14 @@ pub struct CanBusMultiFrameEncoder {
 }
 
 impl CanBusMultiFrameEncoder {
-    pub fn new<T: CanBusMessage>(message: T) -> Self {
+    pub fn new(message: CanBusMessageEnum) -> Self {
         let mut deserialized_message = [0u8; MAX_CAN_MESSAGE_SIZE];
-        message.serialize(&mut deserialized_message);
+        let len = message.serialize(&mut deserialized_message);
 
         Self {
             deserialized_message,
             offset: 0,
-            message_len: T::len(),
+            message_len: len,
             toggle: false,
         }
     }
@@ -113,9 +115,11 @@ impl Iterator for CanBusMultiFrameEncoder {
 }
 
 impl<M: RawMutex, const N: usize> CanSender<M, N> {
-    pub fn new() -> Self {
+    pub fn new(node_type: u8, node_id: u16) -> Self {
         Self {
             channel: Channel::new(),
+            node_type,
+            node_id,
         }
     }
 
@@ -132,13 +136,8 @@ impl<M: RawMutex, const N: usize> CanSender<M, N> {
         }
     }
 
-    pub async fn send<T: CanBusMessage>(&self, message: T) {
-        let id = CanBusExtendedId::new(
-            message.priority(),
-            CanBusMessageEnum::get_message_type::<T>().unwrap(),
-            0,
-            0,
-        );
+    pub async fn send(&self, message: CanBusMessageEnum) {
+        let id = message.get_id(self.node_type, self.node_id);
 
         let multi_frame_encoder = CanBusMultiFrameEncoder::new(message);
         for data in multi_frame_encoder {

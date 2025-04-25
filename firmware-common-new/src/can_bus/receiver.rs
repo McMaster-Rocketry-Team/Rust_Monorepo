@@ -252,7 +252,7 @@ mod tests {
         messages::{
             amp_status::PowerOutputStatus,
             payload_status::{EPSOutputStatus, EPSStatus},
-            CanBusMessage, PayloadStatusMessage,
+            PayloadStatusMessage,
         },
         sender::CanBusMultiFrameEncoder,
     };
@@ -271,7 +271,7 @@ mod tests {
             .is_test(true)
             .try_init();
 
-        let message = PayloadStatusMessage::new(
+        let message = CanBusMessageEnum::PayloadStatus(PayloadStatusMessage::new(
             EPSStatus {
                 battery1_mv: 1,
                 battery2_mv: 2,
@@ -307,14 +307,9 @@ mod tests {
             11,
             12,
             13,
-        );
+        ));
 
-        let id = CanBusExtendedId::new(
-            message.priority(),
-            CanBusMessageEnum::get_message_type::<PayloadStatusMessage>().unwrap(),
-            0,
-            1,
-        );
+        let id = message.get_id(0, 1);
         let id: u32 = id.into();
         let encoder = CanBusMultiFrameEncoder::new(message);
 

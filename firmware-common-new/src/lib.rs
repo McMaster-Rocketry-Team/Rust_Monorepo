@@ -4,6 +4,7 @@
 #![feature(assert_matches)]
 
 mod fmt;
+pub(crate) mod utils;
 
 pub(crate) mod fixed_point;
 pub mod can_bus;

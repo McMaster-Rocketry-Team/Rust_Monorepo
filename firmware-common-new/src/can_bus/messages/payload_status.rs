@@ -71,71 +71,7 @@ impl PayloadStatusMessage {
 }
 
 impl CanBusMessage for PayloadStatusMessage {
-    fn len() -> usize {
-        25
-    }
-
     fn priority(&self) -> u8 {
         5
-    }
-
-    fn serialize(self, buffer: &mut [u8]) {
-        self.pack_to_slice(&mut buffer[..Self::len()]).unwrap();
-    }
-
-    fn deserialize(data: &[u8]) -> Option<Self> {
-        Self::unpack_from_slice(data).ok()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_payload_status_message() {
-        let mut buffer = [0u8; 25];
-
-        let message = PayloadStatusMessage::new(
-            EPSStatus {
-                battery1_mv: 1,
-                battery2_mv: 2,
-                output_3v3: EPSOutputStatus {
-                    current_ma: 3,
-                    status: PowerOutputStatus::Disabled,
-                },
-                output_5v: EPSOutputStatus {
-                    current_ma: 4,
-                    status: PowerOutputStatus::PowerGood,
-                },
-                output_9v: EPSOutputStatus {
-                    current_ma: 5,
-                    status: PowerOutputStatus::PowerBad,
-                },
-            },
-            EPSStatus {
-                battery1_mv: 6,
-                battery2_mv: 7,
-                output_3v3: EPSOutputStatus {
-                    current_ma: 8,
-                    status: PowerOutputStatus::Disabled,
-                },
-                output_5v: EPSOutputStatus {
-                    current_ma: 9,
-                    status: PowerOutputStatus::PowerGood,
-                },
-                output_9v: EPSOutputStatus {
-                    current_ma: 10,
-                    status: PowerOutputStatus::PowerBad,
-                },
-            },
-            11,
-            12,
-            13,
-        );
-
-        message.serialize(&mut buffer);
-
-        println!("{:?}", buffer);
     }
 }

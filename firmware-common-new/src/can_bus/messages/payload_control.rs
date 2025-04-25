@@ -40,19 +40,7 @@ impl PayloadControlMessage {
 }
 
 impl CanBusMessage for PayloadControlMessage {
-    fn len() -> usize {
-        1
-    }
-
     fn priority(&self) -> u8 {
         5
-    }
-
-    fn serialize(self, buffer: &mut [u8]) {
-        self.pack_to_slice(&mut buffer[..Self::len()]).unwrap();
-    }
-
-    fn deserialize(data: &[u8]) -> Option<Self> {
-        Self::unpack_from_slice(data).ok()
     }
 }

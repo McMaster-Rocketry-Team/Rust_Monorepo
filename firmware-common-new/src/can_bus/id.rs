@@ -33,15 +33,6 @@ impl CanBusExtendedId {
         }
     }
 
-    pub fn from_message<T: CanBusMessage>(message: &T, node_type: u8, node_id: u16) -> Self {
-        Self::new(
-            message.priority(),
-            CanBusMessageEnum::get_message_type::<T>().unwrap(),
-            node_type,
-            node_id,
-        )
-    }
-
     pub fn from_raw(raw: u32) -> Self {
         let unpacked = raw.to_be_bytes();
         let mut packed = [0; 4];
