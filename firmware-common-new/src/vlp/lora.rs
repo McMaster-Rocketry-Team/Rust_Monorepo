@@ -22,7 +22,7 @@ impl<'a, RK: RadioKind, DL: DelayNs> Radio for LoraPhy<'a, RK, DL> {
         )?;
         let mut tx_params =
             self.lora
-                .create_tx_packet_params(8, false, false, false, &modulation_params)?;
+                .create_tx_packet_params(12, false, false, false, &modulation_params)?;
 
         self.lora
             .prepare_for_tx(
@@ -48,7 +48,7 @@ impl<'a, RK: RadioKind, DL: DelayNs> Radio for LoraPhy<'a, RK, DL> {
             self.lora_config.frequency,
         )?;
         let rx_pkt_params = self.lora.create_rx_packet_params(
-            8,
+            12,
             false,
             buffer.len() as u8,
             false,

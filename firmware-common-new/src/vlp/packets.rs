@@ -5,6 +5,7 @@ use ack::AckPacket;
 use change_mode::ChangeModePacket;
 use gps_beacon::GPSBeaconPacket;
 use low_power_telemetry::LowPowerTelemetryPacket;
+use telemetry_packet::TelemetryPacket;
 
 pub mod ack;
 pub mod change_mode;
@@ -21,6 +22,7 @@ pub enum VLPDownlinkPacket {
     GPSBeacon(GPSBeaconPacket),
     Ack(AckPacket),
     LowPowerTelemetry(LowPowerTelemetryPacket),
+    Telemetry(TelemetryPacket),
 }
 
 impl VLPDownlinkPacket {
@@ -36,6 +38,7 @@ impl VLPDownlinkPacket {
             2 => {
                 LowPowerTelemetryPacket::deserialize(data).map(VLPDownlinkPacket::LowPowerTelemetry)
             }
+            3 => TelemetryPacket::deserialize(data).map(VLPDownlinkPacket::Telemetry),
             _ => None,
         }
     }
@@ -45,22 +48,15 @@ impl VLPDownlinkPacket {
             VLPDownlinkPacket::GPSBeacon(_) => 0,
             VLPDownlinkPacket::Ack(_) => 1,
             VLPDownlinkPacket::LowPowerTelemetry(_) => 2,
+            VLPDownlinkPacket::Telemetry(_) => 3,
         };
         buffer = &mut buffer[1..];
 
         1 + match self {
-            VLPDownlinkPacket::GPSBeacon(packet) => {
-                packet.serialize(buffer);
-                GPSBeaconPacket::len()
-            }
-            VLPDownlinkPacket::Ack(packet) => {
-                packet.serialize(buffer);
-                AckPacket::len()
-            }
-            VLPDownlinkPacket::LowPowerTelemetry(packet) => {
-                packet.serialize(buffer);
-                LowPowerTelemetryPacket::len()
-            }
+            VLPDownlinkPacket::GPSBeacon(packet) => packet.serialize(buffer),
+            VLPDownlinkPacket::Ack(packet) => packet.serialize(buffer),
+            VLPDownlinkPacket::LowPowerTelemetry(packet) => packet.serialize(buffer),
+            VLPDownlinkPacket::Telemetry(packet) => packet.serialize(buffer),
         }
     }
 }
@@ -90,10 +86,7 @@ impl VLPUplinkPacket {
         buffer = &mut buffer[1..];
 
         1 + match self {
-            VLPUplinkPacket::ChangeMode(packet) => {
-                packet.serialize(buffer);
-                ChangeModePacket::len()
-            }
+            VLPUplinkPacket::ChangeMode(packet) => packet.serialize(buffer),
         }
     }
 }

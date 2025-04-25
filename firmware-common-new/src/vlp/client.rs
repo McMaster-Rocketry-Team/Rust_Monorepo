@@ -42,6 +42,7 @@ fn encode_ecc(buffer: &mut [u8], data_len: usize) -> usize {
 /// buffer contains data with ecc
 /// returns the length of data in the buffer if ecc is correct
 /// returns None if ecc is incorrect
+/// TODO: also return the number of corrected errors
 fn decode_ecc(buffer: &mut [u8]) -> Option<usize> {
     let ecc_len = if buffer.len() < 15 {
         2

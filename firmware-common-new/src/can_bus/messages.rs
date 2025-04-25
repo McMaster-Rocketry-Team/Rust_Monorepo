@@ -111,25 +111,22 @@ impl CanBusMessageEnum {
 
     pub fn serialize(self, buffer: &mut [u8]) -> usize {
         match self {
-            CanBusMessageEnum::UnixTime(m) => {
-                m.serialize(buffer);
-                UnixTimeMessage::len()
-            }
-            CanBusMessageEnum::NodeStatus(node_status_message) => todo!(),
-            CanBusMessageEnum::Reset(reset_message) => todo!(),
-            CanBusMessageEnum::BaroMeasurement(baro_measurement_message) => todo!(),
-            CanBusMessageEnum::IMUMeasurement(imumeasurement_message) => todo!(),
-            CanBusMessageEnum::TempuratureMeasurement(tempurature_measurement_message) => todo!(),
-            CanBusMessageEnum::BrightnessMeasurement(brightness_measurement_message) => todo!(),
-            CanBusMessageEnum::AmpStatus(amp_status_message) => todo!(),
-            CanBusMessageEnum::AmpControl(amp_control_message) => todo!(),
-            CanBusMessageEnum::PayloadStatus(payload_status_message) => todo!(),
-            CanBusMessageEnum::PayloadControl(payload_control_message) => todo!(),
-            CanBusMessageEnum::PayloadSelfTest(payload_self_test_message) => todo!(),
-            CanBusMessageEnum::AvionicsStatus(avionics_status_message) => todo!(),
-            CanBusMessageEnum::IcarusStatus(icarus_status_message) => todo!(),
-            CanBusMessageEnum::DataTransfer(data_transfer_message) => todo!(),
-            CanBusMessageEnum::Ack(ack_message) => todo!(),
+            CanBusMessageEnum::UnixTime(m) => m.serialize(buffer),
+            CanBusMessageEnum::NodeStatus(m) => m.serialize(buffer),
+            CanBusMessageEnum::Reset(m) => m.serialize(buffer),
+            CanBusMessageEnum::BaroMeasurement(m) => m.serialize(buffer),
+            CanBusMessageEnum::IMUMeasurement(m) => m.serialize(buffer),
+            CanBusMessageEnum::TempuratureMeasurement(m) => m.serialize(buffer),
+            CanBusMessageEnum::BrightnessMeasurement(m) => m.serialize(buffer),
+            CanBusMessageEnum::AmpStatus(m) => m.serialize(buffer),
+            CanBusMessageEnum::AmpControl(m) => m.serialize(buffer),
+            CanBusMessageEnum::PayloadStatus(m) => m.serialize(buffer),
+            CanBusMessageEnum::PayloadControl(m) => m.serialize(buffer),
+            CanBusMessageEnum::PayloadSelfTest(m) => m.serialize(buffer),
+            CanBusMessageEnum::AvionicsStatus(m) => m.serialize(buffer),
+            CanBusMessageEnum::IcarusStatus(m) => m.serialize(buffer),
+            CanBusMessageEnum::DataTransfer(m) => m.serialize(buffer),
+            CanBusMessageEnum::Ack(m) => m.serialize(buffer),
         }
     }
 
