@@ -312,6 +312,7 @@ mod tests {
         let id = message.get_id(0, 1);
         let id: u32 = id.into();
         let encoder = CanBusMultiFrameEncoder::new(message);
+        let encoder_crc = encoder.crc;
 
         let mut decoder = CanBusMultiFrameDecoder::<1>::new();
         let mut decoded_message: Option<SensorReading<BootTimestamp, ReceivedCanBusMessage>> = None;
@@ -320,7 +321,8 @@ mod tests {
             decoded_message = decoder.process_frame(&frame);
         }
 
-        assert!(decoded_message.is_some());
+        let decoded_message = decoded_message.unwrap();
+        assert_eq!(decoded_message.data.crc, encoder_crc);
         log_info!("Decoded message: {:?}", decoded_message);
     }
 }
