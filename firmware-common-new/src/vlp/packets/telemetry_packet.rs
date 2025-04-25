@@ -9,7 +9,7 @@ use crate::{
         avionics_status::FlightStage,
         node_status::{NodeHealth, NodeMode},
     },
-    fixed_point_factory,
+    fixed_point_factory, gps::GPSData,
 };
 
 fixed_point_factory!(PayloadVoltageFac, f32, 2.0, 4.5, 0.05);
@@ -90,7 +90,6 @@ pub struct TelemetryPacket {
     vl_battery_v: Integer<BatteryVFacBase, packed_bits::Bits<BATTERY_V_FAC_BITS>>,
     #[packed_field(element_size_bits = "9")]
     air_temperature: Integer<TemperatureFacBase, packed_bits::Bits<TEMPERATURE_FAC_BITS>>,
-
     #[packed_field(element_size_bits = "9")]
     vl_stm32_temperature: Integer<TemperatureFacBase, packed_bits::Bits<TEMPERATURE_FAC_BITS>>,
 
@@ -179,189 +178,383 @@ pub struct TelemetryPacket {
     payload: PayloadTelemetry,
 }
 
-// impl TelemetryPacket {
-//     pub fn new(
-//         unix_clock_ready: bool,
-//         timestamp: f64,
+impl TelemetryPacket {
+    pub fn new(
+        nonce: u8,
 
-//         num_of_fix_satellites: u8,
-//         lat_lon: Option<(f64, f64)>,
+        unix_clock_ready: bool,
+        num_of_fix_satellites: u8,
+        lat_lon: Option<(f64, f64)>,
 
-//         battery_v: f32,
-//         temperature: f32,
+        vl_battery_v: f32,
+        air_temperature: f32,
+        vl_stm32_temperature: f32,
 
-//         hardware_armed: bool,
-//         software_armed: bool,
+        pyro_main_continuity: bool,
+        pyro_drogue_continuity: bool,
 
-//         free_space: u32,
+        altitude: f32,
+        max_altitude: f32,
+        backup_max_altitude: f32,
 
-//         pyro_main_continuity: bool,
-//         pyro_drogue_continuity: bool,
+        air_speed: f32,
+        max_air_speed: f32,
+        backup_max_air_speed: f32,
 
-//         altitude: f32,
-//         max_altitude: f32,
-//         backup_max_altitude: f32,
+        tilt_deg: f32,
 
-//         air_speed: f32,
-//         max_air_speed: f32,
-//         backup_max_air_speed: f32,
+        flight_core_state: u8,
+        backup_flight_core_state: u8,
 
-//         flight_core_state: FlightCoreState,
-//         backup_flight_core_state: FlightCoreState,
+        amp_online: bool,
+        amp_rebooted_in_last_5s: bool,
+        shared_battery_v: f32,
+        amp_out1: PowerOutputStatus,
+        amp_out2: PowerOutputStatus,
+        amp_out3: PowerOutputStatus,
+        amp_out4: PowerOutputStatus,
 
-//         drogue_deployed: bool,
-//         main_deployed: bool,
-//     ) -> Self {
-//         Self {
-//             unix_clock_ready,
-//             timestamp: (timestamp / 1000.0) as u32,
-//             num_of_fix_satellites: num_of_fix_satellites.into(),
-//             lat_lon: lat_lon.unwrap_or((0.0, 0.0)),
-//             battery_v: BatteryVFac::to_fixed_point_capped(battery_v),
-//             temperature: TemperatureFac::to_fixed_point_capped(temperature),
-//             hardware_armed,
-//             software_armed,
-//             disk_free_space: FreeSpaceFac::to_fixed_point_capped(free_space as f32),
-//             pyro_main_continuity,
-//             pyro_drogue_continuity,
-//             altitude: AltitudeFac::to_fixed_point_capped(altitude),
-//             max_altitude: AltitudeFac::to_fixed_point_capped(max_altitude),
-//             backup_max_altitude: AltitudeFac::to_fixed_point_capped(backup_max_altitude),
-//             air_speed: AirSpeedFac::to_fixed_point_capped(air_speed),
-//             max_air_speed: AirSpeedFac::to_fixed_point_capped(max_air_speed),
-//             backup_max_air_speed: AirSpeedFac::to_fixed_point_capped(backup_max_air_speed),
-//             flight_core_state: (flight_core_state as u8).into(),
-//             backup_flight_core_state: (backup_flight_core_state as u8).into(),
-//             drogue_deployed,
-//             main_deployed,
-//         }
-//     }
+        main_bulkhead_online: bool,
+        main_bulkhead_rebooted_in_last_5s: bool,
+        main_bulkhead_brightness: u8,
 
-//     pub fn unix_clock_ready(&self) -> bool {
-//         self.unix_clock_ready
-//     }
+        drogue_bulkhead_online: bool,
+        drogue_bulkhead_rebooted_in_last_5s: bool,
+        drogue_bulkhead_brightness: u8,
 
-//     /// Get the timestamp in milliseconds
-//     pub fn timestamp(&self) -> f64 {
-//         self.timestamp as f64 * 1000.0
-//     }
+        icarus_online: bool,
+        icarus_rebooted_in_last_5s: bool,
+        air_brakes_extention_inch: f32,
+        air_brakes_servo_temp: f32,
+        ap_residue: f32,
+        cd: f32,
 
-//     pub fn num_of_fix_satellites(&self) -> u8 {
-//         self.num_of_fix_satellites.into()
-//     }
+        ozys1_online: bool,
+        ozys1_rebooted_in_last_5s: bool,
 
-//     pub fn lat_lon(&self) -> Option<(f64, f64)> {
-//         if self.lat_lon.0 == 0.0 && self.lat_lon.1 == 0.0 {
-//             None
-//         } else {
-//             Some(self.lat_lon)
-//         }
-//     }
+        ozys2_online: bool,
+        ozys2_rebooted_in_last_5s: bool,
 
-//     pub fn battery_v(&self) -> f32 {
-//         BatteryVFac::to_float(self.battery_v)
-//     }
+        payload_activation_online: bool,
+        payload_activation_rebooted_in_last_5s: bool,
+        payload_alive: bool,
 
-//     pub fn temperature(&self) -> f32 {
-//         TemperatureFac::to_float(self.temperature)
-//     }
+        aero_rust_online: bool,
+        aero_rust_rebooted_in_last_5s: bool,
+        aero_rust_health: NodeHealth,
+        aero_rust_mode: NodeMode,
+        aero_rust_status: u16,
 
-//     pub fn hardware_armed(&self) -> bool {
-//         self.hardware_armed
-//     }
+        payload: PayloadTelemetry,
+    ) -> Self {
+        Self {
+            nonce: nonce.into(),
 
-//     pub fn software_armed(&self) -> bool {
-//         self.software_armed
-//     }
+            unix_clock_ready,
+            num_of_fix_satellites: num_of_fix_satellites.into(),
+            lat: LatFac::to_fixed_point_capped(lat_lon.unwrap_or((0.0, 0.0)).0),
+            lon: LonFac::to_fixed_point_capped(lat_lon.unwrap_or((0.0, 0.0)).1),
 
-//     /// Get the free space in bytes
-//     pub fn free_space(&self) -> f32 {
-//         FreeSpaceFac::to_float(self.disk_free_space)
-//     }
+            vl_battery_v: BatteryVFac::to_fixed_point_capped(vl_battery_v),
+            air_temperature: TemperatureFac::to_fixed_point_capped(air_temperature),
+            vl_stm32_temperature: TemperatureFac::to_fixed_point_capped(vl_stm32_temperature),
 
-//     pub fn pyro_main_continuity(&self) -> bool {
-//         self.pyro_main_continuity
-//     }
+            pyro_main_continuity,
+            pyro_drogue_continuity,
 
-//     pub fn pyro_drogue_continuity(&self) -> bool {
-//         self.pyro_drogue_continuity
-//     }
+            altitude: AltitudeFac::to_fixed_point_capped(altitude),
+            max_altitude: AltitudeFac::to_fixed_point_capped(max_altitude),
+            backup_max_altitude: AltitudeFac::to_fixed_point_capped(backup_max_altitude),
 
-//     pub fn altitude(&self) -> f32 {
-//         AltitudeFac::to_float(self.altitude)
-//     }
+            air_speed: AirSpeedFac::to_fixed_point_capped(air_speed),
+            max_air_speed: AirSpeedFac::to_fixed_point_capped(max_air_speed),
+            backup_max_air_speed: AirSpeedFac::to_fixed_point_capped(backup_max_air_speed),
 
-//     pub fn max_altitude(&self) -> f32 {
-//         AltitudeFac::to_float(self.max_altitude)
-//     }
+            tilt_deg: TiltDegFac::to_fixed_point_capped(tilt_deg),
 
-//     pub fn backup_max_altitude(&self) -> f32 {
-//         AltitudeFac::to_float(self.backup_max_altitude)
-//     }
+            flight_core_state: flight_core_state.into(),
+            backup_flight_core_state: backup_flight_core_state.into(),
 
-//     pub fn air_speed(&self) -> f32 {
-//         AirSpeedFac::to_float(self.air_speed)
-//     }
+            amp_online,
+            amp_rebooted_in_last_5s,
+            shared_battery_v: BatteryVFac::to_fixed_point_capped(shared_battery_v),
 
-//     pub fn max_air_speed(&self) -> f32 {
-//         AirSpeedFac::to_float(self.max_air_speed)
-//     }
+            amp_out1,
+            amp_out2,
+            amp_out3,
+            amp_out4,
 
-//     pub fn backup_max_air_speed(&self) -> f32 {
-//         AirSpeedFac::to_float(self.backup_max_air_speed)
-//     }
+            main_bulkhead_online,
+            main_bulkhead_rebooted_in_last_5s,
+            main_bulkhead_brightness,
 
-//     pub fn flight_core_state(&self) -> FlightCoreState {
-//         let flight_core_state: u8 = self.flight_core_state.into();
-//         if let Ok(flight_core_state) = FlightCoreState::try_from(flight_core_state) {
-//             flight_core_state
-//         } else {
-//             FlightCoreState::DisArmed
-//         }
-//     }
+            drogue_bulkhead_online,
+            drogue_bulkhead_rebooted_in_last_5s,
+            drogue_bulkhead_brightness,
 
-//     pub fn backup_flight_core_state(&self) -> FlightCoreState {
-//         let backup_flight_core_state: u8 = self.backup_flight_core_state.into();
-//         if let Ok(backup_flight_core_state) = FlightCoreState::try_from(backup_flight_core_state) {
-//             backup_flight_core_state
-//         } else {
-//             FlightCoreState::DisArmed
-//         }
-//     }
+            icarus_online,
+            icarus_rebooted_in_last_5s,
+            air_brakes_extention_inch: AirBrakesExtensionInchFac::to_fixed_point_capped(
+                air_brakes_extention_inch,
+            ),
+            air_brakes_servo_temp: TemperatureFac::to_fixed_point_capped(air_brakes_servo_temp),
+            ap_residue: APResidueFac::to_fixed_point_capped(ap_residue),
+            cd: CdFac::to_fixed_point_capped(cd),
 
-//     pub fn drogue_deployed(&self) -> bool {
-//         self.drogue_deployed
-//     }
+            ozys1_online,
+            ozys1_rebooted_in_last_5s,
 
-//     pub fn main_deployed(&self) -> bool {
-//         self.main_deployed
-//     }
-// }
+            ozys2_online,
+            ozys2_rebooted_in_last_5s,
 
-// pub struct TelemetryPacketBuilderState {
-//     pub gps_location: Option<GPSData>,
-//     pub battery_v: f32,
-//     pub temperature: f32,
-//     pub altitude: f32,
-//     max_altitude: f32,
-//     pub backup_altitude: f32,
-//     backup_max_altitude: f32,
-//     pub air_speed: f32,
-//     max_air_speed: f32,
-//     pub backup_air_speed: f32,
-//     backup_max_air_speed: f32,
+            payload_activation_online,
+            payload_activation_rebooted_in_last_5s,
+            payload_alive,
 
-//     pub hardware_armed: bool,
-//     pub software_armed: bool,
-//     pub pyro_main_continuity: bool,
-//     pub pyro_drogue_continuity: bool,
-//     pub flight_core_state: FlightCoreState,
-//     pub backup_flight_core_state: FlightCoreState,
-//     pub disk_free_space: u32,
+            aero_rust_online,
+            aero_rust_rebooted_in_last_5s,
+            aero_rust_health,
+            aero_rust_mode,
+            aero_rust_status,
 
-//     pub drogue_deployed: bool,
-//     pub main_deployed: bool,
-// }
+            payload,
+        }
+    }
+
+    pub fn unix_clock_ready(&self) -> bool {
+        self.unix_clock_ready
+    }
+
+    pub fn num_of_fix_satellites(&self) -> u8 {
+        self.num_of_fix_satellites.into()
+    }
+
+    pub fn lat_lon(&self) -> (f64, f64) {
+        (LatFac::to_float(self.lat), LonFac::to_float(self.lon))
+    }
+
+    pub fn vl_battery_v(&self) -> f32 {
+        BatteryVFac::to_float(self.vl_battery_v)
+    }
+
+    pub fn air_temperature(&self) -> f32 {
+        TemperatureFac::to_float(self.air_temperature)
+    }
+
+    pub fn vl_stm32_temperature(&self) -> f32 {
+        TemperatureFac::to_float(self.vl_stm32_temperature)
+    }
+
+    pub fn pyro_main_continuity(&self) -> bool {
+        self.pyro_main_continuity
+    }
+
+    pub fn pyro_drogue_continuity(&self) -> bool {
+        self.pyro_drogue_continuity
+    }
+
+    pub fn altitude(&self) -> f32 {
+        AltitudeFac::to_float(self.altitude)
+    }
+
+    pub fn max_altitude(&self) -> f32 {
+        AltitudeFac::to_float(self.max_altitude)
+    }
+
+    pub fn backup_max_altitude(&self) -> f32 {
+        AltitudeFac::to_float(self.backup_max_altitude)
+    }
+
+    pub fn air_speed(&self) -> f32 {
+        AirSpeedFac::to_float(self.air_speed)
+    }
+
+    pub fn max_air_speed(&self) -> f32 {
+        AirSpeedFac::to_float(self.max_air_speed)
+    }
+
+    pub fn backup_max_air_speed(&self) -> f32 {
+        AirSpeedFac::to_float(self.backup_max_air_speed)
+    }
+
+    pub fn tilt_deg(&self) -> f32 {
+        TiltDegFac::to_float(self.tilt_deg)
+    }
+
+    pub fn flight_core_state(&self) -> u8 {
+        self.flight_core_state.into()
+    }
+
+    pub fn backup_flight_core_state(&self) -> u8 {
+        self.backup_flight_core_state.into()
+    }
+
+    pub fn amp_online(&self) -> bool {
+        self.amp_online
+    }
+
+    pub fn amp_rebooted_in_last_5s(&self) -> bool {
+        self.amp_rebooted_in_last_5s
+    }
+
+    pub fn shared_battery_v(&self) -> f32 {
+        BatteryVFac::to_float(self.shared_battery_v)
+    }
+
+    pub fn amp_out1(&self) -> PowerOutputStatus {
+        self.amp_out1
+    }
+
+    pub fn amp_out2(&self) -> PowerOutputStatus {
+        self.amp_out2
+    }
+
+    pub fn amp_out3(&self) -> PowerOutputStatus {
+        self.amp_out3
+    }
+
+    pub fn amp_out4(&self) -> PowerOutputStatus {
+        self.amp_out4
+    }
+
+    pub fn main_bulkhead_online(&self) -> bool {
+        self.main_bulkhead_online
+    }
+
+    pub fn main_bulkhead_rebooted_in_last_5s(&self) -> bool {
+        self.main_bulkhead_rebooted_in_last_5s
+    }
+
+    pub fn main_bulkhead_brightness(&self) -> u8 {
+        self.main_bulkhead_brightness
+    }
+
+    pub fn drogue_bulkhead_online(&self) -> bool {
+        self.drogue_bulkhead_online
+    }
+
+    pub fn drogue_bulkhead_rebooted_in_last_5s(&self) -> bool {
+        self.drogue_bulkhead_rebooted_in_last_5s
+    }
+
+    pub fn drogue_bulkhead_brightness(&self) -> u8 {
+        self.drogue_bulkhead_brightness
+    }
+
+    pub fn icarus_online(&self) -> bool {
+        self.icarus_online
+    }
+
+    pub fn icarus_rebooted_in_last_5s(&self) -> bool {
+        self.icarus_rebooted_in_last_5s
+    }
+
+    pub fn air_brakes_extention_inch(&self) -> f32 {
+        AirBrakesExtensionInchFac::to_float(self.air_brakes_extention_inch)
+    }
+
+    pub fn air_brakes_servo_temp(&self) -> f32 {
+        TemperatureFac::to_float(self.air_brakes_servo_temp)
+    }
+
+    pub fn ap_residue(&self) -> f32 {
+        APResidueFac::to_float(self.ap_residue)
+    }
+
+    pub fn cd(&self) -> f32 {
+        CdFac::to_float(self.cd)
+    }
+
+    pub fn ozys1_online(&self) -> bool {
+        self.ozys1_online
+    }
+
+    pub fn ozys1_rebooted_in_last_5s(&self) -> bool {
+        self.ozys1_rebooted_in_last_5s
+    }
+
+    pub fn ozys2_online(&self) -> bool {
+        self.ozys2_online
+    }
+
+    pub fn ozys2_rebooted_in_last_5s(&self) -> bool {
+        self.ozys2_rebooted_in_last_5s
+    }
+
+    pub fn payload_activation_online(&self) -> bool {
+        self.payload_activation_online
+    }
+
+    pub fn payload_activation_rebooted_in_last_5s(&self) -> bool {
+        self.payload_activation_rebooted_in_last_5s
+    }
+
+    pub fn payload_alive(&self) -> bool {
+        self.payload_alive
+    }
+
+    pub fn aero_rust_online(&self) -> bool {
+        self.aero_rust_online
+    }
+
+    pub fn aero_rust_rebooted_in_last_5s(&self) -> bool {
+        self.aero_rust_rebooted_in_last_5s
+    }
+
+    pub fn aero_rust_health(&self) -> NodeHealth {
+        self.aero_rust_health
+    }
+
+    pub fn aero_rust_mode(&self) -> NodeMode {
+        self.aero_rust_mode
+    }
+
+    pub fn aero_rust_status(&self) -> u16 {
+        self.aero_rust_status
+    }
+
+    pub fn payload(&self) -> &PayloadTelemetry {
+        &self.payload
+    }
+}
+
+pub struct TelemetryPacketBuilderState {
+    nonce: u8,
+
+    pub gps_location: Option<GPSData>,
+
+    pub vl_battery_v: f32,
+    pub air_temperature: f32,
+    pub vl_stm32_temperature: f32,
+
+    pub pyro_main_continuity: bool,
+    pub pyro_drogue_continuity: bool,
+
+    pub altitude: f32,
+    max_altitude: f32,
+    pub backup_altitude: f32,
+    backup_max_altitude: f32,
+    
+    pub air_speed: f32,
+    max_air_speed: f32,
+    pub backup_air_speed: f32,
+    backup_max_air_speed: f32,
+
+    pub tilt_deg: f32,
+
+    pub flight_core_state: u8,
+    pub backup_flight_core_state:u8,
+
+    pub amp_online: bool,
+    pub amp_uptime_s: u32,
+    pub shared_battery_v: f32,
+    pub amp_out1: PowerOutputStatus,
+    pub amp_out2: PowerOutputStatus,
+    pub amp_out3: PowerOutputStatus,
+    pub amp_out4: PowerOutputStatus,
+    
+    pub main_bulkhead_online: bool,
+}
 
 // pub struct TelemetryPacketBuilder<'a, K: Clock> {
 //     unix_clock: UnixClock<'a, K>,
