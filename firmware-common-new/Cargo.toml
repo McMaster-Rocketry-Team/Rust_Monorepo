@@ -6,7 +6,7 @@ edition = "2021"
 [features]
 default = ["log"]
 log = ["dep:log"]
-defmt = ["dep:defmt", "heapless/defmt-03"]
+defmt = ["dep:defmt", "heapless/defmt-03", "lora-phy/defmt-03"]
 
 [dependencies]
 embedded-io-async = "0.6.1"

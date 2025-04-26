@@ -12,6 +12,12 @@ pub struct LoraPhy<'a, LK: RadioKind, DL: DelayNs> {
     lora_config: LoraConfig,
 }
 
+impl<'a, RK: RadioKind, DL: DelayNs> LoraPhy<'a, RK, DL> {
+    pub fn new(lora: &'a mut LoRa<RK, DL>, lora_config: LoraConfig) -> Self {
+        Self { lora, lora_config }
+    }
+}
+
 impl<'a, RK: RadioKind, DL: DelayNs> Radio for LoraPhy<'a, RK, DL> {
     async fn tx(&mut self, buffer: &[u8]) -> Result<(), RadioError> {
         let modulation_params = self.lora.create_modulation_params(

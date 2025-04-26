@@ -55,7 +55,7 @@ pub async fn run_gps_uart_receiver(
     rx: &mut impl Read,
     clock: impl Clock,
     mut on_receive: impl FnMut(SensorReading<BootTimestamp, GPSData>),
-) -> ! {
+) {
     let mut buffer = [0; 84];
     let mut sentence = String::<84>::new();
     let mut nmea = Nmea::default();
