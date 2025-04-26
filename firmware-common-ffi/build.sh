@@ -33,7 +33,7 @@ mkdir -p ./out/thumbv7em-none-eabihf/
 cp ../target/thumbv7em-none-eabihf/release/libfirmware_common_ffi.a ./out/thumbv7em-none-eabihf/libfirmware_common_ffi.a
 
 # Compress the out folder into release.tar.gz
-tar -czf release.tar.gz -C out .
-mv release.tar.gz ./out/
+tar -czf firmware-common-ffi-release.tar.gz -C out .
+mv firmware-common-ffi-release.tar.gz ./out/
 
 echo "Build complete. Output files are in the 'out' directory."
