@@ -38,6 +38,6 @@ impl IMUMeasurementMessage {
 
 impl CanBusMessage for IMUMeasurementMessage {
     fn priority(&self) -> u8 {
-        6
+        3
     }
 }

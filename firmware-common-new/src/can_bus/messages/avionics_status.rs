@@ -29,6 +29,6 @@ pub struct AvionicsStatusMessage {
 
 impl CanBusMessage for AvionicsStatusMessage {
     fn priority(&self) -> u8 {
-        4
+        2
     }
 }

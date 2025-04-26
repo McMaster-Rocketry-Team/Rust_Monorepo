@@ -47,6 +47,6 @@ impl PayloadEPSOutputOverwriteMessage {
 
 impl CanBusMessage for PayloadEPSOutputOverwriteMessage {
     fn priority(&self) -> u8 {
-        5
+        2
     }
 }

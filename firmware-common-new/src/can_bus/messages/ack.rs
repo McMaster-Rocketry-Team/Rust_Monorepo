@@ -27,6 +27,6 @@ impl AckMessage {
 
 impl CanBusMessage for AckMessage {
     fn priority(&self) -> u8 {
-        1
+        4
     }
 }

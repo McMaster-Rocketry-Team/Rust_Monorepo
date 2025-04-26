@@ -46,6 +46,6 @@ impl BaroMeasurementMessage {
 
 impl CanBusMessage for BaroMeasurementMessage {
     fn priority(&self) -> u8 {
-        6
+        3
     }
 }

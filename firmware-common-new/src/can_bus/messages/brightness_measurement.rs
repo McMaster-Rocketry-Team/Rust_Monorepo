@@ -31,6 +31,6 @@ impl BrightnessMeasurementMessage {
 
 impl CanBusMessage for BrightnessMeasurementMessage {
     fn priority(&self) -> u8 {
-        6
+        5
     }
 }

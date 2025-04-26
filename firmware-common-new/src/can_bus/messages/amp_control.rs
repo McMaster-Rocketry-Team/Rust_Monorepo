@@ -27,6 +27,6 @@ impl AmpControlMessage {
 
 impl CanBusMessage for AmpControlMessage {
     fn priority(&self) -> u8 {
-        5
+        2
     }
 }
