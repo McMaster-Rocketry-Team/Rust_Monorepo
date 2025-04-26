@@ -22,8 +22,6 @@ pub struct DataTransferMessage {
     pub end_of_data: bool,
     #[packed_field(bits = "266..268", ty = "enum")]
     pub data_type: DataType,
-    #[packed_field(element_size_bits = "4")]
-    _padding: u8,
 }
 
 impl DataTransferMessage {
@@ -36,7 +34,6 @@ impl DataTransferMessage {
             data_type,
             start_of_data,
             end_of_data,
-            _padding: Default::default(),
         }
     }
 

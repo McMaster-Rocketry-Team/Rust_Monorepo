@@ -14,8 +14,6 @@ pub struct PayloadEPSSelfTestMessage {
     pub out_3v3_ok: bool,
     pub out_5v_ok: bool,
     pub out_9v_ok: bool,
-    #[packed_field(element_size_bits = "3")]
-    _padding: u8,
 }
 
 impl PayloadEPSSelfTestMessage {
@@ -32,7 +30,6 @@ impl PayloadEPSSelfTestMessage {
             out_3v3_ok,
             out_5v_ok,
             out_9v_ok,
-            _padding: Default::default(),
         }
     }
 }

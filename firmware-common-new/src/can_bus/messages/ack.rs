@@ -14,9 +14,6 @@ pub struct AckMessage {
     /// Node ID of the sender
     #[packed_field(element_size_bits = "12")]
     pub node_id: u16,
-
-    #[packed_field(element_size_bits = "4")]
-    _padding: u8,
 }
 
 impl AckMessage {
@@ -24,7 +21,6 @@ impl AckMessage {
         Self {
             crc,
             node_id: node_id.into(),
-            _padding: Default::default(),
         }
     }
 }

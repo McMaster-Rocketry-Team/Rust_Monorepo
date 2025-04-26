@@ -11,9 +11,6 @@ pub struct ResetMessage {
     #[packed_field(element_size_bits = "12")]
     pub node_id: u16,
     pub reset_all: bool,
-
-    #[packed_field(element_size_bits = "3")]
-    _padding: u8,
 }
 
 impl ResetMessage {
@@ -21,7 +18,6 @@ impl ResetMessage {
         Self {
             node_id: node_id.into(),
             reset_all,
-            _padding: Default::default(),
         }
     }
 }

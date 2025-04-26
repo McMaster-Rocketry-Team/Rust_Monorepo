@@ -5,16 +5,13 @@ use super::CanBusMessage;
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PackedStruct, Clone, Debug, Serialize, Deserialize)]
-#[packed_struct]
+#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "1")]
 #[repr(C)]
 pub struct AmpControlMessage {
     pub out1_enable: bool,
     pub out2_enable: bool,
     pub out3_enable: bool,
     pub out4_enable: bool,
-
-    #[packed_field(element_size_bits = "4")]
-    _padding: u8,
 }
 
 impl AmpControlMessage {
@@ -24,7 +21,6 @@ impl AmpControlMessage {
             out2_enable,
             out3_enable,
             out4_enable,
-            _padding: Default::default(),
         }
     }
 }
