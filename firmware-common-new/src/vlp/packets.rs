@@ -2,17 +2,21 @@ use core::fmt::Debug;
 
 use crate::utils::FixedLenSerializable;
 use ack::AckPacket;
+use amp_output_overwrite::AMPOutputOverwritePacket;
 use change_mode::ChangeModePacket;
 use gps_beacon::GPSBeaconPacket;
 use low_power_telemetry::LowPowerTelemetryPacket;
+use payload_eps_output_overwrite::PayloadEPSOutputOverwritePacket;
 use reset::ResetPacket;
 use self_test_result::SelfTestResultPacket;
 use telemetry::TelemetryPacket;
 
 pub mod ack;
+pub mod amp_output_overwrite;
 pub mod change_mode;
 pub mod gps_beacon;
 pub mod low_power_telemetry;
+pub mod payload_eps_output_overwrite;
 pub mod reset;
 pub mod self_test_result;
 pub mod telemetry;
@@ -72,6 +76,8 @@ impl VLPDownlinkPacket {
 pub enum VLPUplinkPacket {
     ChangeMode(ChangeModePacket),
     Reset(ResetPacket),
+    PayloadEPSOutputOverwrite(PayloadEPSOutputOverwritePacket),
+    AMPOutputOverwrite(AMPOutputOverwritePacket),
 }
 
 impl VLPUplinkPacket {
@@ -84,6 +90,11 @@ impl VLPUplinkPacket {
         match packet_type {
             0 => ChangeModePacket::deserialize(data).map(VLPUplinkPacket::ChangeMode),
             1 => ResetPacket::deserialize(data).map(VLPUplinkPacket::Reset),
+            2 => PayloadEPSOutputOverwritePacket::deserialize(data)
+                .map(VLPUplinkPacket::PayloadEPSOutputOverwrite),
+            3 => {
+                AMPOutputOverwritePacket::deserialize(data).map(VLPUplinkPacket::AMPOutputOverwrite)
+            }
             _ => None,
         }
     }
@@ -92,12 +103,16 @@ impl VLPUplinkPacket {
         buffer[0] = match self {
             VLPUplinkPacket::ChangeMode(_) => 0,
             VLPUplinkPacket::Reset(_) => 1,
+            VLPUplinkPacket::PayloadEPSOutputOverwrite(_) => 2,
+            VLPUplinkPacket::AMPOutputOverwrite(_) => 3,
         };
         buffer = &mut buffer[1..];
 
         1 + match self {
             VLPUplinkPacket::ChangeMode(packet) => packet.serialize(buffer),
             VLPUplinkPacket::Reset(packet) => packet.serialize(buffer),
+            VLPUplinkPacket::PayloadEPSOutputOverwrite(packet) => packet.serialize(buffer),
+            VLPUplinkPacket::AMPOutputOverwrite(packet) => packet.serialize(buffer),
         }
     }
 }

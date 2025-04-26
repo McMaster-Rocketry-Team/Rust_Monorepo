@@ -3,8 +3,8 @@ use ack::AckMessage;
 use brightness_measurement::BrightnessMeasurementMessage;
 use core::fmt::Debug;
 use data_transfer::DataTransferMessage;
-use payload_eps_control::PayloadEPSControlMessage;
-use payload_self_test::PayloadEPSSelfTestMessage;
+use payload_eps_output_overwrite::PayloadEPSOutputOverwriteMessage;
+use payload_eps_self_test::PayloadEPSSelfTestMessage;
 
 pub use amp_control::AmpControlMessage;
 pub use amp_status::AmpStatusMessage;
@@ -30,8 +30,8 @@ pub mod data_transfer;
 pub mod icarus_status;
 pub mod imu_measurement;
 pub mod node_status;
-pub mod payload_eps_control;
-pub mod payload_self_test;
+pub mod payload_eps_output_overwrite;
+pub mod payload_eps_self_test;
 pub mod reset;
 pub mod tempurature_measurement;
 pub mod unix_time;
@@ -54,7 +54,7 @@ pub enum CanBusMessageEnum {
     AmpControl(AmpControlMessage),
 
     PayloadEPSStatus(PayloadEPSStatusMessage),
-    PayloadEPSControl(PayloadEPSControlMessage),
+    PayloadEPSOutputOverwrite(PayloadEPSOutputOverwriteMessage),
     PayloadEPSSelfTest(PayloadEPSSelfTestMessage),
 
     AvionicsStatus(AvionicsStatusMessage),
@@ -77,7 +77,7 @@ impl CanBusMessageEnum {
             CanBusMessageEnum::AmpStatus(m) => m.priority(),
             CanBusMessageEnum::AmpControl(m) => m.priority(),
             CanBusMessageEnum::PayloadEPSStatus(m) => m.priority(),
-            CanBusMessageEnum::PayloadEPSControl(m) => m.priority(),
+            CanBusMessageEnum::PayloadEPSOutputOverwrite(m) => m.priority(),
             CanBusMessageEnum::PayloadEPSSelfTest(m) => m.priority(),
             CanBusMessageEnum::AvionicsStatus(m) => m.priority(),
             CanBusMessageEnum::IcarusStatus(m) => m.priority(),
@@ -98,7 +98,7 @@ impl CanBusMessageEnum {
             CanBusMessageEnum::AmpStatus(_) => 6,
             CanBusMessageEnum::AmpControl(_) => 7,
             CanBusMessageEnum::PayloadEPSStatus(_) => 8,
-            CanBusMessageEnum::PayloadEPSControl(_) => 9,
+            CanBusMessageEnum::PayloadEPSOutputOverwrite(_) => 9,
             CanBusMessageEnum::PayloadEPSSelfTest(_) => 10,
             CanBusMessageEnum::AvionicsStatus(_) => 11,
             CanBusMessageEnum::IcarusStatus(_) => 12,
@@ -123,7 +123,7 @@ impl CanBusMessageEnum {
             CanBusMessageEnum::AmpStatus(m) => m.serialize(buffer),
             CanBusMessageEnum::AmpControl(m) => m.serialize(buffer),
             CanBusMessageEnum::PayloadEPSStatus(m) => m.serialize(buffer),
-            CanBusMessageEnum::PayloadEPSControl(m) => m.serialize(buffer),
+            CanBusMessageEnum::PayloadEPSOutputOverwrite(m) => m.serialize(buffer),
             CanBusMessageEnum::PayloadEPSSelfTest(m) => m.serialize(buffer),
             CanBusMessageEnum::AvionicsStatus(m) => m.serialize(buffer),
             CanBusMessageEnum::IcarusStatus(m) => m.serialize(buffer),
@@ -144,7 +144,7 @@ impl CanBusMessageEnum {
             6 => AmpStatusMessage::deserialize(data).map(CanBusMessageEnum::AmpStatus),
             7 => AmpControlMessage::deserialize(data).map(CanBusMessageEnum::AmpControl),
             8 => PayloadEPSStatusMessage::deserialize(data).map(CanBusMessageEnum::PayloadEPSStatus),
-            9 => PayloadEPSControlMessage::deserialize(data).map(CanBusMessageEnum::PayloadEPSControl),
+            9 => PayloadEPSOutputOverwriteMessage::deserialize(data).map(CanBusMessageEnum::PayloadEPSOutputOverwrite),
             10 => PayloadEPSSelfTestMessage::deserialize(data).map(CanBusMessageEnum::PayloadEPSSelfTest),
             11 => AvionicsStatusMessage::deserialize(data).map(CanBusMessageEnum::AvionicsStatus),
             12 => IcarusStatusMessage::deserialize(data).map(CanBusMessageEnum::IcarusStatus),

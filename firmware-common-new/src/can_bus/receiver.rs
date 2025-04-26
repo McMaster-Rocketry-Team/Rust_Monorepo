@@ -275,14 +275,17 @@ mod tests {
             battery2_mv: 2,
             output_3v3: PayloadEPSOutputStatus {
                 current_ma: 3,
+                overwrote: false,
                 status: PowerOutputStatus::Disabled,
             },
             output_5v: PayloadEPSOutputStatus {
                 current_ma: 4,
+                overwrote: false,
                 status: PowerOutputStatus::PowerGood,
             },
             output_9v: PayloadEPSOutputStatus {
                 current_ma: 5,
+                overwrote: false,
                 status: PowerOutputStatus::PowerBad,
             },
         });

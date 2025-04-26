@@ -22,7 +22,9 @@ pub static OZYS_NODE_TYPE: u8 = node_types::OZYS_NODE_TYPE;
 #[no_mangle]
 pub static BULKHEAD_NODE_TYPE: u8 = node_types::BULKHEAD_NODE_TYPE;
 #[no_mangle]
-pub static PAYLOAD_EPS_NODE_TYPE: u8 = node_types::PAYLOAD_EPS_NODE_TYPE;
+pub static PAYLOAD_EPS1_NODE_TYPE: u8 = node_types::PAYLOAD_EPS1_NODE_TYPE;
+#[no_mangle]
+pub static PAYLOAD_EPS2_NODE_TYPE: u8 = node_types::PAYLOAD_EPS2_NODE_TYPE;
 #[no_mangle]
 pub static AERO_RUST_NODE_TYPE: u8 = node_types::AERO_RUST_NODE_TYPE;
 

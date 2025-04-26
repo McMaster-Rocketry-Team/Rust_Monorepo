@@ -8,8 +8,10 @@ use super::{amp_status::PowerOutputStatus, CanBusMessage};
 #[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "2")]
 #[repr(C)]
 pub struct PayloadEPSOutputStatus {
-    #[packed_field(bits = "0..14")]
+    #[packed_field(bits = "0..13")]
     pub current_ma: u16,
+    #[packed_field(bits = "13..14")]
+    pub overwrote: bool,
     #[packed_field(bits = "14..16", ty = "enum")]
     pub status: PowerOutputStatus,
 }

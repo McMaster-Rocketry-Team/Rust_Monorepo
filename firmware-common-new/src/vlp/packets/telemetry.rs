@@ -31,7 +31,7 @@ fixed_point_factory!(PayloadCurrentFac, f32, 0.0, 2.0, 0.1);
 
 // 48 byte max size to achieve 0.5Hz with 250khz bandwidth + 12sf + 8cr lora
 #[derive(PackedStruct, Debug, Clone, PartialEq, Deserialize, Serialize)]
-#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "40")]
+#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "42")]
 pub struct TelemetryPacket {
     #[packed_field(bits = "0..4")]
     nonce: Integer<u8, packed_bits::Bits<4>>,
@@ -78,12 +78,16 @@ pub struct TelemetryPacket {
     amp_rebooted_in_last_5s: bool,
     #[packed_field(element_size_bits = "8")]
     shared_battery_v: Integer<BatteryVFacBase, packed_bits::Bits<BATTERY_V_FAC_BITS>>,
+    amp_out1_overwrote: bool,
     #[packed_field(element_size_bits = "2", ty = "enum")]
     amp_out1: PowerOutputStatus,
+    amp_out2_overwrote: bool,
     #[packed_field(element_size_bits = "2", ty = "enum")]
     amp_out2: PowerOutputStatus,
+    amp_out3_overwrote: bool,
     #[packed_field(element_size_bits = "2", ty = "enum")]
     amp_out3: PowerOutputStatus,
+    amp_out4_overwrote: bool,
     #[packed_field(element_size_bits = "2", ty = "enum")]
     amp_out4: PowerOutputStatus,
 
@@ -138,19 +142,25 @@ pub struct TelemetryPacket {
     eps1_battery1_v: Integer<PayloadVoltageFacBase, packed_bits::Bits<PAYLOAD_VOLTAGE_FAC_BITS>>,
     #[packed_field(element_size_bits = "6")]
     eps1_battery2_v: Integer<PayloadVoltageFacBase, packed_bits::Bits<PAYLOAD_VOLTAGE_FAC_BITS>>,
+
     #[packed_field(element_size_bits = "5")]
     eps1_output_3v3_current:
         Integer<PayloadCurrentFacBase, packed_bits::Bits<PAYLOAD_CURRENT_FAC_BITS>>,
+    eps1_output_3v3_overwrote: bool,
     #[packed_field(element_size_bits = "2", ty = "enum")]
     eps1_output_3v3_status: PowerOutputStatus,
+
     #[packed_field(element_size_bits = "5")]
     eps1_output_5v_current:
         Integer<PayloadCurrentFacBase, packed_bits::Bits<PAYLOAD_CURRENT_FAC_BITS>>,
+    eps1_output_5v_overwrote: bool,
     #[packed_field(element_size_bits = "2", ty = "enum")]
     eps1_output_5v_status: PowerOutputStatus,
+
     #[packed_field(element_size_bits = "5")]
     eps1_output_9v_current:
         Integer<PayloadCurrentFacBase, packed_bits::Bits<PAYLOAD_CURRENT_FAC_BITS>>,
+    eps1_output_9v_overwrote: bool,
     #[packed_field(element_size_bits = "2", ty = "enum")]
     eps1_output_9v_status: PowerOutputStatus,
 
@@ -160,19 +170,25 @@ pub struct TelemetryPacket {
     eps2_battery1_v: Integer<PayloadVoltageFacBase, packed_bits::Bits<PAYLOAD_VOLTAGE_FAC_BITS>>,
     #[packed_field(element_size_bits = "6")]
     eps2_battery2_v: Integer<PayloadVoltageFacBase, packed_bits::Bits<PAYLOAD_VOLTAGE_FAC_BITS>>,
+
     #[packed_field(element_size_bits = "5")]
     eps2_output_3v3_current:
         Integer<PayloadCurrentFacBase, packed_bits::Bits<PAYLOAD_CURRENT_FAC_BITS>>,
+    eps2_output_3v3_overwrote: bool,
     #[packed_field(element_size_bits = "2", ty = "enum")]
     eps2_output_3v3_status: PowerOutputStatus,
+
     #[packed_field(element_size_bits = "5")]
     eps2_output_5v_current:
         Integer<PayloadCurrentFacBase, packed_bits::Bits<PAYLOAD_CURRENT_FAC_BITS>>,
+    eps2_output_5v_overwrote: bool,
     #[packed_field(element_size_bits = "2", ty = "enum")]
     eps2_output_5v_status: PowerOutputStatus,
+
     #[packed_field(element_size_bits = "5")]
     eps2_output_9v_current:
         Integer<PayloadCurrentFacBase, packed_bits::Bits<PAYLOAD_CURRENT_FAC_BITS>>,
+    eps2_output_9v_overwrote: bool,
     #[packed_field(element_size_bits = "2", ty = "enum")]
     eps2_output_9v_status: PowerOutputStatus,
 }
@@ -208,9 +224,13 @@ impl TelemetryPacket {
         amp_online: bool,
         amp_rebooted_in_last_5s: bool,
         shared_battery_v: f32,
+        amp_out1_overwrote: bool,
         amp_out1: PowerOutputStatus,
+        amp_out2_overwrote: bool,
         amp_out2: PowerOutputStatus,
+        amp_out3_overwrote: bool,
         amp_out3: PowerOutputStatus,
+        amp_out4_overwrote: bool,
         amp_out4: PowerOutputStatus,
 
         main_bulkhead_online: bool,
@@ -250,10 +270,13 @@ impl TelemetryPacket {
         eps1_battery1_v: f32,
         eps1_battery2_v: f32,
         eps1_output_3v3_current: f32,
+        eps1_output_3v3_overwrote: bool,
         eps1_output_3v3_status: PowerOutputStatus,
         eps1_output_5v_current: f32,
+        eps1_output_5v_overwrote: bool,
         eps1_output_5v_status: PowerOutputStatus,
         eps1_output_9v_current: f32,
+        eps1_output_9v_overwrote: bool,
         eps1_output_9v_status: PowerOutputStatus,
 
         eps2_online: bool,
@@ -261,10 +284,13 @@ impl TelemetryPacket {
         eps2_battery1_v: f32,
         eps2_battery2_v: f32,
         eps2_output_3v3_current: f32,
+        eps2_output_3v3_overwrote: bool,
         eps2_output_3v3_status: PowerOutputStatus,
         eps2_output_5v_current: f32,
+        eps2_output_5v_overwrote: bool,
         eps2_output_5v_status: PowerOutputStatus,
         eps2_output_9v_current: f32,
+        eps2_output_9v_overwrote: bool,
         eps2_output_9v_status: PowerOutputStatus,
     ) -> Self {
         Self {
@@ -299,9 +325,13 @@ impl TelemetryPacket {
             amp_rebooted_in_last_5s,
             shared_battery_v: BatteryVFac::to_fixed_point_capped(shared_battery_v),
 
+            amp_out1_overwrote,
             amp_out1,
+            amp_out2_overwrote,
             amp_out2,
+            amp_out3_overwrote,
             amp_out3,
+            amp_out4_overwrote,
             amp_out4,
 
             main_bulkhead_online,
@@ -345,14 +375,17 @@ impl TelemetryPacket {
             eps1_output_3v3_current: PayloadCurrentFac::to_fixed_point_capped(
                 eps1_output_3v3_current,
             ),
+            eps1_output_3v3_overwrote,
             eps1_output_3v3_status,
             eps1_output_5v_current: PayloadCurrentFac::to_fixed_point_capped(
                 eps1_output_5v_current,
             ),
+            eps1_output_5v_overwrote,
             eps1_output_5v_status,
             eps1_output_9v_current: PayloadCurrentFac::to_fixed_point_capped(
                 eps1_output_9v_current,
             ),
+            eps1_output_9v_overwrote,
             eps1_output_9v_status,
 
             eps2_online,
@@ -362,14 +395,17 @@ impl TelemetryPacket {
             eps2_output_3v3_current: PayloadCurrentFac::to_fixed_point_capped(
                 eps2_output_3v3_current,
             ),
+            eps2_output_3v3_overwrote,
             eps2_output_3v3_status,
             eps2_output_5v_current: PayloadCurrentFac::to_fixed_point_capped(
                 eps2_output_5v_current,
             ),
+            eps2_output_5v_overwrote,
             eps2_output_5v_status,
             eps2_output_9v_current: PayloadCurrentFac::to_fixed_point_capped(
                 eps2_output_9v_current,
             ),
+            eps2_output_9v_overwrote,
             eps2_output_9v_status,
         }
     }
@@ -454,16 +490,32 @@ impl TelemetryPacket {
         BatteryVFac::to_float(self.shared_battery_v)
     }
 
+    pub fn amp_out1_overwrote(&self) -> bool {
+        self.amp_out1_overwrote
+    }
+
     pub fn amp_out1(&self) -> PowerOutputStatus {
         self.amp_out1
+    }
+
+    pub fn amp_out2_overwrote(&self) -> bool {
+        self.amp_out2_overwrote
     }
 
     pub fn amp_out2(&self) -> PowerOutputStatus {
         self.amp_out2
     }
 
+    pub fn amp_out3_overwrote(&self) -> bool {
+        self.amp_out3_overwrote
+    }
+
     pub fn amp_out3(&self) -> PowerOutputStatus {
         self.amp_out3
+    }
+
+    pub fn amp_out4_overwrote(&self) -> bool {
+        self.amp_out4_overwrote
     }
 
     pub fn amp_out4(&self) -> PowerOutputStatus {
@@ -590,6 +642,10 @@ impl TelemetryPacket {
         PayloadCurrentFac::to_float(self.eps1_output_3v3_current)
     }
 
+    pub fn eps1_output_3v3_overwrote(&self) -> bool {
+        self.eps1_output_3v3_overwrote
+    }
+
     pub fn eps1_output_3v3_status(&self) -> PowerOutputStatus {
         self.eps1_output_3v3_status
     }
@@ -598,12 +654,20 @@ impl TelemetryPacket {
         PayloadCurrentFac::to_float(self.eps1_output_5v_current)
     }
 
+    pub fn eps1_output_5v_overwrote(&self) -> bool {
+        self.eps1_output_5v_overwrote
+    }
+
     pub fn eps1_output_5v_status(&self) -> PowerOutputStatus {
         self.eps1_output_5v_status
     }
 
     pub fn eps1_output_9v_current(&self) -> f32 {
         PayloadCurrentFac::to_float(self.eps1_output_9v_current)
+    }
+
+    pub fn eps1_output_9v_overwrote(&self) -> bool {
+        self.eps1_output_9v_overwrote
     }
 
     pub fn eps1_output_9v_status(&self) -> PowerOutputStatus {
@@ -630,6 +694,10 @@ impl TelemetryPacket {
         PayloadCurrentFac::to_float(self.eps2_output_3v3_current)
     }
 
+    pub fn eps2_output_3v3_overwrote(&self) -> bool {
+        self.eps2_output_3v3_overwrote
+    }
+
     pub fn eps2_output_3v3_status(&self) -> PowerOutputStatus {
         self.eps2_output_3v3_status
     }
@@ -638,12 +706,20 @@ impl TelemetryPacket {
         PayloadCurrentFac::to_float(self.eps2_output_5v_current)
     }
 
+    pub fn eps2_output_5v_overwrote(&self) -> bool {
+        self.eps2_output_5v_overwrote
+    }
+
     pub fn eps2_output_5v_status(&self) -> PowerOutputStatus {
         self.eps2_output_5v_status
     }
 
     pub fn eps2_output_9v_current(&self) -> f32 {
         PayloadCurrentFac::to_float(self.eps2_output_9v_current)
+    }
+
+    pub fn eps2_output_9v_overwrote(&self) -> bool {
+        self.eps2_output_9v_overwrote
     }
 
     pub fn eps2_output_9v_status(&self) -> PowerOutputStatus {
@@ -681,9 +757,13 @@ pub struct TelemetryPacketBuilderState {
     pub amp_online: bool,
     pub amp_uptime_s: u32,
     pub shared_battery_v: f32,
+    pub amp_out1_overwrote: bool,
     pub amp_out1: PowerOutputStatus,
+    pub amp_out2_overwrote: bool,
     pub amp_out2: PowerOutputStatus,
+    pub amp_out3_overwrote: bool,
     pub amp_out3: PowerOutputStatus,
+    pub amp_out4_overwrote: bool,
     pub amp_out4: PowerOutputStatus,
 
     pub main_bulkhead_online: bool,
@@ -723,10 +803,13 @@ pub struct TelemetryPacketBuilderState {
     pub eps1_battery1_v: f32,
     pub eps1_battery2_v: f32,
     pub eps1_output_3v3_current: f32,
+    pub eps1_output_3v3_overwrote: bool,
     pub eps1_output_3v3_status: PowerOutputStatus,
     pub eps1_output_5v_current: f32,
+    pub eps1_output_5v_overwrote: bool,
     pub eps1_output_5v_status: PowerOutputStatus,
     pub eps1_output_9v_current: f32,
+    pub eps1_output_9v_overwrote: bool,
     pub eps1_output_9v_status: PowerOutputStatus,
 
     pub eps2_online: bool,
@@ -734,10 +817,13 @@ pub struct TelemetryPacketBuilderState {
     pub eps2_battery1_v: f32,
     pub eps2_battery2_v: f32,
     pub eps2_output_3v3_current: f32,
+    pub eps2_output_3v3_overwrote: bool,
     pub eps2_output_3v3_status: PowerOutputStatus,
     pub eps2_output_5v_current: f32,
+    pub eps2_output_5v_overwrote: bool,
     pub eps2_output_5v_status: PowerOutputStatus,
     pub eps2_output_9v_current: f32,
+    pub eps2_output_9v_overwrote: bool,
     pub eps2_output_9v_status: PowerOutputStatus,
 }
 
@@ -778,9 +864,13 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 amp_online: false,
                 amp_uptime_s: 0,
                 shared_battery_v: 0.0,
+                amp_out1_overwrote: false,
                 amp_out1: PowerOutputStatus::Disabled,
+                amp_out2_overwrote: false,
                 amp_out2: PowerOutputStatus::Disabled,
+                amp_out3_overwrote: false,
                 amp_out3: PowerOutputStatus::Disabled,
+                amp_out4_overwrote: false,
                 amp_out4: PowerOutputStatus::Disabled,
 
                 main_bulkhead_online: false,
@@ -820,10 +910,13 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 eps1_battery1_v: 0.0,
                 eps1_battery2_v: 0.0,
                 eps1_output_3v3_current: 0.0,
+                eps1_output_3v3_overwrote: false,
                 eps1_output_3v3_status: PowerOutputStatus::Disabled,
                 eps1_output_5v_current: 0.0,
+                eps1_output_5v_overwrote: false,
                 eps1_output_5v_status: PowerOutputStatus::Disabled,
                 eps1_output_9v_current: 0.0,
+                eps1_output_9v_overwrote: false,
                 eps1_output_9v_status: PowerOutputStatus::Disabled,
 
                 eps2_online: false,
@@ -831,10 +924,13 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 eps2_battery1_v: 0.0,
                 eps2_battery2_v: 0.0,
                 eps2_output_3v3_current: 0.0,
+                eps2_output_3v3_overwrote: false,
                 eps2_output_3v3_status: PowerOutputStatus::Disabled,
                 eps2_output_5v_current: 0.0,
+                eps2_output_5v_overwrote: false,
                 eps2_output_5v_status: PowerOutputStatus::Disabled,
                 eps2_output_9v_current: 0.0,
+                eps2_output_9v_overwrote: false,
                 eps2_output_9v_status: PowerOutputStatus::Disabled,
             })),
         }
@@ -878,9 +974,13 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 state.amp_online,
                 state.amp_uptime_s < 5,
                 state.shared_battery_v,
+                state.amp_out1_overwrote,
                 state.amp_out1,
+                state.amp_out2_overwrote,
                 state.amp_out2,
+                state.amp_out3_overwrote,
                 state.amp_out3,
+                state.amp_out4_overwrote,
                 state.amp_out4,
                 state.main_bulkhead_online,
                 state.main_bulkhead_uptime_s < 5,
@@ -911,20 +1011,26 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 state.eps1_battery1_v,
                 state.eps1_battery2_v,
                 state.eps1_output_3v3_current,
+                state.eps1_output_3v3_overwrote,
                 state.eps1_output_3v3_status,
                 state.eps1_output_5v_current,
+                state.eps1_output_5v_overwrote,
                 state.eps1_output_5v_status,
                 state.eps1_output_9v_current,
+                state.eps1_output_9v_overwrote,
                 state.eps1_output_9v_status,
                 state.eps2_online,
                 state.eps2_uptime_s < 5,
                 state.eps2_battery1_v,
                 state.eps2_battery2_v,
                 state.eps2_output_3v3_current,
+                state.eps2_output_3v3_overwrote,
                 state.eps2_output_3v3_status,
                 state.eps2_output_5v_current,
+                state.eps2_output_5v_overwrote,
                 state.eps2_output_5v_status,
                 state.eps2_output_9v_current,
+                state.eps2_output_9v_overwrote,
                 state.eps2_output_9v_status,
             )
         })
