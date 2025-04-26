@@ -13,10 +13,9 @@ pub use baro_measurement::BaroMeasurementMessage;
 pub use icarus_status::IcarusStatusMessage;
 pub use imu_measurement::IMUMeasurementMessage;
 pub use node_status::NodeStatusMessage;
-pub use reset::ResetMessage;
-pub use tempurature_measurement::TempuratureMeasurementMessage;
-pub use unix_time::UnixTimeMessage;
 pub use payload_eps_status::PayloadEPSStatusMessage;
+pub use reset::ResetMessage;
+pub use unix_time::UnixTimeMessage;
 
 use super::id::CanBusExtendedId;
 
@@ -32,10 +31,9 @@ pub mod imu_measurement;
 pub mod node_status;
 pub mod payload_eps_output_overwrite;
 pub mod payload_eps_self_test;
-pub mod reset;
-pub mod tempurature_measurement;
-pub mod unix_time;
 pub mod payload_eps_status;
+pub mod reset;
+pub mod unix_time;
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -47,7 +45,6 @@ pub enum CanBusMessageEnum {
 
     BaroMeasurement(BaroMeasurementMessage),
     IMUMeasurement(IMUMeasurementMessage),
-    TempuratureMeasurement(TempuratureMeasurementMessage),
     BrightnessMeasurement(BrightnessMeasurementMessage),
 
     AmpStatus(AmpStatusMessage),
@@ -72,7 +69,6 @@ impl CanBusMessageEnum {
             CanBusMessageEnum::Reset(m) => m.priority(),
             CanBusMessageEnum::BaroMeasurement(m) => m.priority(),
             CanBusMessageEnum::IMUMeasurement(m) => m.priority(),
-            CanBusMessageEnum::TempuratureMeasurement(m) => m.priority(),
             CanBusMessageEnum::BrightnessMeasurement(m) => m.priority(),
             CanBusMessageEnum::AmpStatus(m) => m.priority(),
             CanBusMessageEnum::AmpControl(m) => m.priority(),
@@ -93,8 +89,7 @@ impl CanBusMessageEnum {
             CanBusMessageEnum::Reset(_) => 2,
             CanBusMessageEnum::BaroMeasurement(_) => 3,
             CanBusMessageEnum::IMUMeasurement(_) => 4,
-            CanBusMessageEnum::TempuratureMeasurement(_) => 5,
-            CanBusMessageEnum::BrightnessMeasurement(_) => 13,
+            CanBusMessageEnum::BrightnessMeasurement(_) => 5,
             CanBusMessageEnum::AmpStatus(_) => 6,
             CanBusMessageEnum::AmpControl(_) => 7,
             CanBusMessageEnum::PayloadEPSStatus(_) => 8,
@@ -102,8 +97,8 @@ impl CanBusMessageEnum {
             CanBusMessageEnum::PayloadEPSSelfTest(_) => 10,
             CanBusMessageEnum::AvionicsStatus(_) => 11,
             CanBusMessageEnum::IcarusStatus(_) => 12,
-            CanBusMessageEnum::DataTransfer(_) => 14,
-            CanBusMessageEnum::Ack(_) => 15,
+            CanBusMessageEnum::DataTransfer(_) => 13,
+            CanBusMessageEnum::Ack(_) => 14,
         }
     }
 
@@ -118,7 +113,6 @@ impl CanBusMessageEnum {
             CanBusMessageEnum::Reset(m) => m.serialize(buffer),
             CanBusMessageEnum::BaroMeasurement(m) => m.serialize(buffer),
             CanBusMessageEnum::IMUMeasurement(m) => m.serialize(buffer),
-            CanBusMessageEnum::TempuratureMeasurement(m) => m.serialize(buffer),
             CanBusMessageEnum::BrightnessMeasurement(m) => m.serialize(buffer),
             CanBusMessageEnum::AmpStatus(m) => m.serialize(buffer),
             CanBusMessageEnum::AmpControl(m) => m.serialize(buffer),
@@ -139,19 +133,21 @@ impl CanBusMessageEnum {
             2 => ResetMessage::deserialize(data).map(CanBusMessageEnum::Reset),
             3 => BaroMeasurementMessage::deserialize(data).map(CanBusMessageEnum::BaroMeasurement),
             4 => IMUMeasurementMessage::deserialize(data).map(CanBusMessageEnum::IMUMeasurement),
-            5 => TempuratureMeasurementMessage::deserialize(data)
-                .map(CanBusMessageEnum::TempuratureMeasurement),
+            5 => BrightnessMeasurementMessage::deserialize(data)
+                .map(CanBusMessageEnum::BrightnessMeasurement),
             6 => AmpStatusMessage::deserialize(data).map(CanBusMessageEnum::AmpStatus),
             7 => AmpControlMessage::deserialize(data).map(CanBusMessageEnum::AmpControl),
-            8 => PayloadEPSStatusMessage::deserialize(data).map(CanBusMessageEnum::PayloadEPSStatus),
-            9 => PayloadEPSOutputOverwriteMessage::deserialize(data).map(CanBusMessageEnum::PayloadEPSOutputOverwrite),
-            10 => PayloadEPSSelfTestMessage::deserialize(data).map(CanBusMessageEnum::PayloadEPSSelfTest),
+            8 => {
+                PayloadEPSStatusMessage::deserialize(data).map(CanBusMessageEnum::PayloadEPSStatus)
+            }
+            9 => PayloadEPSOutputOverwriteMessage::deserialize(data)
+                .map(CanBusMessageEnum::PayloadEPSOutputOverwrite),
+            10 => PayloadEPSSelfTestMessage::deserialize(data)
+                .map(CanBusMessageEnum::PayloadEPSSelfTest),
             11 => AvionicsStatusMessage::deserialize(data).map(CanBusMessageEnum::AvionicsStatus),
             12 => IcarusStatusMessage::deserialize(data).map(CanBusMessageEnum::IcarusStatus),
-            13 => BrightnessMeasurementMessage::deserialize(data)
-                .map(CanBusMessageEnum::BrightnessMeasurement),
-            14 => DataTransferMessage::deserialize(data).map(CanBusMessageEnum::DataTransfer),
-            15 => AckMessage::deserialize(data).map(CanBusMessageEnum::Ack),
+            13 => DataTransferMessage::deserialize(data).map(CanBusMessageEnum::DataTransfer),
+            14 => AckMessage::deserialize(data).map(CanBusMessageEnum::Ack),
             _ => None,
         }
     }

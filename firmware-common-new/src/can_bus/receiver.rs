@@ -249,10 +249,7 @@ impl<M: RawMutex, const N: usize, const SUBS: usize> CanReceiver<M, N, SUBS> {
 #[cfg(test)]
 mod tests {
     use crate::can_bus::{
-        messages::{
-            amp_status::PowerOutputStatus,
-            payload_eps_status::*,
-        },
+        messages::{amp_status::PowerOutputStatus, payload_eps_status::*},
         sender::CanBusMultiFrameEncoder,
     };
 
@@ -272,19 +269,21 @@ mod tests {
 
         let message = CanBusMessageEnum::PayloadEPSStatus(PayloadEPSStatusMessage {
             battery1_mv: 1,
-            battery2_mv: 2,
+            battery1_temperature: 2,
+            battery2_mv: 3,
+            battery2_temperature: 4,
             output_3v3: PayloadEPSOutputStatus {
-                current_ma: 3,
+                current_ma: 5,
                 overwrote: false,
                 status: PowerOutputStatus::Disabled,
             },
             output_5v: PayloadEPSOutputStatus {
-                current_ma: 4,
+                current_ma: 6,
                 overwrote: false,
                 status: PowerOutputStatus::PowerGood,
             },
             output_9v: PayloadEPSOutputStatus {
-                current_ma: 5,
+                current_ma: 7,
                 overwrote: false,
                 status: PowerOutputStatus::PowerBad,
             },

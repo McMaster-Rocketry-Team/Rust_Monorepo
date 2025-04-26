@@ -28,10 +28,11 @@ fixed_point_factory!(CdFac, f32, 0.4, 0.85, 0.01);
 
 fixed_point_factory!(PayloadVoltageFac, f32, 2.0, 4.5, 0.05);
 fixed_point_factory!(PayloadCurrentFac, f32, 0.0, 2.0, 0.1);
+fixed_point_factory!(PayloadTemperatureFac, f32, 10.0, 85.0, 1.0);
 
 // 48 byte max size to achieve 0.5Hz with 250khz bandwidth + 12sf + 8cr lora
 #[derive(PackedStruct, Debug, Clone, PartialEq, Deserialize, Serialize)]
-#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "42")]
+#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "45")]
 pub struct TelemetryPacket {
     #[packed_field(bits = "0..4")]
     nonce: Integer<u8, packed_bits::Bits<4>>,
@@ -140,8 +141,14 @@ pub struct TelemetryPacket {
     eps1_rebooted_in_last_5s: bool,
     #[packed_field(element_size_bits = "6")]
     eps1_battery1_v: Integer<PayloadVoltageFacBase, packed_bits::Bits<PAYLOAD_VOLTAGE_FAC_BITS>>,
+    #[packed_field(element_size_bits = "7")]
+    eps1_battery1_temperature:
+        Integer<PayloadTemperatureFacBase, packed_bits::Bits<PAYLOAD_TEMPERATURE_FAC_BITS>>,
     #[packed_field(element_size_bits = "6")]
     eps1_battery2_v: Integer<PayloadVoltageFacBase, packed_bits::Bits<PAYLOAD_VOLTAGE_FAC_BITS>>,
+    #[packed_field(element_size_bits = "7")]
+    eps1_battery2_temperature:
+        Integer<PayloadTemperatureFacBase, packed_bits::Bits<PAYLOAD_TEMPERATURE_FAC_BITS>>,
 
     #[packed_field(element_size_bits = "5")]
     eps1_output_3v3_current:
@@ -168,8 +175,14 @@ pub struct TelemetryPacket {
     eps2_rebooted_in_last_5s: bool,
     #[packed_field(element_size_bits = "6")]
     eps2_battery1_v: Integer<PayloadVoltageFacBase, packed_bits::Bits<PAYLOAD_VOLTAGE_FAC_BITS>>,
+    #[packed_field(element_size_bits = "7")]
+    eps2_battery1_temperature:
+        Integer<PayloadTemperatureFacBase, packed_bits::Bits<PAYLOAD_TEMPERATURE_FAC_BITS>>,
     #[packed_field(element_size_bits = "6")]
     eps2_battery2_v: Integer<PayloadVoltageFacBase, packed_bits::Bits<PAYLOAD_VOLTAGE_FAC_BITS>>,
+    #[packed_field(element_size_bits = "7")]
+    eps2_battery2_temperature:
+        Integer<PayloadTemperatureFacBase, packed_bits::Bits<PAYLOAD_TEMPERATURE_FAC_BITS>>,
 
     #[packed_field(element_size_bits = "5")]
     eps2_output_3v3_current:
@@ -268,7 +281,9 @@ impl TelemetryPacket {
         eps1_online: bool,
         eps1_rebooted_in_last_5s: bool,
         eps1_battery1_v: f32,
+        eps1_battery1_temperature: f32,
         eps1_battery2_v: f32,
+        eps1_battery2_temperature: f32,
         eps1_output_3v3_current: f32,
         eps1_output_3v3_overwrote: bool,
         eps1_output_3v3_status: PowerOutputStatus,
@@ -282,7 +297,9 @@ impl TelemetryPacket {
         eps2_online: bool,
         eps2_rebooted_in_last_5s: bool,
         eps2_battery1_v: f32,
+        eps2_battery1_temperature: f32,
         eps2_battery2_v: f32,
+        eps2_battery2_temperature: f32,
         eps2_output_3v3_current: f32,
         eps2_output_3v3_overwrote: bool,
         eps2_output_3v3_status: PowerOutputStatus,
@@ -371,7 +388,13 @@ impl TelemetryPacket {
             eps1_online,
             eps1_rebooted_in_last_5s,
             eps1_battery1_v: PayloadVoltageFac::to_fixed_point_capped(eps1_battery1_v),
+            eps1_battery1_temperature: PayloadTemperatureFac::to_fixed_point_capped(
+                eps1_battery1_temperature,
+            ),
             eps1_battery2_v: PayloadVoltageFac::to_fixed_point_capped(eps1_battery2_v),
+            eps1_battery2_temperature: PayloadTemperatureFac::to_fixed_point_capped(
+                eps1_battery2_temperature,
+            ),
             eps1_output_3v3_current: PayloadCurrentFac::to_fixed_point_capped(
                 eps1_output_3v3_current,
             ),
@@ -391,7 +414,13 @@ impl TelemetryPacket {
             eps2_online,
             eps2_rebooted_in_last_5s,
             eps2_battery1_v: PayloadVoltageFac::to_fixed_point_capped(eps2_battery1_v),
+            eps2_battery1_temperature: PayloadTemperatureFac::to_fixed_point_capped(
+                eps2_battery1_temperature,
+            ),
             eps2_battery2_v: PayloadVoltageFac::to_fixed_point_capped(eps2_battery2_v),
+            eps2_battery2_temperature: PayloadTemperatureFac::to_fixed_point_capped(
+                eps2_battery2_temperature,
+            ),
             eps2_output_3v3_current: PayloadCurrentFac::to_fixed_point_capped(
                 eps2_output_3v3_current,
             ),
@@ -634,8 +663,16 @@ impl TelemetryPacket {
         PayloadVoltageFac::to_float(self.eps1_battery1_v)
     }
 
+    pub fn eps1_battery1_temperature(&self) -> f32 {
+        PayloadTemperatureFac::to_float(self.eps1_battery1_temperature)
+    }
+
     pub fn eps1_battery2_v(&self) -> f32 {
         PayloadVoltageFac::to_float(self.eps1_battery2_v)
+    }
+
+    pub fn eps1_battery2_temperature(&self) -> f32 {
+        PayloadTemperatureFac::to_float(self.eps1_battery2_temperature)
     }
 
     pub fn eps1_output_3v3_current(&self) -> f32 {
@@ -686,8 +723,16 @@ impl TelemetryPacket {
         PayloadVoltageFac::to_float(self.eps2_battery1_v)
     }
 
+    pub fn eps2_battery1_temperature(&self) -> f32 {
+        PayloadTemperatureFac::to_float(self.eps2_battery1_temperature)
+    }
+
     pub fn eps2_battery2_v(&self) -> f32 {
         PayloadVoltageFac::to_float(self.eps2_battery2_v)
+    }
+
+    pub fn eps2_battery2_temperature(&self) -> f32 {
+        PayloadTemperatureFac::to_float(self.eps2_battery2_temperature)
     }
 
     pub fn eps2_output_3v3_current(&self) -> f32 {
@@ -801,7 +846,9 @@ pub struct TelemetryPacketBuilderState {
     pub eps1_online: bool,
     pub eps1_uptime_s: u32,
     pub eps1_battery1_v: f32,
+    pub eps1_battery1_temperature: f32,
     pub eps1_battery2_v: f32,
+    pub eps1_battery2_temperature: f32,
     pub eps1_output_3v3_current: f32,
     pub eps1_output_3v3_overwrote: bool,
     pub eps1_output_3v3_status: PowerOutputStatus,
@@ -815,7 +862,9 @@ pub struct TelemetryPacketBuilderState {
     pub eps2_online: bool,
     pub eps2_uptime_s: u32,
     pub eps2_battery1_v: f32,
+    pub eps2_battery1_temperature: f32,
     pub eps2_battery2_v: f32,
+    pub eps2_battery2_temperature: f32,
     pub eps2_output_3v3_current: f32,
     pub eps2_output_3v3_overwrote: bool,
     pub eps2_output_3v3_status: PowerOutputStatus,
@@ -908,7 +957,9 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 eps1_online: false,
                 eps1_uptime_s: 0,
                 eps1_battery1_v: 0.0,
+                eps1_battery1_temperature: 0.0,
                 eps1_battery2_v: 0.0,
+                eps1_battery2_temperature: 0.0,
                 eps1_output_3v3_current: 0.0,
                 eps1_output_3v3_overwrote: false,
                 eps1_output_3v3_status: PowerOutputStatus::Disabled,
@@ -922,7 +973,9 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 eps2_online: false,
                 eps2_uptime_s: 0,
                 eps2_battery1_v: 0.0,
+                eps2_battery1_temperature: 0.0,
                 eps2_battery2_v: 0.0,
+                eps2_battery2_temperature: 0.0,
                 eps2_output_3v3_current: 0.0,
                 eps2_output_3v3_overwrote: false,
                 eps2_output_3v3_status: PowerOutputStatus::Disabled,
@@ -1009,7 +1062,9 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 state.eps1_online,
                 state.eps1_uptime_s < 5,
                 state.eps1_battery1_v,
+                state.eps1_battery1_temperature,
                 state.eps1_battery2_v,
+                state.eps1_battery2_temperature,
                 state.eps1_output_3v3_current,
                 state.eps1_output_3v3_overwrote,
                 state.eps1_output_3v3_status,
@@ -1022,7 +1077,9 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 state.eps2_online,
                 state.eps2_uptime_s < 5,
                 state.eps2_battery1_v,
+                state.eps2_battery1_temperature,
                 state.eps2_battery2_v,
+                state.eps2_battery2_temperature,
                 state.eps2_output_3v3_current,
                 state.eps2_output_3v3_overwrote,
                 state.eps2_output_3v3_status,

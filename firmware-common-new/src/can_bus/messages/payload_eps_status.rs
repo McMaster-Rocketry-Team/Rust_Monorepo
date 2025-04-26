@@ -18,11 +18,16 @@ pub struct PayloadEPSOutputStatus {
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PackedStruct, Clone, Debug, Serialize, Deserialize)]
-#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "10")]
+#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "14")]
 #[repr(C)]
 pub struct PayloadEPSStatusMessage {
     pub battery1_mv: u16,
+    /// Unit: 0.1C, e.g. 250 = 25C
+    pub battery1_temperature: u16,
+
     pub battery2_mv: u16,
+    /// Unit: 0.1C, e.g. 250 = 25C
+    pub battery2_temperature: u16,
 
     #[packed_field(element_size_bytes = "2")]
     pub output_3v3: PayloadEPSOutputStatus,
