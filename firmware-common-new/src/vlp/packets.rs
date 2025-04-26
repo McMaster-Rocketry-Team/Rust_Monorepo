@@ -24,6 +24,7 @@ pub mod telemetry;
 // TODO change
 pub const MAX_VLP_PACKET_SIZE: usize = 100;
 
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum VLPDownlinkPacket {
     GPSBeacon(GPSBeaconPacket),
@@ -72,6 +73,7 @@ impl VLPDownlinkPacket {
     }
 }
 
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum VLPUplinkPacket {
     ChangeMode(ChangeModePacket),

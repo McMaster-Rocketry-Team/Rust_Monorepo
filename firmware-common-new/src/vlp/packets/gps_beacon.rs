@@ -46,3 +46,18 @@ impl GPSBeaconPacket {
         BatteryVFac::to_float(self.battery_v)
     }
 }
+
+#[cfg(feature = "defmt")]
+impl defmt::Format for GPSBeaconPacket {
+    fn format(&self, f: defmt::Formatter) {
+        let (lat, lon) = self.lat_lon();
+        defmt::write!(
+           f,
+           "GPSBeaconPacket {{ lat: {}, lon: {}, num_of_fix_satellites: {}, battery_v: {} }}",
+           lat,
+           lon,
+           self.num_of_fix_satellites(),
+           self.battery_v(),
+        )
+    }
+}

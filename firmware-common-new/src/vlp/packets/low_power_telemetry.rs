@@ -59,3 +59,18 @@ impl LowPowerTelemetryPacket {
         TemperatureFac::to_float(self.air_temperature)
     }
 }
+
+#[cfg(feature = "defmt")]
+impl defmt::Format for LowPowerTelemetryPacket {
+    fn format(&self, f: defmt::Formatter) {
+        defmt::write!(
+            f,
+            "LowPowerTelemetryPacket {{ num_of_fix_satellites: {}, gps_fixed: {}, amp_online: {}, battery_v: {}, air_temperature: {} }}",
+            self.num_of_fix_satellites(),
+            self.gps_fixed(),
+            self.amp_online(),
+            self.battery_v(),
+            self.air_temperature(),
+        )
+    }
+}

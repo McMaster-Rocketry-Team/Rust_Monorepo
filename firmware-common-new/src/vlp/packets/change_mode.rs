@@ -10,7 +10,7 @@ pub enum Mode {
     Landed = 3,
 }
 
-
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PackedStruct, Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "1")]
 pub struct ChangeModePacket {

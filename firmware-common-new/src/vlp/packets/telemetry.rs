@@ -772,6 +772,187 @@ impl TelemetryPacket {
     }
 }
 
+#[cfg(feature = "defmt")]
+impl defmt::Format for TelemetryPacket {
+    fn format(&self, f: defmt::Formatter) {
+        let nonce: u8 = self.nonce.into();
+        let (lat, lon) = self.lat_lon();
+        defmt::write!(
+            f,
+            "TelemetryPacket {{ \
+            nonce: {}, \
+            unix_clock_ready: {}, \
+            num_of_fix_satellites: {}, \
+            lat: {}, \
+            lon: {}, \
+            vl_battery_v: {}, \
+            air_temperature: {}, \
+            vl_stm32_temperature: {}, \
+            pyro_main_continuity: {}, \
+            pyro_drogue_continuity: {}, \
+            altitude: {}, \
+            max_altitude: {}, \
+            backup_max_altitude: {}, \
+            air_speed: {}, \
+            max_air_speed: {}, \
+            backup_max_air_speed: {}, \
+            tilt_deg: {}, \
+            flight_core_state: {}, \
+            backup_flight_core_state: {}, \
+            amp_online: {}, \
+            amp_rebooted_in_last_5s: {}, \
+            shared_battery_v: {}, \
+            amp_out1_overwrote: {}, \
+            amp_out1: {}, \
+            amp_out2_overwrote: {}, \
+            amp_out2: {}, \
+            amp_out3_overwrote: {}, \
+            amp_out3: {}, \
+            amp_out4_overwrote: {}, \
+            amp_out4: {}, \
+            main_bulkhead_online: {}, \
+            main_bulkhead_rebooted_in_last_5s: {}, \
+            main_bulkhead_brightness: {}, \
+            drogue_bulkhead_online: {}, \
+            drogue_bulkhead_rebooted_in_last_5s: {}, \
+            drogue_bulkhead_brightness: {}, \
+            icarus_online: {}, \
+            icarus_rebooted_in_last_5s: {}, \
+            air_brakes_extention_inch: {}, \
+            air_brakes_servo_temp: {}, \
+            ap_residue: {}, \
+            cd: {}, \
+            ozys1_online: {}, \
+            ozys1_rebooted_in_last_5s: {}, \
+            ozys2_online: {}, \
+            ozys2_rebooted_in_last_5s: {}, \
+            aero_rust_rebooted_in_last_5s: {}, \
+            aero_rust_health: {}, \
+            aero_rust_mode: {}, \
+            aero_rust_status: {}, \
+            payload_activation_pcb_online: {}, \
+            payload_activation_pcb_rebooted_in_last_5s: {}, \
+            rocket_wifi_online: {}, \
+            rocket_wifi_rebooted_in_last_5s: {}, \
+            eps1_online: {}, \
+            eps1_rebooted_in_last_5s: {}, \
+            eps1_battery1_v: {}, \
+            eps1_battery1_temperature: {}, \
+            eps1_battery2_v: {}, \
+            eps1_battery2_temperature: {}, \
+            eps1_output_3v3_current: {}, \
+            eps1_output_3v3_overwrote: {}, \
+            eps1_output_3v3_status: {}, \
+            eps1_output_5v_current: {}, \
+            eps1_output_5v_overwrote: {}, \
+            eps1_output_5v_status: {}, \
+            eps1_output_9v_current: {}, \
+            eps1_output_9v_overwrote: {}, \
+            eps1_output_9v_status: {}, \
+            eps2_online: {}, \
+            eps2_rebooted_in_last_5s: {}, \
+            eps2_battery1_v: {}, \
+            eps2_battery1_temperature: {}, \
+            eps2_battery2_v: {}, \
+            eps2_battery2_temperature: {}, \
+            eps2_output_3v3_current: {}, \
+            eps2_output_3v3_overwrote: {}, \
+            eps2_output_3v3_status: {}, \
+            eps2_output_5v_current: {}, \
+            eps2_output_5v_overwrote: {}, \
+            eps2_output_5v_status: {}, \
+            eps2_output_9v_current: {}, \
+            eps2_output_9v_overwrote: {}, \
+            eps2_output_9v_status: {}, \
+            }}",
+            nonce,
+            self.unix_clock_ready(),
+            self.num_of_fix_satellites(),
+            lat,
+            lon,
+            self.vl_battery_v(),
+            self.air_temperature(),
+            self.vl_stm32_temperature(),
+            self.pyro_main_continuity(),
+            self.pyro_drogue_continuity(),
+            self.altitude(),
+            self.max_altitude(),
+            self.backup_max_altitude(),
+            self.air_speed(),
+            self.max_air_speed(),
+            self.backup_max_air_speed(),
+            self.tilt_deg(),
+            self.flight_core_state(),
+            self.backup_flight_core_state(),
+            self.amp_online(),
+            self.amp_rebooted_in_last_5s(),
+            self.shared_battery_v(),
+            self.amp_out1_overwrote(),
+            self.amp_out1(),
+            self.amp_out2_overwrote(),
+            self.amp_out2(),
+            self.amp_out3_overwrote(),
+            self.amp_out3(),
+            self.amp_out4_overwrote(),
+            self.amp_out4(),
+            self.main_bulkhead_online(),
+            self.main_bulkhead_rebooted_in_last_5s(),
+            self.main_bulkhead_brightness(),
+            self.drogue_bulkhead_online(),
+            self.drogue_bulkhead_rebooted_in_last_5s(),
+            self.drogue_bulkhead_brightness(),
+            self.icarus_online(),
+            self.icarus_rebooted_in_last_5s(),
+            self.air_brakes_extention_inch(),
+            self.air_brakes_servo_temp(),
+            self.ap_residue(),
+            self.cd(),
+            self.ozys1_online(),
+            self.ozys1_rebooted_in_last_5s(),
+            self.ozys2_online(),
+            self.ozys2_rebooted_in_last_5s(),
+            self.aero_rust_rebooted_in_last_5s(),
+            self.aero_rust_health(),
+            self.aero_rust_mode(),
+            self.aero_rust_status(),
+            self.payload_activation_pcb_online(),
+            self.payload_activation_pcb_rebooted_in_last_5s(),
+            self.rocket_wifi_online(),
+            self.rocket_wifi_rebooted_in_last_5s(),
+            self.eps1_online(),
+            self.eps1_rebooted_in_last_5s(),
+            self.eps1_battery1_v(),
+            self.eps1_battery1_temperature(),
+            self.eps1_battery2_v(),
+            self.eps1_battery2_temperature(),
+            self.eps1_output_3v3_current(),
+            self.eps1_output_3v3_overwrote(),
+            self.eps1_output_3v3_status(),
+            self.eps1_output_5v_current(),
+            self.eps1_output_5v_overwrote(),
+            self.eps1_output_5v_status(),
+            self.eps1_output_9v_current(),
+            self.eps1_output_9v_overwrote(),
+            self.eps1_output_9v_status(),
+            self.eps2_online(),
+            self.eps2_rebooted_in_last_5s(),
+            self.eps2_battery1_v(),
+            self.eps2_battery1_temperature(),
+            self.eps2_battery2_v(),
+            self.eps2_battery2_temperature(),
+            self.eps2_output_3v3_current(),
+            self.eps2_output_3v3_overwrote(),
+            self.eps2_output_3v3_status(),
+            self.eps2_output_5v_current(),
+            self.eps2_output_5v_overwrote(),
+            self.eps2_output_5v_status(),
+            self.eps2_output_9v_current(),
+            self.eps2_output_9v_overwrote(),
+            self.eps2_output_9v_status(),
+        )
+    }
+}
+
 pub struct TelemetryPacketBuilderState {
     nonce: u8,
 
