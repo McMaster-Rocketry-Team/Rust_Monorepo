@@ -151,6 +151,16 @@ pub extern "C" fn process_can_bus_frame(
     }
 }
 
+#[no_mangle]
+pub extern "C" fn parse_can_bus_id(id: u32) -> CanBusExtendedId {
+    CanBusExtendedId::from_raw(id)
+}
+
+#[no_mangle]
+pub extern "C" fn get_can_bus_message_type(message: CanBusMessageEnum) -> u8 {
+    message.get_message_type()
+}
+
 #[cfg(any(target_os = "none", target_os = "espidf"))]
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {

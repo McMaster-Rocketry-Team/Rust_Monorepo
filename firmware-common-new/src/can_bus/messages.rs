@@ -3,8 +3,8 @@ use ack::AckMessage;
 use brightness_measurement::BrightnessMeasurementMessage;
 use core::fmt::Debug;
 use data_transfer::DataTransferMessage;
-use payload_control::PayloadControlMessage;
-use payload_self_test::PayloadSelfTestMessage;
+use payload_eps_control::PayloadEPSControlMessage;
+use payload_self_test::PayloadEPSSelfTestMessage;
 
 pub use amp_control::AmpControlMessage;
 pub use amp_status::AmpStatusMessage;
@@ -13,10 +13,10 @@ pub use baro_measurement::BaroMeasurementMessage;
 pub use icarus_status::IcarusStatusMessage;
 pub use imu_measurement::IMUMeasurementMessage;
 pub use node_status::NodeStatusMessage;
-pub use payload_status::PayloadStatusMessage;
 pub use reset::ResetMessage;
 pub use tempurature_measurement::TempuratureMeasurementMessage;
 pub use unix_time::UnixTimeMessage;
+pub use payload_eps_status::PayloadEPSStatusMessage;
 
 use super::id::CanBusExtendedId;
 
@@ -30,12 +30,12 @@ pub mod data_transfer;
 pub mod icarus_status;
 pub mod imu_measurement;
 pub mod node_status;
-pub mod payload_control;
+pub mod payload_eps_control;
 pub mod payload_self_test;
-pub mod payload_status;
 pub mod reset;
 pub mod tempurature_measurement;
 pub mod unix_time;
+pub mod payload_eps_status;
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -53,9 +53,9 @@ pub enum CanBusMessageEnum {
     AmpStatus(AmpStatusMessage),
     AmpControl(AmpControlMessage),
 
-    PayloadStatus(PayloadStatusMessage),
-    PayloadControl(PayloadControlMessage),
-    PayloadSelfTest(PayloadSelfTestMessage),
+    PayloadEPSStatus(PayloadEPSStatusMessage),
+    PayloadEPSControl(PayloadEPSControlMessage),
+    PayloadEPSSelfTest(PayloadEPSSelfTestMessage),
 
     AvionicsStatus(AvionicsStatusMessage),
     IcarusStatus(IcarusStatusMessage),
@@ -76,9 +76,9 @@ impl CanBusMessageEnum {
             CanBusMessageEnum::BrightnessMeasurement(m) => m.priority(),
             CanBusMessageEnum::AmpStatus(m) => m.priority(),
             CanBusMessageEnum::AmpControl(m) => m.priority(),
-            CanBusMessageEnum::PayloadStatus(m) => m.priority(),
-            CanBusMessageEnum::PayloadControl(m) => m.priority(),
-            CanBusMessageEnum::PayloadSelfTest(m) => m.priority(),
+            CanBusMessageEnum::PayloadEPSStatus(m) => m.priority(),
+            CanBusMessageEnum::PayloadEPSControl(m) => m.priority(),
+            CanBusMessageEnum::PayloadEPSSelfTest(m) => m.priority(),
             CanBusMessageEnum::AvionicsStatus(m) => m.priority(),
             CanBusMessageEnum::IcarusStatus(m) => m.priority(),
             CanBusMessageEnum::DataTransfer(m) => m.priority(),
@@ -86,8 +86,8 @@ impl CanBusMessageEnum {
         }
     }
 
-    pub fn get_id(&self, node_type: u8, node_id: u16) -> CanBusExtendedId {
-        let message_type: u8 = match self {
+    pub fn get_message_type(&self) -> u8 {
+        match self {
             CanBusMessageEnum::UnixTime(_) => 0,
             CanBusMessageEnum::NodeStatus(_) => 1,
             CanBusMessageEnum::Reset(_) => 2,
@@ -97,16 +97,18 @@ impl CanBusMessageEnum {
             CanBusMessageEnum::BrightnessMeasurement(_) => 13,
             CanBusMessageEnum::AmpStatus(_) => 6,
             CanBusMessageEnum::AmpControl(_) => 7,
-            CanBusMessageEnum::PayloadStatus(_) => 8,
-            CanBusMessageEnum::PayloadControl(_) => 9,
-            CanBusMessageEnum::PayloadSelfTest(_) => 10,
+            CanBusMessageEnum::PayloadEPSStatus(_) => 8,
+            CanBusMessageEnum::PayloadEPSControl(_) => 9,
+            CanBusMessageEnum::PayloadEPSSelfTest(_) => 10,
             CanBusMessageEnum::AvionicsStatus(_) => 11,
             CanBusMessageEnum::IcarusStatus(_) => 12,
             CanBusMessageEnum::DataTransfer(_) => 14,
             CanBusMessageEnum::Ack(_) => 15,
-        };
+        }
+    }
 
-        CanBusExtendedId::new(self.priority(), message_type, node_type, node_id)
+    pub fn get_id(&self, node_type: u8, node_id: u16) -> CanBusExtendedId {
+        CanBusExtendedId::new(self.priority(), self.get_message_type(), node_type, node_id)
     }
 
     pub fn serialize(self, buffer: &mut [u8]) -> usize {
@@ -120,9 +122,9 @@ impl CanBusMessageEnum {
             CanBusMessageEnum::BrightnessMeasurement(m) => m.serialize(buffer),
             CanBusMessageEnum::AmpStatus(m) => m.serialize(buffer),
             CanBusMessageEnum::AmpControl(m) => m.serialize(buffer),
-            CanBusMessageEnum::PayloadStatus(m) => m.serialize(buffer),
-            CanBusMessageEnum::PayloadControl(m) => m.serialize(buffer),
-            CanBusMessageEnum::PayloadSelfTest(m) => m.serialize(buffer),
+            CanBusMessageEnum::PayloadEPSStatus(m) => m.serialize(buffer),
+            CanBusMessageEnum::PayloadEPSControl(m) => m.serialize(buffer),
+            CanBusMessageEnum::PayloadEPSSelfTest(m) => m.serialize(buffer),
             CanBusMessageEnum::AvionicsStatus(m) => m.serialize(buffer),
             CanBusMessageEnum::IcarusStatus(m) => m.serialize(buffer),
             CanBusMessageEnum::DataTransfer(m) => m.serialize(buffer),
@@ -141,9 +143,9 @@ impl CanBusMessageEnum {
                 .map(CanBusMessageEnum::TempuratureMeasurement),
             6 => AmpStatusMessage::deserialize(data).map(CanBusMessageEnum::AmpStatus),
             7 => AmpControlMessage::deserialize(data).map(CanBusMessageEnum::AmpControl),
-            8 => PayloadStatusMessage::deserialize(data).map(CanBusMessageEnum::PayloadStatus),
-            9 => PayloadControlMessage::deserialize(data).map(CanBusMessageEnum::PayloadControl),
-            10 => PayloadSelfTestMessage::deserialize(data).map(CanBusMessageEnum::PayloadSelfTest),
+            8 => PayloadEPSStatusMessage::deserialize(data).map(CanBusMessageEnum::PayloadEPSStatus),
+            9 => PayloadEPSControlMessage::deserialize(data).map(CanBusMessageEnum::PayloadEPSControl),
+            10 => PayloadEPSSelfTestMessage::deserialize(data).map(CanBusMessageEnum::PayloadEPSSelfTest),
             11 => AvionicsStatusMessage::deserialize(data).map(CanBusMessageEnum::AvionicsStatus),
             12 => IcarusStatusMessage::deserialize(data).map(CanBusMessageEnum::IcarusStatus),
             13 => BrightnessMeasurementMessage::deserialize(data)

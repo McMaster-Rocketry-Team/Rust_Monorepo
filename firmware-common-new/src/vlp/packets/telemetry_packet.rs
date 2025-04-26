@@ -7,100 +7,10 @@ use crate::{
     can_bus::messages::{
         amp_status::PowerOutputStatus,
         node_status::{NodeHealth, NodeMode},
-        payload_status::{EPSOutputStatus, EPSStatus},
     },
     fixed_point_factory,
     gps::GPSData,
 };
-
-fixed_point_factory!(PayloadVoltageFac, f32, 2.0, 4.5, 0.05);
-fixed_point_factory!(PayloadCurrentFac, f32, 0.0, 2.0, 0.1);
-
-#[derive(PackedStruct, Debug, Clone, PartialEq, Deserialize, Serialize)]
-#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bits = 66)]
-pub struct PayloadTelemetry {
-    #[packed_field(element_size_bits = "6", bits = "0..6")]
-    eps1_battery1_v: Integer<PayloadVoltageFacBase, packed_bits::Bits<PAYLOAD_VOLTAGE_FAC_BITS>>,
-    #[packed_field(element_size_bits = "6")]
-    eps1_battery2_v: Integer<PayloadVoltageFacBase, packed_bits::Bits<PAYLOAD_VOLTAGE_FAC_BITS>>,
-    #[packed_field(element_size_bits = "5")]
-    eps1_output_3v3_current:
-        Integer<PayloadCurrentFacBase, packed_bits::Bits<PAYLOAD_CURRENT_FAC_BITS>>,
-    #[packed_field(element_size_bits = "2", ty = "enum")]
-    eps1_output_3v3_status: PowerOutputStatus,
-    #[packed_field(element_size_bits = "5")]
-    eps1_output_5v_current:
-        Integer<PayloadCurrentFacBase, packed_bits::Bits<PAYLOAD_CURRENT_FAC_BITS>>,
-    #[packed_field(element_size_bits = "2", ty = "enum")]
-    eps1_output_5v_status: PowerOutputStatus,
-    #[packed_field(element_size_bits = "5")]
-    eps1_output_9v_current:
-        Integer<PayloadCurrentFacBase, packed_bits::Bits<PAYLOAD_CURRENT_FAC_BITS>>,
-    #[packed_field(element_size_bits = "2", ty = "enum")]
-    eps1_output_9v_status: PowerOutputStatus,
-    #[packed_field(element_size_bits = "6")]
-    eps2_battery1_v: Integer<PayloadVoltageFacBase, packed_bits::Bits<PAYLOAD_VOLTAGE_FAC_BITS>>,
-    #[packed_field(element_size_bits = "6")]
-    eps2_battery2_v: Integer<PayloadVoltageFacBase, packed_bits::Bits<PAYLOAD_VOLTAGE_FAC_BITS>>,
-    #[packed_field(element_size_bits = "5")]
-    eps2_output_3v3_current:
-        Integer<PayloadCurrentFacBase, packed_bits::Bits<PAYLOAD_CURRENT_FAC_BITS>>,
-    #[packed_field(element_size_bits = "2", ty = "enum")]
-    eps2_output_3v3_status: PowerOutputStatus,
-    #[packed_field(element_size_bits = "5")]
-    eps2_output_5v_current:
-        Integer<PayloadCurrentFacBase, packed_bits::Bits<PAYLOAD_CURRENT_FAC_BITS>>,
-    #[packed_field(element_size_bits = "2", ty = "enum")]
-    eps2_output_5v_status: PowerOutputStatus,
-    #[packed_field(element_size_bits = "5")]
-    eps2_output_9v_current:
-        Integer<PayloadCurrentFacBase, packed_bits::Bits<PAYLOAD_CURRENT_FAC_BITS>>,
-    #[packed_field(element_size_bits = "2", ty = "enum")]
-    eps2_output_9v_status: PowerOutputStatus,
-}
-
-impl PayloadTelemetry {
-    pub fn new(eps1: &EPSStatus, eps2: &EPSStatus) -> Self {
-        Self {
-            eps1_battery1_v: PayloadVoltageFac::to_fixed_point_capped(
-                eps1.battery1_mv as f32 / 1000.0,
-            ),
-            eps1_battery2_v: PayloadVoltageFac::to_fixed_point_capped(
-                eps1.battery2_mv as f32 / 1000.0,
-            ),
-            eps1_output_3v3_current: PayloadCurrentFac::to_fixed_point_capped(
-                eps1.output_3v3.current_ma as f32 / 1000.0,
-            ),
-            eps1_output_3v3_status: eps1.output_3v3.status,
-            eps1_output_5v_current: PayloadCurrentFac::to_fixed_point_capped(
-                eps1.output_5v.current_ma as f32 / 1000.0,
-            ),
-            eps1_output_5v_status: eps1.output_5v.status,
-            eps1_output_9v_current: PayloadCurrentFac::to_fixed_point_capped(
-                eps1.output_9v.current_ma as f32 / 1000.0,
-            ),
-            eps1_output_9v_status: eps1.output_9v.status,
-            eps2_battery1_v: PayloadVoltageFac::to_fixed_point_capped(
-                eps2.battery1_mv as f32 / 1000.0,
-            ),
-            eps2_battery2_v: PayloadVoltageFac::to_fixed_point_capped(
-                eps2.battery2_mv as f32 / 1000.0,
-            ),
-            eps2_output_3v3_current: PayloadCurrentFac::to_fixed_point_capped(
-                eps2.output_3v3.current_ma as f32 / 1000.0,
-            ),
-            eps2_output_3v3_status: eps2.output_3v3.status,
-            eps2_output_5v_current: PayloadCurrentFac::to_fixed_point_capped(
-                eps2.output_5v.current_ma as f32 / 1000.0,
-            ),
-            eps2_output_5v_status: eps2.output_5v.status,
-            eps2_output_9v_current: PayloadCurrentFac::to_fixed_point_capped(
-                eps2.output_9v.current_ma as f32 / 1000.0,
-            ),
-            eps2_output_9v_status: eps2.output_9v.status,
-        }
-    }
-}
 
 // 23 bits for latitude, 24 bits for longitude
 // resolution of 2.4m at equator
@@ -115,6 +25,9 @@ fixed_point_factory!(AirSpeedFac, f32, -100.0, 400.0, 2.0);
 fixed_point_factory!(AirBrakesExtensionInchFac, f32, 0.0, 0.9, 0.04);
 fixed_point_factory!(TiltDegFac, f32, -90.0, 90.0, 1.0);
 fixed_point_factory!(CdFac, f32, 0.4, 0.85, 0.01);
+
+fixed_point_factory!(PayloadVoltageFac, f32, 2.0, 4.5, 0.05);
+fixed_point_factory!(PayloadCurrentFac, f32, 0.0, 2.0, 0.1);
 
 // 48 byte max size to achieve 0.5Hz with 250khz bandwidth + 12sf + 8cr lora
 #[derive(PackedStruct, Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -204,10 +117,6 @@ pub struct TelemetryPacket {
     ozys2_online: bool,
     ozys2_rebooted_in_last_5s: bool,
 
-    payload_activation_online: bool,
-    payload_activation_rebooted_in_last_5s: bool,
-    payload_alive: bool,
-
     aero_rust_rebooted_in_last_5s: bool,
 
     #[packed_field(element_size_bits = "2", ty = "enum")]
@@ -217,8 +126,55 @@ pub struct TelemetryPacket {
     #[packed_field(element_size_bits = "12")]
     aero_rust_status: u16,
 
-    #[packed_field(element_size_bits = "66")]
-    payload: PayloadTelemetry,
+    payload_activation_pcb_online: bool,
+    payload_activation_pcb_rebooted_in_last_5s: bool,
+
+    rocket_wifi_online: bool,
+    rocket_wifi_rebooted_in_last_5s: bool,
+
+    eps1_online: bool,
+    eps1_rebooted_in_last_5s: bool,
+    #[packed_field(element_size_bits = "6")]
+    eps1_battery1_v: Integer<PayloadVoltageFacBase, packed_bits::Bits<PAYLOAD_VOLTAGE_FAC_BITS>>,
+    #[packed_field(element_size_bits = "6")]
+    eps1_battery2_v: Integer<PayloadVoltageFacBase, packed_bits::Bits<PAYLOAD_VOLTAGE_FAC_BITS>>,
+    #[packed_field(element_size_bits = "5")]
+    eps1_output_3v3_current:
+        Integer<PayloadCurrentFacBase, packed_bits::Bits<PAYLOAD_CURRENT_FAC_BITS>>,
+    #[packed_field(element_size_bits = "2", ty = "enum")]
+    eps1_output_3v3_status: PowerOutputStatus,
+    #[packed_field(element_size_bits = "5")]
+    eps1_output_5v_current:
+        Integer<PayloadCurrentFacBase, packed_bits::Bits<PAYLOAD_CURRENT_FAC_BITS>>,
+    #[packed_field(element_size_bits = "2", ty = "enum")]
+    eps1_output_5v_status: PowerOutputStatus,
+    #[packed_field(element_size_bits = "5")]
+    eps1_output_9v_current:
+        Integer<PayloadCurrentFacBase, packed_bits::Bits<PAYLOAD_CURRENT_FAC_BITS>>,
+    #[packed_field(element_size_bits = "2", ty = "enum")]
+    eps1_output_9v_status: PowerOutputStatus,
+
+    eps2_online: bool,
+    eps2_rebooted_in_last_5s: bool,
+    #[packed_field(element_size_bits = "6")]
+    eps2_battery1_v: Integer<PayloadVoltageFacBase, packed_bits::Bits<PAYLOAD_VOLTAGE_FAC_BITS>>,
+    #[packed_field(element_size_bits = "6")]
+    eps2_battery2_v: Integer<PayloadVoltageFacBase, packed_bits::Bits<PAYLOAD_VOLTAGE_FAC_BITS>>,
+    #[packed_field(element_size_bits = "5")]
+    eps2_output_3v3_current:
+        Integer<PayloadCurrentFacBase, packed_bits::Bits<PAYLOAD_CURRENT_FAC_BITS>>,
+    #[packed_field(element_size_bits = "2", ty = "enum")]
+    eps2_output_3v3_status: PowerOutputStatus,
+    #[packed_field(element_size_bits = "5")]
+    eps2_output_5v_current:
+        Integer<PayloadCurrentFacBase, packed_bits::Bits<PAYLOAD_CURRENT_FAC_BITS>>,
+    #[packed_field(element_size_bits = "2", ty = "enum")]
+    eps2_output_5v_status: PowerOutputStatus,
+    #[packed_field(element_size_bits = "5")]
+    eps2_output_9v_current:
+        Integer<PayloadCurrentFacBase, packed_bits::Bits<PAYLOAD_CURRENT_FAC_BITS>>,
+    #[packed_field(element_size_bits = "2", ty = "enum")]
+    eps2_output_9v_status: PowerOutputStatus,
 }
 
 impl TelemetryPacket {
@@ -278,16 +234,38 @@ impl TelemetryPacket {
         ozys2_online: bool,
         ozys2_rebooted_in_last_5s: bool,
 
-        payload_activation_online: bool,
-        payload_activation_rebooted_in_last_5s: bool,
-        payload_alive: bool,
-
         aero_rust_rebooted_in_last_5s: bool,
         aero_rust_health: NodeHealth,
         aero_rust_mode: NodeMode,
         aero_rust_status: u16,
 
-        payload: PayloadTelemetry,
+        payload_activation_pcb_online: bool,
+        payload_activation_pcb_rebooted_in_last_5s: bool,
+
+        rocket_wifi_online: bool,
+        rocket_wifi_rebooted_in_last_5s: bool,
+
+        eps1_online: bool,
+        eps1_rebooted_in_last_5s: bool,
+        eps1_battery1_v: f32,
+        eps1_battery2_v: f32,
+        eps1_output_3v3_current: f32,
+        eps1_output_3v3_status: PowerOutputStatus,
+        eps1_output_5v_current: f32,
+        eps1_output_5v_status: PowerOutputStatus,
+        eps1_output_9v_current: f32,
+        eps1_output_9v_status: PowerOutputStatus,
+
+        eps2_online: bool,
+        eps2_rebooted_in_last_5s: bool,
+        eps2_battery1_v: f32,
+        eps2_battery2_v: f32,
+        eps2_output_3v3_current: f32,
+        eps2_output_3v3_status: PowerOutputStatus,
+        eps2_output_5v_current: f32,
+        eps2_output_5v_status: PowerOutputStatus,
+        eps2_output_9v_current: f32,
+        eps2_output_9v_status: PowerOutputStatus,
     ) -> Self {
         Self {
             nonce: nonce.into(),
@@ -349,16 +327,50 @@ impl TelemetryPacket {
             ozys2_online,
             ozys2_rebooted_in_last_5s,
 
-            payload_activation_online,
-            payload_activation_rebooted_in_last_5s,
-            payload_alive,
-
             aero_rust_rebooted_in_last_5s,
             aero_rust_health,
             aero_rust_mode,
             aero_rust_status,
 
-            payload,
+            payload_activation_pcb_online,
+            payload_activation_pcb_rebooted_in_last_5s,
+
+            rocket_wifi_online,
+            rocket_wifi_rebooted_in_last_5s,
+
+            eps1_online,
+            eps1_rebooted_in_last_5s,
+            eps1_battery1_v: PayloadVoltageFac::to_fixed_point_capped(eps1_battery1_v),
+            eps1_battery2_v: PayloadVoltageFac::to_fixed_point_capped(eps1_battery2_v),
+            eps1_output_3v3_current: PayloadCurrentFac::to_fixed_point_capped(
+                eps1_output_3v3_current,
+            ),
+            eps1_output_3v3_status,
+            eps1_output_5v_current: PayloadCurrentFac::to_fixed_point_capped(
+                eps1_output_5v_current,
+            ),
+            eps1_output_5v_status,
+            eps1_output_9v_current: PayloadCurrentFac::to_fixed_point_capped(
+                eps1_output_9v_current,
+            ),
+            eps1_output_9v_status,
+
+            eps2_online,
+            eps2_rebooted_in_last_5s,
+            eps2_battery1_v: PayloadVoltageFac::to_fixed_point_capped(eps2_battery1_v),
+            eps2_battery2_v: PayloadVoltageFac::to_fixed_point_capped(eps2_battery2_v),
+            eps2_output_3v3_current: PayloadCurrentFac::to_fixed_point_capped(
+                eps2_output_3v3_current,
+            ),
+            eps2_output_3v3_status,
+            eps2_output_5v_current: PayloadCurrentFac::to_fixed_point_capped(
+                eps2_output_5v_current,
+            ),
+            eps2_output_5v_status,
+            eps2_output_9v_current: PayloadCurrentFac::to_fixed_point_capped(
+                eps2_output_9v_current,
+            ),
+            eps2_output_9v_status,
         }
     }
 
@@ -522,18 +534,6 @@ impl TelemetryPacket {
         self.ozys2_rebooted_in_last_5s
     }
 
-    pub fn payload_activation_online(&self) -> bool {
-        self.payload_activation_online
-    }
-
-    pub fn payload_activation_rebooted_in_last_5s(&self) -> bool {
-        self.payload_activation_rebooted_in_last_5s
-    }
-
-    pub fn payload_alive(&self) -> bool {
-        self.payload_alive
-    }
-
     pub fn aero_rust_online(&self) -> bool {
         self.aero_rust_mode != NodeMode::Offline
     }
@@ -554,8 +554,100 @@ impl TelemetryPacket {
         self.aero_rust_status
     }
 
-    pub fn payload(&self) -> &PayloadTelemetry {
-        &self.payload
+    pub fn payload_activation_pcb_online(&self) -> bool {
+        self.payload_activation_pcb_online
+    }
+
+    pub fn payload_activation_pcb_rebooted_in_last_5s(&self) -> bool {
+        self.payload_activation_pcb_rebooted_in_last_5s
+    }
+
+    pub fn rocket_wifi_online(&self) -> bool {
+        self.rocket_wifi_online
+    }
+
+    pub fn rocket_wifi_rebooted_in_last_5s(&self) -> bool {
+        self.rocket_wifi_rebooted_in_last_5s
+    }
+
+    pub fn eps1_online(&self) -> bool {
+        self.eps1_online
+    }
+
+    pub fn eps1_rebooted_in_last_5s(&self) -> bool {
+        self.eps1_rebooted_in_last_5s
+    }
+
+    pub fn eps1_battery1_v(&self) -> f32 {
+        PayloadVoltageFac::to_float(self.eps1_battery1_v)
+    }
+
+    pub fn eps1_battery2_v(&self) -> f32 {
+        PayloadVoltageFac::to_float(self.eps1_battery2_v)
+    }
+
+    pub fn eps1_output_3v3_current(&self) -> f32 {
+        PayloadCurrentFac::to_float(self.eps1_output_3v3_current)
+    }
+
+    pub fn eps1_output_3v3_status(&self) -> PowerOutputStatus {
+        self.eps1_output_3v3_status
+    }
+
+    pub fn eps1_output_5v_current(&self) -> f32 {
+        PayloadCurrentFac::to_float(self.eps1_output_5v_current)
+    }
+
+    pub fn eps1_output_5v_status(&self) -> PowerOutputStatus {
+        self.eps1_output_5v_status
+    }
+
+    pub fn eps1_output_9v_current(&self) -> f32 {
+        PayloadCurrentFac::to_float(self.eps1_output_9v_current)
+    }
+
+    pub fn eps1_output_9v_status(&self) -> PowerOutputStatus {
+        self.eps1_output_9v_status
+    }
+
+    pub fn eps2_online(&self) -> bool {
+        self.eps2_online
+    }
+
+    pub fn eps2_rebooted_in_last_5s(&self) -> bool {
+        self.eps2_rebooted_in_last_5s
+    }
+
+    pub fn eps2_battery1_v(&self) -> f32 {
+        PayloadVoltageFac::to_float(self.eps2_battery1_v)
+    }
+
+    pub fn eps2_battery2_v(&self) -> f32 {
+        PayloadVoltageFac::to_float(self.eps2_battery2_v)
+    }
+
+    pub fn eps2_output_3v3_current(&self) -> f32 {
+        PayloadCurrentFac::to_float(self.eps2_output_3v3_current)
+    }
+
+    pub fn eps2_output_3v3_status(&self) -> PowerOutputStatus {
+        self.eps2_output_3v3_status
+    }
+
+    pub fn eps2_output_5v_current(&self) -> f32 {
+        PayloadCurrentFac::to_float(self.eps2_output_5v_current)
+    }
+
+    pub fn eps2_output_5v_status(&self) -> PowerOutputStatus {
+        self.eps2_output_5v_status
+    }
+
+    pub fn eps2_output_9v_current(&self) -> f32 {
+        PayloadCurrentFac::to_float(self.eps2_output_9v_current)
+    }
+
+    pub fn eps2_output_9v_status(&self) -> PowerOutputStatus {
+        self.eps2_output_9v_status
     }
 }
 
@@ -615,17 +707,38 @@ pub struct TelemetryPacketBuilderState {
     pub ozys2_online: bool,
     pub ozys2_uptime_s: u32,
 
-    pub payload_activation_online: bool,
-    pub payload_activation_uptime_s: u32,
-    pub payload_alive: bool,
-
     pub aero_rust_uptime_s: u32,
     pub aero_rust_health: NodeHealth,
     pub aero_rust_mode: NodeMode,
     pub aero_rust_status: u16,
 
-    pub payload_eps1: EPSStatus,
-    pub payload_eps2: EPSStatus,
+    pub payload_activation_pcb_online: bool,
+    pub payload_activation_pcb_uptime_s: u32,
+
+    pub rocket_wifi_online: bool,
+    pub rocket_wifi_uptime_s: u32,
+
+    pub eps1_online: bool,
+    pub eps1_uptime_s: u32,
+    pub eps1_battery1_v: f32,
+    pub eps1_battery2_v: f32,
+    pub eps1_output_3v3_current: f32,
+    pub eps1_output_3v3_status: PowerOutputStatus,
+    pub eps1_output_5v_current: f32,
+    pub eps1_output_5v_status: PowerOutputStatus,
+    pub eps1_output_9v_current: f32,
+    pub eps1_output_9v_status: PowerOutputStatus,
+
+    pub eps2_online: bool,
+    pub eps2_uptime_s: u32,
+    pub eps2_battery1_v: f32,
+    pub eps2_battery2_v: f32,
+    pub eps2_output_3v3_current: f32,
+    pub eps2_output_3v3_status: PowerOutputStatus,
+    pub eps2_output_5v_current: f32,
+    pub eps2_output_5v_status: PowerOutputStatus,
+    pub eps2_output_9v_current: f32,
+    pub eps2_output_9v_status: PowerOutputStatus,
 }
 
 pub struct TelemetryPacketBuilder<M: RawMutex> {
@@ -691,47 +804,38 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 ozys2_online: false,
                 ozys2_uptime_s: 0,
 
-                payload_activation_online: false,
-                payload_activation_uptime_s: 0,
-                payload_alive: false,
-
                 aero_rust_uptime_s: 0,
                 aero_rust_health: NodeHealth::Healthy,
                 aero_rust_mode: NodeMode::Offline,
                 aero_rust_status: 0,
 
-                payload_eps1: EPSStatus {
-                    battery1_mv: 0,
-                    battery2_mv: 0,
-                    output_3v3: EPSOutputStatus {
-                        current_ma: 0,
-                        status: PowerOutputStatus::Disabled,
-                    },
-                    output_5v: EPSOutputStatus {
-                        current_ma: 0,
-                        status: PowerOutputStatus::Disabled,
-                    },
-                    output_9v: EPSOutputStatus {
-                        current_ma: 0,
-                        status: PowerOutputStatus::Disabled,
-                    },
-                },
-                payload_eps2: EPSStatus {
-                    battery1_mv: 0,
-                    battery2_mv: 0,
-                    output_3v3: EPSOutputStatus {
-                        current_ma: 0,
-                        status: PowerOutputStatus::Disabled,
-                    },
-                    output_5v: EPSOutputStatus {
-                        current_ma: 0,
-                        status: PowerOutputStatus::Disabled,
-                    },
-                    output_9v: EPSOutputStatus {
-                        current_ma: 0,
-                        status: PowerOutputStatus::Disabled,
-                    },
-                },
+                payload_activation_pcb_online: false,
+                payload_activation_pcb_uptime_s: 0,
+
+                rocket_wifi_online: false,
+                rocket_wifi_uptime_s: 0,
+
+                eps1_online: false,
+                eps1_uptime_s: 0,
+                eps1_battery1_v: 0.0,
+                eps1_battery2_v: 0.0,
+                eps1_output_3v3_current: 0.0,
+                eps1_output_3v3_status: PowerOutputStatus::Disabled,
+                eps1_output_5v_current: 0.0,
+                eps1_output_5v_status: PowerOutputStatus::Disabled,
+                eps1_output_9v_current: 0.0,
+                eps1_output_9v_status: PowerOutputStatus::Disabled,
+
+                eps2_online: false,
+                eps2_uptime_s: 0,
+                eps2_battery1_v: 0.0,
+                eps2_battery2_v: 0.0,
+                eps2_output_3v3_current: 0.0,
+                eps2_output_3v3_status: PowerOutputStatus::Disabled,
+                eps2_output_5v_current: 0.0,
+                eps2_output_5v_status: PowerOutputStatus::Disabled,
+                eps2_output_9v_current: 0.0,
+                eps2_output_9v_status: PowerOutputStatus::Disabled,
             })),
         }
     }
@@ -794,14 +898,34 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 state.ozys1_uptime_s < 5,
                 state.ozys2_online,
                 state.ozys2_uptime_s < 5,
-                state.payload_activation_online,
-                state.payload_activation_uptime_s < 5,
-                state.payload_alive,
                 state.aero_rust_uptime_s < 5,
                 state.aero_rust_health,
                 state.aero_rust_mode,
                 state.aero_rust_status,
-                PayloadTelemetry::new(&state.payload_eps1, &state.payload_eps2),
+                state.payload_activation_pcb_online,
+                state.payload_activation_pcb_uptime_s < 5,
+                state.rocket_wifi_online,
+                state.rocket_wifi_uptime_s < 5,
+                state.eps1_online,
+                state.eps1_uptime_s < 5,
+                state.eps1_battery1_v,
+                state.eps1_battery2_v,
+                state.eps1_output_3v3_current,
+                state.eps1_output_3v3_status,
+                state.eps1_output_5v_current,
+                state.eps1_output_5v_status,
+                state.eps1_output_9v_current,
+                state.eps1_output_9v_status,
+                state.eps2_online,
+                state.eps2_uptime_s < 5,
+                state.eps2_battery1_v,
+                state.eps2_battery2_v,
+                state.eps2_output_3v3_current,
+                state.eps2_output_3v3_status,
+                state.eps2_output_5v_current,
+                state.eps2_output_5v_status,
+                state.eps2_output_9v_current,
+                state.eps2_output_9v_status,
             )
         })
     }

@@ -251,8 +251,7 @@ mod tests {
     use crate::can_bus::{
         messages::{
             amp_status::PowerOutputStatus,
-            payload_status::{EPSOutputStatus, EPSStatus},
-            PayloadStatusMessage,
+            payload_eps_status::*,
         },
         sender::CanBusMultiFrameEncoder,
     };
@@ -271,43 +270,22 @@ mod tests {
             .is_test(true)
             .try_init();
 
-        let message = CanBusMessageEnum::PayloadStatus(PayloadStatusMessage::new(
-            EPSStatus {
-                battery1_mv: 1,
-                battery2_mv: 2,
-                output_3v3: EPSOutputStatus {
-                    current_ma: 3,
-                    status: PowerOutputStatus::Disabled,
-                },
-                output_5v: EPSOutputStatus {
-                    current_ma: 4,
-                    status: PowerOutputStatus::PowerGood,
-                },
-                output_9v: EPSOutputStatus {
-                    current_ma: 5,
-                    status: PowerOutputStatus::PowerBad,
-                },
+        let message = CanBusMessageEnum::PayloadEPSStatus(PayloadEPSStatusMessage {
+            battery1_mv: 1,
+            battery2_mv: 2,
+            output_3v3: PayloadEPSOutputStatus {
+                current_ma: 3,
+                status: PowerOutputStatus::Disabled,
             },
-            EPSStatus {
-                battery1_mv: 6,
-                battery2_mv: 7,
-                output_3v3: EPSOutputStatus {
-                    current_ma: 8,
-                    status: PowerOutputStatus::Disabled,
-                },
-                output_5v: EPSOutputStatus {
-                    current_ma: 9,
-                    status: PowerOutputStatus::PowerGood,
-                },
-                output_9v: EPSOutputStatus {
-                    current_ma: 10,
-                    status: PowerOutputStatus::PowerBad,
-                },
+            output_5v: PayloadEPSOutputStatus {
+                current_ma: 4,
+                status: PowerOutputStatus::PowerGood,
             },
-            11,
-            12,
-            13,
-        ));
+            output_9v: PayloadEPSOutputStatus {
+                current_ma: 5,
+                status: PowerOutputStatus::PowerBad,
+            },
+        });
 
         let id = message.get_id(0, 1);
         let id: u32 = id.into();
