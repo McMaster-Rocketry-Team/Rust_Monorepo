@@ -36,13 +36,14 @@ calculate-required-bits = { path = "../calculate-required-bits" }
 libm = "0.2.7"
 paste = "1.0"
 num-traits = { version = "0.2.19", default-features = false }
-lora-phy = { git = "https://github.com/lora-rs/lora-rs", default-features = false }
-lora-modulation = { git = "https://github.com/lora-rs/lora-rs", default-features = false }
+# change back to https://github.com/lora-rs/lora-rs.git once https://github.com/lora-rs/lora-rs/pull/381 is merged
+lora-phy = { git = "https://github.com/PegasisForever/lora-rs.git", branch = "patch-1", default-features = false }
+lora-modulation = { git = "https://github.com/PegasisForever/lora-rs.git", branch = "patch-1", default-features = false }
 sha2 = { version = "0.10.8", default-features = false }
 reed-solomon = "0.2.1"
 
 [dev-dependencies]
 approx = "0.5.1"
 env_logger = "0.11.8"
-tokio = {version = "1.44.2", features = ["full"]}
-embassy-sync = {version = "0.6.2", features = ["std"] }
+tokio = { version = "1.44.2", features = ["full"] }
+embassy-sync = { version = "0.6.2", features = ["std"] }

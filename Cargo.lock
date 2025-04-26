@@ -919,8 +919,8 @@ dependencies = [
  "int-enum",
  "libm 0.2.13",
  "log",
- "lora-modulation",
- "lora-phy",
+ "lora-modulation 0.1.5 (git+https://github.com/lora-rs/lora-rs)",
+ "lora-phy 3.0.2-alpha (git+https://github.com/lora-rs/lora-rs)",
  "micromath",
  "mockall",
  "nalgebra 0.32.6",
@@ -964,8 +964,8 @@ dependencies = [
  "icao-units 1.0.0",
  "libm 0.2.13",
  "log",
- "lora-modulation",
- "lora-phy",
+ "lora-modulation 0.1.5 (git+https://github.com/PegasisForever/lora-rs.git?branch=patch-1)",
+ "lora-phy 3.0.2-alpha (git+https://github.com/PegasisForever/lora-rs.git?branch=patch-1)",
  "nmea 0.7.0",
  "num-traits",
  "packed_struct",
@@ -1785,9 +1785,28 @@ checksum = "13dc2df351e3202783a1fe0d44375f7295ffb4049267b0f3018346dc122a1d94"
 [[package]]
 name = "lora-modulation"
 version = "0.1.5"
-source = "git+https://github.com/lora-rs/lora-rs#9afed8a238d382aed979c68b0f73f0f5e8fd752a"
+source = "git+https://github.com/PegasisForever/lora-rs.git?branch=patch-1#bd377ec431991e8af7903c735abe30409425091b"
 dependencies = [
  "defmt 0.3.100",
+]
+
+[[package]]
+name = "lora-modulation"
+version = "0.1.5"
+source = "git+https://github.com/lora-rs/lora-rs#9afed8a238d382aed979c68b0f73f0f5e8fd752a"
+
+[[package]]
+name = "lora-phy"
+version = "3.0.2-alpha"
+source = "git+https://github.com/PegasisForever/lora-rs.git?branch=patch-1#bd377ec431991e8af7903c735abe30409425091b"
+dependencies = [
+ "defmt 0.3.100",
+ "document-features",
+ "embedded-hal",
+ "embedded-hal-async",
+ "lora-modulation 0.1.5 (git+https://github.com/PegasisForever/lora-rs.git?branch=patch-1)",
+ "lorawan-device",
+ "num-traits",
 ]
 
 [[package]]
@@ -1795,19 +1814,17 @@ name = "lora-phy"
 version = "3.0.2-alpha"
 source = "git+https://github.com/lora-rs/lora-rs#9afed8a238d382aed979c68b0f73f0f5e8fd752a"
 dependencies = [
- "defmt 0.3.100",
  "document-features",
  "embedded-hal",
  "embedded-hal-async",
- "lora-modulation",
- "lorawan-device",
+ "lora-modulation 0.1.5 (git+https://github.com/lora-rs/lora-rs)",
  "num-traits",
 ]
 
 [[package]]
 name = "lorawan"
 version = "0.9.1"
-source = "git+https://github.com/lora-rs/lora-rs#9afed8a238d382aed979c68b0f73f0f5e8fd752a"
+source = "git+https://github.com/PegasisForever/lora-rs.git?branch=patch-1#bd377ec431991e8af7903c735abe30409425091b"
 dependencies = [
  "defmt 0.3.100",
  "hex",
@@ -1817,14 +1834,14 @@ dependencies = [
 [[package]]
 name = "lorawan-device"
 version = "0.12.2"
-source = "git+https://github.com/lora-rs/lora-rs#9afed8a238d382aed979c68b0f73f0f5e8fd752a"
+source = "git+https://github.com/PegasisForever/lora-rs.git?branch=patch-1#bd377ec431991e8af7903c735abe30409425091b"
 dependencies = [
  "defmt 0.3.100",
  "document-features",
  "fastrand",
  "futures",
  "heapless 0.8.0",
- "lora-modulation",
+ "lora-modulation 0.1.5 (git+https://github.com/PegasisForever/lora-rs.git?branch=patch-1)",
  "lorawan",
  "rand_core",
 ]
@@ -1832,7 +1849,7 @@ dependencies = [
 [[package]]
 name = "lorawan-macros"
 version = "0.1.0"
-source = "git+https://github.com/lora-rs/lora-rs#9afed8a238d382aed979c68b0f73f0f5e8fd752a"
+source = "git+https://github.com/PegasisForever/lora-rs.git?branch=patch-1#bd377ec431991e8af7903c735abe30409425091b"
 dependencies = [
  "proc-macro2",
  "quote",
