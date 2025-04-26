@@ -1,8 +1,6 @@
 use core::fmt::Debug;
 use packed_struct::prelude::*;
 
-use super::messages::{CanBusMessage, CanBusMessageEnum};
-
 #[derive(PackedStruct, Default, Clone, Copy, Debug, PartialEq, Eq)]
 #[packed_struct(endian = "msb", size_bytes = "4")]
 #[repr(C)]

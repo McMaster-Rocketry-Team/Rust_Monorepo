@@ -1,15 +1,16 @@
 use core::cell::{RefCell, RefMut};
-use embassy_sync::blocking_mutex::{raw::NoopRawMutex, Mutex as BlockingMutex};
+use embassy_sync::blocking_mutex::{raw::RawMutex, Mutex as BlockingMutex};
 use packed_struct::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::{
     can_bus::messages::{
         amp_status::PowerOutputStatus,
-        avionics_status::FlightStage,
         node_status::{NodeHealth, NodeMode},
+        payload_status::{EPSOutputStatus, EPSStatus},
     },
-    fixed_point_factory, gps::GPSData,
+    fixed_point_factory,
+    gps::GPSData,
 };
 
 fixed_point_factory!(PayloadVoltageFac, f32, 2.0, 4.5, 0.05);
@@ -56,6 +57,49 @@ pub struct PayloadTelemetry {
         Integer<PayloadCurrentFacBase, packed_bits::Bits<PAYLOAD_CURRENT_FAC_BITS>>,
     #[packed_field(element_size_bits = "2", ty = "enum")]
     eps2_output_9v_status: PowerOutputStatus,
+}
+
+impl PayloadTelemetry {
+    pub fn new(eps1: &EPSStatus, eps2: &EPSStatus) -> Self {
+        Self {
+            eps1_battery1_v: PayloadVoltageFac::to_fixed_point_capped(
+                eps1.battery1_mv as f32 / 1000.0,
+            ),
+            eps1_battery2_v: PayloadVoltageFac::to_fixed_point_capped(
+                eps1.battery2_mv as f32 / 1000.0,
+            ),
+            eps1_output_3v3_current: PayloadCurrentFac::to_fixed_point_capped(
+                eps1.output_3v3.current_ma as f32 / 1000.0,
+            ),
+            eps1_output_3v3_status: eps1.output_3v3.status,
+            eps1_output_5v_current: PayloadCurrentFac::to_fixed_point_capped(
+                eps1.output_5v.current_ma as f32 / 1000.0,
+            ),
+            eps1_output_5v_status: eps1.output_5v.status,
+            eps1_output_9v_current: PayloadCurrentFac::to_fixed_point_capped(
+                eps1.output_9v.current_ma as f32 / 1000.0,
+            ),
+            eps1_output_9v_status: eps1.output_9v.status,
+            eps2_battery1_v: PayloadVoltageFac::to_fixed_point_capped(
+                eps2.battery1_mv as f32 / 1000.0,
+            ),
+            eps2_battery2_v: PayloadVoltageFac::to_fixed_point_capped(
+                eps2.battery2_mv as f32 / 1000.0,
+            ),
+            eps2_output_3v3_current: PayloadCurrentFac::to_fixed_point_capped(
+                eps2.output_3v3.current_ma as f32 / 1000.0,
+            ),
+            eps2_output_3v3_status: eps2.output_3v3.status,
+            eps2_output_5v_current: PayloadCurrentFac::to_fixed_point_capped(
+                eps2.output_5v.current_ma as f32 / 1000.0,
+            ),
+            eps2_output_5v_status: eps2.output_5v.status,
+            eps2_output_9v_current: PayloadCurrentFac::to_fixed_point_capped(
+                eps2.output_9v.current_ma as f32 / 1000.0,
+            ),
+            eps2_output_9v_status: eps2.output_9v.status,
+        }
+    }
 }
 
 // 23 bits for latitude, 24 bits for longitude
@@ -164,7 +208,6 @@ pub struct TelemetryPacket {
     payload_activation_rebooted_in_last_5s: bool,
     payload_alive: bool,
 
-    aero_rust_online: bool,
     aero_rust_rebooted_in_last_5s: bool,
 
     #[packed_field(element_size_bits = "2", ty = "enum")]
@@ -239,7 +282,6 @@ impl TelemetryPacket {
         payload_activation_rebooted_in_last_5s: bool,
         payload_alive: bool,
 
-        aero_rust_online: bool,
         aero_rust_rebooted_in_last_5s: bool,
         aero_rust_health: NodeHealth,
         aero_rust_mode: NodeMode,
@@ -311,7 +353,6 @@ impl TelemetryPacket {
             payload_activation_rebooted_in_last_5s,
             payload_alive,
 
-            aero_rust_online,
             aero_rust_rebooted_in_last_5s,
             aero_rust_health,
             aero_rust_mode,
@@ -494,7 +535,7 @@ impl TelemetryPacket {
     }
 
     pub fn aero_rust_online(&self) -> bool {
-        self.aero_rust_online
+        self.aero_rust_mode != NodeMode::Offline
     }
 
     pub fn aero_rust_rebooted_in_last_5s(&self) -> bool {
@@ -534,7 +575,7 @@ pub struct TelemetryPacketBuilderState {
     max_altitude: f32,
     pub backup_altitude: f32,
     backup_max_altitude: f32,
-    
+
     pub air_speed: f32,
     max_air_speed: f32,
     pub backup_air_speed: f32,
@@ -543,7 +584,7 @@ pub struct TelemetryPacketBuilderState {
     pub tilt_deg: f32,
 
     pub flight_core_state: u8,
-    pub backup_flight_core_state:u8,
+    pub backup_flight_core_state: u8,
 
     pub amp_online: bool,
     pub amp_uptime_s: u32,
@@ -552,102 +593,230 @@ pub struct TelemetryPacketBuilderState {
     pub amp_out2: PowerOutputStatus,
     pub amp_out3: PowerOutputStatus,
     pub amp_out4: PowerOutputStatus,
-    
+
     pub main_bulkhead_online: bool,
+    pub main_bulkhead_uptime_s: u32,
+    pub main_bulkhead_brightness: u8,
+
+    pub drogue_bulkhead_online: bool,
+    pub drogue_bulkhead_uptime_s: u32,
+    pub drogue_bulkhead_brightness: u8,
+
+    pub icarus_online: bool,
+    pub icarus_uptime_s: u32,
+    pub air_brakes_extention_inch: f32,
+    pub air_brakes_servo_temp: f32,
+    pub ap_residue: f32,
+    pub cd: f32,
+
+    pub ozys1_online: bool,
+    pub ozys1_uptime_s: u32,
+
+    pub ozys2_online: bool,
+    pub ozys2_uptime_s: u32,
+
+    pub payload_activation_online: bool,
+    pub payload_activation_uptime_s: u32,
+    pub payload_alive: bool,
+
+    pub aero_rust_uptime_s: u32,
+    pub aero_rust_health: NodeHealth,
+    pub aero_rust_mode: NodeMode,
+    pub aero_rust_status: u16,
+
+    pub payload_eps1: EPSStatus,
+    pub payload_eps2: EPSStatus,
 }
 
-// pub struct TelemetryPacketBuilder<'a, K: Clock> {
-//     unix_clock: UnixClock<'a, K>,
-//     state: BlockingMutex<NoopRawMutex, RefCell<TelemetryPacketBuilderState>>,
-// }
+pub struct TelemetryPacketBuilder<M: RawMutex> {
+    state: BlockingMutex<M, RefCell<TelemetryPacketBuilderState>>,
+}
 
-// impl<'a, K: Clock> TelemetryPacketBuilder<'a, K> {
-//     pub fn new(unix_clock: UnixClock<'a, K>) -> Self {
-//         Self {
-//             unix_clock,
-//             state: BlockingMutex::new(RefCell::new(TelemetryPacketBuilderState {
-//                 gps_location: None,
-//                 battery_v: 0.0,
-//                 temperature: 0.0,
-//                 altitude: 0.0,
-//                 max_altitude: 0.0,
-//                 backup_altitude: 0.0,
-//                 backup_max_altitude: 0.0,
-//                 air_speed: 0.0,
-//                 max_air_speed: 0.0,
-//                 backup_air_speed: 0.0,
-//                 backup_max_air_speed: 0.0,
-//                 hardware_armed: false,
-//                 software_armed: false,
-//                 pyro_main_continuity: false,
-//                 pyro_drogue_continuity: false,
-//                 flight_core_state: FlightCoreState::DisArmed,
-//                 backup_flight_core_state: FlightCoreState::DisArmed,
-//                 disk_free_space: 0,
-//                 drogue_deployed: false,
-//                 main_deployed: false,
-//             })),
-//         }
-//     }
+impl<M: RawMutex> TelemetryPacketBuilder<M> {
+    pub fn new() -> Self {
+        Self {
+            state: BlockingMutex::new(RefCell::new(TelemetryPacketBuilderState {
+                nonce: 0,
 
-//     pub fn create_packet(&self) -> TelemetryPacket {
-//         self.state.lock(|state| {
-//             let state = state.borrow();
+                gps_location: None,
 
-//             TelemetryPacket::new(
-//                 self.unix_clock.ready(),
-//                 self.unix_clock.now_ms(),
-//                 state
-//                     .gps_location
-//                     .as_ref()
-//                     .map_or(0, |l| l.num_of_fix_satellites),
-//                 state.gps_location.as_ref().map(|l| l.lat_lon).flatten(),
-//                 state.battery_v,
-//                 state.temperature,
-//                 state.hardware_armed,
-//                 state.software_armed,
-//                 state.disk_free_space,
-//                 state.pyro_main_continuity,
-//                 state.pyro_drogue_continuity,
-//                 state.altitude,
-//                 state.max_altitude,
-//                 state.backup_max_altitude,
-//                 state.air_speed,
-//                 state.max_air_speed,
-//                 state.backup_max_air_speed,
-//                 state.flight_core_state,
-//                 state.backup_flight_core_state,
-//                 state.drogue_deployed,
-//                 state.main_deployed,
-//             )
-//         })
-//     }
+                vl_battery_v: 0.0,
+                air_temperature: 0.0,
+                vl_stm32_temperature: 0.0,
 
-//     pub fn update<U>(&self, update_fn: U)
-//     where
-//         U: FnOnce(&mut RefMut<TelemetryPacketBuilderState>) -> (),
-//     {
-//         self.state.lock(|state| {
-//             let mut state = state.borrow_mut();
-//             update_fn(&mut state);
-//             state.max_altitude = state.altitude.max(state.max_altitude);
-//             state.max_air_speed = state.air_speed.max(state.max_air_speed);
-//             state.backup_max_altitude = state.backup_altitude.max(state.backup_max_altitude);
-//             state.backup_max_air_speed = state.backup_air_speed.max(state.backup_max_air_speed);
-//         })
-//     }
-// }
+                pyro_main_continuity: false,
+                pyro_drogue_continuity: false,
 
-// #[cfg(test)]
-// mod test {
-//     use super::*;
+                altitude: 0.0,
+                max_altitude: 0.0,
+                backup_altitude: 0.0,
+                backup_max_altitude: 0.0,
 
-//     #[test]
-//     fn print_telemetry_packet_length() {
-//         println!(
-//             "Telemetry Packet Struct Length: {}",
-//             size_of::<TelemetryPacket>() * 8
-//         );
-//         println!("Telemetry Packet Length: {}", TelemetryPacket::len_bits());
-//     }
-// }
+                air_speed: 0.0,
+                max_air_speed: 0.0,
+                backup_air_speed: 0.0,
+                backup_max_air_speed: 0.0,
+
+                tilt_deg: 0.0,
+
+                flight_core_state: 0,
+                backup_flight_core_state: 0,
+
+                amp_online: false,
+                amp_uptime_s: 0,
+                shared_battery_v: 0.0,
+                amp_out1: PowerOutputStatus::Disabled,
+                amp_out2: PowerOutputStatus::Disabled,
+                amp_out3: PowerOutputStatus::Disabled,
+                amp_out4: PowerOutputStatus::Disabled,
+
+                main_bulkhead_online: false,
+                main_bulkhead_uptime_s: 0,
+                main_bulkhead_brightness: 0,
+
+                drogue_bulkhead_online: false,
+                drogue_bulkhead_uptime_s: 0,
+                drogue_bulkhead_brightness: 0,
+
+                icarus_online: false,
+                icarus_uptime_s: 0,
+                air_brakes_extention_inch: 0.0,
+                air_brakes_servo_temp: 0.0,
+                ap_residue: 0.0,
+                cd: 0.0,
+
+                ozys1_online: false,
+                ozys1_uptime_s: 0,
+
+                ozys2_online: false,
+                ozys2_uptime_s: 0,
+
+                payload_activation_online: false,
+                payload_activation_uptime_s: 0,
+                payload_alive: false,
+
+                aero_rust_uptime_s: 0,
+                aero_rust_health: NodeHealth::Healthy,
+                aero_rust_mode: NodeMode::Offline,
+                aero_rust_status: 0,
+
+                payload_eps1: EPSStatus {
+                    battery1_mv: 0,
+                    battery2_mv: 0,
+                    output_3v3: EPSOutputStatus {
+                        current_ma: 0,
+                        status: PowerOutputStatus::Disabled,
+                    },
+                    output_5v: EPSOutputStatus {
+                        current_ma: 0,
+                        status: PowerOutputStatus::Disabled,
+                    },
+                    output_9v: EPSOutputStatus {
+                        current_ma: 0,
+                        status: PowerOutputStatus::Disabled,
+                    },
+                },
+                payload_eps2: EPSStatus {
+                    battery1_mv: 0,
+                    battery2_mv: 0,
+                    output_3v3: EPSOutputStatus {
+                        current_ma: 0,
+                        status: PowerOutputStatus::Disabled,
+                    },
+                    output_5v: EPSOutputStatus {
+                        current_ma: 0,
+                        status: PowerOutputStatus::Disabled,
+                    },
+                    output_9v: EPSOutputStatus {
+                        current_ma: 0,
+                        status: PowerOutputStatus::Disabled,
+                    },
+                },
+            })),
+        }
+    }
+
+    pub fn create_packet(&self) -> TelemetryPacket {
+        self.state.lock(|state| {
+            let mut state = state.borrow_mut();
+            state.nonce += 1;
+            if state.nonce > 15 {
+                state.nonce = 0;
+            }
+            TelemetryPacket::new(
+                state.nonce,
+                state
+                    .gps_location
+                    .as_ref()
+                    .map(|g| g.timestamp)
+                    .flatten()
+                    .is_some(),
+                state
+                    .gps_location
+                    .as_ref()
+                    .map(|g| g.num_of_fix_satellites)
+                    .unwrap_or(0),
+                state.gps_location.as_ref().map(|g| g.lat_lon).flatten(),
+                state.vl_battery_v,
+                state.air_temperature,
+                state.vl_stm32_temperature,
+                state.pyro_main_continuity,
+                state.pyro_drogue_continuity,
+                state.altitude,
+                state.max_altitude,
+                state.backup_max_altitude,
+                state.air_speed,
+                state.max_air_speed,
+                state.backup_max_air_speed,
+                state.tilt_deg,
+                state.flight_core_state,
+                state.backup_flight_core_state,
+                state.amp_online,
+                state.amp_uptime_s < 5,
+                state.shared_battery_v,
+                state.amp_out1,
+                state.amp_out2,
+                state.amp_out3,
+                state.amp_out4,
+                state.main_bulkhead_online,
+                state.main_bulkhead_uptime_s < 5,
+                state.main_bulkhead_brightness,
+                state.drogue_bulkhead_online,
+                state.drogue_bulkhead_uptime_s < 5,
+                state.drogue_bulkhead_brightness,
+                state.icarus_online,
+                state.icarus_uptime_s < 5,
+                state.air_brakes_extention_inch,
+                state.air_brakes_servo_temp,
+                state.ap_residue,
+                state.cd,
+                state.ozys1_online,
+                state.ozys1_uptime_s < 5,
+                state.ozys2_online,
+                state.ozys2_uptime_s < 5,
+                state.payload_activation_online,
+                state.payload_activation_uptime_s < 5,
+                state.payload_alive,
+                state.aero_rust_uptime_s < 5,
+                state.aero_rust_health,
+                state.aero_rust_mode,
+                state.aero_rust_status,
+                PayloadTelemetry::new(&state.payload_eps1, &state.payload_eps2),
+            )
+        })
+    }
+
+    pub fn update<U>(&self, update_fn: U)
+    where
+        U: FnOnce(&mut RefMut<TelemetryPacketBuilderState>) -> (),
+    {
+        self.state.lock(|state| {
+            let mut state = state.borrow_mut();
+            update_fn(&mut state);
+            state.max_altitude = state.altitude.max(state.max_altitude);
+            state.max_air_speed = state.air_speed.max(state.max_air_speed);
+            state.backup_max_altitude = state.backup_altitude.max(state.backup_max_altitude);
+            state.backup_max_air_speed = state.backup_air_speed.max(state.backup_max_air_speed);
+        })
+    }
+}
