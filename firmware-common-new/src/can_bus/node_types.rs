@@ -23,7 +23,8 @@ pub const OZYS_NODE_TYPE: u8 = 25;
 pub const BULKHEAD_NODE_TYPE: u8 = 30;
 
 /// EPS node in payload bay
-pub const PAYLOAD_EPS_NODE_TYPE: u8 = 40;
+pub const PAYLOAD_EPS1_NODE_TYPE: u8 = 40;
+pub const PAYLOAD_EPS2_NODE_TYPE: u8 = 41;
 
 /// Aero rust node
 pub const AERO_RUST_NODE_TYPE: u8 = 50;

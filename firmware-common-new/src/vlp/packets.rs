@@ -5,14 +5,17 @@ use ack::AckPacket;
 use change_mode::ChangeModePacket;
 use gps_beacon::GPSBeaconPacket;
 use low_power_telemetry::LowPowerTelemetryPacket;
-use telemetry_packet::TelemetryPacket;
+use reset::ResetPacket;
+use self_test_result::SelfTestResultPacket;
+use telemetry::TelemetryPacket;
 
 pub mod ack;
 pub mod change_mode;
 pub mod gps_beacon;
 pub mod low_power_telemetry;
-pub mod self_test_result_packet;
-pub mod telemetry_packet;
+pub mod reset;
+pub mod self_test_result;
+pub mod telemetry;
 
 // TODO change
 pub const MAX_VLP_PACKET_SIZE: usize = 100;
@@ -23,6 +26,7 @@ pub enum VLPDownlinkPacket {
     Ack(AckPacket),
     LowPowerTelemetry(LowPowerTelemetryPacket),
     Telemetry(TelemetryPacket),
+    SelfTestResult(SelfTestResultPacket),
 }
 
 impl VLPDownlinkPacket {
@@ -39,6 +43,7 @@ impl VLPDownlinkPacket {
                 LowPowerTelemetryPacket::deserialize(data).map(VLPDownlinkPacket::LowPowerTelemetry)
             }
             3 => TelemetryPacket::deserialize(data).map(VLPDownlinkPacket::Telemetry),
+            4 => SelfTestResultPacket::deserialize(data).map(VLPDownlinkPacket::SelfTestResult),
             _ => None,
         }
     }
@@ -49,6 +54,7 @@ impl VLPDownlinkPacket {
             VLPDownlinkPacket::Ack(_) => 1,
             VLPDownlinkPacket::LowPowerTelemetry(_) => 2,
             VLPDownlinkPacket::Telemetry(_) => 3,
+            VLPDownlinkPacket::SelfTestResult(_) => 4,
         };
         buffer = &mut buffer[1..];
 
@@ -57,6 +63,7 @@ impl VLPDownlinkPacket {
             VLPDownlinkPacket::Ack(packet) => packet.serialize(buffer),
             VLPDownlinkPacket::LowPowerTelemetry(packet) => packet.serialize(buffer),
             VLPDownlinkPacket::Telemetry(packet) => packet.serialize(buffer),
+            VLPDownlinkPacket::SelfTestResult(packet) => packet.serialize(buffer),
         }
     }
 }
@@ -64,6 +71,7 @@ impl VLPDownlinkPacket {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum VLPUplinkPacket {
     ChangeMode(ChangeModePacket),
+    Reset(ResetPacket),
 }
 
 impl VLPUplinkPacket {
@@ -75,6 +83,7 @@ impl VLPUplinkPacket {
         let data = &data[1..];
         match packet_type {
             0 => ChangeModePacket::deserialize(data).map(VLPUplinkPacket::ChangeMode),
+            1 => ResetPacket::deserialize(data).map(VLPUplinkPacket::Reset),
             _ => None,
         }
     }
@@ -82,11 +91,13 @@ impl VLPUplinkPacket {
     pub(super) fn serialize(self, mut buffer: &mut [u8]) -> usize {
         buffer[0] = match self {
             VLPUplinkPacket::ChangeMode(_) => 0,
+            VLPUplinkPacket::Reset(_) => 1,
         };
         buffer = &mut buffer[1..];
 
         1 + match self {
             VLPUplinkPacket::ChangeMode(packet) => packet.serialize(buffer),
+            VLPUplinkPacket::Reset(packet) => packet.serialize(buffer),
         }
     }
 }

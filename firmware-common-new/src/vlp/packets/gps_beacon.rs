@@ -3,13 +3,19 @@ use serde::{Deserialize, Serialize};
 
 use crate::fixed_point_factory;
 
+// 23 bits for latitude, 24 bits for longitude
+// resolution of 2.4m at equator
+fixed_point_factory!(LatFac, f64, -90.0, 90.0, 0.00002146);
+fixed_point_factory!(LonFac, f64, -180.0, 180.0, 0.00002146);
 fixed_point_factory!(BatteryVFac, f32, 5.0, 8.5, 0.001);
 
 #[derive(PackedStruct, Debug, Clone, PartialEq, Deserialize, Serialize)]
-#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "19")]
+#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "8")]
 pub struct GPSBeaconPacket {
-    lat: u64,
-    lon: u64,
+    #[packed_field(element_size_bits = "23")]
+    lat: Integer<LatFacBase, packed_bits::Bits<LAT_FAC_BITS>>,
+    #[packed_field(element_size_bits = "24")]
+    lon: Integer<LonFacBase, packed_bits::Bits<LON_FAC_BITS>>,
 
     #[packed_field(element_size_bits = "5")]
     num_of_fix_satellites: u8,
@@ -19,21 +25,17 @@ pub struct GPSBeaconPacket {
 }
 
 impl GPSBeaconPacket {
-    pub fn new(lat: f64, lon: f64, num_of_fix_satellites: u8, battery_v: f32) -> Self {
+    pub fn new(lat_lon: Option<(f64, f64)>, num_of_fix_satellites: u8, battery_v: f32) -> Self {
         Self {
-            lat: u64::from_be_bytes(lat.to_be_bytes()),
-            lon: u64::from_be_bytes(lon.to_be_bytes()),
+            lat: LatFac::to_fixed_point_capped(lat_lon.unwrap_or((0.0, 0.0)).0),
+            lon: LonFac::to_fixed_point_capped(lat_lon.unwrap_or((0.0, 0.0)).1),
             num_of_fix_satellites: num_of_fix_satellites,
             battery_v: BatteryVFac::to_fixed_point_capped(battery_v),
         }
     }
 
-    pub fn lat(&self) -> f64 {
-        f64::from_bits(self.lat)
-    }
-
-    pub fn lon(&self) -> f64 {
-        f64::from_bits(self.lon)
+    pub fn lat_lon(&self) -> (f64, f64) {
+        (LatFac::to_float(self.lat), LonFac::to_float(self.lon))
     }
 
     pub fn num_of_fix_satellites(&self) -> u8 {
