@@ -17,7 +17,7 @@ pub use payload_eps_status::PayloadEPSStatusMessage;
 pub use reset::ResetMessage;
 pub use unix_time::UnixTimeMessage;
 
-use super::id::CanBusExtendedId;
+use super::id::{create_can_bus_message_type, CanBusExtendedId, CanBusMessageTypeFlag};
 
 pub mod ack;
 pub mod amp_control;
@@ -35,13 +35,164 @@ pub mod payload_eps_status;
 pub mod reset;
 pub mod unix_time;
 
+pub const RESET_MESSAGE_TYPE: u8 = create_can_bus_message_type(
+    CanBusMessageTypeFlag {
+        is_measurement: false,
+        is_control: false,
+        is_status: false,
+        is_data: false,
+        is_misc: false,
+    },
+    0,
+);
+pub const UNIX_TIME_MESSAGE_TYPE: u8 = create_can_bus_message_type(
+    CanBusMessageTypeFlag {
+        is_measurement: false,
+        is_control: false,
+        is_status: false,
+        is_data: false,
+        is_misc: false,
+    },
+    7,
+);
+pub const NODE_STATUS_MESSAGE_TYPE: u8 = create_can_bus_message_type(
+    CanBusMessageTypeFlag {
+        is_measurement: false,
+        is_control: false,
+        is_status: true,
+        is_data: false,
+        is_misc: false,
+    },
+    0,
+);
+pub const BARO_MEASUREMENT_MESSAGE_TYPE: u8 = create_can_bus_message_type(
+    CanBusMessageTypeFlag {
+        is_measurement: true,
+        is_control: false,
+        is_status: false,
+        is_data: false,
+        is_misc: false,
+    },
+    0,
+);
+pub const IMU_MEASUREMENT_MESSAGE_TYPE: u8 = create_can_bus_message_type(
+    CanBusMessageTypeFlag {
+        is_measurement: true,
+        is_control: false,
+        is_status: false,
+        is_data: false,
+        is_misc: false,
+    },
+    1,
+);
+pub const BRIGHTNESS_MEASUREMENT_MESSAGE_TYPE: u8 = create_can_bus_message_type(
+    CanBusMessageTypeFlag {
+        is_measurement: true,
+        is_control: false,
+        is_status: false,
+        is_data: false,
+        is_misc: false,
+    },
+    2,
+);
+pub const AMP_STATUS_MESSAGE_TYPE: u8 = create_can_bus_message_type(
+    CanBusMessageTypeFlag {
+        is_measurement: false,
+        is_control: false,
+        is_status: true,
+        is_data: false,
+        is_misc: false,
+    },
+    1,
+);
+pub const AMP_CONTROL_MESSAGE_TYPE: u8 = create_can_bus_message_type(
+    CanBusMessageTypeFlag {
+        is_measurement: false,
+        is_control: true,
+        is_status: false,
+        is_data: false,
+        is_misc: false,
+    },
+    0,
+);
+pub const PAYLOAD_EPS_STATUS_MESSAGE_TYPE: u8 = create_can_bus_message_type(
+    CanBusMessageTypeFlag {
+        is_measurement: false,
+        is_control: false,
+        is_status: true,
+        is_data: false,
+        is_misc: false,
+    },
+    2,
+);
+pub const PAYLOAD_EPS_OUTPUT_OVERWRITE_MESSAGE_TYPE: u8 = create_can_bus_message_type(
+    CanBusMessageTypeFlag {
+        is_measurement: false,
+        is_control: true,
+        is_status: false,
+        is_data: false,
+        is_misc: false,
+    },
+    1,
+);
+pub const PAYLOAD_EPS_SELF_TEST_MESSAGE_TYPE: u8 = create_can_bus_message_type(
+    CanBusMessageTypeFlag {
+        is_measurement: false,
+        is_control: false,
+        is_status: true,
+        is_data: false,
+        is_misc: false,
+    },
+    3,
+);
+pub const AVIONICS_STATUS_MESSAGE_TYPE: u8 = create_can_bus_message_type(
+    CanBusMessageTypeFlag {
+        is_measurement: false,
+        is_control: false,
+        is_status: true,
+        is_data: false,
+        is_misc: false,
+    },
+    4,
+);
+pub const ICARUS_STATUS_MESSAGE_TYPE: u8 = create_can_bus_message_type(
+    CanBusMessageTypeFlag {
+        is_measurement: true,
+        is_control: false,
+        is_status: true,
+        is_data: false,
+        is_misc: false,
+    },
+    0,
+);
+pub const DATA_TRANSFER_MESSAGE_TYPE: u8 = create_can_bus_message_type(
+    CanBusMessageTypeFlag {
+        is_measurement: false,
+        is_control: false,
+        is_status: false,
+        is_data: true,
+        is_misc: false,
+    },
+    0,
+);
+pub const ACK_MESSAGE_TYPE: u8 = create_can_bus_message_type(
+    CanBusMessageTypeFlag {
+        is_measurement: false,
+        is_control: true,
+        is_status: false,
+        is_data: false,
+        is_misc: false,
+    },
+    2,
+);
+
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[repr(C)]
 pub enum CanBusMessageEnum {
+    Reset(ResetMessage),
     UnixTime(UnixTimeMessage),
     NodeStatus(NodeStatusMessage),
-    Reset(ResetMessage),
 
     BaroMeasurement(BaroMeasurementMessage),
     IMUMeasurement(IMUMeasurementMessage),
@@ -84,21 +235,23 @@ impl CanBusMessageEnum {
 
     pub fn get_message_type(&self) -> u8 {
         match self {
-            CanBusMessageEnum::UnixTime(_) => 0,
-            CanBusMessageEnum::NodeStatus(_) => 1,
-            CanBusMessageEnum::Reset(_) => 2,
-            CanBusMessageEnum::BaroMeasurement(_) => 3,
-            CanBusMessageEnum::IMUMeasurement(_) => 4,
-            CanBusMessageEnum::BrightnessMeasurement(_) => 5,
-            CanBusMessageEnum::AmpStatus(_) => 6,
-            CanBusMessageEnum::AmpControl(_) => 7,
-            CanBusMessageEnum::PayloadEPSStatus(_) => 8,
-            CanBusMessageEnum::PayloadEPSOutputOverwrite(_) => 9,
-            CanBusMessageEnum::PayloadEPSSelfTest(_) => 10,
-            CanBusMessageEnum::AvionicsStatus(_) => 11,
-            CanBusMessageEnum::IcarusStatus(_) => 12,
-            CanBusMessageEnum::DataTransfer(_) => 13,
-            CanBusMessageEnum::Ack(_) => 14,
+            CanBusMessageEnum::UnixTime(_) => UNIX_TIME_MESSAGE_TYPE,
+            CanBusMessageEnum::NodeStatus(_) => NODE_STATUS_MESSAGE_TYPE,
+            CanBusMessageEnum::Reset(_) => RESET_MESSAGE_TYPE,
+            CanBusMessageEnum::BaroMeasurement(_) => BARO_MEASUREMENT_MESSAGE_TYPE,
+            CanBusMessageEnum::IMUMeasurement(_) => IMU_MEASUREMENT_MESSAGE_TYPE,
+            CanBusMessageEnum::BrightnessMeasurement(_) => BRIGHTNESS_MEASUREMENT_MESSAGE_TYPE,
+            CanBusMessageEnum::AmpStatus(_) => AMP_STATUS_MESSAGE_TYPE,
+            CanBusMessageEnum::AmpControl(_) => AMP_CONTROL_MESSAGE_TYPE,
+            CanBusMessageEnum::PayloadEPSStatus(_) => PAYLOAD_EPS_STATUS_MESSAGE_TYPE,
+            CanBusMessageEnum::PayloadEPSOutputOverwrite(_) => {
+                PAYLOAD_EPS_OUTPUT_OVERWRITE_MESSAGE_TYPE
+            }
+            CanBusMessageEnum::PayloadEPSSelfTest(_) => PAYLOAD_EPS_SELF_TEST_MESSAGE_TYPE,
+            CanBusMessageEnum::AvionicsStatus(_) => AVIONICS_STATUS_MESSAGE_TYPE,
+            CanBusMessageEnum::IcarusStatus(_) => ICARUS_STATUS_MESSAGE_TYPE,
+            CanBusMessageEnum::DataTransfer(_) => DATA_TRANSFER_MESSAGE_TYPE,
+            CanBusMessageEnum::Ack(_) => ACK_MESSAGE_TYPE,
         }
     }
 
@@ -128,26 +281,46 @@ impl CanBusMessageEnum {
 
     pub fn deserialize(message_type: u8, data: &[u8]) -> Option<Self> {
         match message_type {
-            0 => UnixTimeMessage::deserialize(data).map(CanBusMessageEnum::UnixTime),
-            1 => NodeStatusMessage::deserialize(data).map(CanBusMessageEnum::NodeStatus),
-            2 => ResetMessage::deserialize(data).map(CanBusMessageEnum::Reset),
-            3 => BaroMeasurementMessage::deserialize(data).map(CanBusMessageEnum::BaroMeasurement),
-            4 => IMUMeasurementMessage::deserialize(data).map(CanBusMessageEnum::IMUMeasurement),
-            5 => BrightnessMeasurementMessage::deserialize(data)
+            UNIX_TIME_MESSAGE_TYPE => {
+                UnixTimeMessage::deserialize(data).map(CanBusMessageEnum::UnixTime)
+            }
+            NODE_STATUS_MESSAGE_TYPE => {
+                NodeStatusMessage::deserialize(data).map(CanBusMessageEnum::NodeStatus)
+            }
+            RESET_MESSAGE_TYPE => ResetMessage::deserialize(data).map(CanBusMessageEnum::Reset),
+            BARO_MEASUREMENT_MESSAGE_TYPE => {
+                BaroMeasurementMessage::deserialize(data).map(CanBusMessageEnum::BaroMeasurement)
+            }
+            IMU_MEASUREMENT_MESSAGE_TYPE => {
+                IMUMeasurementMessage::deserialize(data).map(CanBusMessageEnum::IMUMeasurement)
+            }
+            BRIGHTNESS_MEASUREMENT_MESSAGE_TYPE => BrightnessMeasurementMessage::deserialize(data)
                 .map(CanBusMessageEnum::BrightnessMeasurement),
-            6 => AmpStatusMessage::deserialize(data).map(CanBusMessageEnum::AmpStatus),
-            7 => AmpControlMessage::deserialize(data).map(CanBusMessageEnum::AmpControl),
-            8 => {
+            AMP_STATUS_MESSAGE_TYPE => {
+                AmpStatusMessage::deserialize(data).map(CanBusMessageEnum::AmpStatus)
+            }
+            AMP_CONTROL_MESSAGE_TYPE => {
+                AmpControlMessage::deserialize(data).map(CanBusMessageEnum::AmpControl)
+            }
+            PAYLOAD_EPS_STATUS_MESSAGE_TYPE => {
                 PayloadEPSStatusMessage::deserialize(data).map(CanBusMessageEnum::PayloadEPSStatus)
             }
-            9 => PayloadEPSOutputOverwriteMessage::deserialize(data)
-                .map(CanBusMessageEnum::PayloadEPSOutputOverwrite),
-            10 => PayloadEPSSelfTestMessage::deserialize(data)
+            PAYLOAD_EPS_OUTPUT_OVERWRITE_MESSAGE_TYPE => {
+                PayloadEPSOutputOverwriteMessage::deserialize(data)
+                    .map(CanBusMessageEnum::PayloadEPSOutputOverwrite)
+            }
+            PAYLOAD_EPS_SELF_TEST_MESSAGE_TYPE => PayloadEPSSelfTestMessage::deserialize(data)
                 .map(CanBusMessageEnum::PayloadEPSSelfTest),
-            11 => AvionicsStatusMessage::deserialize(data).map(CanBusMessageEnum::AvionicsStatus),
-            12 => IcarusStatusMessage::deserialize(data).map(CanBusMessageEnum::IcarusStatus),
-            13 => DataTransferMessage::deserialize(data).map(CanBusMessageEnum::DataTransfer),
-            14 => AckMessage::deserialize(data).map(CanBusMessageEnum::Ack),
+            AVIONICS_STATUS_MESSAGE_TYPE => {
+                AvionicsStatusMessage::deserialize(data).map(CanBusMessageEnum::AvionicsStatus)
+            }
+            ICARUS_STATUS_MESSAGE_TYPE => {
+                IcarusStatusMessage::deserialize(data).map(CanBusMessageEnum::IcarusStatus)
+            }
+            DATA_TRANSFER_MESSAGE_TYPE => {
+                DataTransferMessage::deserialize(data).map(CanBusMessageEnum::DataTransfer)
+            }
+            ACK_MESSAGE_TYPE => AckMessage::deserialize(data).map(CanBusMessageEnum::Ack),
             _ => None,
         }
     }

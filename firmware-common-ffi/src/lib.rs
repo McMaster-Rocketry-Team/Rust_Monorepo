@@ -2,11 +2,11 @@
 #![allow(static_mut_refs)]
 
 use firmware_common_new::can_bus::id::CanBusExtendedId;
+use firmware_common_new::can_bus::messages;
 use firmware_common_new::can_bus::messages::CanBusMessageEnum;
+use firmware_common_new::can_bus::node_types;
 use firmware_common_new::can_bus::receiver::CanBusMultiFrameDecoder;
 use firmware_common_new::can_bus::sender::CanBusMultiFrameEncoder;
-
-pub use firmware_common_new::can_bus::node_types;
 
 #[no_mangle]
 pub static VOID_LAKE_NODE_TYPE: u8 = node_types::VOID_LAKE_NODE_TYPE;
@@ -28,6 +28,38 @@ pub static PAYLOAD_EPS1_NODE_TYPE: u8 = node_types::PAYLOAD_EPS1_NODE_TYPE;
 pub static PAYLOAD_EPS2_NODE_TYPE: u8 = node_types::PAYLOAD_EPS2_NODE_TYPE;
 #[no_mangle]
 pub static AERO_RUST_NODE_TYPE: u8 = node_types::AERO_RUST_NODE_TYPE;
+
+#[no_mangle]
+pub static RESET_MESSAGE_TYPE: u8 = messages::RESET_MESSAGE_TYPE;
+#[no_mangle]
+pub static UNIX_TIME_MESSAGE_TYPE: u8 = messages::UNIX_TIME_MESSAGE_TYPE;
+#[no_mangle]
+pub static NODE_STATUS_MESSAGE_TYPE: u8 = messages::NODE_STATUS_MESSAGE_TYPE;
+#[no_mangle]
+pub static BARO_MEASUREMENT_MESSAGE_TYPE: u8 = messages::BARO_MEASUREMENT_MESSAGE_TYPE;
+#[no_mangle]
+pub static IMU_MEASUREMENT_MESSAGE_TYPE: u8 = messages::IMU_MEASUREMENT_MESSAGE_TYPE;
+#[no_mangle]
+pub static BRIGHTNESS_MEASUREMENT_MESSAGE_TYPE: u8 = messages::BRIGHTNESS_MEASUREMENT_MESSAGE_TYPE;
+#[no_mangle]
+pub static AMP_STATUS_MESSAGE_TYPE: u8 = messages::AMP_STATUS_MESSAGE_TYPE;
+#[no_mangle]
+pub static AMP_CONTROL_MESSAGE_TYPE: u8 = messages::AMP_CONTROL_MESSAGE_TYPE;
+#[no_mangle]
+pub static PAYLOAD_EPS_STATUS_MESSAGE_TYPE: u8 = messages::PAYLOAD_EPS_STATUS_MESSAGE_TYPE;
+#[no_mangle]
+pub static PAYLOAD_EPS_OUTPUT_OVERWRITE_MESSAGE_TYPE: u8 =
+    messages::PAYLOAD_EPS_OUTPUT_OVERWRITE_MESSAGE_TYPE;
+#[no_mangle]
+pub static PAYLOAD_EPS_SELF_TEST_MESSAGE_TYPE: u8 = messages::PAYLOAD_EPS_SELF_TEST_MESSAGE_TYPE;
+#[no_mangle]
+pub static AVIONICS_STATUS_MESSAGE_TYPE: u8 = messages::AVIONICS_STATUS_MESSAGE_TYPE;
+#[no_mangle]
+pub static ICARUS_STATUS_MESSAGE_TYPE: u8 = messages::ICARUS_STATUS_MESSAGE_TYPE;
+#[no_mangle]
+pub static DATA_TRANSFER_MESSAGE_TYPE: u8 = messages::DATA_TRANSFER_MESSAGE_TYPE;
+#[no_mangle]
+pub static ACK_MESSAGE_TYPE: u8 = messages::ACK_MESSAGE_TYPE;
 
 #[repr(C)]
 pub struct CanBusFrames {
@@ -179,6 +211,30 @@ pub extern "C" fn can_node_id_from_serial_number(
 ) -> u16 {
     let serial_number = unsafe { core::slice::from_raw_parts(serial_number, serial_number_length) };
     firmware_common_new::can_bus::id::can_node_id_from_serial_number(serial_number)
+}
+
+/// Returns a mask that can be used to filter incoming frames.
+///
+/// Filter logic: `frame_accepted = (incoming_id & mask) == 0`
+///
+/// - If the message type of the incoming frame is in `accept_message_types`, the frame will be accepted
+/// - If the message type of the incoming frame is not in `accept_message_types`, the frame *MAY OR MAY NOT* be rejected
+/// - `ResetMessage` and `UnixTimeMessage` is always accepted even if its not in the `accept_message_types` list
+///
+/// This is useful when you want to utilize the filter function of the CAN hardware.
+///
+/// # Parameters
+/// - `accept_message_types`: A pointer to the array of message types to accept.
+/// - `accept_message_types_length`: The length of the `accept_message_types` array.
+///
+#[no_mangle]
+pub extern "C" fn create_can_bus_message_type_filter_mask(
+    accept_message_types: *const u8,
+    accept_message_types_length: usize,
+) -> u32 {
+    let accept_message_types =
+        unsafe { core::slice::from_raw_parts(accept_message_types, accept_message_types_length) };
+    firmware_common_new::can_bus::id::create_can_bus_message_type_filter_mask(accept_message_types)
 }
 
 #[cfg(any(target_os = "none", target_os = "espidf"))]
