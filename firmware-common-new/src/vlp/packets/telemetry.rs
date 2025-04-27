@@ -12,6 +12,8 @@ use crate::{
     gps::GPSData,
 };
 
+use super::VLPDownlinkPacket;
+
 // 23 bits for latitude, 24 bits for longitude
 // resolution of 2.4m at equator
 fixed_point_factory!(LatFac, f64, -90.0, 90.0, 0.00002146);
@@ -950,6 +952,12 @@ impl defmt::Format for TelemetryPacket {
             self.eps2_output_9v_overwrote(),
             self.eps2_output_9v_status(),
         )
+    }
+}
+
+impl Into<VLPDownlinkPacket> for TelemetryPacket {
+    fn into(self) -> VLPDownlinkPacket {
+        VLPDownlinkPacket::Telemetry(self)
     }
 }
 

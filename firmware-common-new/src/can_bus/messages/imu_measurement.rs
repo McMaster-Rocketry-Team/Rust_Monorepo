@@ -1,7 +1,7 @@
 use packed_struct::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use super::CanBusMessage;
+use super::{CanBusMessage, CanBusMessageEnum};
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PackedStruct, Clone, Debug, Serialize, Deserialize)]
@@ -39,5 +39,11 @@ impl IMUMeasurementMessage {
 impl CanBusMessage for IMUMeasurementMessage {
     fn priority(&self) -> u8 {
         3
+    }
+}
+
+impl Into<CanBusMessageEnum> for IMUMeasurementMessage {
+    fn into(self) -> CanBusMessageEnum {
+        CanBusMessageEnum::IMUMeasurement(self)
     }
 }

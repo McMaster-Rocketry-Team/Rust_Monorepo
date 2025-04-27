@@ -1,7 +1,7 @@
 use packed_struct::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use super::CanBusMessage;
+use super::{CanBusMessage, CanBusMessageEnum};
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PrimitiveEnum_u8, Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -49,5 +49,11 @@ impl AmpStatusMessage {
 impl CanBusMessage for AmpStatusMessage {
     fn priority(&self) -> u8 {
         5
+    }
+}
+
+impl Into<CanBusMessageEnum> for AmpStatusMessage {
+    fn into(self) -> CanBusMessageEnum {
+        CanBusMessageEnum::AmpStatus(self)
     }
 }

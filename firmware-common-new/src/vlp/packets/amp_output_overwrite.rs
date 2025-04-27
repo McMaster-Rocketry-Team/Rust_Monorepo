@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::can_bus::messages::payload_eps_output_overwrite::PowerOutputOverwrite;
 
+use super::VLPUplinkPacket;
+
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PackedStruct, Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "1")]
@@ -15,4 +17,10 @@ pub struct AMPOutputOverwritePacket {
     pub out3: PowerOutputOverwrite,
     #[packed_field(bits = "6..8", ty = "enum")]
     pub out4: PowerOutputOverwrite,
+}
+
+impl Into<VLPUplinkPacket> for AMPOutputOverwritePacket {
+    fn into(self) -> VLPUplinkPacket {
+        VLPUplinkPacket::AMPOutputOverwrite(self)
+    }
 }

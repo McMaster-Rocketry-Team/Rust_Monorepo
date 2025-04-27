@@ -1,7 +1,7 @@
 use packed_struct::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use super::CanBusMessage;
+use super::{CanBusMessage, CanBusMessageEnum};
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PackedStruct, Clone, Debug, Serialize, Deserialize)]
@@ -32,5 +32,11 @@ impl BrightnessMeasurementMessage {
 impl CanBusMessage for BrightnessMeasurementMessage {
     fn priority(&self) -> u8 {
         5
+    }
+}
+
+impl Into<CanBusMessageEnum> for BrightnessMeasurementMessage {
+    fn into(self) -> CanBusMessageEnum {
+        CanBusMessageEnum::BrightnessMeasurement(self)
     }
 }

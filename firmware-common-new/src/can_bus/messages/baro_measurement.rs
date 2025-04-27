@@ -3,7 +3,7 @@ use icao_units::si::Pascals;
 use packed_struct::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use super::CanBusMessage;
+use super::{CanBusMessage, CanBusMessageEnum};
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PackedStruct, Clone, Debug, Serialize, Deserialize)]
@@ -47,5 +47,11 @@ impl BaroMeasurementMessage {
 impl CanBusMessage for BaroMeasurementMessage {
     fn priority(&self) -> u8 {
         3
+    }
+}
+
+impl Into<CanBusMessageEnum> for BaroMeasurementMessage {
+    fn into(self) -> CanBusMessageEnum {
+        CanBusMessageEnum::BaroMeasurement(self)
     }
 }

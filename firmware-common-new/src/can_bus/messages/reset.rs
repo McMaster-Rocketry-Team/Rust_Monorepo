@@ -1,7 +1,7 @@
 use packed_struct::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use super::CanBusMessage;
+use super::{CanBusMessage, CanBusMessageEnum};
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PackedStruct, Clone, Debug, Serialize, Deserialize)]
@@ -25,5 +25,11 @@ impl ResetMessage {
 impl CanBusMessage for ResetMessage {
     fn priority(&self) -> u8 {
         0
+    }
+}
+
+impl Into<CanBusMessageEnum> for ResetMessage {
+    fn into(self) -> CanBusMessageEnum {
+        CanBusMessageEnum::Reset(self)
     }
 }

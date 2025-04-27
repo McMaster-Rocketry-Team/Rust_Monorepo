@@ -1,6 +1,8 @@
 use packed_struct::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use super::VLPUplinkPacket;
+
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PrimitiveEnum_u8, Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Mode {
@@ -16,4 +18,10 @@ pub enum Mode {
 pub struct ChangeModePacket {
     #[packed_field(element_size_bits = "2", ty = "enum")]
     pub mode: Mode,
+}
+
+impl Into<VLPUplinkPacket> for ChangeModePacket {
+    fn into(self) -> VLPUplinkPacket {
+        VLPUplinkPacket::ChangeMode(self)
+    }
 }

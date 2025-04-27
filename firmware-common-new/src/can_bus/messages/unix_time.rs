@@ -1,7 +1,7 @@
 use packed_struct::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use super::CanBusMessage;
+use super::{CanBusMessage, CanBusMessageEnum};
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PackedStruct, Clone, Debug, Serialize, Deserialize)]
@@ -24,5 +24,11 @@ impl UnixTimeMessage {
 impl CanBusMessage for UnixTimeMessage {
     fn priority(&self) -> u8 {
         1
+    }
+}
+
+impl Into<CanBusMessageEnum> for UnixTimeMessage {
+    fn into(self) -> CanBusMessageEnum {
+        CanBusMessageEnum::UnixTime(self)
     }
 }

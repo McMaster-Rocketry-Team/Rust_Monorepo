@@ -1,6 +1,8 @@
 use packed_struct::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use super::VLPDownlinkPacket;
+
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PackedStruct, Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "5")]
@@ -49,3 +51,10 @@ pub struct SelfTestResultPacket {
     pub payload_eps2_out_5v_ok: bool,
     pub payload_eps2_out_9v_ok: bool,
 }
+
+impl Into<VLPDownlinkPacket> for SelfTestResultPacket {
+    fn into(self) -> VLPDownlinkPacket {
+        VLPDownlinkPacket::SelfTestResult(self)
+    }
+}
+

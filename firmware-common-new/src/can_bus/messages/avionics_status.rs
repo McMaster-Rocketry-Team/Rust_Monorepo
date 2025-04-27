@@ -1,7 +1,7 @@
 use packed_struct::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use super::CanBusMessage;
+use super::{CanBusMessage, CanBusMessageEnum};
 
 /// may skip stages, may go back to a previous stage
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
@@ -30,5 +30,11 @@ pub struct AvionicsStatusMessage {
 impl CanBusMessage for AvionicsStatusMessage {
     fn priority(&self) -> u8 {
         2
+    }
+}
+
+impl Into<CanBusMessageEnum> for AvionicsStatusMessage {
+    fn into(self) -> CanBusMessageEnum {
+        CanBusMessageEnum::AvionicsStatus(self)
     }
 }

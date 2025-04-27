@@ -1,6 +1,6 @@
 use crc::Crc;
 use embassy_futures::yield_now;
-use embassy_sync::{blocking_mutex::raw::RawMutex, channel::Channel};
+use embassy_sync::{blocking_mutex::raw::RawMutex, channel::Channel, watch::Watch};
 use heapless::Vec;
 
 use crate::can_bus::messages::CanBusMessageEnum;
@@ -40,6 +40,7 @@ pub struct CanSender<M: RawMutex, const N: usize> {
     channel: Channel<M, (CanBusExtendedId, Vec<u8, 8>), N>,
     node_type: u8,
     node_id: u16,
+    flushed_watch: Watch<M, bool, 2>,
 }
 
 pub(super) const CAN_CRC: Crc<u16> = Crc::<u16>::new(&crc::CRC_16_IBM_3740);
@@ -121,15 +122,21 @@ impl<M: RawMutex, const N: usize> CanSender<M, N> {
             channel: Channel::new(),
             node_type,
             node_id,
+            flushed_watch: Watch::new(),
         }
     }
 
-    pub async fn run_daemon(&self, tx: &mut impl CanBusTX, node_type: u8, node_id: u16) {
+    pub async fn run_daemon(&self, tx: &mut impl CanBusTX) {
+        let flushed_sender = self.flushed_watch.sender();
         loop {
-            let (mut id, data) = self.channel.receive().await;
-            id.node_type = node_type.into();
-            id.node_id = node_id.into();
+            let (id, data) = self.channel.receive().await;
+            flushed_sender.send(false);
             let result = tx.send(id.into(), &data).await;
+
+            if self.channel.is_empty() {
+                flushed_sender.send(true);
+            }
+
             if let Err(e) = result {
                 log_error!("Failed to send CAN frame: {:?}", e);
                 yield_now().await;
@@ -146,5 +153,12 @@ impl<M: RawMutex, const N: usize> CanSender<M, N> {
             self.channel.send((id, data)).await;
         }
         crc
+    }
+
+    pub async fn flush(&self) {
+        let mut flushed_receiver = self.flushed_watch.receiver().unwrap();
+        if flushed_receiver.try_get() != Some(true) {
+            flushed_receiver.get_and(|w| *w).await;
+        }
     }
 }

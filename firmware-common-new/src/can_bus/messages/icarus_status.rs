@@ -1,7 +1,7 @@
 use packed_struct::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use super::CanBusMessage;
+use super::{CanBusMessage, CanBusMessageEnum};
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PackedStruct, Clone, Debug, Serialize, Deserialize)]
@@ -29,5 +29,11 @@ impl IcarusStatusMessage {
 impl CanBusMessage for IcarusStatusMessage {
     fn priority(&self) -> u8 {
         5
+    }
+}
+
+impl Into<CanBusMessageEnum> for IcarusStatusMessage {
+    fn into(self) -> CanBusMessageEnum {
+        CanBusMessageEnum::IcarusStatus(self)
     }
 }

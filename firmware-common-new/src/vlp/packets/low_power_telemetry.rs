@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::fixed_point_factory;
 
+use super::VLPDownlinkPacket;
+
 fixed_point_factory!(BatteryVFac, f32, 5.0, 8.5, 0.001);
 fixed_point_factory!(TemperatureFac, f32, -30.0, 85.0, 0.1);
 
@@ -72,5 +74,11 @@ impl defmt::Format for LowPowerTelemetryPacket {
             self.battery_v(),
             self.air_temperature(),
         )
+    }
+}
+
+impl Into<VLPDownlinkPacket> for LowPowerTelemetryPacket {
+    fn into(self) -> VLPDownlinkPacket {
+        VLPDownlinkPacket::LowPowerTelemetry(self)
     }
 }

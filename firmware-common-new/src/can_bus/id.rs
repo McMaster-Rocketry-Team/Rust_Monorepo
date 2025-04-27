@@ -1,9 +1,11 @@
 use core::fmt::Debug;
 use packed_struct::prelude::*;
+use serde::{Deserialize, Serialize};
 
 use super::sender::CAN_CRC;
 
-#[derive(PackedStruct, Default, Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(PackedStruct, Default, Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[packed_struct(endian = "msb", size_bytes = "4")]
 #[repr(C)]
 pub struct CanBusExtendedId {

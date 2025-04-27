@@ -1,7 +1,7 @@
 use packed_struct::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use super::{amp_status::PowerOutputStatus, CanBusMessage};
+use super::{amp_status::PowerOutputStatus, CanBusMessage, CanBusMessageEnum};
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PackedStruct, Clone, Debug, Serialize, Deserialize)]
@@ -40,5 +40,11 @@ pub struct PayloadEPSStatusMessage {
 impl CanBusMessage for PayloadEPSStatusMessage {
     fn priority(&self) -> u8 {
         5
+    }
+}
+
+impl Into<CanBusMessageEnum> for PayloadEPSStatusMessage {
+    fn into(self) -> CanBusMessageEnum {
+        CanBusMessageEnum::PayloadEPSStatus(self)
     }
 }

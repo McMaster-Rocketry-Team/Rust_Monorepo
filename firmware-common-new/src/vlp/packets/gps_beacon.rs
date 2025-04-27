@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::fixed_point_factory;
 
+use super::VLPDownlinkPacket;
+
 // 23 bits for latitude, 24 bits for longitude
 // resolution of 2.4m at equator
 fixed_point_factory!(LatFac, f64, -90.0, 90.0, 0.00002146);
@@ -59,5 +61,11 @@ impl defmt::Format for GPSBeaconPacket {
            self.num_of_fix_satellites(),
            self.battery_v(),
         )
+    }
+}
+
+impl Into<VLPDownlinkPacket> for GPSBeaconPacket {
+    fn into(self) -> VLPDownlinkPacket {
+        VLPDownlinkPacket::GPSBeacon(self)
     }
 }

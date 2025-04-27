@@ -21,6 +21,7 @@ use super::{
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ReceivedCanBusMessage {
+    pub id: CanBusExtendedId,
     pub crc: u16,
     pub message: CanBusMessageEnum,
 }
@@ -71,6 +72,7 @@ impl StateMachine {
                 SensorReading::new(
                     frame.timestamp(),
                     ReceivedCanBusMessage {
+                        id: frame_id,
                         crc: CAN_CRC.checksum(data),
                         message,
                     },
@@ -145,6 +147,7 @@ impl StateMachine {
                             SensorReading::new(
                                 *first_frame_timestamp,
                                 ReceivedCanBusMessage {
+                                    id: frame_id,
                                     crc: calculated_crc,
                                     message,
                                 },
@@ -238,7 +241,7 @@ impl<M: RawMutex, const N: usize, const SUBS: usize> CanReceiver<M, N, SUBS> {
         }
     }
 
-    pub async fn subscriber(
+    pub fn subscriber(
         &self,
     ) -> Option<Subscriber<M, SensorReading<BootTimestamp, ReceivedCanBusMessage>, N, SUBS, 1>>
     {

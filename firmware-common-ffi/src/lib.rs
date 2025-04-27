@@ -1,8 +1,6 @@
 #![no_std]
+#![allow(static_mut_refs)]
 
-use core::cell::RefCell;
-
-use embassy_sync::lazy_lock::LazyLock;
 use firmware_common_new::can_bus::id::CanBusExtendedId;
 use firmware_common_new::can_bus::messages::CanBusMessageEnum;
 use firmware_common_new::can_bus::receiver::CanBusMultiFrameDecoder;
@@ -95,8 +93,7 @@ pub extern "C" fn encode_can_bus_message(
     }
 }
 
-static CAN_DECODER: LazyLock<RefCell<CanBusMultiFrameDecoder<8>>> =
-    LazyLock::new(|| RefCell::new(CanBusMultiFrameDecoder::new()));
+static mut CAN_DECODER: Option<CanBusMultiFrameDecoder<8>> = None;
 
 #[repr(C)]
 pub struct ReceivedCanBusMessage {
@@ -136,7 +133,12 @@ pub extern "C" fn process_can_bus_frame(
     let data = unsafe { core::slice::from_raw_parts(data, data_length) };
     let frame = (timestamp, id, data);
 
-    let mut decoder = CAN_DECODER.get().borrow_mut();
+    let decoder = unsafe {
+        if CAN_DECODER.is_none() {
+            CAN_DECODER = Some(CanBusMultiFrameDecoder::new())
+        }
+        CAN_DECODER.as_mut().unwrap()
+    };
 
     match decoder.process_frame(&frame) {
         Some(m) => {

@@ -1,4 +1,4 @@
-use super::CanBusMessage;
+use super::{CanBusMessage, CanBusMessageEnum};
 use heapless::Vec;
 use packed_struct::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -56,5 +56,11 @@ impl DataTransferMessage {
 impl CanBusMessage for DataTransferMessage {
     fn priority(&self) -> u8 {
         7
+    }
+}
+
+impl Into<CanBusMessageEnum> for DataTransferMessage {
+    fn into(self) -> CanBusMessageEnum {
+        CanBusMessageEnum::DataTransfer(self)
     }
 }

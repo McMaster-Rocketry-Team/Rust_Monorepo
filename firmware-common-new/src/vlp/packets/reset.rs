@@ -1,6 +1,8 @@
 use packed_struct::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use super::VLPUplinkPacket;
+
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PrimitiveEnum_u8, Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DeviceToReset {
@@ -28,4 +30,10 @@ pub enum DeviceToReset {
 pub struct ResetPacket {
     #[packed_field(element_size_bits = "8", ty = "enum")]
     pub device: DeviceToReset,
+}
+
+impl Into<VLPUplinkPacket> for ResetPacket {
+    fn into(self) -> VLPUplinkPacket {
+        VLPUplinkPacket::Reset(self)
+    }
 }
