@@ -95,7 +95,8 @@ pub extern "C" fn encode_can_bus_message(
     }
 }
 
-static CAN_DECODER: LazyLock<RefCell<CanBusMultiFrameDecoder<8>>> = LazyLock::new(|| RefCell::new(CanBusMultiFrameDecoder::new()));
+static CAN_DECODER: LazyLock<RefCell<CanBusMultiFrameDecoder<8>>> =
+    LazyLock::new(|| RefCell::new(CanBusMultiFrameDecoder::new()));
 
 #[repr(C)]
 pub struct ReceivedCanBusMessage {
@@ -159,6 +160,23 @@ pub extern "C" fn parse_can_bus_id(id: u32) -> CanBusExtendedId {
 #[no_mangle]
 pub extern "C" fn get_can_bus_message_type(message: CanBusMessageEnum) -> u8 {
     message.get_message_type()
+}
+
+/// Calculates a CAN node ID from a serial number.
+///
+/// # Parameters
+/// - `serial_number`: A pointer to the serial number buffer.
+/// - `serial_number_length`: The length of the serial number buffer.
+///
+/// # Returns
+/// The calculated CAN node ID.
+#[no_mangle]
+pub extern "C" fn can_node_id_from_serial_number(
+    serial_number: *mut u8,
+    serial_number_length: usize,
+) -> u16 {
+    let serial_number = unsafe { core::slice::from_raw_parts(serial_number, serial_number_length) };
+    firmware_common_new::can_bus::id::can_node_id_from_serial_number(serial_number)
 }
 
 #[cfg(any(target_os = "none", target_os = "espidf"))]

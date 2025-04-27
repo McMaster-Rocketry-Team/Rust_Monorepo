@@ -1,6 +1,8 @@
 use core::fmt::Debug;
 use packed_struct::prelude::*;
 
+use super::sender::CAN_CRC;
+
 #[derive(PackedStruct, Default, Clone, Copy, Debug, PartialEq, Eq)]
 #[packed_struct(endian = "msb", size_bytes = "4")]
 #[repr(C)]
@@ -12,7 +14,7 @@ pub struct CanBusExtendedId {
     pub priority: u8,
 
     pub message_type: u8,
-    
+
     #[packed_field(element_size_bits = "6")]
     pub node_type: u8,
 
@@ -44,4 +46,8 @@ impl Into<u32> for CanBusExtendedId {
         let packed = self.pack().unwrap();
         u32::from_be_bytes(packed)
     }
+}
+
+pub fn can_node_id_from_serial_number(serial_number: &[u8]) -> u16 {
+    CAN_CRC.checksum(serial_number) & 0xFFF
 }
