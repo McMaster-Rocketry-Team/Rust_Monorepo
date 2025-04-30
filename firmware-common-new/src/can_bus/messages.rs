@@ -45,6 +45,16 @@ pub const RESET_MESSAGE_TYPE: u8 = create_can_bus_message_type(
     },
     0,
 );
+pub const PRE_UNIX_TIME_MESSAGE_TYPE: u8 = create_can_bus_message_type(
+    CanBusMessageTypeFlag {
+        is_measurement: false,
+        is_control: false,
+        is_status: false,
+        is_data: false,
+        is_misc: true,
+    },
+    0,
+);
 pub const UNIX_TIME_MESSAGE_TYPE: u8 = create_can_bus_message_type(
     CanBusMessageTypeFlag {
         is_measurement: false,
@@ -191,6 +201,8 @@ pub const ACK_MESSAGE_TYPE: u8 = create_can_bus_message_type(
 #[repr(C)]
 pub enum CanBusMessageEnum {
     Reset(ResetMessage),
+    // the usize does nothing here, it just makes firmware-common-ffi not complain about unsafe zero size type
+    PreUnixTime(usize),
     UnixTime(UnixTimeMessage),
     NodeStatus(NodeStatusMessage),
 
@@ -216,6 +228,7 @@ impl CanBusMessageEnum {
     pub fn priority(&self) -> u8 {
         match self {
             CanBusMessageEnum::UnixTime(m) => m.priority(),
+            CanBusMessageEnum::PreUnixTime(_) => 1,
             CanBusMessageEnum::NodeStatus(m) => m.priority(),
             CanBusMessageEnum::Reset(m) => m.priority(),
             CanBusMessageEnum::BaroMeasurement(m) => m.priority(),
@@ -236,6 +249,7 @@ impl CanBusMessageEnum {
     pub fn get_message_type(&self) -> u8 {
         match self {
             CanBusMessageEnum::UnixTime(_) => UNIX_TIME_MESSAGE_TYPE,
+            CanBusMessageEnum::PreUnixTime(_) => PRE_UNIX_TIME_MESSAGE_TYPE,
             CanBusMessageEnum::NodeStatus(_) => NODE_STATUS_MESSAGE_TYPE,
             CanBusMessageEnum::Reset(_) => RESET_MESSAGE_TYPE,
             CanBusMessageEnum::BaroMeasurement(_) => BARO_MEASUREMENT_MESSAGE_TYPE,
@@ -262,6 +276,7 @@ impl CanBusMessageEnum {
     pub fn serialize(self, buffer: &mut [u8]) -> usize {
         match self {
             CanBusMessageEnum::UnixTime(m) => m.serialize(buffer),
+            CanBusMessageEnum::PreUnixTime(_) => 0,
             CanBusMessageEnum::NodeStatus(m) => m.serialize(buffer),
             CanBusMessageEnum::Reset(m) => m.serialize(buffer),
             CanBusMessageEnum::BaroMeasurement(m) => m.serialize(buffer),
@@ -284,6 +299,7 @@ impl CanBusMessageEnum {
             UNIX_TIME_MESSAGE_TYPE => {
                 UnixTimeMessage::deserialize(data).map(CanBusMessageEnum::UnixTime)
             }
+            PRE_UNIX_TIME_MESSAGE_TYPE => Some(CanBusMessageEnum::PreUnixTime(0)),
             NODE_STATUS_MESSAGE_TYPE => {
                 NodeStatusMessage::deserialize(data).map(CanBusMessageEnum::NodeStatus)
             }

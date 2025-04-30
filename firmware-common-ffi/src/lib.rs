@@ -32,6 +32,8 @@ pub static AERO_RUST_NODE_TYPE: u8 = node_types::AERO_RUST_NODE_TYPE;
 #[no_mangle]
 pub static RESET_MESSAGE_TYPE: u8 = messages::RESET_MESSAGE_TYPE;
 #[no_mangle]
+pub static PRE_UNIX_TIME_MESSAGE_TYPE: u8 = messages::PRE_UNIX_TIME_MESSAGE_TYPE;
+#[no_mangle]
 pub static UNIX_TIME_MESSAGE_TYPE: u8 = messages::UNIX_TIME_MESSAGE_TYPE;
 #[no_mangle]
 pub static NODE_STATUS_MESSAGE_TYPE: u8 = messages::NODE_STATUS_MESSAGE_TYPE;

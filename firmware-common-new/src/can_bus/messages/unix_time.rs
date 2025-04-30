@@ -5,18 +5,19 @@ use super::{CanBusMessage, CanBusMessageEnum};
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PackedStruct, Clone, Debug, Serialize, Deserialize)]
-#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "6")]
+#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "7")]
 #[repr(C)]
 pub struct UnixTimeMessage {
-    /// Current milliseconds since Unix epoch, floored to the nearest ms
-    #[packed_field(element_size_bits = "48")]
-    pub timestamp: u64,
+    /// Current microseconds since Unix epoch, floored to the nearest us
+    /// 56 representation of it will overflow at year 4254
+    #[packed_field(element_size_bits = "56")]
+    pub timestamp_us: u64,
 }
 
 impl UnixTimeMessage {
-    pub fn new(timestamp: f64) -> Self {
+    pub fn new(timestamp_us: u64) -> Self {
         Self {
-            timestamp: (timestamp as u64).into(),
+            timestamp_us,
         }
     }
 }
@@ -32,3 +33,4 @@ impl Into<CanBusMessageEnum> for UnixTimeMessage {
         CanBusMessageEnum::UnixTime(self)
     }
 }
+
