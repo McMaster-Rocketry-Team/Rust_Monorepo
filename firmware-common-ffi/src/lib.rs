@@ -8,59 +8,59 @@ use firmware_common_new::can_bus::node_types;
 use firmware_common_new::can_bus::receiver::CanBusMultiFrameDecoder;
 use firmware_common_new::can_bus::sender::CanBusMultiFrameEncoder;
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub static VOID_LAKE_NODE_TYPE: u8 = node_types::VOID_LAKE_NODE_TYPE;
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub static AMP_NODE_TYPE: u8 = node_types::AMP_NODE_TYPE;
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub static ICARUS_NODE_TYPE: u8 = node_types::ICARUS_NODE_TYPE;
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub static PAYLOAD_ACTIVATION_NODE_TYPE: u8 = node_types::PAYLOAD_ACTIVATION_NODE_TYPE;
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub static PAYLOAD_ROCKET_WIFI_NODE_TYPE: u8 = node_types::PAYLOAD_ROCKET_WIFI_NODE_TYPE;
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub static OZYS_NODE_TYPE: u8 = node_types::OZYS_NODE_TYPE;
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub static BULKHEAD_NODE_TYPE: u8 = node_types::BULKHEAD_NODE_TYPE;
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub static PAYLOAD_EPS1_NODE_TYPE: u8 = node_types::PAYLOAD_EPS1_NODE_TYPE;
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub static PAYLOAD_EPS2_NODE_TYPE: u8 = node_types::PAYLOAD_EPS2_NODE_TYPE;
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub static AERO_RUST_NODE_TYPE: u8 = node_types::AERO_RUST_NODE_TYPE;
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub static RESET_MESSAGE_TYPE: u8 = messages::RESET_MESSAGE_TYPE;
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub static PRE_UNIX_TIME_MESSAGE_TYPE: u8 = messages::PRE_UNIX_TIME_MESSAGE_TYPE;
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub static UNIX_TIME_MESSAGE_TYPE: u8 = messages::UNIX_TIME_MESSAGE_TYPE;
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub static NODE_STATUS_MESSAGE_TYPE: u8 = messages::NODE_STATUS_MESSAGE_TYPE;
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub static BARO_MEASUREMENT_MESSAGE_TYPE: u8 = messages::BARO_MEASUREMENT_MESSAGE_TYPE;
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub static IMU_MEASUREMENT_MESSAGE_TYPE: u8 = messages::IMU_MEASUREMENT_MESSAGE_TYPE;
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub static BRIGHTNESS_MEASUREMENT_MESSAGE_TYPE: u8 = messages::BRIGHTNESS_MEASUREMENT_MESSAGE_TYPE;
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub static AMP_STATUS_MESSAGE_TYPE: u8 = messages::AMP_STATUS_MESSAGE_TYPE;
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub static AMP_CONTROL_MESSAGE_TYPE: u8 = messages::AMP_CONTROL_MESSAGE_TYPE;
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub static PAYLOAD_EPS_STATUS_MESSAGE_TYPE: u8 = messages::PAYLOAD_EPS_STATUS_MESSAGE_TYPE;
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub static PAYLOAD_EPS_OUTPUT_OVERWRITE_MESSAGE_TYPE: u8 =
     messages::PAYLOAD_EPS_OUTPUT_OVERWRITE_MESSAGE_TYPE;
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub static PAYLOAD_EPS_SELF_TEST_MESSAGE_TYPE: u8 = messages::PAYLOAD_EPS_SELF_TEST_MESSAGE_TYPE;
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub static AVIONICS_STATUS_MESSAGE_TYPE: u8 = messages::AVIONICS_STATUS_MESSAGE_TYPE;
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub static ICARUS_STATUS_MESSAGE_TYPE: u8 = messages::ICARUS_STATUS_MESSAGE_TYPE;
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub static DATA_TRANSFER_MESSAGE_TYPE: u8 = messages::DATA_TRANSFER_MESSAGE_TYPE;
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub static ACK_MESSAGE_TYPE: u8 = messages::ACK_MESSAGE_TYPE;
 
 #[repr(C)]
@@ -93,7 +93,7 @@ pub struct CanBusFrames {
 /// - `buffer[8..16]`
 /// - `buffer[16..20]`
 /// All slices should be sent with the same `id` from the return value.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn encode_can_bus_message(
     message: CanBusMessageEnum,
     self_node_type: u8,
@@ -156,7 +156,7 @@ pub struct ReceivedCanBusMessage {
 ///
 /// # Notes
 /// The contents of `result` are only valid if the function returns `true`.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn process_can_bus_frame(
     timestamp: f64,
     id: u32,
@@ -188,12 +188,12 @@ pub extern "C" fn process_can_bus_frame(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn parse_can_bus_id(id: u32) -> CanBusExtendedId {
     CanBusExtendedId::from_raw(id)
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn get_can_bus_message_type(message: CanBusMessageEnum) -> u8 {
     message.get_message_type()
 }
@@ -206,7 +206,7 @@ pub extern "C" fn get_can_bus_message_type(message: CanBusMessageEnum) -> u8 {
 ///
 /// # Returns
 /// The calculated CAN node ID.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn can_node_id_from_serial_number(
     serial_number: *mut u8,
     serial_number_length: usize,
@@ -229,7 +229,7 @@ pub extern "C" fn can_node_id_from_serial_number(
 /// - `accept_message_types`: A pointer to the array of message types to accept.
 /// - `accept_message_types_length`: The length of the `accept_message_types` array.
 ///
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn create_can_bus_message_type_filter_mask(
     accept_message_types: *const u8,
     accept_message_types_length: usize,

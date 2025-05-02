@@ -107,7 +107,7 @@ impl VLFSTestingHarness {
         let mut rng = rand::thread_rng();
         let mut vec = Vec::with_capacity(length);
         for _ in 0..length {
-            vec.push(rng.gen::<u8>());
+            vec.push(rng.r#gen::<u8>());
         }
 
         self.files

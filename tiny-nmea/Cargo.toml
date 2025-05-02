@@ -5,7 +5,7 @@ description = "A tiny NMEA parser for embedded systems. Works with `#[no_std]` a
 repository = "https://github.com/McMaster-Rocketry-Team/rust-monorepo"
 license = "MIT OR Apache-2.0"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 keywords = ["gps", "nmea"]
 categories = ["parser-implementations"]
 

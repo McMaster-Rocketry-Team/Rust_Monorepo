@@ -2,19 +2,18 @@
 members = [
     "tiny-nmea",
     "firmware-common",
-    "nyoom",
     "vlfs",
     "ferraris-calibration",
-    # "vl8-ctrl-protocol", 
     "vl-cli",
-    # "vl-simulink-bridge", 
     "calculate-required-bits",
     "vl-host-lib",
     "dspower-servo",
     "servo-mpc-controller",
-    "firmware-common-new", 
-    "firmware-common-ffi", "air-brakes-controller-core", "air-brakes-controller-matlab-server", "air-brakes-controller-matlab-client",
-    # "launch-simulator",
+    "firmware-common-new",
+    "firmware-common-ffi",
+    "air-brakes-controller-core",
+    "air-brakes-controller-matlab-server",
+    "air-brakes-controller-matlab-client",
 ]
 resolver = "2"
 

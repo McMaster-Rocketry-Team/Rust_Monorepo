@@ -3,12 +3,10 @@
 
 #[cfg(feature = "defmt")]
 #[derive(defmt::Format, Debug)]
-#[allow(unused)]
 pub struct Debug2DefmtWrapper<T: core::fmt::Debug>(#[defmt(Debug2Format)] pub T);
 
 #[cfg(not(feature = "defmt"))]
 #[derive(Debug)]
-#[allow(unused)]
 pub struct Debug2DefmtWrapper<T: core::fmt::Debug>(pub T);
 
 macro_rules! log_trace {
