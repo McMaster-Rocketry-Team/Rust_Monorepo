@@ -114,15 +114,17 @@ pub fn can_node_id_from_serial_number(serial_number: &[u8]) -> u16 {
 
 #[cfg(test)]
 mod tests {
-    use crate::can_bus::messages::{
+    use crate::{can_bus::messages::{
         ACK_MESSAGE_TYPE, AMP_STATUS_MESSAGE_TYPE, BARO_MEASUREMENT_MESSAGE_TYPE,
         DATA_TRANSFER_MESSAGE_TYPE, RESET_MESSAGE_TYPE, UNIX_TIME_MESSAGE_TYPE,
-    };
+    }, tests::init_logger};
 
     use super::*;
 
     #[test]
     fn test_create_can_bus_message_type_filter_mask() {
+        init_logger();
+        
         let mask = create_can_bus_message_type_filter_mask(&[
             BARO_MEASUREMENT_MESSAGE_TYPE,
             DATA_TRANSFER_MESSAGE_TYPE,

@@ -1,0 +1,20 @@
+[package]
+name = "air-brakes-controller-core"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+default = ["log"]
+log = ["dep:log"]
+defmt = ["dep:defmt", "heapless/defmt-03"]
+
+[dependencies]
+defmt = { version = "1.0.1", optional = true }
+log = { version = "0.4", optional = true }
+heapless = { version = "0.8.0", features = ["serde"], default-features = false }
+serde = { version = "1.0.219", default-features = false, features = ["derive"] }
+libm = "0.2.7"
+
+[dev-dependencies]
+approx = "0.5.1"
+env_logger = "0.11.8"

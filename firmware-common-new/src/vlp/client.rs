@@ -369,15 +369,17 @@ mod tests {
     };
     use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 
-    use crate::vlp::packets::{
+    use crate::{tests::init_logger, vlp::packets::{
         change_mode::{ChangeModePacket, Mode},
         low_power_telemetry::LowPowerTelemetryPacket,
-    };
+    }};
 
     use super::*;
 
     #[test]
     fn test_ecc() {
+        init_logger();
+
         // first 8 are data, last 1 is ecc
         let mut buffer: [u8; 10] = [0, 1, 2, 3, 4, 5, 6, 7, 0, 0];
         let len = 8;
@@ -476,6 +478,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_vlp_client_downlink() {
+        init_logger();
+        
         let ground_station_client = VLPGroundStation::<NoopRawMutex>::new();
         let avionics_client = VLPAvionics::<NoopRawMutex>::new();
 
@@ -516,6 +520,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_vlp_client_uplink() {
+        init_logger();
+
         let ground_station_client = VLPGroundStation::<NoopRawMutex>::new();
         let avionics_client = VLPAvionics::<NoopRawMutex>::new();
 

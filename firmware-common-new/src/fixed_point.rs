@@ -103,8 +103,12 @@ macro_rules! fixed_point_factory_slope {
 mod test {
     use approx::assert_relative_eq;
 
+    use crate::tests::init_logger;
+
     #[test]
     fn test_fixed_point_factory_one_bit() {
+        init_logger();
+        
         fixed_point_factory!(Factory, f32, 0.0, 1.0, 0.5);
         assert_eq!(Factory::to_fixed_point(0.0), Some(0.into()));
         assert_eq!(Factory::to_fixed_point(0.25), Some(0.into()));
@@ -120,6 +124,8 @@ mod test {
 
     #[test]
     fn test_fixed_point_factory_slope() {
+        init_logger();
+        
         fixed_point_factory_slope!(Factory, 1.0, 1000.0, 1.0);
         assert_eq!(Factory::to_fixed_point(-1.0), Some(0.into()));
         assert_eq!(Factory::to_fixed_point(0.0), Some(1.into()));

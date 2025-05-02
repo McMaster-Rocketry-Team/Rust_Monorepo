@@ -1,0 +1,21 @@
+[package]
+name = "air-brakes-controller-matlab-server"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+air-brakes-controller-core = { path = "../air-brakes-controller-core", default-features = false, features = ["log"] }
+anyhow = "1.0"
+log = "0.4"
+env_logger = "0.11.8"
+tarpc = { version = "0.36",  features = ["full"] }
+tokio = { version = "1.44.2", features = ["full"] }
+futures = "0.3.31"
+
+[lib]
+name = "air_brakes_controller_matlab_service"
+path = "src/lib.rs"
+
+[[bin]]
+name = "air_brakes_controller_matlab_server"
+path = "src/server.rs"

@@ -13,7 +13,7 @@ members = [
     "dspower-servo",
     "servo-mpc-controller",
     "firmware-common-new", 
-    "firmware-common-ffi",
+    "firmware-common-ffi", "air-brakes-controller-core", "air-brakes-controller-matlab-server", "air-brakes-controller-matlab-client",
     # "launch-simulator",
 ]
 resolver = "2"

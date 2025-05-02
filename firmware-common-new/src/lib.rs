@@ -6,6 +6,9 @@
 mod fmt;
 pub(crate) mod utils;
 
+#[cfg(test)]
+mod tests;
+
 pub(crate) mod fixed_point;
 pub mod can_bus;
 pub mod gps;
