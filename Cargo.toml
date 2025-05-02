@@ -1,6 +1,5 @@
 [workspace]
 members = [
-    "tiny-nmea",
     "firmware-common",
     "vlfs",
     "ferraris-calibration",
@@ -8,11 +7,17 @@ members = [
     "calculate-required-bits",
     "vl-host-lib",
     "dspower-servo",
-    "servo-mpc-controller",
+
+    # commented out because its dependency osqp does not compile on windows
+    # "servo-mpc-controller",
+
     "firmware-common-new",
     "firmware-common-ffi",
     "air-brakes-controller-core",
     "air-brakes-controller-matlab-server",
+
+    # commmented out because rust-analyzer dont like it on windows,
+    # pre-compiled binaries are provided for win64 and linux x64.
     "air-brakes-controller-matlab-client",
 ]
 resolver = "2"

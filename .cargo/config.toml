@@ -1,0 +1,7 @@
+[target.x86_64-pc-windows-msvc.mex800]
+rustc-link-search = ["C:\\Program Files\\MATLAB\\R2024b\\extern\\lib\\win64\\microsoft"]
+rustc-link-lib = ["libmx", "libmex", "libmat", "kernel32", "user32", "gdi32", "winspool", "comdlg32", "advapi32", "shell32", "ole32", "oleaut32", "uuid", "odbc32", "odbccp32"]
+
+[target.x86_64-pc-windows-gnu.mex800]
+rustc-link-search = ["C:\\Program Files\\MATLAB\\R2024b\\extern\\lib\\win64\\mingw64"]
+rustc-link-lib = ["libmx", "libmex", "libmat", "kernel32", "user32", "gdi32", "winspool", "comdlg32", "advapi32", "shell32", "ole32", "oleaut32", "uuid", "odbc32", "odbccp32"]
