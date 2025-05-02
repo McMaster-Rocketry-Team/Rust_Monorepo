@@ -12,3 +12,4 @@ pub mod gps;
 pub mod sensor_reading;
 pub mod time;
 pub mod vlp;
+pub mod signal_with_ack;

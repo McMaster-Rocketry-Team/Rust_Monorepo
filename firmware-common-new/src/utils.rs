@@ -1,6 +1,6 @@
+use core::fmt::Debug;
 use packed_struct::prelude::*;
 use packed_struct::types::bits::ByteArray;
-use core::fmt::Debug;
 
 pub trait FixedLenSerializable: Clone + Debug {
     fn serialize(self, buffer: &mut [u8]) -> usize;
