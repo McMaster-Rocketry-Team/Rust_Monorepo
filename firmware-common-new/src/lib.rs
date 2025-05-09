@@ -17,3 +17,4 @@ pub mod time;
 pub mod vlp;
 pub mod signal_with_ack;
 pub mod readings;
+pub mod variance;

@@ -1018,6 +1018,7 @@ dependencies = [
  "log",
  "lora-modulation",
  "lora-phy",
+ "micromath",
  "nmea 0.7.0",
  "num-traits",
  "packed_struct",
