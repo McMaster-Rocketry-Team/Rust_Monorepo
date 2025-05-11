@@ -30,7 +30,7 @@ enum StateMachine {
     Empty,
     MultiFrame {
         id: CanBusExtendedId,
-        first_frame_timestamp: f64,
+        first_frame_timestamp_us: u64,
         crc: u16,
         data: Vec<u8, MAX_CAN_MESSAGE_SIZE>,
     },
@@ -70,7 +70,7 @@ impl StateMachine {
             let data = &frame_data[..frame_data.len() - 1];
             return CanBusMessageEnum::deserialize(frame_id.message_type, data).map(|message| {
                 SensorReading::new(
-                    frame.timestamp(),
+                    frame.timestamp_us(),
                     ReceivedCanBusMessage {
                         id: frame_id,
                         crc: CAN_CRC.checksum(data),
@@ -97,7 +97,7 @@ impl StateMachine {
                 }
                 *self = StateMachine::MultiFrame {
                     id: frame_id,
-                    first_frame_timestamp: frame.timestamp(),
+                    first_frame_timestamp_us: frame.timestamp_us(),
                     crc: u16::from_le_bytes([frame_data[0], frame_data[1]]),
                     data,
                 };
@@ -105,7 +105,7 @@ impl StateMachine {
             }
             StateMachine::MultiFrame {
                 id,
-                first_frame_timestamp,
+                first_frame_timestamp_us,
                 crc,
                 data,
             } => {
@@ -145,7 +145,7 @@ impl StateMachine {
                     let message =
                         CanBusMessageEnum::deserialize(id.message_type, &data).map(|message| {
                             SensorReading::new(
-                                *first_frame_timestamp,
+                                *first_frame_timestamp_us,
                                 ReceivedCanBusMessage {
                                     id: frame_id,
                                     crc: calculated_crc,
@@ -197,11 +197,11 @@ impl<const Q: usize> CanBusMultiFrameDecoder<Q> {
                 (StateMachine::MultiFrame { .. }, StateMachine::Empty) => Ordering::Greater,
                 (
                     StateMachine::MultiFrame {
-                        first_frame_timestamp: ts1,
+                        first_frame_timestamp_us: ts1,
                         ..
                     },
                     StateMachine::MultiFrame {
-                        first_frame_timestamp: ts2,
+                        first_frame_timestamp_us: ts2,
                         ..
                     },
                 ) => ts1.partial_cmp(ts2).unwrap(),
@@ -292,7 +292,7 @@ mod tests {
         let mut decoder = CanBusMultiFrameDecoder::<1>::new();
         let mut decoded_message: Option<SensorReading<BootTimestamp, ReceivedCanBusMessage>> = None;
         for data in encoder {
-            let frame = (0.0f64, id, data.as_slice());
+            let frame = (0u64, id, data.as_slice());
             decoded_message = decoder.process_frame(&frame);
         }
 

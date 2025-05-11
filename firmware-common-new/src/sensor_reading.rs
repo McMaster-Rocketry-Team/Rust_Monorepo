@@ -7,15 +7,15 @@ use serde::{Serialize, Deserialize};
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SensorReading<T: TimestampType, D> {
     _phantom_timestamp: PhantomData<T>,
-    pub timestamp: f64,
+    pub timestamp_us: u64,
     pub data: D,
 }
 
 impl<T: TimestampType, D> SensorReading<T, D> {
-    pub fn new(timestamp: f64, data: D) -> Self {
+    pub fn new(timestamp_us: u64, data: D) -> Self {
         SensorReading {
             _phantom_timestamp: PhantomData,
-            timestamp,
+            timestamp_us,
             data,
         }
     }

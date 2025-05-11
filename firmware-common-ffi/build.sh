@@ -36,4 +36,6 @@ cp ../target/thumbv7em-none-eabihf/release/libfirmware_common_ffi.a ./out/thumbv
 tar -czf firmware-common-ffi-release.tar.gz -C out .
 mv firmware-common-ffi-release.tar.gz ./out/
 
+RUSTFLAGS="-Zwasm-c-abi=spec" wasm-pack build --target web --features wasm
+
 echo "Build complete. Output files are in the 'out' directory."

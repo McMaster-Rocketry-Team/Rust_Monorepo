@@ -1,3 +1,8 @@
+#[cfg(feature = "wasm")]
+use wasm_bindgen::prelude::*;
+#[cfg(feature = "wasm")]
+use tsify::Tsify;
+
 use crate::utils::FixedLenSerializable;
 use ack::AckMessage;
 use brightness_measurement::BrightnessMeasurementMessage;
@@ -17,7 +22,7 @@ pub use payload_eps_status::PayloadEPSStatusMessage;
 pub use reset::ResetMessage;
 pub use unix_time::UnixTimeMessage;
 
-use super::id::{create_can_bus_message_type, CanBusExtendedId, CanBusMessageTypeFlag};
+use super::id::{CanBusExtendedId, CanBusMessageTypeFlag, create_can_bus_message_type};
 
 pub mod ack;
 pub mod amp_control;
@@ -197,6 +202,8 @@ pub const ACK_MESSAGE_TYPE: u8 = create_can_bus_message_type(
 );
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[cfg_attr(feature = "wasm", derive(Tsify))]
+#[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[repr(C)]
 pub enum CanBusMessageEnum {

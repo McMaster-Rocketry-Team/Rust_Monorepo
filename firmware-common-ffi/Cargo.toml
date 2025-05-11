@@ -3,9 +3,15 @@ name = "firmware-common-ffi"
 version = "0.1.4"
 edition = "2024"
 
+[features]
+wasm = ["tsify", "serde", "wasm-bindgen", "firmware-common-new/wasm"]
+
 [dependencies]
-firmware-common-new = { path = "../firmware-common-new", default-features = false, features = ["defmt"] }
+firmware-common-new = { path = "../firmware-common-new", default-features = false }
+serde = { version = "1.0.219", default-features = false, features = ["derive"], optional = true}
+tsify = { version = "0.5.5", optional = true, default-features = false, features = ["js"]}
+wasm-bindgen = { version = "0.2.100", default-features = false, optional = true }
 
 [lib]
 name = "firmware_common_ffi"
-crate-type = ["staticlib"]
+crate-type = ["staticlib", "cdylib"]

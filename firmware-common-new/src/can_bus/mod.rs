@@ -5,16 +5,15 @@ pub mod messages;
 pub mod node_types;
 pub mod receiver;
 pub mod sender;
-pub mod timestamp_residue;
 
 pub trait CanBusFrame {
-    fn timestamp(&self) -> f64;
+    fn timestamp_us(&self) -> u64;
     fn id(&self) -> u32;
     fn data(&self) -> &[u8];
 }
 
-impl CanBusFrame for (f64, u32, &[u8]) {
-    fn timestamp(&self) -> f64 {
+impl CanBusFrame for (u64, u32, &[u8]) {
+    fn timestamp_us(&self) -> u64 {
         self.0
     }
 

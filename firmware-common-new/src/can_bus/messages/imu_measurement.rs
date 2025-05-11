@@ -1,27 +1,34 @@
+#[cfg(feature = "wasm")]
+use wasm_bindgen::prelude::*;
+#[cfg(feature = "wasm")]
+use tsify::Tsify;
+
 use packed_struct::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use super::{CanBusMessage, CanBusMessageEnum};
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[cfg_attr(feature = "wasm", derive(Tsify))]
+#[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
 #[derive(PackedStruct, Clone, Debug, Serialize, Deserialize)]
-#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "30")]
+#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "31")]
 #[repr(C)]
 pub struct IMUMeasurementMessage {
     acc: [u32; 3],
     gyro: [u32; 3],
 
-    /// Measurement timestamp, milliseconds since Unix epoch, floored to the nearest ms
-    #[packed_field(element_size_bits = "48")]
-    pub timestamp: u64,
+    /// Measurement timestamp, microseconds since Unix epoch, floored to the nearest us
+    #[packed_field(element_size_bits = "56")]
+    pub timestamp_us: u64,
 }
 
 impl IMUMeasurementMessage {
-    pub fn new(timestamp: f64, acc: [f32; 3], gyro: [f32; 3]) -> Self {
+    pub fn new(timestamp_us: u64, acc: [f32; 3], gyro: [f32; 3]) -> Self {
         Self {
             acc: acc.map(|x| u32::from_be_bytes(x.to_be_bytes())),
             gyro: gyro.map(|x| u32::from_be_bytes(x.to_be_bytes())),
-            timestamp: (timestamp as u64).into(),
+            timestamp_us,
         }
     }
 

@@ -72,7 +72,7 @@ pub async fn run_gps_uart_receiver(
                         // log_info!("NMEA sentence: {}", sentence);
                         nmea.parse(sentence.as_str()).ok();
 
-                        on_receive(SensorReading::new(clock.now_ms(), (&nmea).into()));
+                        on_receive(SensorReading::new(clock.now_us(), (&nmea).into()));
 
                         sentence.clear();
                         for j in (i + 1)..length {

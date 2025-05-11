@@ -1,7 +1,7 @@
 use serde::{Serialize, Deserialize};
 
 pub trait Clock: Clone {
-    fn now_ms(&self) -> f64;
+    fn now_us(&self) -> u64;
 }
 
 pub trait TimestampType: Clone + Sized + Serialize + Deserialize<'static> {}

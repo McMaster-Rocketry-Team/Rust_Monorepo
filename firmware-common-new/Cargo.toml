@@ -7,6 +7,7 @@ edition = "2024"
 default = ["log"]
 log = ["dep:log"]
 defmt = ["dep:defmt", "heapless/defmt-03", "lora-phy/defmt-03"]
+wasm = ["tsify", "wasm-bindgen"]
 
 [dependencies]
 embedded-io-async = "0.6.1"
@@ -41,6 +42,8 @@ lora-modulation = { git = "https://github.com/lora-rs/lora-rs.git", default-feat
 sha2 = { version = "0.10.8", default-features = false }
 reed-solomon = "0.2.1"
 micromath = "2.1.0"
+tsify = { version = "0.5.5", optional = true, default-features = false, features = ["js"]}
+wasm-bindgen = { version = "0.2.100", default-features = false, optional = true }
 
 [dev-dependencies]
 approx = "0.5.1"
