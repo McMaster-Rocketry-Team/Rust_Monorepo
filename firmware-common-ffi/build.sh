@@ -36,7 +36,9 @@ cp ./out/firmware_common_ffi.h ./out/thumbv7em-none-eabihf/firmware_common_ffi.h
 
 # ========== Compile for wasm ==========
 
-RUSTFLAGS="-Zwasm-c-abi=spec" wasm-pack build -d out/wasm --release --target web --features wasm
+RUSTFLAGS="-Zwasm-c-abi=spec" wasm-pack build --release --target web --features wasm
+cp -r ./pkg ./out/wasm
+rm ./pkg/.gitignore
 
 # ========== Clean up and compress ==========
 

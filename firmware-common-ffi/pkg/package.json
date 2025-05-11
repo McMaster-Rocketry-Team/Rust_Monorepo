@@ -1,0 +1,15 @@
+{
+  "name": "firmware-common-ffi",
+  "type": "module",
+  "version": "0.2.0",
+  "files": [
+    "firmware_common_ffi_bg.wasm",
+    "firmware_common_ffi.js",
+    "firmware_common_ffi.d.ts"
+  ],
+  "main": "firmware_common_ffi.js",
+  "types": "firmware_common_ffi.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

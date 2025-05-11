@@ -1,0 +1,34 @@
+/* tslint:disable */
+/* eslint-disable */
+export const memory: WebAssembly.Memory;
+export const encode_can_bus_message: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
+export const process_can_bus_frame: (a: number, b: bigint, c: number, d: number, e: number) => void;
+export const can_node_id_from_serial_number: (a: number, b: number) => number;
+export const create_can_bus_message_type_filter_mask: (a: number, b: number) => number;
+export const getCanBusNodeTypes: () => any;
+export const getCanBusMessageTypes: () => any;
+export const encodeCanBusMessage: (a: any, b: number, c: number, d: number, e: number, f: any) => any;
+export const processCanBusFrame: (a: bigint, b: number, c: number, d: number) => any;
+export const getCanBusMessageType: (a: any) => number;
+export const canNodeIdFromSerialNumber: (a: number, b: number) => number;
+export const createCanBusMessageTypeFilterMask: (a: number, b: number) => number;
+export const __wbg_canbusextendedid_free: (a: number, b: number) => void;
+export const __wbg_get_canbusextendedid_priority: (a: number) => number;
+export const __wbg_set_canbusextendedid_priority: (a: number, b: number) => void;
+export const __wbg_get_canbusextendedid_message_type: (a: number) => number;
+export const __wbg_set_canbusextendedid_message_type: (a: number, b: number) => void;
+export const __wbg_get_canbusextendedid_node_type: (a: number) => number;
+export const __wbg_set_canbusextendedid_node_type: (a: number, b: number) => void;
+export const __wbg_get_canbusextendedid_node_id: (a: number) => number;
+export const __wbg_set_canbusextendedid_node_id: (a: number, b: number) => void;
+export const canbusextendedid_new: (a: number, b: number, c: number, d: number) => number;
+export const canbusextendedid_from_raw: (a: number) => number;
+export const brightnessmeasurementmessage_new: (a: bigint, b: number) => any;
+export const brightnessmeasurementmessage_brightness: (a: number) => number;
+export const parseCanBusId: (a: number) => number;
+export const __wbindgen_malloc: (a: number, b: number) => number;
+export const __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
+export const __wbindgen_exn_store: (a: number) => void;
+export const __externref_table_alloc: () => number;
+export const __wbindgen_export_4: WebAssembly.Table;
+export const __wbindgen_start: () => void;
