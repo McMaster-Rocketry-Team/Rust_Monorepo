@@ -23,10 +23,8 @@ dist-ssr
 *.sln
 *.sw?
 
-.pnp.*
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/sdks
-!.yarn/versions
+
+pnpm-lock.yaml
+yarn.lock
+package-lock.json
+bun.lockb
