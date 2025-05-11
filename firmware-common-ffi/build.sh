@@ -19,6 +19,7 @@ cbindgen --config cbindgen.toml --crate firmware-common-ffi --output out/firmwar
 CARGO_PROFILE_RELEASE_PANIC=abort cargo build --release -Z build-std=core,panic_abort -Z build-std-features=panic_immediate_abort --target=riscv32imc-esp-espidf
 mkdir -p ./out/riscv32imc-esp-espidf/
 cp ../target/riscv32imc-esp-espidf/release/libfirmware_common_ffi.a ./out/riscv32imc-esp-espidf/libfirmware_common_ffi.a
+cp ./out/firmware_common_ffi.h ./out/riscv32imc-esp-espidf/firmware_common_ffi.h
 
 # remove the .riscv.attributes section
 # Rust uses LLVM to build, which outputs an .a file with instruction set "rv32i2p1_m2p0_c2p0_zmmul1p0"
@@ -31,11 +32,21 @@ llvm-objcopy --remove-section=.riscv.attributes ./out/riscv32imc-esp-espidf/libf
 CARGO_PROFILE_RELEASE_PANIC=abort cargo build --release -Z build-std=core,panic_abort -Z build-std-features=panic_immediate_abort --target=thumbv7em-none-eabihf
 mkdir -p ./out/thumbv7em-none-eabihf/
 cp ../target/thumbv7em-none-eabihf/release/libfirmware_common_ffi.a ./out/thumbv7em-none-eabihf/libfirmware_common_ffi.a
+cp ./out/firmware_common_ffi.h ./out/thumbv7em-none-eabihf/firmware_common_ffi.h
 
-# Compress the out folder into release.tar.gz
-tar -czf firmware-common-ffi-release.tar.gz -C out .
-mv firmware-common-ffi-release.tar.gz ./out/
+# ========== Compile for wasm ==========
 
-RUSTFLAGS="-Zwasm-c-abi=spec" wasm-pack build --target web --features wasm
+RUSTFLAGS="-Zwasm-c-abi=spec" wasm-pack build -d out/wasm --release --target web --features wasm
+
+# ========== Clean up and compress ==========
+
+rm out/firmware_common_ffi.h
+
+tar -czf riscv32imc-esp-espidf.tar.gz -C out/riscv32imc-esp-espidf .
+mv riscv32imc-esp-espidf.tar.gz ./out/
+tar -czf thumbv7em-none-eabihf.tar.gz -C out/thumbv7em-none-eabihf .
+mv thumbv7em-none-eabihf.tar.gz ./out/
+tar -czf wasm.tar.gz -C out/wasm .
+mv wasm.tar.gz ./out/
 
 echo "Build complete. Output files are in the 'out' directory."
