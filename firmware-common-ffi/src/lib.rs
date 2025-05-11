@@ -15,6 +15,39 @@ use firmware_common_new::can_bus::node_types;
 use firmware_common_new::can_bus::receiver::CanBusMultiFrameDecoder;
 use firmware_common_new::can_bus::sender::CanBusMultiFrameEncoder;
 
+#[cfg_attr(feature = "wasm", derive(Serialize, Deserialize, Tsify))]
+#[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
+#[repr(C)]
+pub struct CanBusNodeTypes {
+    void_lake: u8,
+    amp: u8,
+    icarus: u8,
+    payload_activation: u8,
+    payload_rocket_wifi: u8,
+    ozys: u8,
+    bulkhead: u8,
+    payload_eps1: u8,
+    payload_eps2: u8,
+    aero_rust: u8,
+}
+
+#[cfg_attr(not(feature = "wasm"), unsafe(no_mangle))]
+#[cfg_attr(feature = "wasm", wasm_bindgen(js_name = getCanBusNodeTypes))]
+pub extern "C" fn get_can_bus_node_types() -> CanBusNodeTypes {
+    CanBusNodeTypes {
+        void_lake: node_types::VOID_LAKE_NODE_TYPE,
+        amp: node_types::AMP_NODE_TYPE,
+        icarus: node_types::ICARUS_NODE_TYPE,
+        payload_activation: node_types::PAYLOAD_ACTIVATION_NODE_TYPE,
+        payload_rocket_wifi: node_types::PAYLOAD_ROCKET_WIFI_NODE_TYPE,
+        ozys: node_types::OZYS_NODE_TYPE,
+        bulkhead: node_types::BULKHEAD_NODE_TYPE,
+        payload_eps1: node_types::PAYLOAD_EPS1_NODE_TYPE,
+        payload_eps2: node_types::PAYLOAD_EPS2_NODE_TYPE,
+        aero_rust: node_types::AERO_RUST_NODE_TYPE,
+    }
+}
+
 #[unsafe(no_mangle)]
 pub static VOID_LAKE_NODE_TYPE: u8 = node_types::VOID_LAKE_NODE_TYPE;
 #[unsafe(no_mangle)]
@@ -35,6 +68,51 @@ pub static PAYLOAD_EPS1_NODE_TYPE: u8 = node_types::PAYLOAD_EPS1_NODE_TYPE;
 pub static PAYLOAD_EPS2_NODE_TYPE: u8 = node_types::PAYLOAD_EPS2_NODE_TYPE;
 #[unsafe(no_mangle)]
 pub static AERO_RUST_NODE_TYPE: u8 = node_types::AERO_RUST_NODE_TYPE;
+
+#[cfg_attr(feature = "wasm", derive(Serialize, Deserialize, Tsify))]
+#[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
+#[repr(C)]
+pub struct CanBusMessageTypes {
+    reset: u8,
+    pre_unix_time: u8,
+    unix_time: u8,
+    node_status: u8,
+    baro_measurement: u8,
+    imu_measurement: u8,
+    brightness_measurement: u8,
+    amp_status: u8,
+    amp_control: u8,
+    payload_eps_status: u8,
+    payload_eps_output_overwrite: u8,
+    payload_eps_self_test: u8,
+    avionics_status: u8,
+    icarus_status: u8,
+    data_transfer: u8,
+    ack: u8,
+}
+
+#[cfg_attr(not(feature = "wasm"), unsafe(no_mangle))]
+#[cfg_attr(feature = "wasm", wasm_bindgen(js_name = getCanBusMessageTypes))]
+pub extern "C" fn get_can_bus_message_types() -> CanBusMessageTypes {
+    CanBusMessageTypes {
+        reset: messages::RESET_MESSAGE_TYPE,
+        pre_unix_time: messages::PRE_UNIX_TIME_MESSAGE_TYPE,
+        unix_time: messages::UNIX_TIME_MESSAGE_TYPE,
+        node_status: messages::NODE_STATUS_MESSAGE_TYPE,
+        baro_measurement: messages::BARO_MEASUREMENT_MESSAGE_TYPE,
+        imu_measurement: messages::IMU_MEASUREMENT_MESSAGE_TYPE,
+        brightness_measurement: messages::BRIGHTNESS_MEASUREMENT_MESSAGE_TYPE,
+        amp_status: messages::AMP_STATUS_MESSAGE_TYPE,
+        amp_control: messages::AMP_CONTROL_MESSAGE_TYPE,
+        payload_eps_status: messages::PAYLOAD_EPS_STATUS_MESSAGE_TYPE,
+        payload_eps_output_overwrite: messages::PAYLOAD_EPS_OUTPUT_OVERWRITE_MESSAGE_TYPE,
+        payload_eps_self_test: messages::PAYLOAD_EPS_SELF_TEST_MESSAGE_TYPE,
+        avionics_status: messages::AVIONICS_STATUS_MESSAGE_TYPE,
+        icarus_status: messages::ICARUS_STATUS_MESSAGE_TYPE,
+        data_transfer: messages::DATA_TRANSFER_MESSAGE_TYPE,
+        ack: messages::ACK_MESSAGE_TYPE,
+    }
+}
 
 #[unsafe(no_mangle)]
 pub static RESET_MESSAGE_TYPE: u8 = messages::RESET_MESSAGE_TYPE;
@@ -165,9 +243,14 @@ pub fn encode_can_bus_message_js(
     self_node_id: u16,
     buffer: &mut [u8],
 ) -> CanBusFrames {
-    encode_can_bus_message(message, self_node_type, self_node_id, buffer.as_mut_ptr(), buffer.len())
+    encode_can_bus_message(
+        message,
+        self_node_type,
+        self_node_id,
+        buffer.as_mut_ptr(),
+        buffer.len(),
+    )
 }
-
 
 static mut CAN_DECODER: Option<CanBusMultiFrameDecoder<8>> = None;
 
