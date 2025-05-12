@@ -312,6 +312,154 @@ export function createCanBusMessageTypeFilterMask(accept_message_types) {
     return ret >>> 0;
 }
 
+/**
+ * @param {bigint} timestamp_us
+ * @param {number} pressure
+ * @param {number} temperature
+ * @returns {BaroMeasurementMessage}
+ */
+export function newBaroMeasurementMessage(timestamp_us, pressure, temperature) {
+    const ret = wasm.newBaroMeasurementMessage(timestamp_us, pressure, temperature);
+    return ret;
+}
+
+/**
+ * @param {BaroMeasurementMessage} message
+ * @returns {number}
+ */
+export function baroMeasurementMessageGetPressure(message) {
+    const ret = wasm.baroMeasurementMessageGetPressure(message);
+    return ret;
+}
+
+/**
+ * @param {BaroMeasurementMessage} message
+ * @returns {number}
+ */
+export function baroMeasurementMessageGetTemperature(message) {
+    const ret = wasm.baroMeasurementMessageGetTemperature(message);
+    return ret;
+}
+
+/**
+ * @param {BaroMeasurementMessage} message
+ * @returns {number}
+ */
+export function baroMeasurementMessageGetAltitude(message) {
+    const ret = wasm.baroMeasurementMessageGetAltitude(message);
+    return ret;
+}
+
+/**
+ * @param {bigint} timestamp_us
+ * @param {number} brightness
+ * @returns {BrightnessMeasurementMessage}
+ */
+export function newBrightnessMeasurementMessage(timestamp_us, brightness) {
+    const ret = wasm.newBrightnessMeasurementMessage(timestamp_us, brightness);
+    return ret;
+}
+
+/**
+ * @param {BrightnessMeasurementMessage} message
+ * @returns {number}
+ */
+export function brightnessMeasurementMessageGetBrightness(message) {
+    const ret = wasm.brightnessMeasurementMessageGetBrightness(message);
+    return ret;
+}
+
+/**
+ * @param {number} extended_inches
+ * @param {number} servo_current
+ * @param {number} servo_angular_velocity
+ * @returns {IcarusStatusMessage}
+ */
+export function newIcarusStatusMessage(extended_inches, servo_current, servo_angular_velocity) {
+    const ret = wasm.newIcarusStatusMessage(extended_inches, servo_current, servo_angular_velocity);
+    return ret;
+}
+
+/**
+ * @param {IcarusStatusMessage} message
+ * @returns {number}
+ */
+export function icarusStatusMessageGetExtendedInches(message) {
+    const ret = wasm.icarusStatusMessageGetExtendedInches(message);
+    return ret;
+}
+
+/**
+ * @param {IcarusStatusMessage} message
+ * @returns {number}
+ */
+export function icarusStatusMessageGetServoCurrent(message) {
+    const ret = wasm.icarusStatusMessageGetServoCurrent(message);
+    return ret;
+}
+
+/**
+ * @param {bigint} timestamp_us
+ * @param {Vector3} accel
+ * @param {Vector3} gyro
+ * @returns {IMUMeasurementMessage}
+ */
+export function newIMUMeasurementMessage(timestamp_us, accel, gyro) {
+    const ret = wasm.newIMUMeasurementMessage(timestamp_us, accel, gyro);
+    return ret;
+}
+
+/**
+ * @param {IMUMeasurementMessage} message
+ * @returns {Vector3}
+ */
+export function imuMeasurementMessageGetAcc(message) {
+    const ret = wasm.imuMeasurementMessageGetAcc(message);
+    return ret;
+}
+
+/**
+ * @param {IMUMeasurementMessage} message
+ * @returns {Vector3}
+ */
+export function imuMeasurementMessageGetGyro(message) {
+    const ret = wasm.imuMeasurementMessageGetGyro(message);
+    return ret;
+}
+
+/**
+ * @param {number} battery1_mv
+ * @param {number} battery1_temperature
+ * @param {number} battery2_mv
+ * @param {number} battery2_temperature
+ * @param {PayloadEPSOutputStatus} output_3v3
+ * @param {PayloadEPSOutputStatus} output_5v
+ * @param {PayloadEPSOutputStatus} output_9v
+ * @returns {PayloadEPSStatusMessage}
+ */
+export function newPayloadEPSStatusMessage(battery1_mv, battery1_temperature, battery2_mv, battery2_temperature, output_3v3, output_5v, output_9v) {
+    const ret = wasm.newPayloadEPSStatusMessage(battery1_mv, battery1_temperature, battery2_mv, battery2_temperature, output_3v3, output_5v, output_9v);
+    return ret;
+}
+
+/**
+ * @param {PayloadEPSStatusMessage} message
+ * @returns {number}
+ */
+export function payloadEPSStatusMessageGetBattery1Temperature(message) {
+    const ret = wasm.payloadEPSStatusMessageGetBattery1Temperature(message);
+    return ret;
+}
+
+/**
+ * @param {PayloadEPSStatusMessage} message
+ * @returns {number}
+ */
+export function payloadEPSStatusMessageGetBattery2Temperature(message) {
+    const ret = wasm.payloadEPSStatusMessageGetBattery2Temperature(message);
+    return ret;
+}
+
 const BrightnessMeasurementMessageFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_brightnessmeasurementmessage_free(ptr >>> 0, 1));

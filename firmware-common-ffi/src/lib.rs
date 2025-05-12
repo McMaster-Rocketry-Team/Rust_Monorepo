@@ -1,6 +1,8 @@
 #![cfg_attr(not(feature = "wasm"), no_std)]
 #![allow(static_mut_refs)]
 
+use firmware_common_new::can_bus::messages::brightness_measurement::BrightnessMeasurementMessage;
+use firmware_common_new::can_bus::messages::payload_eps_status::PayloadEPSOutputStatus;
 #[cfg(feature = "wasm")]
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "wasm")]
@@ -9,8 +11,10 @@ use tsify::Tsify;
 use wasm_bindgen::prelude::*;
 
 use firmware_common_new::can_bus::id::CanBusExtendedId;
-use firmware_common_new::can_bus::messages;
-use firmware_common_new::can_bus::messages::CanBusMessageEnum;
+use firmware_common_new::can_bus::messages::{
+    self, BaroMeasurementMessage, IMUMeasurementMessage, IcarusStatusMessage,
+};
+use firmware_common_new::can_bus::messages::{CanBusMessageEnum, PayloadEPSStatusMessage};
 use firmware_common_new::can_bus::node_types;
 use firmware_common_new::can_bus::receiver::CanBusMultiFrameDecoder;
 use firmware_common_new::can_bus::sender::CanBusMultiFrameEncoder;
@@ -406,6 +410,160 @@ pub fn create_can_bus_message_type_filter_mask_js(accept_message_types: &[u8]) -
         accept_message_types.as_ptr(),
         accept_message_types.len(),
     )
+}
+
+#[cfg_attr(not(feature = "wasm"), unsafe(no_mangle))]
+#[cfg_attr(feature = "wasm", wasm_bindgen(js_name = newBaroMeasurementMessage))]
+pub extern "C" fn new_baro_measurement_message(
+    timestamp_us: u64,
+    pressure: f32,
+    temperature: f32,
+) -> BaroMeasurementMessage {
+    BaroMeasurementMessage::new(timestamp_us, pressure, temperature)
+}
+
+#[cfg_attr(not(feature = "wasm"), unsafe(no_mangle))]
+#[cfg_attr(feature = "wasm", wasm_bindgen(js_name = baroMeasurementMessageGetPressure))]
+pub extern "C" fn baro_measurement_message_get_pressure(message: &BaroMeasurementMessage) -> f32 {
+    message.pressure()
+}
+
+#[cfg_attr(not(feature = "wasm"), unsafe(no_mangle))]
+#[cfg_attr(feature = "wasm", wasm_bindgen(js_name = baroMeasurementMessageGetTemperature))]
+pub extern "C" fn baro_measurement_message_get_temperature(
+    message: &BaroMeasurementMessage,
+) -> f32 {
+    message.temperature()
+}
+
+#[cfg_attr(not(feature = "wasm"), unsafe(no_mangle))]
+#[cfg_attr(feature = "wasm", wasm_bindgen(js_name = baroMeasurementMessageGetAltitude))]
+pub extern "C" fn baro_measurement_message_get_altitude(message: &BaroMeasurementMessage) -> f32 {
+    message.altitude()
+}
+
+#[cfg_attr(not(feature = "wasm"), unsafe(no_mangle))]
+#[cfg_attr(feature = "wasm", wasm_bindgen(js_name = newBrightnessMeasurementMessage))]
+pub extern "C" fn new_brightness_measurement_message(
+    timestamp_us: u64,
+    brightness: f32,
+) -> BrightnessMeasurementMessage {
+    BrightnessMeasurementMessage::new(timestamp_us, brightness)
+}
+
+#[cfg_attr(not(feature = "wasm"), unsafe(no_mangle))]
+#[cfg_attr(feature = "wasm", wasm_bindgen(js_name = brightnessMeasurementMessageGetBrightness))]
+pub extern "C" fn brightness_measurement_message_get_brightness(
+    message: &BrightnessMeasurementMessage,
+) -> f32 {
+    message.brightness()
+}
+
+#[cfg_attr(not(feature = "wasm"), unsafe(no_mangle))]
+#[cfg_attr(feature = "wasm", wasm_bindgen(js_name = newIcarusStatusMessage))]
+pub extern "C" fn new_icarus_status_message(
+    extended_inches: f32,
+    servo_current: f32,
+    servo_angular_velocity: i16,
+) -> IcarusStatusMessage {
+    IcarusStatusMessage::new(extended_inches, servo_current, servo_angular_velocity)
+}
+
+#[cfg_attr(not(feature = "wasm"), unsafe(no_mangle))]
+#[cfg_attr(feature = "wasm", wasm_bindgen(js_name = icarusStatusMessageGetExtendedInches))]
+pub extern "C" fn icarus_status_message_get_extended_inches(message: &IcarusStatusMessage) -> f32 {
+    message.extended_inches()
+}
+
+#[cfg_attr(not(feature = "wasm"), unsafe(no_mangle))]
+#[cfg_attr(feature = "wasm", wasm_bindgen(js_name = icarusStatusMessageGetServoCurrent))]
+pub extern "C" fn icarus_status_message_get_servo_current(message: &IcarusStatusMessage) -> f32 {
+    message.servo_current()
+}
+
+#[cfg_attr(feature = "wasm", derive(Serialize, Deserialize, Tsify))]
+#[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
+#[repr(C)]
+pub struct Vector3 {
+    x: f32,
+    y: f32,
+    z: f32,
+}
+
+impl Into<[f32; 3]> for Vector3 {
+    fn into(self) -> [f32; 3] {
+        [self.x, self.y, self.z]
+    }
+}
+
+impl From<[f32; 3]> for Vector3 {
+    fn from(value: [f32; 3]) -> Self {
+        Vector3 {
+            x: value[0],
+            y: value[1],
+            z: value[2],
+        }
+    }
+}
+
+#[cfg_attr(not(feature = "wasm"), unsafe(no_mangle))]
+#[cfg_attr(feature = "wasm", wasm_bindgen(js_name = newIMUMeasurementMessage))]
+pub extern "C" fn new_imu_measurement_message(
+    timestamp_us: u64,
+    accel: Vector3,
+    gyro: Vector3,
+) -> IMUMeasurementMessage {
+    IMUMeasurementMessage::new(timestamp_us, &accel.into(), &gyro.into())
+}
+
+#[cfg_attr(not(feature = "wasm"), unsafe(no_mangle))]
+#[cfg_attr(feature = "wasm", wasm_bindgen(js_name = imuMeasurementMessageGetAcc))]
+pub extern "C" fn imu_measurement_message_get_acc(message: &IMUMeasurementMessage) -> Vector3 {
+    message.acc().into()
+}
+
+#[cfg_attr(not(feature = "wasm"), unsafe(no_mangle))]
+#[cfg_attr(feature = "wasm", wasm_bindgen(js_name = imuMeasurementMessageGetGyro))]
+pub extern "C" fn imu_measurement_message_get_gyro(message: &IMUMeasurementMessage) -> Vector3 {
+    message.gyro().into()
+}
+
+#[cfg_attr(not(feature = "wasm"), unsafe(no_mangle))]
+#[cfg_attr(feature = "wasm", wasm_bindgen(js_name = newPayloadEPSStatusMessage))]
+pub extern "C" fn new_payload_eps_status_message(
+    battery1_mv: u16,
+    battery1_temperature: f32,
+    battery2_mv: u16,
+    battery2_temperature: f32,
+    output_3v3: PayloadEPSOutputStatus,
+    output_5v: PayloadEPSOutputStatus,
+    output_9v: PayloadEPSOutputStatus,
+) -> PayloadEPSStatusMessage {
+    PayloadEPSStatusMessage::new(
+        battery1_mv,
+        battery1_temperature,
+        battery2_mv,
+        battery2_temperature,
+        output_3v3,
+        output_5v,
+        output_9v,
+    )
+}
+
+#[cfg_attr(not(feature = "wasm"), unsafe(no_mangle))]
+#[cfg_attr(feature = "wasm", wasm_bindgen(js_name = payloadEPSStatusMessageGetBattery1Temperature))]
+pub extern "C" fn payload_eps_status_message_get_battery1_temperature(
+    message: &PayloadEPSStatusMessage,
+) -> f32 {
+    message.battery1_temperature()
+}
+
+#[cfg_attr(not(feature = "wasm"), unsafe(no_mangle))]
+#[cfg_attr(feature = "wasm", wasm_bindgen(js_name = payloadEPSStatusMessageGetBattery2Temperature))]
+pub extern "C" fn payload_eps_status_message_get_battery2_temperature(
+    message: &PayloadEPSStatusMessage,
+) -> f32 {
+    message.battery2_temperature()
 }
 
 #[cfg(any(target_os = "none", target_os = "espidf"))]

@@ -32,11 +32,11 @@ pub struct PayloadEPSOutputStatus {
 pub struct PayloadEPSStatusMessage {
     pub battery1_mv: u16,
     /// Unit: 0.1C, e.g. 250 = 25C
-    pub battery1_temperature: u16,
+    battery1_temperature_raw: u16,
 
     pub battery2_mv: u16,
     /// Unit: 0.1C, e.g. 250 = 25C
-    pub battery2_temperature: u16,
+    battery2_temperature_raw: u16,
 
     #[packed_field(element_size_bytes = "2")]
     pub output_3v3: PayloadEPSOutputStatus,
@@ -44,6 +44,37 @@ pub struct PayloadEPSStatusMessage {
     pub output_5v: PayloadEPSOutputStatus,
     #[packed_field(element_size_bytes = "2")]
     pub output_9v: PayloadEPSOutputStatus,
+}
+
+impl PayloadEPSStatusMessage {
+    pub fn new(
+        battery1_mv: u16,
+        battery1_temperature: f32,
+        battery2_mv: u16,
+        battery2_temperature: f32,
+
+        output_3v3: PayloadEPSOutputStatus,
+        output_5v: PayloadEPSOutputStatus,
+        output_9v: PayloadEPSOutputStatus,
+    ) -> Self {
+        Self {
+            battery1_mv,
+            battery1_temperature_raw: (battery1_temperature * 10.0) as u16,
+            battery2_mv,
+            battery2_temperature_raw: (battery2_temperature * 10.0) as u16,
+            output_3v3,
+            output_5v,
+            output_9v,
+        }
+    }
+
+    pub fn battery1_temperature(&self) -> f32 {
+        self.battery1_temperature_raw as f32 / 10.0
+    }
+
+    pub fn battery2_temperature(&self) -> f32 {
+        self.battery2_temperature_raw as f32 / 10.0
+    }
 }
 
 impl CanBusMessage for PayloadEPSStatusMessage {

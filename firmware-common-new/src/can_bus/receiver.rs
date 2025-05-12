@@ -12,10 +12,10 @@ use serde::{Deserialize, Serialize};
 use crate::{sensor_reading::SensorReading, time::BootTimestamp};
 
 use super::{
+    CanBusFrame, CanBusRX,
     id::CanBusExtendedId,
     messages::CanBusMessageEnum,
-    sender::{TailByte, CAN_CRC, MAX_CAN_MESSAGE_SIZE},
-    CanBusFrame, CanBusRX,
+    sender::{CAN_CRC, MAX_CAN_MESSAGE_SIZE, TailByte},
 };
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
@@ -90,7 +90,8 @@ impl StateMachine {
                 }
 
                 let mut data = Vec::new();
-                data.extend_from_slice(&frame_data[2..frame_data.len() - 1]).unwrap();
+                data.extend_from_slice(&frame_data[2..frame_data.len() - 1])
+                    .unwrap();
                 *self = StateMachine::MultiFrame {
                     id: frame_id,
                     first_frame_timestamp_us: frame.timestamp_us(),
@@ -248,10 +249,13 @@ impl<M: RawMutex, const N: usize, const SUBS: usize> CanReceiver<M, N, SUBS> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{can_bus::{
-        messages::{amp_status::PowerOutputStatus, payload_eps_status::*},
-        sender::CanBusMultiFrameEncoder,
-    }, tests::init_logger};
+    use crate::{
+        can_bus::{
+            messages::{amp_status::PowerOutputStatus, payload_eps_status::*},
+            sender::CanBusMultiFrameEncoder,
+        },
+        tests::init_logger,
+    };
 
     use super::*;
 
@@ -259,27 +263,27 @@ mod tests {
     fn multi_frame_encode_and_decode() {
         init_logger();
 
-        let message = CanBusMessageEnum::PayloadEPSStatus(PayloadEPSStatusMessage {
-            battery1_mv: 1,
-            battery1_temperature: 2,
-            battery2_mv: 3,
-            battery2_temperature: 4,
-            output_3v3: PayloadEPSOutputStatus {
+        let message = CanBusMessageEnum::PayloadEPSStatus(PayloadEPSStatusMessage::new(
+            1,
+            2.0,
+            3,
+            4.0,
+            PayloadEPSOutputStatus {
                 current_ma: 5,
                 overwrote: false,
                 status: PowerOutputStatus::Disabled,
             },
-            output_5v: PayloadEPSOutputStatus {
+            PayloadEPSOutputStatus {
                 current_ma: 6,
                 overwrote: false,
                 status: PowerOutputStatus::PowerGood,
             },
-            output_9v: PayloadEPSOutputStatus {
+            PayloadEPSOutputStatus {
                 current_ma: 7,
                 overwrote: false,
                 status: PowerOutputStatus::PowerBad,
             },
-        });
+        ));
 
         let id = message.get_id(0, 1);
         let id: u32 = id.into();

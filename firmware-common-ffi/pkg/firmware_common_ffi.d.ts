@@ -68,6 +68,21 @@ export function canNodeIdFromSerialNumber(serial_number: Uint8Array): number;
  * - `accept_message_types`: An array of message types to accept.
  */
 export function createCanBusMessageTypeFilterMask(accept_message_types: Uint8Array): number;
+export function newBaroMeasurementMessage(timestamp_us: bigint, pressure: number, temperature: number): BaroMeasurementMessage;
+export function baroMeasurementMessageGetPressure(message: BaroMeasurementMessage): number;
+export function baroMeasurementMessageGetTemperature(message: BaroMeasurementMessage): number;
+export function baroMeasurementMessageGetAltitude(message: BaroMeasurementMessage): number;
+export function newBrightnessMeasurementMessage(timestamp_us: bigint, brightness: number): BrightnessMeasurementMessage;
+export function brightnessMeasurementMessageGetBrightness(message: BrightnessMeasurementMessage): number;
+export function newIcarusStatusMessage(extended_inches: number, servo_current: number, servo_angular_velocity: number): IcarusStatusMessage;
+export function icarusStatusMessageGetExtendedInches(message: IcarusStatusMessage): number;
+export function icarusStatusMessageGetServoCurrent(message: IcarusStatusMessage): number;
+export function newIMUMeasurementMessage(timestamp_us: bigint, accel: Vector3, gyro: Vector3): IMUMeasurementMessage;
+export function imuMeasurementMessageGetAcc(message: IMUMeasurementMessage): Vector3;
+export function imuMeasurementMessageGetGyro(message: IMUMeasurementMessage): Vector3;
+export function newPayloadEPSStatusMessage(battery1_mv: number, battery1_temperature: number, battery2_mv: number, battery2_temperature: number, output_3v3: PayloadEPSOutputStatus, output_5v: PayloadEPSOutputStatus, output_9v: PayloadEPSOutputStatus): PayloadEPSStatusMessage;
+export function payloadEPSStatusMessageGetBattery1Temperature(message: PayloadEPSStatusMessage): number;
+export function payloadEPSStatusMessageGetBattery2Temperature(message: PayloadEPSStatusMessage): number;
 export interface CanBusNodeTypes {
     void_lake: number;
     amp: number;
@@ -108,6 +123,12 @@ export interface CanBusFrames {
 
 export type ProcessCanBusFrameResult = { Message: { timestamp: number; id: CanBusExtendedId; crc: number; message: CanBusMessageEnum } } | { Empty: number };
 
+export interface Vector3 {
+    x: number;
+    y: number;
+    z: number;
+}
+
 export interface AckMessage {
     /**
      * CRC of the message that was acknowledged
@@ -126,14 +147,28 @@ export interface AmpControlMessage {
     out4_enable: boolean;
 }
 
+export type PowerOutputOverwrite = "NoOverwrite" | "ForceEnabled" | "ForceDisabled";
+
+export interface AmpOverwriteMessage {
+    out1: PowerOutputOverwrite;
+    out2: PowerOutputOverwrite;
+    out3: PowerOutputOverwrite;
+    out4: PowerOutputOverwrite;
+}
+
 export type PowerOutputStatus = "Disabled" | "PowerGood" | "PowerBad";
+
+export interface AmpOutputStatus {
+    overwrote: boolean;
+    status: PowerOutputStatus;
+}
 
 export interface AmpStatusMessage {
     shared_battery_mv: number;
-    out1: PowerOutputStatus;
-    out2: PowerOutputStatus;
-    out3: PowerOutputStatus;
-    out4: PowerOutputStatus;
+    out1: AmpOutputStatus;
+    out2: AmpOutputStatus;
+    out3: AmpOutputStatus;
+    out4: AmpOutputStatus;
 }
 
 /**
@@ -150,7 +185,7 @@ export interface BaroMeasurementMessage {
     /**
      * Unit: 0.1C, e.g. 250 = 25C
      */
-    temperature: number;
+    temperature_raw: number;
     /**
      * Measurement timestamp, microseconds since Unix epoch, floored to the nearest us
      */
@@ -180,11 +215,11 @@ export interface IcarusStatusMessage {
     /**
      * Unit: 0.01 inch, e.g. 10 = 0.1 inch
      */
-    extended_inches: number;
+    extended_inches_raw: number;
     /**
      * Unit: 0.01A, e.g. 10 = 0.1A
      */
-    servo_current: number;
+    servo_current_raw: number;
     /**
      * Unit: deg/s
      */
@@ -218,8 +253,6 @@ export interface NodeStatusMessage {
     custom_status: number;
 }
 
-export type PowerOutputOverwrite = "NoOverwrite" | "ForceEnabled" | "ForceDisabled";
-
 export interface PayloadEPSOutputOverwriteMessage {
     out_3v3: PowerOutputOverwrite;
     out_5v: PowerOutputOverwrite;
@@ -249,12 +282,12 @@ export interface PayloadEPSStatusMessage {
     /**
      * Unit: 0.1C, e.g. 250 = 25C
      */
-    battery1_temperature: number;
+    battery1_temperature_raw: number;
     battery2_mv: number;
     /**
      * Unit: 0.1C, e.g. 250 = 25C
      */
-    battery2_temperature: number;
+    battery2_temperature_raw: number;
     output_3v3: PayloadEPSOutputStatus;
     output_5v: PayloadEPSOutputStatus;
     output_9v: PayloadEPSOutputStatus;
@@ -273,7 +306,7 @@ export interface UnixTimeMessage {
     timestamp_us: number;
 }
 
-export type CanBusMessageEnum = { Reset: ResetMessage } | { PreUnixTime: number } | { UnixTime: UnixTimeMessage } | { NodeStatus: NodeStatusMessage } | { BaroMeasurement: BaroMeasurementMessage } | { IMUMeasurement: IMUMeasurementMessage } | { BrightnessMeasurement: BrightnessMeasurementMessage } | { AmpStatus: AmpStatusMessage } | { AmpControl: AmpControlMessage } | { PayloadEPSStatus: PayloadEPSStatusMessage } | { PayloadEPSOutputOverwrite: PayloadEPSOutputOverwriteMessage } | { PayloadEPSSelfTest: PayloadEPSSelfTestMessage } | { AvionicsStatus: AvionicsStatusMessage } | { IcarusStatus: IcarusStatusMessage } | { DataTransfer: DataTransferMessage } | { Ack: AckMessage };
+export type CanBusMessageEnum = { Reset: ResetMessage } | { PreUnixTime: number } | { UnixTime: UnixTimeMessage } | { NodeStatus: NodeStatusMessage } | { BaroMeasurement: BaroMeasurementMessage } | { IMUMeasurement: IMUMeasurementMessage } | { BrightnessMeasurement: BrightnessMeasurementMessage } | { AmpStatus: AmpStatusMessage } | { AmpOverwrite: AmpOverwriteMessage } | { AmpControl: AmpControlMessage } | { PayloadEPSStatus: PayloadEPSStatusMessage } | { PayloadEPSOutputOverwrite: PayloadEPSOutputOverwriteMessage } | { PayloadEPSSelfTest: PayloadEPSSelfTestMessage } | { AvionicsStatus: AvionicsStatusMessage } | { IcarusStatus: IcarusStatusMessage } | { DataTransfer: DataTransferMessage } | { Ack: AckMessage };
 
 export class CanBusExtendedId {
   free(): void;
@@ -300,6 +333,21 @@ export interface InitOutput {
   readonly getCanBusMessageType: (a: any) => number;
   readonly canNodeIdFromSerialNumber: (a: number, b: number) => number;
   readonly createCanBusMessageTypeFilterMask: (a: number, b: number) => number;
+  readonly newBaroMeasurementMessage: (a: bigint, b: number, c: number) => any;
+  readonly baroMeasurementMessageGetPressure: (a: any) => number;
+  readonly baroMeasurementMessageGetTemperature: (a: any) => number;
+  readonly baroMeasurementMessageGetAltitude: (a: any) => number;
+  readonly newBrightnessMeasurementMessage: (a: bigint, b: number) => any;
+  readonly brightnessMeasurementMessageGetBrightness: (a: any) => number;
+  readonly newIcarusStatusMessage: (a: number, b: number, c: number) => any;
+  readonly icarusStatusMessageGetExtendedInches: (a: any) => number;
+  readonly icarusStatusMessageGetServoCurrent: (a: any) => number;
+  readonly newIMUMeasurementMessage: (a: bigint, b: any, c: any) => any;
+  readonly imuMeasurementMessageGetAcc: (a: any) => any;
+  readonly imuMeasurementMessageGetGyro: (a: any) => any;
+  readonly newPayloadEPSStatusMessage: (a: number, b: number, c: number, d: number, e: any, f: any, g: any) => any;
+  readonly payloadEPSStatusMessageGetBattery1Temperature: (a: any) => number;
+  readonly payloadEPSStatusMessageGetBattery2Temperature: (a: any) => number;
   readonly __wbg_canbusextendedid_free: (a: number, b: number) => void;
   readonly __wbg_get_canbusextendedid_priority: (a: number) => number;
   readonly __wbg_set_canbusextendedid_priority: (a: number, b: number) => void;
@@ -312,8 +360,8 @@ export interface InitOutput {
   readonly canbusextendedid_new: (a: number, b: number, c: number, d: number) => number;
   readonly canbusextendedid_from_raw: (a: number) => number;
   readonly brightnessmeasurementmessage_new: (a: bigint, b: number) => any;
-  readonly brightnessmeasurementmessage_brightness: (a: number) => number;
   readonly parseCanBusId: (a: number) => number;
+  readonly brightnessmeasurementmessage_brightness: (a: number) => number;
   readonly __wbindgen_malloc: (a: number, b: number) => number;
   readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
   readonly __wbindgen_exn_store: (a: number) => void;

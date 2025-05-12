@@ -24,7 +24,7 @@ pub struct IMUMeasurementMessage {
 }
 
 impl IMUMeasurementMessage {
-    pub fn new(timestamp_us: u64, acc: [f32; 3], gyro: [f32; 3]) -> Self {
+    pub fn new(timestamp_us: u64, acc: &[f32; 3], gyro: &[f32; 3]) -> Self {
         Self {
             acc_raw: acc.map(|x| u32::from_be_bytes(x.to_be_bytes())),
             gyro_raw: gyro.map(|x| u32::from_be_bytes(x.to_be_bytes())),

@@ -20,7 +20,7 @@ pub struct BaroMeasurementMessage {
     pressure_raw: u32,
 
     /// Unit: 0.1C, e.g. 250 = 25C
-    temperature: u16,
+    temperature_raw: u16,
 
     /// Measurement timestamp, microseconds since Unix epoch, floored to the nearest us
     #[packed_field(element_size_bits = "56")]
@@ -31,7 +31,7 @@ impl BaroMeasurementMessage {
     pub fn new(timestamp_us: u64, pressure: f32, temperature: f32) -> Self {
         Self {
             pressure_raw: u32::from_be_bytes(pressure.to_be_bytes()),
-            temperature: (temperature * 10.0) as u16,
+            temperature_raw: (temperature * 10.0) as u16,
             timestamp_us,
         }
     }
@@ -43,7 +43,7 @@ impl BaroMeasurementMessage {
 
     /// Temperature in C
     pub fn temperature(&self) -> f32 {
-        self.temperature as f32 / 10.0
+        self.temperature_raw as f32 / 10.0
     }
 
     pub fn altitude(&self) -> f32 {
