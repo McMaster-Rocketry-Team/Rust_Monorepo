@@ -35,6 +35,7 @@ import { CanBusMessage } from '../device/IcarusDevice'
 export function CanMessageRow(props: {
   nodeTypeLookupMap: Map<number, string>
   message: CanBusMessage
+  count: number
 }) {
   let nodeTypeStr =
     props.nodeTypeLookupMap.get(props.message.id.node_type) ?? 'unknown'
@@ -443,7 +444,7 @@ export function CanMessageRow(props: {
       <div className='font-mono'>{props.message.id.node_id}</div>
       <div className='flex items-center gap-4'>{inner}</div>
       <div>{props.message.timestamp}</div>
-      <div className='font-mono'>0</div>
+      <div className='font-mono'>{props.count}</div>
     </div>
   )
 }
