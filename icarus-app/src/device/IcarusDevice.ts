@@ -15,7 +15,7 @@ export class IcarusDevice {
   private constructor(
     private device: USBDevice,
     private isoEpIn: USBEndpoint,
-    private isoEpOut: USBEndpoint,
+    // private isoEpOut: USBEndpoint,
     private onMessage: (message: CanBusMessage) => void,
     private onDisconnect: () => void,
   ) {
@@ -76,7 +76,7 @@ export class IcarusDevice {
     return new IcarusDevice(
       device,
       endpoints[0],
-      endpoints[1],
+      // endpoints[1],
       onMessage,
       onDisconnect,
     )
