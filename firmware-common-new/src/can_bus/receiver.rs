@@ -90,11 +90,7 @@ impl StateMachine {
                 }
 
                 let mut data = Vec::new();
-                let result = data.extend_from_slice(&frame_data[2..frame_data.len() - 1]);
-                if result.is_err() {
-                    // buffer overflow
-                    return None;
-                }
+                data.extend_from_slice(&frame_data[2..frame_data.len() - 1]).unwrap();
                 *self = StateMachine::MultiFrame {
                     id: frame_id,
                     first_frame_timestamp_us: frame.timestamp_us(),
@@ -188,6 +184,7 @@ impl<const Q: usize> CanBusMultiFrameDecoder<Q> {
             }
         }
 
+        log_warn!("No empty state machine left, discarding least recent used state machine");
         let lru_state_machine = self
             .state_machines
             .iter_mut()
