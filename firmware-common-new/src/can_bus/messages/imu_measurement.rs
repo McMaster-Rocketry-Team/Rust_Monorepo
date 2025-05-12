@@ -15,8 +15,8 @@ use super::{CanBusMessage, CanBusMessageEnum};
 #[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "31")]
 #[repr(C)]
 pub struct IMUMeasurementMessage {
-    acc: [u32; 3],
-    gyro: [u32; 3],
+    acc_raw: [u32; 3],
+    gyro_raw: [u32; 3],
 
     /// Measurement timestamp, microseconds since Unix epoch, floored to the nearest us
     #[packed_field(element_size_bits = "56")]
@@ -26,20 +26,20 @@ pub struct IMUMeasurementMessage {
 impl IMUMeasurementMessage {
     pub fn new(timestamp_us: u64, acc: [f32; 3], gyro: [f32; 3]) -> Self {
         Self {
-            acc: acc.map(|x| u32::from_be_bytes(x.to_be_bytes())),
-            gyro: gyro.map(|x| u32::from_be_bytes(x.to_be_bytes())),
+            acc_raw: acc.map(|x| u32::from_be_bytes(x.to_be_bytes())),
+            gyro_raw: gyro.map(|x| u32::from_be_bytes(x.to_be_bytes())),
             timestamp_us,
         }
     }
 
     /// Acceleration in m/s^2
     pub fn acc(&self) -> [f32; 3] {
-        self.acc.map(f32::from_bits)
+        self.acc_raw.map(f32::from_bits)
     }
 
     /// Gyroscope in deg/s
     pub fn gyro(&self) -> [f32; 3] {
-        self.gyro.map(f32::from_bits)
+        self.gyro_raw.map(f32::from_bits)
     }
 }
 

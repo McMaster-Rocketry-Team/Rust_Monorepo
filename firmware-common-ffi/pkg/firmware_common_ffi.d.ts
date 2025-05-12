@@ -192,8 +192,8 @@ export interface IcarusStatusMessage {
 }
 
 export interface IMUMeasurementMessage {
-    acc: [number, number, number];
-    gyro: [number, number, number];
+    acc_raw: [number, number, number];
+    gyro_raw: [number, number, number];
     /**
      * Measurement timestamp, microseconds since Unix epoch, floored to the nearest us
      */
