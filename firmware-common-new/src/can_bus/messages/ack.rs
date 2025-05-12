@@ -23,15 +23,6 @@ pub struct AckMessage {
     pub node_id: u16,
 }
 
-impl AckMessage {
-    pub fn new(crc: u16, node_id: u16) -> Self {
-        Self {
-            crc,
-            node_id: node_id.into(),
-        }
-    }
-}
-
 impl CanBusMessage for AckMessage {
     fn priority(&self) -> u8 {
         4

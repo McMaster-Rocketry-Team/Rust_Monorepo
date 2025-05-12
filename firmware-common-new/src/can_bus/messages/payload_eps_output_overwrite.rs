@@ -6,18 +6,9 @@ use tsify::Tsify;
 use packed_struct::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use super::{CanBusMessage, CanBusMessageEnum};
+use super::{amp_overwrite::PowerOutputOverwrite, CanBusMessage, CanBusMessageEnum};
 
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
-#[cfg_attr(feature = "wasm", derive(Tsify))]
-#[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
-#[derive(PrimitiveEnum_u8, Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[repr(C)]
-pub enum PowerOutputOverwrite {
-    NoOverwrite = 0,
-    ForceEnabled = 1,
-    ForceDisabled = 2,
-}
+
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[cfg_attr(feature = "wasm", derive(Tsify))]
@@ -36,22 +27,6 @@ pub struct PayloadEPSOutputOverwriteMessage {
     /// Node ID of EPS to control
     #[packed_field(element_size_bits = "12")]
     pub node_id: u16,
-}
-
-impl PayloadEPSOutputOverwriteMessage {
-    pub fn new(
-        out_3v3: PowerOutputOverwrite,
-        out_5v: PowerOutputOverwrite,
-        out_9v: PowerOutputOverwrite,
-        node_id: u16,
-    ) -> Self {
-        Self {
-            out_3v3,
-            out_5v,
-            out_9v,
-            node_id,
-        }
-    }
 }
 
 impl CanBusMessage for PayloadEPSOutputOverwriteMessage {

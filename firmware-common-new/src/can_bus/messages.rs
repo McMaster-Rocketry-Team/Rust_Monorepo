@@ -1,7 +1,8 @@
-#[cfg(feature = "wasm")]
-use wasm_bindgen::prelude::*;
+use amp_overwrite::AmpOverwriteMessage;
 #[cfg(feature = "wasm")]
 use tsify::Tsify;
+#[cfg(feature = "wasm")]
+use wasm_bindgen::prelude::*;
 
 use crate::utils::FixedLenSerializable;
 use ack::AckMessage;
@@ -26,6 +27,7 @@ use super::id::{CanBusExtendedId, CanBusMessageTypeFlag, create_can_bus_message_
 
 pub mod ack;
 pub mod amp_control;
+pub mod amp_overwrite;
 pub mod amp_status;
 pub mod avionics_status;
 pub mod baro_measurement;
@@ -119,6 +121,16 @@ pub const AMP_STATUS_MESSAGE_TYPE: u8 = create_can_bus_message_type(
         is_misc: false,
     },
     1,
+);
+pub const AMP_OVERWRITE_MESSAGE_TYPE: u8 = create_can_bus_message_type(
+    CanBusMessageTypeFlag {
+        is_measurement: false,
+        is_control: true,
+        is_status: false,
+        is_data: false,
+        is_misc: false,
+    },
+    2,
 );
 pub const AMP_CONTROL_MESSAGE_TYPE: u8 = create_can_bus_message_type(
     CanBusMessageTypeFlag {
@@ -218,6 +230,7 @@ pub enum CanBusMessageEnum {
     BrightnessMeasurement(BrightnessMeasurementMessage),
 
     AmpStatus(AmpStatusMessage),
+    AmpOverwrite(AmpOverwriteMessage),
     AmpControl(AmpControlMessage),
 
     PayloadEPSStatus(PayloadEPSStatusMessage),
@@ -242,6 +255,7 @@ impl CanBusMessageEnum {
             CanBusMessageEnum::IMUMeasurement(m) => m.priority(),
             CanBusMessageEnum::BrightnessMeasurement(m) => m.priority(),
             CanBusMessageEnum::AmpStatus(m) => m.priority(),
+            CanBusMessageEnum::AmpOverwrite(m) => m.priority(),
             CanBusMessageEnum::AmpControl(m) => m.priority(),
             CanBusMessageEnum::PayloadEPSStatus(m) => m.priority(),
             CanBusMessageEnum::PayloadEPSOutputOverwrite(m) => m.priority(),
@@ -263,6 +277,7 @@ impl CanBusMessageEnum {
             CanBusMessageEnum::IMUMeasurement(_) => IMU_MEASUREMENT_MESSAGE_TYPE,
             CanBusMessageEnum::BrightnessMeasurement(_) => BRIGHTNESS_MEASUREMENT_MESSAGE_TYPE,
             CanBusMessageEnum::AmpStatus(_) => AMP_STATUS_MESSAGE_TYPE,
+            CanBusMessageEnum::AmpOverwrite(_) => AMP_OVERWRITE_MESSAGE_TYPE,
             CanBusMessageEnum::AmpControl(_) => AMP_CONTROL_MESSAGE_TYPE,
             CanBusMessageEnum::PayloadEPSStatus(_) => PAYLOAD_EPS_STATUS_MESSAGE_TYPE,
             CanBusMessageEnum::PayloadEPSOutputOverwrite(_) => {
@@ -290,6 +305,7 @@ impl CanBusMessageEnum {
             CanBusMessageEnum::IMUMeasurement(m) => m.serialize(buffer),
             CanBusMessageEnum::BrightnessMeasurement(m) => m.serialize(buffer),
             CanBusMessageEnum::AmpStatus(m) => m.serialize(buffer),
+            CanBusMessageEnum::AmpOverwrite(m) => m.serialize(buffer),
             CanBusMessageEnum::AmpControl(m) => m.serialize(buffer),
             CanBusMessageEnum::PayloadEPSStatus(m) => m.serialize(buffer),
             CanBusMessageEnum::PayloadEPSOutputOverwrite(m) => m.serialize(buffer),

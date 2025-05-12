@@ -21,14 +21,6 @@ pub struct UnixTimeMessage {
     pub timestamp_us: u64,
 }
 
-impl UnixTimeMessage {
-    pub fn new(timestamp_us: u64) -> Self {
-        Self {
-            timestamp_us,
-        }
-    }
-}
-
 impl CanBusMessage for UnixTimeMessage {
     fn priority(&self) -> u8 {
         1

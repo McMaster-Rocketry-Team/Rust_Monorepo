@@ -1,7 +1,7 @@
 use packed_struct::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::can_bus::messages::payload_eps_output_overwrite::PowerOutputOverwrite;
+use crate::can_bus::messages::amp_overwrite::PowerOutputOverwrite;
 
 use super::VLPUplinkPacket;
 

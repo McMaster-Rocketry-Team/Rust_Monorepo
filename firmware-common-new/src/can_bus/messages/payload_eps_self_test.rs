@@ -23,24 +23,6 @@ pub struct PayloadEPSSelfTestMessage {
     pub out_9v_ok: bool,
 }
 
-impl PayloadEPSSelfTestMessage {
-    pub fn new(
-        battery1_ok: bool,
-        battery2_ok: bool,
-        out_3v3_ok: bool,
-        out_5v_ok: bool,
-        out_9v_ok: bool,
-    ) -> Self {
-        Self {
-            battery1_ok,
-            battery2_ok,
-            out_3v3_ok,
-            out_5v_ok,
-            out_9v_ok,
-        }
-    }
-}
-
 impl CanBusMessage for PayloadEPSSelfTestMessage {
     fn priority(&self) -> u8 {
         5

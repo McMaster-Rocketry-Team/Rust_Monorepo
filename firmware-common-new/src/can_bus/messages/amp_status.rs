@@ -23,36 +23,31 @@ pub enum PowerOutputStatus {
 #[cfg_attr(feature = "wasm", derive(Tsify))]
 #[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
 #[derive(PackedStruct, Clone, Debug, Serialize, Deserialize)]
-#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "3")]
+#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bits = "3")]
+#[repr(C)]
+pub struct AmpOutputStatus {
+    #[packed_field(bits = "0..1")]
+    pub overwrote: bool,
+    #[packed_field(bits = "1..3", ty = "enum")]
+    pub status: PowerOutputStatus,
+}
+
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[cfg_attr(feature = "wasm", derive(Tsify))]
+#[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
+#[derive(PackedStruct, Clone, Debug, Serialize, Deserialize)]
+#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "4")]
 #[repr(C)]
 pub struct AmpStatusMessage {
     pub shared_battery_mv: u16,
-    #[packed_field(bits = "16..18", ty = "enum")]
-    pub out1: PowerOutputStatus,
-    #[packed_field(bits = "18..20", ty = "enum")]
-    pub out2: PowerOutputStatus,
-    #[packed_field(bits = "20..22", ty = "enum")]
-    pub out3: PowerOutputStatus,
-    #[packed_field(bits = "22..24", ty = "enum")]
-    pub out4: PowerOutputStatus,
-}
-
-impl AmpStatusMessage {
-    pub fn new(
-        shared_battery_mv: u16,
-        out1: PowerOutputStatus,
-        out2: PowerOutputStatus,
-        out3: PowerOutputStatus,
-        out4: PowerOutputStatus,
-    ) -> Self {
-        Self {
-            shared_battery_mv,
-            out1,
-            out2,
-            out3,
-            out4,
-        }
-    }
+    #[packed_field(element_size_bits = "3")]
+    pub out1: AmpOutputStatus,
+    #[packed_field(element_size_bits = "3")]
+    pub out2: AmpOutputStatus,
+    #[packed_field(element_size_bits = "3")]
+    pub out3: AmpOutputStatus,
+    #[packed_field(element_size_bits = "3")]
+    pub out4: AmpOutputStatus,
 }
 
 impl CanBusMessage for AmpStatusMessage {

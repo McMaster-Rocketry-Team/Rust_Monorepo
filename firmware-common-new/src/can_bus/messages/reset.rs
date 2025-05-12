@@ -20,15 +20,6 @@ pub struct ResetMessage {
     pub reset_all: bool,
 }
 
-impl ResetMessage {
-    pub fn new(node_id: u16, reset_all: bool) -> Self {
-        Self {
-            node_id,
-            reset_all,
-        }
-    }
-}
-
 impl CanBusMessage for ResetMessage {
     fn priority(&self) -> u8 {
         0

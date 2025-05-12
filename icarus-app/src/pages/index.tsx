@@ -1,11 +1,16 @@
 import { Button } from '@heroui/button'
-import init, {
+import {
   getCanBusNodeTypes,
-  CanBusMessageEnum,
-  encodeCanBusMessage,
-  processCanBusFrame,
   CanBusExtendedId,
+  ResetMessage,
+  UnixTimeMessage,
+  NodeStatusMessage,
+  BaroMeasurementMessage,
+  IMUMeasurementMessage,
+  BrightnessMeasurementMessage,
+  AmpStatusMessage,
 } from 'firmware-common-ffi'
+import { ReactNode, useMemo, useRef, useState } from 'react'
 
 import { ThemeSwitch } from '../components/theme-switch'
 import {
@@ -13,7 +18,6 @@ import {
   IcarusDevice,
   requestIcarusDevice,
 } from '../device/IcarusDevice'
-import { useRef, useState } from 'react'
 
 export default function IndexPage() {
   const deviceRef = useRef<IcarusDevice>()
@@ -221,13 +225,24 @@ export default function IndexPage() {
     },
   })
 
+  const nodeTypeLookupMap = useMemo(() => {
+    const nodeTypeLookupMap = new Map<number, string>()
+    const nodeTypes = getCanBusNodeTypes()
+
+    for (const [name, nodeType] of Object.entries(nodeTypes)) {
+      nodeTypeLookupMap.set(nodeType, name.replaceAll('_', ' '))
+    }
+
+    return nodeTypeLookupMap
+  }, [])
+
   const resetMessage: CanBusMessage | undefined = latestMessages['Reset']
   const unixTimeMessage: CanBusMessage | undefined = latestMessages['UnixTime']
   const nodeStatusMessage: CanBusMessage | undefined =
     latestMessages['NodeStatus']
   const baroMeasurementMessage: CanBusMessage | undefined =
     latestMessages['BaroMeasurement']
-  const IMUMeasurementMessage: CanBusMessage | undefined =
+  const imuMeasurementMessage: CanBusMessage | undefined =
     latestMessages['IMUMeasurement']
   const brightnessMeasurementMessage: CanBusMessage | undefined =
     latestMessages['BrightnessMeasurement']
@@ -275,6 +290,171 @@ export default function IndexPage() {
       >
         Connect
       </Button>
+      <div className='grid grid-cols-[max-content_max-content_max-content_1fr_200px] gap-x-4'>
+        <div className='grid grid-cols-subgrid col-span-full p-4 border-b'>
+          <div>Message Type</div>
+          <div>Node Type</div>
+          <div>Node ID</div>
+          <div>Data</div>
+          <div>Received Time</div>
+        </div>
+        <MessageRow
+          message={resetMessage}
+          messageType='Reset'
+          nodeTypeLookupMap={nodeTypeLookupMap}
+        >
+          {(message: ResetMessage) => (
+            <>
+              <LabeledData
+                data={message.node_id}
+                dataWidth={50}
+                label='reset node id'
+              />
+              <LabeledData
+                data={message.reset_all ? 'true' : 'false'}
+                dataWidth={60}
+                label='reset all'
+              />
+            </>
+          )}
+        </MessageRow>
+        <MessageRow
+          message={unixTimeMessage}
+          messageType='UnixTime'
+          nodeTypeLookupMap={nodeTypeLookupMap}
+        >
+          {(message: UnixTimeMessage) => (
+            <>
+              <LabeledData
+                data={message.timestamp_us}
+                dataWidth={200}
+                label='timestamp us'
+              />
+            </>
+          )}
+        </MessageRow>
+        <MessageRow
+          message={nodeStatusMessage}
+          messageType='NodeStatus'
+          nodeTypeLookupMap={nodeTypeLookupMap}
+        >
+          {(message: NodeStatusMessage) => (
+            <>
+              <LabeledData
+                data={message.uptime_s}
+                dataWidth={75}
+                label='uptime s'
+              />
+              <LabeledData
+                data={message.health}
+                dataWidth={100}
+                label='health'
+              />
+              <LabeledData data={message.mode} dataWidth={100} label='mode' />
+            </>
+          )}
+        </MessageRow>
+        <MessageRow
+          message={baroMeasurementMessage}
+          messageType='BaroMeasurement'
+          nodeTypeLookupMap={nodeTypeLookupMap}
+        >
+          {(message: BaroMeasurementMessage) => (
+            <>
+              <LabeledData data={'TODO'} dataWidth={100} label='pressure' />
+              <LabeledData
+                data={message.temperature / 10}
+                dataWidth={100}
+                label='temperature'
+              />
+            </>
+          )}
+        </MessageRow>
+        <MessageRow
+          message={imuMeasurementMessage}
+          messageType='IMUMeasurement'
+          nodeTypeLookupMap={nodeTypeLookupMap}
+        >
+          {(message: IMUMeasurementMessage) => (
+            <>
+              <LabeledData data={'TODO'} dataWidth={100} label='acc' />
+              <LabeledData data={'TODO'} dataWidth={100} label='gyro' />
+            </>
+          )}
+        </MessageRow>
+        <MessageRow
+          message={brightnessMeasurementMessage}
+          messageType='BrightnessMeasurement'
+          nodeTypeLookupMap={nodeTypeLookupMap}
+        >
+          {(message: BrightnessMeasurementMessage) => (
+            <>
+              <LabeledData data={'TODO'} dataWidth={100} label='brightness' />
+            </>
+          )}
+        </MessageRow>
+        <MessageRow
+          message={ampStatusMessage}
+          messageType='AmpStatus'
+          nodeTypeLookupMap={nodeTypeLookupMap}
+        >
+          {(message: AmpStatusMessage) => (
+            <>
+              <LabeledData data={'TODO'} dataWidth={100} label='brightness' />
+            </>
+          )}
+        </MessageRow>
+      </div>
+    </div>
+  )
+}
+
+function MessageRow(props: {
+  nodeTypeLookupMap: Map<number, string>
+  messageType: string
+  message: CanBusMessage | undefined
+  children: (message: any) => ReactNode
+}) {
+  if (!props.message) {
+    return (
+      <div className='grid grid-cols-subgrid col-span-full p-4'>
+        <div>{props.messageType}</div>
+      </div>
+    )
+  }
+
+  let nodeTypeStr =
+    props.nodeTypeLookupMap.get(props.message.id.node_type) ?? 'unknown'
+
+  return (
+    <div className='grid grid-cols-subgrid col-span-full p-4'>
+      <div>{props.messageType}</div>
+      <div>{nodeTypeStr}</div>
+      <div className='font-mono'>{props.message.id.node_id}</div>
+      <div className='flex items-center gap-4'>
+        {props.children(
+          (props.message.message as Record<string, any>)[props.messageType],
+        )}
+      </div>
+      <div>{props.message.timestamp}</div>
+    </div>
+  )
+}
+
+function LabeledData(props: {
+  label: ReactNode
+  data: ReactNode
+  dataWidth: number
+}) {
+  return (
+    <div>
+      <span className='opacity-70'>{props.label}: </span>
+      <span
+        className='font-mono inline-block'
+        style={{ width: props.dataWidth }}
+      >
+        {props.data}
+      </span>
     </div>
   )
 }

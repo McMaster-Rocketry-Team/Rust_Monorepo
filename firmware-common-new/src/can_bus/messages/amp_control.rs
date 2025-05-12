@@ -21,17 +21,6 @@ pub struct AmpControlMessage {
     pub out4_enable: bool,
 }
 
-impl AmpControlMessage {
-    pub fn new(out1_enable: bool, out2_enable: bool, out3_enable: bool, out4_enable: bool) -> Self {
-        Self {
-            out1_enable,
-            out2_enable,
-            out3_enable,
-            out4_enable,
-        }
-    }
-}
-
 impl CanBusMessage for AmpControlMessage {
     fn priority(&self) -> u8 {
         2

@@ -64,22 +64,6 @@ pub struct NodeStatusMessage {
     pub custom_status: u16,
 }
 
-impl NodeStatusMessage {
-    pub fn new(
-        uptime_s: u32,
-        health: NodeHealth,
-        mode: NodeMode,
-        custom_status: u16,
-    ) -> Self {
-        Self {
-            uptime_s,
-            health,
-            mode,
-            custom_status,
-        }
-    }
-}
-
 impl CanBusMessage for NodeStatusMessage {
     fn priority(&self) -> u8 {
         5
