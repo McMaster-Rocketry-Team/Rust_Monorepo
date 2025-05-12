@@ -48,7 +48,7 @@ export class IcarusDevice {
           const data = new Uint8Array(dataLength)
 
           for (let j = 0; j < dataLength; j++) {
-            data[i] = packetData.getUint8(i + 5 + j)
+            data[j] = packetData.getUint8(i + 5 + j)
           }
           const result = processCanBusFrame(BigInt(Date.now()), id, data)
 

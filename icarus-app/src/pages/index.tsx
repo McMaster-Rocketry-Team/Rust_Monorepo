@@ -117,7 +117,7 @@ export default function IndexPage() {
         <ThemeSwitch />
       </div>
 
-      <div className='grid grid-cols-[230px_120px_max-content_1fr_150px_max-content] gap-x-4'>
+      <div className='grid grid-cols-[230px_120px_max-content_1fr_max-content_max-content] gap-x-4'>
         <div className='grid grid-cols-subgrid col-span-full p-4 border-b sticky top-0 z-10 bg-white dark:bg-black'>
           <div>Message Type</div>
           <div>Node Type</div>

@@ -1,4 +1,4 @@
-import { ReactNode } from 'react'
+import { ReactNode, useState } from 'react'
 import {
   ResetMessage,
   UnixTimeMessage,
@@ -29,6 +29,8 @@ import {
   PayloadEPSOutputOverwriteMessage,
   AmpOverwriteMessage,
 } from 'firmware-common-ffi'
+import { twMerge } from 'tailwind-merge'
+import { useInterval } from 'usehooks-ts'
 
 import { CanBusMessage } from '../device/IcarusDevice'
 
@@ -37,6 +39,14 @@ export function CanMessageRow(props: {
   message: CanBusMessage
   count: number
 }) {
+  const [receivedSecondsAgo, setReceivedSecondsAgo] = useState(0)
+
+  useInterval(() => {
+    const now = Date.now()
+
+    setReceivedSecondsAgo(Math.floor((now - props.message.timestamp) / 1000))
+  }, 100)
+
   let nodeTypeStr =
     props.nodeTypeLookupMap.get(props.message.id.node_type) ?? 'unknown'
   const messageType = Object.keys(props.message.message)[0]
@@ -88,8 +98,18 @@ export function CanMessageRow(props: {
     inner = (
       <>
         <LabeledData data={message.uptime_s} dataWidth={75} label='uptime s' />
-        <LabeledData data={message.health} dataWidth={100} label='health' />
-        <LabeledData data={message.mode} dataWidth={100} label='mode' />
+        <LabeledData
+          data={message.health}
+          dataWidth={100}
+          highlightKey={message.health}
+          label='health'
+        />
+        <LabeledData
+          data={message.mode}
+          dataWidth={130}
+          highlightKey={message.mode}
+          label='mode'
+        />
       </>
     )
   } else if (messageType === 'BaroMeasurement') {
@@ -192,21 +212,25 @@ export function CanMessageRow(props: {
         <LabeledData
           data={getAmpOutPutStatusText(message.out1)}
           dataWidth={60}
+          highlightKey={message.out1}
           label='out 1'
         />
         <LabeledData
           data={getAmpOutPutStatusText(message.out2)}
           dataWidth={60}
+          highlightKey={message.out2}
           label='out 2'
         />
         <LabeledData
           data={getAmpOutPutStatusText(message.out3)}
           dataWidth={60}
+          highlightKey={message.out3}
           label='out 3'
         />
         <LabeledData
           data={getAmpOutPutStatusText(message.out4)}
           dataWidth={60}
+          highlightKey={message.out4}
           label='out 4'
         />
       </>
@@ -216,10 +240,30 @@ export function CanMessageRow(props: {
 
     inner = (
       <>
-        <LabeledData data={message.out1} dataWidth={130} label='out 1' />
-        <LabeledData data={message.out2} dataWidth={130} label='out 2' />
-        <LabeledData data={message.out3} dataWidth={130} label='out 3' />
-        <LabeledData data={message.out4} dataWidth={130} label='out 4' />
+        <LabeledData
+          data={message.out1}
+          dataWidth={130}
+          highlightKey={message.out1}
+          label='out 1'
+        />
+        <LabeledData
+          data={message.out2}
+          dataWidth={130}
+          highlightKey={message.out2}
+          label='out 2'
+        />
+        <LabeledData
+          data={message.out3}
+          dataWidth={130}
+          highlightKey={message.out3}
+          label='out 3'
+        />
+        <LabeledData
+          data={message.out4}
+          dataWidth={130}
+          highlightKey={message.out4}
+          label='out 4'
+        />
       </>
     )
   } else if (messageType === 'AmpControl') {
@@ -230,21 +274,25 @@ export function CanMessageRow(props: {
         <LabeledData
           data={message.out1_enable ? 'T' : 'F'}
           dataWidth={50}
+          highlightKey={message.out1_enable}
           label='out1 en'
         />
         <LabeledData
           data={message.out2_enable ? 'T' : 'F'}
           dataWidth={50}
+          highlightKey={message.out2_enable}
           label='out2 en'
         />
         <LabeledData
           data={message.out3_enable ? 'T' : 'F'}
           dataWidth={50}
+          highlightKey={message.out3_enable}
           label='out3 en'
         />
         <LabeledData
           data={message.out4_enable ? 'T' : 'F'}
           dataWidth={50}
+          highlightKey={message.out4_enable}
           label='out4 en'
         />
       </>
@@ -302,16 +350,19 @@ export function CanMessageRow(props: {
           <LabeledData
             data={getPayloadOutPutStatusText(message.output_3v3)}
             dataWidth={120}
+            highlightKey={message.output_3v3}
             label='out 3v3'
           />
           <LabeledData
             data={getPayloadOutPutStatusText(message.output_5v)}
             dataWidth={120}
+            highlightKey={message.output_5v}
             label='out 5v'
           />
           <LabeledData
             data={getPayloadOutPutStatusText(message.output_9v)}
             dataWidth={120}
+            highlightKey={message.output_9v}
             label='out 9v'
           />
         </div>
@@ -322,10 +373,30 @@ export function CanMessageRow(props: {
 
     inner = (
       <>
-        <LabeledData data={message.node_id} dataWidth={30} label='node id' />
-        <LabeledData data={message.out_3v3} dataWidth={130} label='out 3v3' />
-        <LabeledData data={message.out_5v} dataWidth={130} label='out 5v' />
-        <LabeledData data={message.out_9v} dataWidth={130} label='out 9v' />
+        <LabeledData
+          data={message.node_id}
+          dataWidth={30}
+          highlightKey={message.node_id}
+          label='node id'
+        />
+        <LabeledData
+          data={message.out_3v3}
+          dataWidth={130}
+          highlightKey={message.out_3v3}
+          label='out 3v3'
+        />
+        <LabeledData
+          data={message.out_5v}
+          dataWidth={130}
+          highlightKey={message.out_5v}
+          label='out 5v'
+        />
+        <LabeledData
+          data={message.out_9v}
+          dataWidth={130}
+          highlightKey={message.out_9v}
+          label='out 9v'
+        />
       </>
     )
   } else if (messageType === 'PayloadEPSSelfTest') {
@@ -344,26 +415,31 @@ export function CanMessageRow(props: {
         <LabeledData
           data={getTrueFalseColoredText(message.battery1_ok)}
           dataWidth={20}
+          highlightKey={message.battery1_ok}
           label='bat 1 ok'
         />
         <LabeledData
           data={getTrueFalseColoredText(message.battery2_ok)}
           dataWidth={20}
+          highlightKey={message.battery2_ok}
           label='bat 2 ok'
         />
         <LabeledData
           data={getTrueFalseColoredText(message.out_3v3_ok)}
           dataWidth={20}
+          highlightKey={message.out_3v3_ok}
           label='out 3v3 ok'
         />
         <LabeledData
           data={getTrueFalseColoredText(message.out_5v_ok)}
           dataWidth={20}
+          highlightKey={message.out_5v_ok}
           label='out 5v ok'
         />
         <LabeledData
           data={getTrueFalseColoredText(message.out_9v_ok)}
           dataWidth={20}
+          highlightKey={message.out_9v_ok}
           label='out 9v ok'
         />
       </>
@@ -376,6 +452,7 @@ export function CanMessageRow(props: {
         <LabeledData
           data={message.flight_stage}
           dataWidth={200}
+          highlightKey={message.flight_stage}
           label='flight stage'
         />
       </>
@@ -417,11 +494,13 @@ export function CanMessageRow(props: {
         <LabeledData
           data={message.start_of_transfer ? 'T' : 'F'}
           dataWidth={20}
+          highlightKey={message.start_of_transfer}
           label='start'
         />
         <LabeledData
           data={message.end_of_transfer ? 'T' : 'F'}
           dataWidth={20}
+          highlightKey={message.end_of_transfer}
           label='end'
         />
       </>
@@ -443,7 +522,9 @@ export function CanMessageRow(props: {
       <div>{nodeTypeStr}</div>
       <div className='font-mono'>{props.message.id.node_id}</div>
       <div className='flex items-center gap-4'>{inner}</div>
-      <div>{props.message.timestamp}</div>
+      <div>
+        <span className='font-mono'>{receivedSecondsAgo}</span>s ago
+      </div>
       <div className='font-mono'>{props.count}</div>
     </div>
   )
@@ -453,6 +534,7 @@ function LabeledData(props: {
   label: ReactNode
   data: ReactNode
   dataWidth: number
+  highlightKey?: any
 }) {
   let data
 
@@ -464,12 +546,21 @@ function LabeledData(props: {
 
   return (
     <div>
-      <span className='opacity-70'>{props.label}: </span>
+      <span className='opacity-70'>{props.label}:</span>
       <span
         className='font-mono inline-block'
         style={{ width: props.dataWidth }}
       >
-        {data}
+        <span
+          key={JSON.stringify(props.highlightKey)}
+          className={twMerge(
+            'px-1',
+            props.highlightKey === undefined ? '' : 'enter-highlight',
+          )}
+          style={{ width: props.dataWidth }}
+        >
+          {data}
+        </span>
       </span>
     </div>
   )

@@ -14,6 +14,19 @@ export default {
       fontFamily: {
         mono: ['"Jetbrains Mono"', 'ui-monospace'],
       },
+      keyframes: {
+        'enter-highlight': {
+          '0%': { backgroundColor: 'rgba(233, 123, 43, 1)' },
+          '100%': { backgroundColor: 'rgba(233, 123, 43, 0)' },
+        },
+        enter: {
+          '0%':   { opacity: '0', transform: 'translateY(0.5rem)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' }
+        },
+      },
+      animation: {
+        'enter-highlight': 'enter-highlight 200ms linear forwards',
+      },
     },
   },
   darkMode: 'class',
