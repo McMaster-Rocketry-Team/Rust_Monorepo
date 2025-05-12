@@ -47,7 +47,7 @@ impl BaroMeasurementMessage {
     }
 
     pub fn altitude(&self) -> f32 {
-        return calculate_isa_altitude(Pascals(self.pressure_raw as f64)).0 as f32;
+        return calculate_isa_altitude(Pascals(self.pressure() as f64)).0 as f32;
     }
 }
 
@@ -60,5 +60,18 @@ impl CanBusMessage for BaroMeasurementMessage {
 impl Into<CanBusMessageEnum> for BaroMeasurementMessage {
     fn into(self) -> CanBusMessageEnum {
         CanBusMessageEnum::BaroMeasurement(self)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tests::init_logger;
+
+    #[test]
+    fn altitude_calculation(){
+        init_logger();
+
+        log_info!("{}", BaroMeasurementMessage::new(0, 103325.3, 30.0).altitude())
     }
 }
