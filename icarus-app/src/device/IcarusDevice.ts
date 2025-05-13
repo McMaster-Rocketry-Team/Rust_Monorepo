@@ -1,4 +1,4 @@
-import init, {
+import {
   CanBusMessageEnum,
   processCanBusFrame,
   CanBusExtendedId,
@@ -27,9 +27,10 @@ export class IcarusDevice {
       let transferResult
 
       try {
+        console.log(this.isoEpIn)
         transferResult = await this.device.isochronousTransferIn(
           this.isoEpIn.endpointNumber,
-          [13 * 4],
+          [64],
         )
       } catch (e) {
         console.warn(e)
@@ -42,13 +43,15 @@ export class IcarusDevice {
 
         if (!packetData) continue
 
-        for (let i = 0; i < packetData.byteLength; i += 13) {
-          const id = packetData.getUint32(i, false)
-          const dataLength = packetData.getUint8(i + 4)
+        const canFrames = packetData.getUint8(0)
+
+        for (let i = 0; i < canFrames; i += 13) {
+          const id = packetData.getUint32(1 + i, false)
+          const dataLength = packetData.getUint8(1 + i + 4)
           const data = new Uint8Array(dataLength)
 
           for (let j = 0; j < dataLength; j++) {
-            data[j] = packetData.getUint8(i + 5 + j)
+            data[j] = packetData.getUint8(1 + i + 5 + j)
           }
           const result = processCanBusFrame(BigInt(Date.now()), id, data)
 
@@ -65,13 +68,13 @@ export class IcarusDevice {
     onMessage: (message: CanBusMessage) => void,
     onDisconnect: () => void,
   ): Promise<IcarusDevice> {
-    await init()
+    console.log(device.configuration)
     const endpoints =
       device.configuration!.interfaces[1].alternates[0].endpoints
 
-    if (endpoints.length != 2) {
-      throw new Error('Expect 2 end points')
-    }
+    // if (endpoints.length != 2) {
+    //   throw new Error('Expect 2 end points')
+    // }
 
     return new IcarusDevice(
       device,

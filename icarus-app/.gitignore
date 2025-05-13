@@ -28,3 +28,11 @@ pnpm-lock.yaml
 yarn.lock
 package-lock.json
 bun.lockb
+
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+!.yarn/versions
