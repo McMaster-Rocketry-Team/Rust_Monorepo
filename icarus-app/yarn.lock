@@ -4928,8 +4928,8 @@ __metadata:
 
 "firmware-common-ffi@file:../firmware-common-ffi/pkg::locator=vite-template%40workspace%3A.":
   version: 0.3.0
-  resolution: "firmware-common-ffi@file:../firmware-common-ffi/pkg#../firmware-common-ffi/pkg::hash=6eef38&locator=vite-template%40workspace%3A."
-  checksum: 10c0/1d52a81e2c5d162fd0060310dc8868a8301407e31eec5be6c744e34ad9a785aac7a5daa9eb784f4361470b8eae24da5945eb92cb4e58e5aec5e2d7edce767c0c
+  resolution: "firmware-common-ffi@file:../firmware-common-ffi/pkg#../firmware-common-ffi/pkg::hash=90886a&locator=vite-template%40workspace%3A."
+  checksum: 10c0/4d39717a355ed3ba9a3a444fea3895898db791e07d7ca8cd94a9d1e838927937933dae4b1e2203dda4c2b070b9b68f8b98f4d9dff8fadf4510fda3d39589a156
   languageName: node
   linkType: hard
 

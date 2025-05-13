@@ -14,7 +14,7 @@ export type CanBusMessage = {
 export class IcarusDevice {
   private constructor(
     private device: USBDevice,
-    private isoEpIn: USBEndpoint,
+    private epIn: USBEndpoint,
     // private isoEpOut: USBEndpoint,
     private onMessage: (message: CanBusMessage) => void,
     private onDisconnect: () => void,
@@ -24,13 +24,12 @@ export class IcarusDevice {
 
   private async startHandleIsoIn() {
     while (true) {
-      let transferResult
+      let transferResult: USBInTransferResult
 
       try {
-        console.log(this.isoEpIn)
-        transferResult = await this.device.isochronousTransferIn(
-          this.isoEpIn.endpointNumber,
-          [64],
+        transferResult = await this.device.transferIn(
+          this.epIn.endpointNumber,
+          64,
         )
       } catch (e) {
         console.warn(e)
@@ -38,26 +37,24 @@ export class IcarusDevice {
         break
       }
 
-      for (const packet of transferResult.packets) {
-        const packetData = packet.data
+      const packetData = transferResult.data
 
-        if (!packetData) continue
+      if (!packetData) continue
 
-        const canFrames = packetData.getUint8(0)
+      const canFrames = packetData.getUint8(0)
 
-        for (let i = 0; i < canFrames; i += 13) {
-          const id = packetData.getUint32(1 + i, false)
-          const dataLength = packetData.getUint8(1 + i + 4)
-          const data = new Uint8Array(dataLength)
+      for (let i = 0; i < canFrames; i += 13) {
+        const id = packetData.getUint32(1 + i, false)
+        const dataLength = packetData.getUint8(1 + i + 4)
+        const data = new Uint8Array(dataLength)
 
-          for (let j = 0; j < dataLength; j++) {
-            data[j] = packetData.getUint8(1 + i + 5 + j)
-          }
-          const result = processCanBusFrame(BigInt(Date.now()), id, data)
+        for (let j = 0; j < dataLength; j++) {
+          data[j] = packetData.getUint8(1 + i + 5 + j)
+        }
+        const result = processCanBusFrame(BigInt(Date.now()), id, data)
 
-          if ('Message' in result) {
-            this.onMessage(result.Message)
-          }
+        if ('Message' in result) {
+          this.onMessage(result.Message)
         }
       }
     }
