@@ -97,7 +97,7 @@ export function CanMessageRow(props: {
 
     inner = (
       <>
-        <LabeledData data={message.uptime_s} dataWidth={75} label='uptime s' />
+        <LabeledData data={message.uptime_s} dataWidth={75} label='uptime s' highlight={message.uptime_s < 5} />
         <LabeledData
           data={message.health}
           dataWidth={100}
@@ -523,7 +523,9 @@ export function CanMessageRow(props: {
       <div className='font-mono'>{props.message.id.node_id}</div>
       <div className='flex items-center gap-4'>{inner}</div>
       <div>
-        <span className='font-mono'>{receivedSecondsAgo}</span>s ago
+        <span className={receivedSecondsAgo > 5 ? "bg-orange-500 px-1" : "px-1"}>
+          <span className='font-mono'>{receivedSecondsAgo}</span>s ago
+        </span>
       </div>
       <div className='font-mono'>{props.count}</div>
     </div>
@@ -535,6 +537,7 @@ function LabeledData(props: {
   data: ReactNode
   dataWidth: number
   highlightKey?: any
+  highlight?: boolean
 }) {
   let data
 
@@ -556,6 +559,7 @@ function LabeledData(props: {
           className={twMerge(
             'px-1',
             props.highlightKey === undefined ? '' : 'enter-highlight',
+            props.highlight ? 'bg-orange-500' : '',
           )}
           style={{ width: props.dataWidth }}
         >

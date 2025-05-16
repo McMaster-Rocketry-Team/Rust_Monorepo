@@ -4,10 +4,10 @@
 
 @keyframes highlight {
     from {
-        background-color: rgba(233, 123, 43, 1);
+        background-color: #f97316ff;
     }
     to {
-        background-color: rgba(233, 123, 43, 0);
+        background-color: #f9731600;
     }
 }
 

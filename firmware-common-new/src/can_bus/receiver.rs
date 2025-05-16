@@ -162,12 +162,15 @@ impl StateMachine {
 
 pub struct CanBusMultiFrameDecoder<const Q: usize> {
     state_machines: [StateMachine; Q],
+    accepted_message_types: Option<Vec<u8, 32>>
 }
 
 impl<const Q: usize> CanBusMultiFrameDecoder<Q> {
-    pub fn new() -> Self {
+    /// if accepted_message_types is None, accept all messages
+    pub fn new(accepted_message_types:  Option<Vec<u8, 32>>) -> Self {
         Self {
             state_machines: array::from_fn(|_| StateMachine::new()),
+            accepted_message_types
         }
     }
 
@@ -176,6 +179,12 @@ impl<const Q: usize> CanBusMultiFrameDecoder<Q> {
         frame: &impl CanBusFrame,
     ) -> Option<SensorReading<BootTimestamp, ReceivedCanBusMessage>> {
         let id = CanBusExtendedId::from_raw(frame.id());
+        if let Some(accepted_message_types) = &self.accepted_message_types{
+            if !accepted_message_types.contains(&id.message_type) {
+                return None;
+            }
+        }
+
         for state_machine in &mut self.state_machines {
             if state_machine.has_same_id(id) {
                 if let Some(reading) = state_machine.process_frame(frame) {
@@ -221,8 +230,8 @@ impl<M: RawMutex, const N: usize, const SUBS: usize> CanReceiver<M, N, SUBS> {
         }
     }
 
-    pub async fn run_daemon<R: CanBusRX, const Q: usize>(&self, rx: &mut R) {
-        let mut decoder = CanBusMultiFrameDecoder::<Q>::new();
+    pub async fn run_daemon<R: CanBusRX, const Q: usize>(&self, rx: &mut R, accepted_message_types:  Option<Vec<u8, 32>>) {
+        let mut decoder = CanBusMultiFrameDecoder::<Q>::new(accepted_message_types);
 
         loop {
             match rx.receive().await {
@@ -290,7 +299,7 @@ mod tests {
         let encoder = CanBusMultiFrameEncoder::new(message);
         let encoder_crc = encoder.crc;
 
-        let mut decoder = CanBusMultiFrameDecoder::<1>::new();
+        let mut decoder = CanBusMultiFrameDecoder::<1>::new(None);
         let mut decoded_message: Option<SensorReading<BootTimestamp, ReceivedCanBusMessage>> = None;
         for data in encoder {
             let frame = (0u64, id, data.as_slice());

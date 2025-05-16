@@ -296,6 +296,7 @@ export interface PayloadEPSStatusMessage {
 export interface ResetMessage {
     node_id: number;
     reset_all: boolean;
+    into_bootloader: boolean;
 }
 
 export interface UnixTimeMessage {
