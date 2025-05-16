@@ -2,6 +2,7 @@
 #![cfg_attr(not(any(test, feature = "wasm")), no_std)]
 #![feature(let_chains)]
 #![feature(assert_matches)]
+#![feature(slice_as_array)]
 
 mod fmt;
 pub(crate) mod utils;
@@ -9,12 +10,13 @@ pub(crate) mod utils;
 #[cfg(test)]
 mod tests;
 
-pub(crate) mod fixed_point;
+pub mod bootloader;
 pub mod can_bus;
+pub(crate) mod fixed_point;
 pub mod gps;
-pub mod sensor_reading;
-pub mod time;
-pub mod vlp;
-pub mod signal_with_ack;
 pub mod readings;
+pub mod sensor_reading;
+pub mod signal_with_ack;
+pub mod time;
 pub mod variance;
+pub mod vlp;

@@ -162,6 +162,8 @@ impl StateMachine {
 
 pub struct CanBusMultiFrameDecoder<const Q: usize> {
     state_machines: [StateMachine; Q],
+
+    // TODO instead use a closure
     accepted_message_types: Option<Vec<u8, 32>>
 }
 
