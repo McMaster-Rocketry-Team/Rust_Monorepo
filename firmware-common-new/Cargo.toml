@@ -8,6 +8,7 @@ default = ["log"]
 log = ["dep:log"]
 defmt = ["dep:defmt", "heapless/defmt-03", "lora-phy/defmt-03"]
 wasm = ["tsify", "wasm-bindgen"]
+bootloader = []
 
 [dependencies]
 embedded-io-async = "0.6.1"

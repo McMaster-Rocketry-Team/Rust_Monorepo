@@ -151,9 +151,11 @@ impl StateMachine {
                             )
                         });
                     *self = StateMachine::Empty;
+                    if message.is_none() {
+                        log_warn!("failed to deserialize message");
+                    }
                     return message;
                 }
-
                 None
             }
         }
@@ -164,15 +166,15 @@ pub struct CanBusMultiFrameDecoder<const Q: usize> {
     state_machines: [StateMachine; Q],
 
     // TODO instead use a closure
-    accepted_message_types: Option<Vec<u8, 32>>
+    accepted_message_types: Option<Vec<u8, 32>>,
 }
 
 impl<const Q: usize> CanBusMultiFrameDecoder<Q> {
     /// if accepted_message_types is None, accept all messages
-    pub fn new(accepted_message_types:  Option<Vec<u8, 32>>) -> Self {
+    pub fn new(accepted_message_types: Option<Vec<u8, 32>>) -> Self {
         Self {
             state_machines: array::from_fn(|_| StateMachine::new()),
-            accepted_message_types
+            accepted_message_types,
         }
     }
 
@@ -181,7 +183,7 @@ impl<const Q: usize> CanBusMultiFrameDecoder<Q> {
         frame: &impl CanBusFrame,
     ) -> Option<SensorReading<BootTimestamp, ReceivedCanBusMessage>> {
         let id = CanBusExtendedId::from_raw(frame.id());
-        if let Some(accepted_message_types) = &self.accepted_message_types{
+        if let Some(accepted_message_types) = &self.accepted_message_types {
             if !accepted_message_types.contains(&id.message_type) {
                 return None;
             }
@@ -189,14 +191,10 @@ impl<const Q: usize> CanBusMultiFrameDecoder<Q> {
 
         for state_machine in &mut self.state_machines {
             if state_machine.has_same_id(id) {
-                if let Some(reading) = state_machine.process_frame(frame) {
-                    return Some(reading);
-                }
-                return None;
+                return state_machine.process_frame(frame);
             }
         }
 
-        log_warn!("No empty state machine left, discarding least recent used state machine");
         let lru_state_machine = self
             .state_machines
             .iter_mut()
@@ -217,22 +215,39 @@ impl<const Q: usize> CanBusMultiFrameDecoder<Q> {
             })
             .unwrap();
 
+        if let StateMachine::MultiFrame { id, .. } = &lru_state_machine {
+            log_warn!(
+                "No empty state machine left, discarding least recent used state machine, discarded id: {:?}",
+                id
+            );
+        }
+
         lru_state_machine.process_frame(frame)
     }
 }
 
 pub struct CanReceiver<M: RawMutex, const N: usize, const SUBS: usize> {
     channel: PubSubChannel<M, SensorReading<BootTimestamp, ReceivedCanBusMessage>, N, SUBS, 1>,
+    self_node_id: u16,
 }
 
 impl<M: RawMutex, const N: usize, const SUBS: usize> CanReceiver<M, N, SUBS> {
-    pub fn new() -> Self {
+    pub fn new(self_node_id: u16) -> Self {
         Self {
             channel: PubSubChannel::new(),
+            self_node_id,
         }
     }
 
-    pub async fn run_daemon<R: CanBusRX, const Q: usize>(&self, rx: &mut R, accepted_message_types:  Option<Vec<u8, 32>>) {
+    pub fn self_node_id(&self) -> u16 {
+        self.self_node_id
+    }
+
+    pub async fn run_daemon<R: CanBusRX, const Q: usize>(
+        &self,
+        rx: &mut R,
+        accepted_message_types: Option<Vec<u8, 32>>,
+    ) {
         let mut decoder = CanBusMultiFrameDecoder::<Q>::new(accepted_message_types);
 
         loop {
