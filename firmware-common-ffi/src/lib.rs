@@ -1,8 +1,13 @@
 #![cfg_attr(not(feature = "wasm"), no_std)]
 #![allow(static_mut_refs)]
 
+use firmware_common_new::can_bus::messages::baro_measurement::BaroMeasurementMessage;
 use firmware_common_new::can_bus::messages::brightness_measurement::BrightnessMeasurementMessage;
-use firmware_common_new::can_bus::messages::payload_eps_status::PayloadEPSOutputStatus;
+use firmware_common_new::can_bus::messages::icarus_status::IcarusStatusMessage;
+use firmware_common_new::can_bus::messages::imu_measurement::IMUMeasurementMessage;
+use firmware_common_new::can_bus::messages::payload_eps_status::{
+    PayloadEPSOutputStatus, PayloadEPSStatusMessage,
+};
 #[cfg(feature = "wasm")]
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "wasm")]
@@ -11,10 +16,8 @@ use tsify::Tsify;
 use wasm_bindgen::prelude::*;
 
 use firmware_common_new::can_bus::id::CanBusExtendedId;
-use firmware_common_new::can_bus::messages::{
-    self, BaroMeasurementMessage, IMUMeasurementMessage, IcarusStatusMessage,
-};
-use firmware_common_new::can_bus::messages::{CanBusMessageEnum, PayloadEPSStatusMessage};
+use firmware_common_new::can_bus::messages;
+use firmware_common_new::can_bus::messages::CanBusMessageEnum;
 use firmware_common_new::can_bus::node_types;
 use firmware_common_new::can_bus::receiver::CanBusMultiFrameDecoder;
 use firmware_common_new::can_bus::sender::CanBusMultiFrameEncoder;

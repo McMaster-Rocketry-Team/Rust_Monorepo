@@ -26,6 +26,20 @@ impl CanBusFrame for (u64, u32, &[u8]) {
     }
 }
 
+impl<const N: usize> CanBusFrame for (u64, u32, &[u8; N]) {
+    fn timestamp_us(&self) -> u64 {
+        self.0
+    }
+
+    fn id(&self) -> u32 {
+        self.1
+    }
+
+    fn data(&self) -> &[u8] {
+        self.2
+    }
+}
+
 pub trait CanBusTX {
     #[cfg(feature = "defmt")]
     type Error: defmt::Format + core::fmt::Debug;

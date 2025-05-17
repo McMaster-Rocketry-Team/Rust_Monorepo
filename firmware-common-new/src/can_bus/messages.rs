@@ -1,4 +1,3 @@
-use amp_overwrite::AmpOverwriteMessage;
 #[cfg(feature = "wasm")]
 use tsify::Tsify;
 #[cfg(feature = "wasm")]
@@ -6,40 +5,64 @@ use wasm_bindgen::prelude::*;
 
 use crate::utils::FixedLenSerializable;
 use ack::AckMessage;
+#[cfg(not(feature = "bootloader"))]
+use amp_control::AmpControlMessage;
+#[cfg(not(feature = "bootloader"))]
+use amp_overwrite::AmpOverwriteMessage;
+#[cfg(not(feature = "bootloader"))]
+use amp_status::AmpStatusMessage;
+#[cfg(not(feature = "bootloader"))]
+use avionics_status::AvionicsStatusMessage;
+#[cfg(not(feature = "bootloader"))]
+use baro_measurement::BaroMeasurementMessage;
+#[cfg(not(feature = "bootloader"))]
 use brightness_measurement::BrightnessMeasurementMessage;
 use core::fmt::Debug;
 use data_transfer::DataTransferMessage;
+#[cfg(not(feature = "bootloader"))]
+use icarus_status::IcarusStatusMessage;
+#[cfg(not(feature = "bootloader"))]
+use imu_measurement::IMUMeasurementMessage;
+use node_status::NodeStatusMessage;
+#[cfg(not(feature = "bootloader"))]
 use payload_eps_output_overwrite::PayloadEPSOutputOverwriteMessage;
+#[cfg(not(feature = "bootloader"))]
 use payload_eps_self_test::PayloadEPSSelfTestMessage;
-
-pub use amp_control::AmpControlMessage;
-pub use amp_status::AmpStatusMessage;
-pub use avionics_status::AvionicsStatusMessage;
-pub use baro_measurement::BaroMeasurementMessage;
-pub use icarus_status::IcarusStatusMessage;
-pub use imu_measurement::IMUMeasurementMessage;
-pub use node_status::NodeStatusMessage;
-pub use payload_eps_status::PayloadEPSStatusMessage;
-pub use reset::ResetMessage;
-pub use unix_time::UnixTimeMessage;
+#[cfg(not(feature = "bootloader"))]
+use payload_eps_status::PayloadEPSStatusMessage;
+use reset::ResetMessage;
+#[cfg(not(feature = "bootloader"))]
+use unix_time::UnixTimeMessage;
 
 use super::id::{CanBusExtendedId, CanBusMessageTypeFlag, create_can_bus_message_type};
 
 pub mod ack;
+#[cfg(not(feature = "bootloader"))]
 pub mod amp_control;
+#[cfg(not(feature = "bootloader"))]
 pub mod amp_overwrite;
+#[cfg(not(feature = "bootloader"))]
 pub mod amp_status;
+#[cfg(not(feature = "bootloader"))]
 pub mod avionics_status;
+#[cfg(not(feature = "bootloader"))]
 pub mod baro_measurement;
+#[cfg(not(feature = "bootloader"))]
 pub mod brightness_measurement;
 pub mod data_transfer;
+#[cfg(not(feature = "bootloader"))]
 pub mod icarus_status;
+#[cfg(not(feature = "bootloader"))]
 pub mod imu_measurement;
 pub mod node_status;
+#[cfg(not(feature = "bootloader"))]
 pub mod payload_eps_output_overwrite;
+#[cfg(not(feature = "bootloader"))]
 pub mod payload_eps_self_test;
+#[cfg(not(feature = "bootloader"))]
 pub mod payload_eps_status;
 pub mod reset;
+#[cfg(not(feature = "bootloader"))]
 pub mod unix_time;
 
 pub const RESET_MESSAGE_TYPE: u8 = create_can_bus_message_type(
@@ -221,23 +244,36 @@ pub const ACK_MESSAGE_TYPE: u8 = create_can_bus_message_type(
 pub enum CanBusMessageEnum {
     Reset(ResetMessage),
     // the usize does nothing here, it just makes firmware-common-ffi not complain about unsafe zero size type
+    #[cfg(not(feature = "bootloader"))]
     PreUnixTime(usize),
+    #[cfg(not(feature = "bootloader"))]
     UnixTime(UnixTimeMessage),
     NodeStatus(NodeStatusMessage),
 
+    #[cfg(not(feature = "bootloader"))]
     BaroMeasurement(BaroMeasurementMessage),
+    #[cfg(not(feature = "bootloader"))]
     IMUMeasurement(IMUMeasurementMessage),
+    #[cfg(not(feature = "bootloader"))]
     BrightnessMeasurement(BrightnessMeasurementMessage),
 
+    #[cfg(not(feature = "bootloader"))]
     AmpStatus(AmpStatusMessage),
+    #[cfg(not(feature = "bootloader"))]
     AmpOverwrite(AmpOverwriteMessage),
+    #[cfg(not(feature = "bootloader"))]
     AmpControl(AmpControlMessage),
 
+    #[cfg(not(feature = "bootloader"))]
     PayloadEPSStatus(PayloadEPSStatusMessage),
+    #[cfg(not(feature = "bootloader"))]
     PayloadEPSOutputOverwrite(PayloadEPSOutputOverwriteMessage),
+    #[cfg(not(feature = "bootloader"))]
     PayloadEPSSelfTest(PayloadEPSSelfTestMessage),
 
+    #[cfg(not(feature = "bootloader"))]
     AvionicsStatus(AvionicsStatusMessage),
+    #[cfg(not(feature = "bootloader"))]
     IcarusStatus(IcarusStatusMessage),
 
     DataTransfer(DataTransferMessage),
@@ -247,20 +283,33 @@ pub enum CanBusMessageEnum {
 impl CanBusMessageEnum {
     pub fn priority(&self) -> u8 {
         match self {
+            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::UnixTime(m) => m.priority(),
+            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::PreUnixTime(_) => 1,
             CanBusMessageEnum::NodeStatus(m) => m.priority(),
             CanBusMessageEnum::Reset(m) => m.priority(),
+            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::BaroMeasurement(m) => m.priority(),
+            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::IMUMeasurement(m) => m.priority(),
+            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::BrightnessMeasurement(m) => m.priority(),
+            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::AmpStatus(m) => m.priority(),
+            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::AmpOverwrite(m) => m.priority(),
+            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::AmpControl(m) => m.priority(),
+            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::PayloadEPSStatus(m) => m.priority(),
+            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::PayloadEPSOutputOverwrite(m) => m.priority(),
+            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::PayloadEPSSelfTest(m) => m.priority(),
+            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::AvionicsStatus(m) => m.priority(),
+            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::IcarusStatus(m) => m.priority(),
             CanBusMessageEnum::DataTransfer(m) => m.priority(),
             CanBusMessageEnum::Ack(m) => m.priority(),
@@ -269,22 +318,35 @@ impl CanBusMessageEnum {
 
     pub fn get_message_type(&self) -> u8 {
         match self {
+            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::UnixTime(_) => UNIX_TIME_MESSAGE_TYPE,
+            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::PreUnixTime(_) => PRE_UNIX_TIME_MESSAGE_TYPE,
             CanBusMessageEnum::NodeStatus(_) => NODE_STATUS_MESSAGE_TYPE,
             CanBusMessageEnum::Reset(_) => RESET_MESSAGE_TYPE,
+            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::BaroMeasurement(_) => BARO_MEASUREMENT_MESSAGE_TYPE,
+            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::IMUMeasurement(_) => IMU_MEASUREMENT_MESSAGE_TYPE,
+            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::BrightnessMeasurement(_) => BRIGHTNESS_MEASUREMENT_MESSAGE_TYPE,
+            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::AmpStatus(_) => AMP_STATUS_MESSAGE_TYPE,
+            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::AmpOverwrite(_) => AMP_OVERWRITE_MESSAGE_TYPE,
+            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::AmpControl(_) => AMP_CONTROL_MESSAGE_TYPE,
+            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::PayloadEPSStatus(_) => PAYLOAD_EPS_STATUS_MESSAGE_TYPE,
+            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::PayloadEPSOutputOverwrite(_) => {
                 PAYLOAD_EPS_OUTPUT_OVERWRITE_MESSAGE_TYPE
             }
+            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::PayloadEPSSelfTest(_) => PAYLOAD_EPS_SELF_TEST_MESSAGE_TYPE,
+            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::AvionicsStatus(_) => AVIONICS_STATUS_MESSAGE_TYPE,
+            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::IcarusStatus(_) => ICARUS_STATUS_MESSAGE_TYPE,
             CanBusMessageEnum::DataTransfer(_) => DATA_TRANSFER_MESSAGE_TYPE,
             CanBusMessageEnum::Ack(_) => ACK_MESSAGE_TYPE,
@@ -297,20 +359,33 @@ impl CanBusMessageEnum {
 
     pub fn serialize(self, buffer: &mut [u8]) -> usize {
         match self {
+            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::UnixTime(m) => m.serialize(buffer),
+            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::PreUnixTime(_) => 0,
             CanBusMessageEnum::NodeStatus(m) => m.serialize(buffer),
             CanBusMessageEnum::Reset(m) => m.serialize(buffer),
+            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::BaroMeasurement(m) => m.serialize(buffer),
+            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::IMUMeasurement(m) => m.serialize(buffer),
+            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::BrightnessMeasurement(m) => m.serialize(buffer),
+            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::AmpStatus(m) => m.serialize(buffer),
+            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::AmpOverwrite(m) => m.serialize(buffer),
+            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::AmpControl(m) => m.serialize(buffer),
+            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::PayloadEPSStatus(m) => m.serialize(buffer),
+            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::PayloadEPSOutputOverwrite(m) => m.serialize(buffer),
+            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::PayloadEPSSelfTest(m) => m.serialize(buffer),
+            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::AvionicsStatus(m) => m.serialize(buffer),
+            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::IcarusStatus(m) => m.serialize(buffer),
             CanBusMessageEnum::DataTransfer(m) => m.serialize(buffer),
             CanBusMessageEnum::Ack(m) => m.serialize(buffer),
@@ -319,40 +394,52 @@ impl CanBusMessageEnum {
 
     pub fn deserialize(message_type: u8, data: &[u8]) -> Option<Self> {
         match message_type {
+            #[cfg(not(feature = "bootloader"))]
             UNIX_TIME_MESSAGE_TYPE => {
                 UnixTimeMessage::deserialize(data).map(CanBusMessageEnum::UnixTime)
             }
+            #[cfg(not(feature = "bootloader"))]
             PRE_UNIX_TIME_MESSAGE_TYPE => Some(CanBusMessageEnum::PreUnixTime(0)),
             NODE_STATUS_MESSAGE_TYPE => {
                 NodeStatusMessage::deserialize(data).map(CanBusMessageEnum::NodeStatus)
             }
             RESET_MESSAGE_TYPE => ResetMessage::deserialize(data).map(CanBusMessageEnum::Reset),
+            #[cfg(not(feature = "bootloader"))]
             BARO_MEASUREMENT_MESSAGE_TYPE => {
                 BaroMeasurementMessage::deserialize(data).map(CanBusMessageEnum::BaroMeasurement)
             }
+            #[cfg(not(feature = "bootloader"))]
             IMU_MEASUREMENT_MESSAGE_TYPE => {
                 IMUMeasurementMessage::deserialize(data).map(CanBusMessageEnum::IMUMeasurement)
             }
+            #[cfg(not(feature = "bootloader"))]
             BRIGHTNESS_MEASUREMENT_MESSAGE_TYPE => BrightnessMeasurementMessage::deserialize(data)
                 .map(CanBusMessageEnum::BrightnessMeasurement),
+            #[cfg(not(feature = "bootloader"))]
             AMP_STATUS_MESSAGE_TYPE => {
                 AmpStatusMessage::deserialize(data).map(CanBusMessageEnum::AmpStatus)
             }
+            #[cfg(not(feature = "bootloader"))]
             AMP_CONTROL_MESSAGE_TYPE => {
                 AmpControlMessage::deserialize(data).map(CanBusMessageEnum::AmpControl)
             }
+            #[cfg(not(feature = "bootloader"))]
             PAYLOAD_EPS_STATUS_MESSAGE_TYPE => {
                 PayloadEPSStatusMessage::deserialize(data).map(CanBusMessageEnum::PayloadEPSStatus)
             }
+            #[cfg(not(feature = "bootloader"))]
             PAYLOAD_EPS_OUTPUT_OVERWRITE_MESSAGE_TYPE => {
                 PayloadEPSOutputOverwriteMessage::deserialize(data)
                     .map(CanBusMessageEnum::PayloadEPSOutputOverwrite)
             }
+            #[cfg(not(feature = "bootloader"))]
             PAYLOAD_EPS_SELF_TEST_MESSAGE_TYPE => PayloadEPSSelfTestMessage::deserialize(data)
                 .map(CanBusMessageEnum::PayloadEPSSelfTest),
+            #[cfg(not(feature = "bootloader"))]
             AVIONICS_STATUS_MESSAGE_TYPE => {
                 AvionicsStatusMessage::deserialize(data).map(CanBusMessageEnum::AvionicsStatus)
             }
+            #[cfg(not(feature = "bootloader"))]
             ICARUS_STATUS_MESSAGE_TYPE => {
                 IcarusStatusMessage::deserialize(data).map(CanBusMessageEnum::IcarusStatus)
             }

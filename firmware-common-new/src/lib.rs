@@ -19,4 +19,5 @@ pub mod sensor_reading;
 pub mod signal_with_ack;
 pub mod time;
 pub mod variance;
+#[cfg(not(feature = "bootloader"))]
 pub mod vlp;
