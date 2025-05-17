@@ -22,14 +22,18 @@ pub enum DataType {
 #[cfg_attr(feature = "wasm", derive(Tsify))]
 #[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
 #[derive(PackedStruct, Clone, Debug, Serialize, Deserialize)]
-#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "35")]
+#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "36")]
 #[repr(C)]
 pub struct DataTransferMessage {
     data: [u8; 32],
     data_len: u8,
+    /// Message sequence number used to detect duplicates and ensure ordering.
+    /// Each DataTransferMessage increments message_i by 1 relative to the previous message
+    /// in the same transfer sequence. Wraps from 255 back to 0.
+    pub sequence_number: u8,
     pub start_of_transfer: bool,
     pub end_of_transfer: bool,
-    #[packed_field(bits = "266..268", ty = "enum")]
+    #[packed_field(bits = "274..276", ty = "enum")]
     pub data_type: DataType,
 
     #[packed_field(element_size_bits = "12")]
@@ -40,6 +44,7 @@ impl DataTransferMessage {
     pub fn new(
         mut data: Vec<u8, 32>,
         data_type: DataType,
+        sequence_number: u8,
         start_of_transfer: bool,
         end_of_transfer: bool,
         destination_node_id: u16,
@@ -50,6 +55,7 @@ impl DataTransferMessage {
             data_len,
             data: data.into_array().unwrap(),
             data_type,
+            sequence_number,
             start_of_transfer,
             end_of_transfer,
             destination_node_id,

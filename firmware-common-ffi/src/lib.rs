@@ -299,7 +299,7 @@ pub extern "C" fn process_can_bus_frame(
 
     let decoder = unsafe {
         if CAN_DECODER.is_none() {
-            CAN_DECODER = Some(CanBusMultiFrameDecoder::new(None))
+            CAN_DECODER = Some(CanBusMultiFrameDecoder::new())
         }
         CAN_DECODER.as_mut().unwrap()
     };
