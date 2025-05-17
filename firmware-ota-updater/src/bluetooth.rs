@@ -1,12 +1,14 @@
+use std::process;
+
 use anyhow::{Result, anyhow};
 use btleplug::api::{
     Central as _, Characteristic, Manager as _, Peripheral as _, ScanFilter, ValueNotification,
     WriteType,
 };
 use btleplug::platform::{Manager, Peripheral};
-use futures::{future::FutureExt, stream::StreamExt};
+use futures::stream::StreamExt;
 use indicatif::{ProgressBar, ProgressStyle};
-use log::info;
+use log::{error, info};
 use tokio::time::sleep;
 use tokio::{
     sync::mpsc,
@@ -14,7 +16,6 @@ use tokio::{
 };
 use uuid::Uuid;
 
-const SERVICE_UUID: Uuid = Uuid::from_u128(0xf21c_7374_543e_4e92_a772_32b75205dacf);
 const CHUNK_CHAR_UUID: Uuid = Uuid::from_u128(0xfba7_891b_18cb_4055_ba5d_0e57396c2fcf);
 const READY_CHAR_UUID: Uuid = Uuid::from_u128(0x5ff9_e042_eced_4d02_8f82_c99e81df389b);
 const TARGET_ID_CHAR_UUID: Uuid = Uuid::from_u128(0x7090_bb12_25a4_46a2_8a6a_0b78b09bfcb0);
@@ -69,8 +70,7 @@ pub async fn ble_send_file(
     let chunk_size = 244;
 
     // 4) Ask the device how many chunks it can buffer (the “window”).
-    let ready_bytes = peripheral.read(&ready_char).await?;
-    let mut window = 64 as usize;
+    let mut window = 64usize;
 
     // 5) Optional node-selection.
     if let Some(t) = nodetype {
@@ -169,7 +169,7 @@ pub async fn ble_send_file(
 ///
 /// If you know a MAC address or a specific name, filter on that instead of the
 /// service UUID – the rest is identical.
-pub async fn ble_get_peripheral() -> Result<Peripheral> {
+pub async fn ble_find_peripheral() -> Result<Peripheral> {
     // 1) Pick the first Bluetooth adapter we have
     let manager = Manager::new().await?;
     let adapter = manager
@@ -181,23 +181,31 @@ pub async fn ble_get_peripheral() -> Result<Peripheral> {
 
     // 2) Start a passive scan.  Most stacks need a couple of seconds.
     adapter.start_scan(ScanFilter::default()).await?;
-    sleep(Duration::from_secs(10)).await;
+    info!("Searching for ESP.....");
 
-    // 3) Look for an advertisement that contains our service UUID
-    let peripherals = adapter.peripherals().await?;
-    for peripheral in peripherals {
-        let properties = peripheral.properties().await;
-        if let Ok(Some(properties)) = properties {
-            if properties.local_name == Some("RocketOTA".into()) {
-                // 4) Establish a GATT connection
-                peripheral.connect().await?;
-                peripheral.discover_services().await?; // mandatory before I/O
-                return Ok(peripheral);
+    let mut count = 0;
+    loop {
+        let peripherals = adapter.peripherals().await?;
+        for peripheral in peripherals {
+            let properties = peripheral.properties().await;
+            // info!("{:?} {:?}", peripheral, properties);
+            if let Ok(Some(properties)) = properties {
+                if properties.local_name == Some("RocketOTA".into()) {
+                    // 3) Establish a GATT connection
+                    peripheral.connect().await?;
+                    peripheral.discover_services().await?; // mandatory before I/O
+                    return Ok(peripheral);
+                }
             }
         }
-    }
 
-    Err(anyhow!("ESP not found"))
+        count+=1;
+        if count > 30 {
+            error!("ESP not found");
+            process::exit(1);
+        }
+        sleep(Duration::from_secs(1)).await;
+    }
 }
 
 /// Gracefully drop the connection.

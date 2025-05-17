@@ -1,12 +1,15 @@
+#![feature(try_blocks)]
+
 mod bluetooth;
 
+use std::process;
 use std::process::Command;
 use std::process::Output;
 
 use anyhow::Ok;
 use anyhow::Result;
 use bluetooth::ble_dispose;
-use bluetooth::ble_get_peripheral;
+use bluetooth::ble_find_peripheral;
 use bluetooth::ble_send_file;
 use clap::Parser;
 use clap::Subcommand;
@@ -77,7 +80,7 @@ async fn main() -> Result<()> {
             let secret = std::fs::read(args.secret_path)?;
             if secret.len() != 32 {
                 error!("Secret must be 32 bytes long.");
-                return Ok(());
+                process::exit(1);
             }
 
             let objcopy_path = cargo_binutils::Tool::Objcopy
@@ -100,14 +103,14 @@ async fn main() -> Result<()> {
                     status.code(),
                     String::from_utf8_lossy(&stderr)
                 );
-                return Ok(());
+                process::exit(1);
             }
 
             let mut firmware_bytes = std::fs::read(firmware_binary.path())?;
             info!("Firmware size: {}bytes", firmware_bytes.len());
             if firmware_bytes.len() % 8 != 0 {
                 error!("Firmware size is not a multiple of 8!");
-                return Ok(());
+                process::exit(1);
             }
 
             let mut sha512 = Sha512::new();
@@ -127,9 +130,17 @@ async fn main() -> Result<()> {
                 NodeTypeEnum::Bulkhead => BULKHEAD_NODE_TYPE,
             };
 
-            let esp = ble_get_peripheral().await?;
-            ble_send_file(&esp, &firmware_bytes, Some(node_type), None).await?;
-            ble_dispose(esp).await?;
+            let upload_result: Result<()> = try {
+                let esp = ble_find_peripheral().await?;
+                ble_send_file(&esp, &firmware_bytes, Some(node_type), None).await?;
+                ble_dispose(esp).await?;
+            };
+            if let Err(e) = upload_result {
+                error!("{}", e);
+                process::exit(1);
+            } else {
+                info!("Upload succeeded")
+            }
         }
         ModeSelect::GenKey(args) => {
             let secret_key = rand::rng().random::<[u8; 32]>();
