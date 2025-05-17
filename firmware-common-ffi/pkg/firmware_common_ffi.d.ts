@@ -205,6 +205,12 @@ export type DataType = "Firmware" | "Data";
 export interface DataTransferMessage {
     data: number[];
     data_len: number;
+    /**
+     * Message sequence number used to detect duplicates and ensure ordering.
+     * Each DataTransferMessage increments message_i by 1 relative to the previous message
+     * in the same transfer sequence. Wraps from 255 back to 0.
+     */
+    sequence_number: number;
     start_of_transfer: boolean;
     end_of_transfer: boolean;
     data_type: DataType;
