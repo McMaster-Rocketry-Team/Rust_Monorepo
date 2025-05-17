@@ -72,11 +72,19 @@ export function CanMessageRow(props: {
           data={message.node_id}
           dataWidth={50}
           label='reset node id'
+          highlightKey={message.node_id}
+        />
+        <LabeledData
+          data={message.into_bootloader ? 'T' : 'F'}
+          dataWidth={60}
+          label='into bootloader'
+          highlightKey={message.into_bootloader}
         />
         <LabeledData
           data={message.reset_all ? 'T' : 'F'}
           dataWidth={60}
           label='reset all'
+          highlightKey={message.reset_all}
         />
       </>
     )
