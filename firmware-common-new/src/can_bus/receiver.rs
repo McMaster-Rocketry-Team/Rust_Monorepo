@@ -64,7 +64,6 @@ impl StateMachine {
             // Single frame message
             if tail_byte.toggle {
                 // Invalid tail byte
-                log_trace!("invalid tail byte");
                 return None;
             }
 
@@ -87,7 +86,6 @@ impl StateMachine {
                 if !(tail_byte.start_of_transfer && !tail_byte.end_of_transfer && !tail_byte.toggle)
                 {
                     // Invalid tail byte
-                    log_trace!("invalid tail byte");
                     return None;
                 }
 
@@ -111,7 +109,6 @@ impl StateMachine {
                 if *id != frame_id {
                     // reset state machine
                     *self = StateMachine::Empty;
-                    log_trace!("reset state machine");
                     return self.process_frame(frame);
                 }
 
@@ -119,20 +116,17 @@ impl StateMachine {
 
                 if tail_byte.toggle != expected_toggle_bit {
                     // suspect duplicate frame, ignore
-                    log_trace!("ignore duplicate frame");
                     return None;
                 }
 
                 if tail_byte.start_of_transfer {
                     // invalid tail byte
-                    log_trace!("start of transfer bit set in the middle");
                     return None;
                 }
 
                 let result = data.extend_from_slice(&frame_data[..frame_data.len() - 1]);
                 if result.is_err() {
                     // buffer overflow
-                    log_trace!("buffer overflow");
                     *self = StateMachine::Empty;
                     return None;
                 }
@@ -141,7 +135,6 @@ impl StateMachine {
                     let calculated_crc = CAN_CRC.checksum(&data);
                     if calculated_crc != *crc {
                         // invalid CRC
-                        log_trace!("invalid crc");
                         *self = StateMachine::Empty;
                         return None;
                     }
@@ -159,14 +152,10 @@ impl StateMachine {
                         });
                     *self = StateMachine::Empty;
                     if message.is_none() {
-                        log_trace!("failed to deserialize message");
-                    } else {
-                        log_trace!("message decoded: {:?}", message);
+                        log_warn!("failed to deserialize message");
                     }
                     return message;
                 }
-
-                log_trace!("waiting for more data");
                 None
             }
         }
@@ -194,17 +183,14 @@ impl<const Q: usize> CanBusMultiFrameDecoder<Q> {
         frame: &impl CanBusFrame,
     ) -> Option<SensorReading<BootTimestamp, ReceivedCanBusMessage>> {
         let id = CanBusExtendedId::from_raw(frame.id());
-        log_trace!("processing frame with id {:?}", id);
         if let Some(accepted_message_types) = &self.accepted_message_types {
             if !accepted_message_types.contains(&id.message_type) {
-                log_trace!("filtered out");
                 return None;
             }
         }
 
         for state_machine in &mut self.state_machines {
             if state_machine.has_same_id(id) {
-                log_trace!("found state machine with same id");
                 return state_machine.process_frame(frame);
             }
         }
@@ -236,7 +222,6 @@ impl<const Q: usize> CanBusMultiFrameDecoder<Q> {
             );
         }
 
-        log_trace!("use empty state machine");
         lru_state_machine.process_frame(frame)
     }
 }
