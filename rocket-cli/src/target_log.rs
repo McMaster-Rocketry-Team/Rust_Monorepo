@@ -13,6 +13,7 @@ pub enum NodeTypeEnum {
     EPS1,
     EPS2,
     AeroRust,
+    Other,
 }
 
 impl NodeTypeEnum {
@@ -28,6 +29,7 @@ impl NodeTypeEnum {
             NodeTypeEnum::EPS1 => "EP1",
             NodeTypeEnum::EPS2 => "EP2",
             NodeTypeEnum::AeroRust => "AR",
+            NodeTypeEnum::Other => "??"
         }
     }
 
@@ -43,6 +45,7 @@ impl NodeTypeEnum {
             NodeTypeEnum::EPS1 => Color::Rgb(117, 255, 249),
             NodeTypeEnum::EPS2 => Color::Rgb(181, 195, 168),
             NodeTypeEnum::AeroRust => Color::Rgb(172, 255, 230),
+            NodeTypeEnum::Other => Color::Rgb(255, 255, 255)
         }
     }
 }

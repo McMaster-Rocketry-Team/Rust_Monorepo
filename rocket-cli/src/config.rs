@@ -1,7 +1,10 @@
 use anyhow::Result;
+use log::Level;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+
+use crate::target_log::{NodeTypeEnum, TargetLog};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LogViewerConfig {
@@ -30,6 +33,7 @@ pub struct DeviceFilters {
     pub eps1: bool,
     pub eps2: bool,
     pub aerorust: bool,
+    pub other: bool,
 }
 
 impl Default for LogViewerConfig {
@@ -53,6 +57,7 @@ impl Default for LogViewerConfig {
                 eps1: true,
                 eps2: true,
                 aerorust: true,
+                other: true,
             },
         }
     }
@@ -92,5 +97,31 @@ impl LogViewerConfig {
 
     fn get_config_path() -> PathBuf {
         ".rocket-cli.toml".into()
+    }
+
+    pub fn matches(&self, log: &TargetLog) -> bool {
+        let level_matches = match log.log_level {
+            Level::Trace => self.levels.trace,
+            Level::Debug => self.levels.debug,
+            Level::Info => self.levels.info,
+            Level::Warn => self.levels.warn,
+            Level::Error => self.levels.error,
+        };
+
+        let device_matches = match log.node_type {
+            NodeTypeEnum::VoidLake => self.devices.void_lake,
+            NodeTypeEnum::AMP => self.devices.amp,
+            NodeTypeEnum::ICARUS => self.devices.icarus,
+            NodeTypeEnum::PayloadActivation => self.devices.payload_activation,
+            NodeTypeEnum::RocketWifi => self.devices.rocket_wifi,
+            NodeTypeEnum::OZYS => self.devices.ozys,
+            NodeTypeEnum::Bulkhead => self.devices.bulkhead,
+            NodeTypeEnum::EPS1 => self.devices.eps1,
+            NodeTypeEnum::EPS2 => self.devices.eps2,
+            NodeTypeEnum::AeroRust => self.devices.aerorust,
+            NodeTypeEnum::Other => self.devices.other,
+        };
+
+        level_matches && device_matches
     }
 }

@@ -14,7 +14,9 @@ use cursive::{
     event::{Callback, Event, EventResult, MouseButton, MouseEvent},
     theme::{Color, ColorStyle, Effect, Effects, Palette, Style},
     utils::markup::StyledString,
-    view::{CannotFocus, Nameable as _, Resizable, ScrollStrategy, Scrollable as _, scroll},
+    view::{
+        CannotFocus, Nameable as _, Resizable, ScrollStrategy, Scrollable as _, scroll,
+    },
     views::{
         Button, Checkbox, Dialog, EditView, LinearLayout, ListView, NamedView, Panel, ScrollView,
         TextView,
@@ -33,6 +35,7 @@ pub async fn log_viewer_tui(mut logs_rx: broadcast::Receiver<TargetLog>) -> Resu
     let paused = RwLock::new(false);
     let first_time = !LogViewerConfig::exists();
     let config = Arc::new(RwLock::new(LogViewerConfig::load()?));
+    let config_a = config.clone();
 
     siv.add_fullscreen_layer(
         LinearLayout::vertical()
@@ -192,6 +195,14 @@ pub async fn log_viewer_tui(mut logs_rx: broadcast::Receiver<TargetLog>) -> Resu
                                                             |c, v| c.devices.aerorust = v,
                                                         ),
                                                     )
+                                                    .child(
+                                                        "Other",
+                                                        create_config_checkbox(
+                                                            config.clone(),
+                                                            |c| c.devices.other,
+                                                            |c, v| c.devices.other = v,
+                                                        ),
+                                                    )
                                                     .scrollable(),
                                             )
                                             .title("Device"),
@@ -254,7 +265,10 @@ pub async fn log_viewer_tui(mut logs_rx: broadcast::Receiver<TargetLog>) -> Resu
 
         while let Ok(log) = logs_rx.try_recv() {
             let mut logs_view = runner.find_name::<LinearLayout>("logs").unwrap();
-            logs_view.add_child(LogRow::new(log));
+            logs_view.add_child(LogRow::new(log, config_a.clone()));
+            while logs_view.len() > 500 {
+                logs_view.remove_child(0);
+            }
         }
 
         interval.tick().await;
@@ -284,20 +298,28 @@ struct LogRow {
     log: TargetLog,
     last_size: Vec2,
     show_line_number: bool,
+    config: Arc<RwLock<LogViewerConfig>>,
+    matches: bool,
 }
 
 impl LogRow {
-    pub fn new(log: TargetLog) -> Self {
+    pub fn new(log: TargetLog, config: Arc<RwLock<LogViewerConfig>>) -> Self {
         return Self {
             log,
             last_size: Vec2::zero(),
             show_line_number: false,
+            config,
+            matches: false,
         };
     }
 }
 
 impl View for LogRow {
     fn draw(&self, printer: &Printer) {
+        if !self.matches {
+            return;
+        }
+
         let bg = self.log.node_type.background_color();
 
         printer.with_color(ColorStyle::new(Color::Rgb(0, 0, 0), bg), |printer| {
@@ -365,6 +387,11 @@ impl View for LogRow {
     }
 
     fn required_size(&mut self, constraint: cursive::Vec2) -> cursive::Vec2 {
+        self.matches = self.config.read().unwrap().matches(&self.log);
+        if !self.matches {
+            return Vec2::zero();
+        }
+
         if constraint.x <= 22 || self.log.log_content.len() == 0 {
             return Vec2 {
                 x: constraint.x,
@@ -386,6 +413,9 @@ impl View for LogRow {
     }
 
     fn on_event(&mut self, event: Event) -> EventResult {
+        if !self.matches {
+            return EventResult::Ignored;
+        }
         match event {
             Event::Mouse {
                 event: mouse_event,
