@@ -174,6 +174,7 @@ async fn main() -> Result<()> {
                 while let Ok(log) = logs_rx2.recv().await {
                     log_saver.append_log(&log).await.unwrap();
                 }
+                log_saver.flush().await.unwrap();
             };
 
             tokio::join! {
