@@ -6,3 +6,4 @@
 .VSCodeCounter
 .DS_Store
 secret.key
+.rocket-cli.toml

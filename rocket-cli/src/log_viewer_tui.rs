@@ -1,27 +1,29 @@
 use std::{
-    sync::RwLock,
+    sync::{Arc, RwLock},
     time::Duration,
 };
 
-use crate::target_log::{TargetLog, log_level_foreground_color};
+use crate::{
+    config::LogViewerConfig,
+    target_log::{TargetLog, log_level_foreground_color},
+};
+use anyhow::Result;
 use cursive::{
     Printer, Rect, Vec2, View,
     direction::Direction,
     event::{Callback, Event, EventResult, MouseButton, MouseEvent},
     theme::{Color, ColorStyle, Effect, Effects, Palette, Style},
     utils::markup::StyledString,
-    view::{
-        CannotFocus, Nameable as _, Resizable, ScrollStrategy, Scrollable as _, scroll,
-    },
+    view::{CannotFocus, Nameable as _, Resizable, ScrollStrategy, Scrollable as _, scroll},
     views::{
-        Button, Checkbox, Dialog, EditView, LinearLayout, ListView, NamedView, Panel,
-        ScrollView, TextView,
+        Button, Checkbox, Dialog, EditView, LinearLayout, ListView, NamedView, Panel, ScrollView,
+        TextView,
     },
 };
 use pad::PadStr;
 use tokio::{sync::broadcast, time};
 
-pub async fn log_viewer_tui(mut logs_rx: broadcast::Receiver<TargetLog>) {
+pub async fn log_viewer_tui(mut logs_rx: broadcast::Receiver<TargetLog>) -> Result<()> {
     let mut siv = cursive::default();
     let mut theme = siv.current_theme().clone();
 
@@ -29,6 +31,9 @@ pub async fn log_viewer_tui(mut logs_rx: broadcast::Receiver<TargetLog>) {
     siv.set_theme(theme);
 
     let paused = RwLock::new(false);
+    let first_time = !LogViewerConfig::exists();
+    let config = Arc::new(RwLock::new(LogViewerConfig::load()?));
+
     siv.add_fullscreen_layer(
         LinearLayout::vertical()
             .child(
@@ -60,11 +65,46 @@ pub async fn log_viewer_tui(mut logs_rx: broadcast::Receiver<TargetLog>) {
                                         .child(
                                             Panel::new(
                                                 ListView::new()
-                                                    .child("Trace", Checkbox::new())
-                                                    .child("Debug", Checkbox::new())
-                                                    .child("Info", Checkbox::new())
-                                                    .child("Warn", Checkbox::new())
-                                                    .child("Error", Checkbox::new())
+                                                    .child(
+                                                        "Trace",
+                                                        create_config_checkbox(
+                                                            config.clone(),
+                                                            |c| c.levels.trace,
+                                                            |c, v| c.levels.trace = v,
+                                                        ),
+                                                    )
+                                                    .child(
+                                                        "Debug",
+                                                        create_config_checkbox(
+                                                            config.clone(),
+                                                            |c| c.levels.debug,
+                                                            |c, v| c.levels.debug = v,
+                                                        ),
+                                                    )
+                                                    .child(
+                                                        "Info",
+                                                        create_config_checkbox(
+                                                            config.clone(),
+                                                            |c| c.levels.info,
+                                                            |c, v| c.levels.info = v,
+                                                        ),
+                                                    )
+                                                    .child(
+                                                        "Warn",
+                                                        create_config_checkbox(
+                                                            config.clone(),
+                                                            |c| c.levels.warn,
+                                                            |c, v| c.levels.warn = v,
+                                                        ),
+                                                    )
+                                                    .child(
+                                                        "Error",
+                                                        create_config_checkbox(
+                                                            config.clone(),
+                                                            |c| c.levels.error,
+                                                            |c, v| c.levels.error = v,
+                                                        ),
+                                                    )
                                                     .scrollable(),
                                             )
                                             .title("Level"),
@@ -72,16 +112,86 @@ pub async fn log_viewer_tui(mut logs_rx: broadcast::Receiver<TargetLog>) {
                                         .child(
                                             Panel::new(
                                                 ListView::new()
-                                                    .child("Void Lake", Checkbox::new())
-                                                    .child("AMP", Checkbox::new())
-                                                    .child("ICARUS", Checkbox::new())
-                                                    .child("Payload Activation", Checkbox::new())
-                                                    .child("Rocket WiFi", Checkbox::new())
-                                                    .child("OZYS", Checkbox::new())
-                                                    .child("Bulkhead", Checkbox::new())
-                                                    .child("EPS 1", Checkbox::new())
-                                                    .child("EPS 2", Checkbox::new())
-                                                    .child("AeroRust", Checkbox::new())
+                                                    .child(
+                                                        "Void Lake",
+                                                        create_config_checkbox(
+                                                            config.clone(),
+                                                            |c| c.devices.void_lake,
+                                                            |c, v| c.devices.void_lake = v,
+                                                        ),
+                                                    )
+                                                    .child(
+                                                        "AMP",
+                                                        create_config_checkbox(
+                                                            config.clone(),
+                                                            |c| c.devices.amp,
+                                                            |c, v| c.devices.amp = v,
+                                                        ),
+                                                    )
+                                                    .child(
+                                                        "ICARUS",
+                                                        create_config_checkbox(
+                                                            config.clone(),
+                                                            |c| c.devices.icarus,
+                                                            |c, v| c.devices.icarus = v,
+                                                        ),
+                                                    )
+                                                    .child(
+                                                        "Payload Activation",
+                                                        create_config_checkbox(
+                                                            config.clone(),
+                                                            |c| c.devices.payload_activation,
+                                                            |c, v| c.devices.payload_activation = v,
+                                                        ),
+                                                    )
+                                                    .child(
+                                                        "Rocket WiFi",
+                                                        create_config_checkbox(
+                                                            config.clone(),
+                                                            |c| c.devices.rocket_wifi,
+                                                            |c, v| c.devices.rocket_wifi = v,
+                                                        ),
+                                                    )
+                                                    .child(
+                                                        "OZYS",
+                                                        create_config_checkbox(
+                                                            config.clone(),
+                                                            |c| c.devices.ozys,
+                                                            |c, v| c.devices.ozys = v,
+                                                        ),
+                                                    )
+                                                    .child(
+                                                        "Bulkhead",
+                                                        create_config_checkbox(
+                                                            config.clone(),
+                                                            |c| c.devices.bulkhead,
+                                                            |c, v| c.devices.bulkhead = v,
+                                                        ),
+                                                    )
+                                                    .child(
+                                                        "EPS 1",
+                                                        create_config_checkbox(
+                                                            config.clone(),
+                                                            |c| c.devices.eps1,
+                                                            |c, v| c.devices.eps1 = v,
+                                                        ),
+                                                    )
+                                                    .child(
+                                                        "EPS 2",
+                                                        create_config_checkbox(
+                                                            config.clone(),
+                                                            |c| c.devices.eps2,
+                                                            |c, v| c.devices.eps2 = v,
+                                                        ),
+                                                    )
+                                                    .child(
+                                                        "AeroRust",
+                                                        create_config_checkbox(
+                                                            config.clone(),
+                                                            |c| c.devices.aerorust,
+                                                            |c, v| c.devices.aerorust = v,
+                                                        ),
+                                                    )
                                                     .scrollable(),
                                             )
                                             .title("Device"),
@@ -122,8 +232,19 @@ pub async fn log_viewer_tui(mut logs_rx: broadcast::Receiver<TargetLog>) {
             ),
     );
 
-    siv.focus_name("search").unwrap();
     siv.set_autorefresh(true);
+
+    if first_time {
+        siv.add_layer(
+            Dialog::around(TextView::new("Click on the log to view the line number"))
+                .title("Tips")
+                .button("OK", |s| {
+                    s.pop_layer().unwrap();
+                }),
+        );
+    } else {
+        siv.focus_name("search").unwrap();
+    }
 
     let mut runner = siv.runner();
     runner.refresh();
@@ -138,6 +259,25 @@ pub async fn log_viewer_tui(mut logs_rx: broadcast::Receiver<TargetLog>) {
 
         interval.tick().await;
     }
+
+    Ok(())
+}
+
+fn create_config_checkbox(
+    config: Arc<RwLock<LogViewerConfig>>,
+    get_value: impl Fn(&LogViewerConfig) -> bool + Send + Sync + 'static,
+    set_value: impl Fn(&mut LogViewerConfig, bool) + Send + Sync + 'static,
+) -> impl View {
+    Checkbox::new()
+        .with_checked(get_value(&config.read().unwrap()))
+        .on_change({
+            let config = config.clone();
+            move |_, new_value| {
+                let mut config_guard = config.write().unwrap();
+                set_value(&mut config_guard, new_value);
+                config_guard.save().ok();
+            }
+        })
 }
 
 struct LogRow {

@@ -2,6 +2,7 @@ mod download_probe;
 mod gen_ota_key;
 mod log_viewer_tui;
 mod target_log;
+mod config;
 
 use std::time::Duration;
 
