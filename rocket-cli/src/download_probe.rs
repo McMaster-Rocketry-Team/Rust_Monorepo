@@ -97,6 +97,7 @@ pub async fn download_probe(
         if let Some(cap) = re.captures(&line) {
             let log = TargetLog {
                 node_type: args.node_type,
+                node_id:None,
                 log_content: cap.get(1).unwrap().as_str().to_string(),
                 crate_name: cap.get(2).unwrap().as_str().to_string(),
                 file_name: cap.get(3).unwrap().as_str().to_string(),

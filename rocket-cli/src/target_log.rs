@@ -50,6 +50,7 @@ impl NodeTypeEnum {
 #[derive(Debug, Clone)]
 pub struct TargetLog {
     pub node_type: NodeTypeEnum,
+    pub node_id: Option<u16>,
     pub log_content: String,
     pub crate_name: String,
     pub file_name: String,
@@ -72,10 +73,10 @@ pub fn parse_log_level(s: &str) -> Level {
 
 pub fn log_level_foreground_color(log_level: Level) -> Color {
     match log_level {
-        Level::Trace => Color::Rgb(150, 150, 150),
+        Level::Trace => Color::Rgb(127, 127, 127),
         Level::Debug => Color::Rgb(0, 0, 0),
         Level::Info => Color::Rgb(0, 0, 255),
-        Level::Warn => Color::Rgb(255, 255, 0),
+        Level::Warn => Color::Rgb(127, 127, 0),
         Level::Error => Color::Rgb(255, 0, 0),
     }
 }

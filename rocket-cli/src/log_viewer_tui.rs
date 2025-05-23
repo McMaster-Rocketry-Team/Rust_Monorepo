@@ -1,23 +1,31 @@
-use std::{sync::RwLock, time::Duration};
-
-use cursive::{
-    Printer, View, inner_getters,
-    theme::{BaseColor, Color, ColorStyle, Effect, Effects, Palette, PaletteColor, Style},
-    utils::markup::StyledString,
-    view::{Nameable as _, Resizable, ScrollStrategy, Scrollable as _, ViewWrapper},
-    views::{Button, Checkbox, Dialog, EditView, LinearLayout, ListView, Panel, TextView},
-    wrap_impl,
+use std::{
+    sync::RwLock,
+    time::Duration,
 };
-use tokio::{sync::broadcast, time};
 
 use crate::target_log::{TargetLog, log_level_foreground_color};
+use cursive::{
+    Printer, Rect, Vec2, View,
+    direction::Direction,
+    event::{Callback, Event, EventResult, MouseButton, MouseEvent},
+    theme::{Color, ColorStyle, Effect, Effects, Palette, Style},
+    utils::markup::StyledString,
+    view::{
+        CannotFocus, Nameable as _, Resizable, ScrollStrategy, Scrollable as _, scroll,
+    },
+    views::{
+        Button, Checkbox, Dialog, EditView, LinearLayout, ListView, NamedView, Panel,
+        ScrollView, TextView,
+    },
+};
+use pad::PadStr;
+use tokio::{sync::broadcast, time};
 
 pub async fn log_viewer_tui(mut logs_rx: broadcast::Receiver<TargetLog>) {
     let mut siv = cursive::default();
     let mut theme = siv.current_theme().clone();
 
     theme.palette = Palette::terminal_default();
-    theme.palette[PaletteColor::Highlight] = Color::Light(BaseColor::White);
     siv.set_theme(theme);
 
     let paused = RwLock::new(false);
@@ -103,7 +111,14 @@ pub async fn log_viewer_tui(mut logs_rx: broadcast::Receiver<TargetLog>) {
                 LinearLayout::vertical()
                     .with_name("logs")
                     .scrollable()
-                    .scroll_strategy(ScrollStrategy::StickToBottom),
+                    .scroll_strategy(ScrollStrategy::StickToBottom)
+                    .on_scroll_inner(|v, _| {
+                        if v.is_at_bottom() {
+                            v.set_scroll_strategy(ScrollStrategy::StickToBottom);
+                        }
+                        EventResult::Consumed(None)
+                    })
+                    .with_name("logs_scroll_view"),
             ),
     );
 
@@ -117,99 +132,152 @@ pub async fn log_viewer_tui(mut logs_rx: broadcast::Receiver<TargetLog>) {
         runner.step();
 
         while let Ok(log) = logs_rx.try_recv() {
-            let color_style =
-                ColorStyle::new(Color::Rgb(0, 0, 0), log.node_type.background_color());
-
-            let mut layout = LinearLayout::horizontal()
-                .child(
-                    TextView::new(StyledString::single_span(
-                        log.node_type.short_name(),
-                        Style {
-                            effects: Default::default(),
-                            color: color_style,
-                        },
-                    ))
-                    .fixed_width(4),
-                )
-                .child(
-                    TextView::new(StyledString::single_span(
-                        log.log_level.to_string(),
-                        Style {
-                            effects: Effects::only(Effect::Bold),
-                            color: ColorStyle::new(
-                                log_level_foreground_color(log.log_level),
-                                log.node_type.background_color(),
-                            ),
-                        },
-                    ))
-                    .fixed_width(6),
-                );
-
-            if let Some(timestamp) = log.timestamp.map(|t| format!("{:>7.2}", t)) {
-                layout.add_child(
-                    TextView::new(StyledString::single_span(
-                        &timestamp,
-                        Style {
-                            effects: Default::default(),
-                            color: color_style,
-                        },
-                    ))
-                    .fixed_width(timestamp.len() + 1),
-                );
-            }
-            layout.add_child(
-                TextView::new(StyledString::single_span(
-                    log.log_content,
-                    Style {
-                        effects: Default::default(),
-                        color: color_style,
-                    },
-                ))
-                .full_width(),
-            );
-
             let mut logs_view = runner.find_name::<LinearLayout>("logs").unwrap();
-            logs_view.add_child(layout.with_color(color_style));
+            logs_view.add_child(LogRow::new(log));
         }
 
         interval.tick().await;
     }
 }
 
-/** Fill a region with an arbitrary color. */
-#[derive(Debug)]
-pub struct ColoredLayer<T: View> {
-    color: ColorStyle,
-    view: T,
+struct LogRow {
+    log: TargetLog,
+    last_size: Vec2,
+    show_line_number: bool,
 }
 
-impl<T: View> ColoredLayer<T> {
-    /// Wraps the given view.
-    pub fn new(color: ColorStyle, view: T) -> Self {
-        ColoredLayer { color, view }
+impl LogRow {
+    pub fn new(log: TargetLog) -> Self {
+        return Self {
+            log,
+            last_size: Vec2::zero(),
+            show_line_number: false,
+        };
     }
-
-    inner_getters!(self.view: T);
 }
 
-impl<T: View> ViewWrapper for ColoredLayer<T> {
-    wrap_impl!(self.view: T);
+impl View for LogRow {
+    fn draw(&self, printer: &Printer) {
+        let bg = self.log.node_type.background_color();
 
-    fn wrap_draw(&self, printer: &Printer<'_, '_>) {
-        printer.with_color(self.color, |printer| {
+        printer.with_color(ColorStyle::new(Color::Rgb(0, 0, 0), bg), |printer| {
             for y in 0..printer.size.y {
                 printer.print_hline((0, y), printer.size.x, " ");
             }
+
+            printer.print((0, 0), &self.log.node_type.short_name().pad_to_width(4));
+            printer.print(
+                (4, 0),
+                &self.log.node_id.map_or(String::from("xxx "), |id| {
+                    format!("{:X} ", id).pad(4, '0', pad::Alignment::Right, false)
+                }),
+            );
+            printer.print_styled(
+                (8, 0),
+                &StyledString::single_span(
+                    self.log.log_level.to_string().pad_to_width(6),
+                    Style {
+                        effects: Effects::only(Effect::Bold),
+                        color: ColorStyle::new(log_level_foreground_color(self.log.log_level), bg),
+                    },
+                ),
+            );
+            let timestamp = self
+                .log
+                .timestamp
+                .map_or(String::new(), |t| format!("{:.2}", t))
+                .pad_to_width_with_alignment(7, pad::Alignment::Right)
+                .pad_to_width(8);
+            printer.print_styled(
+                (14, 0),
+                &StyledString::single_span(
+                    timestamp,
+                    Style {
+                        effects: Effects::default(),
+                        color: ColorStyle::new(Color::Rgb(100, 100, 100), bg),
+                    },
+                ),
+            );
+
+            if printer.size.x > 22 {
+                let log_content_width = printer.size.x - 22;
+                let mut i = 0;
+                for y in 0..(printer.size.y - if self.show_line_number { 1 } else { 0 }) {
+                    printer.print(
+                        (22, y),
+                        &self.log.log_content
+                            [i..(i + log_content_width).min(self.log.log_content.len())],
+                    );
+                    i += log_content_width;
+                }
+            }
+
+            if self.show_line_number {
+                printer.print(
+                    (0, printer.size.y - 1),
+                    &format!(
+                        "└─ {} @ {}:{}",
+                        self.log.module_path, self.log.file_path, self.log.line_number
+                    ),
+                );
+            }
         });
-        self.view.draw(printer);
+    }
+
+    fn required_size(&mut self, constraint: cursive::Vec2) -> cursive::Vec2 {
+        if constraint.x <= 22 || self.log.log_content.len() == 0 {
+            return Vec2 {
+                x: constraint.x,
+                y: 1,
+            };
+        }
+
+        let log_content_width = constraint.x - 22;
+        let log_content_lines = (self.log.log_content.len() - 1) / log_content_width + 1;
+
+        return Vec2 {
+            x: constraint.x,
+            y: log_content_lines + if self.show_line_number { 1 } else { 0 },
+        };
+    }
+
+    fn layout(&mut self, size: Vec2) {
+        self.last_size = size;
+    }
+
+    fn on_event(&mut self, event: Event) -> EventResult {
+        match event {
+            Event::Mouse {
+                event: mouse_event,
+                position,
+                offset,
+            } if position.fits_in_rect(offset, self.last_size) => {
+                if mouse_event == MouseEvent::Release(MouseButton::Left) {
+                    self.show_line_number = !self.show_line_number;
+                    EventResult::Consumed(None)
+                } else if mouse_event == MouseEvent::WheelUp || mouse_event == MouseEvent::WheelDown
+                {
+                    EventResult::Consumed(Some(Callback::from_fn(move |s| {
+                        let mut logs_scroll_view = s
+                            .find_name::<ScrollView<NamedView<LinearLayout>>>("logs_scroll_view")
+                            .unwrap();
+
+                        scroll::on_event(
+                            &mut *logs_scroll_view,
+                            event.clone(),
+                            |_, __| EventResult::Ignored,
+                            |_, __| Rect::from_point(Vec2::zero()),
+                        );
+                    })))
+                } else {
+                    EventResult::Ignored
+                }
+            }
+            _ => EventResult::Ignored,
+        }
+    }
+
+    fn take_focus(&mut self, _: Direction) -> Result<EventResult, CannotFocus> {
+        Ok(EventResult::Consumed(None))
     }
 }
-
-pub trait Colorable: View + Sized {
-    /// Wraps `self` in a `ScrollView`.
-    fn with_color(self, color: ColorStyle) -> ColoredLayer<Self> {
-        ColoredLayer::new(color, self)
-    }
-}
-
-impl<T: View> Colorable for T {}
