@@ -1,5 +1,5 @@
 use crate::DownloadCli;
-use crate::target_log::{parse_log_level, TargetLog};
+use crate::target_log::{DefmtLogInfo, TargetLog, parse_log_level};
 use anyhow::{Result, bail};
 use probe_rs::probe::DebugProbeInfo;
 use prompted::input;
@@ -78,7 +78,7 @@ pub async fn download_probe(
         &args.chip,
         "--connect-under-reset",
         "--log-format",
-        ">>>>>{s}|||||{c}|||||{f}|||||{F}|||||{l}|||||{L}|||||{m}|||||{t}<<<<<",
+        ">>>>>{s}|||||{F}|||||{l}|||||{L}|||||{m}|||||{t}<<<<<",
         args.firmware_elf_path.to_str().unwrap(),
     ];
 
@@ -97,15 +97,15 @@ pub async fn download_probe(
         if let Some(cap) = re.captures(&line) {
             let log = TargetLog {
                 node_type: args.node_type,
-                node_id:None,
+                node_id: None,
                 log_content: cap.get(1).unwrap().as_str().to_string(),
-                crate_name: cap.get(2).unwrap().as_str().to_string(),
-                file_name: cap.get(3).unwrap().as_str().to_string(),
-                file_path: cap.get(4).unwrap().as_str().to_string(),
-                line_number: cap.get(5).unwrap().as_str().to_string(),
-                log_level: parse_log_level(cap.get(6).unwrap().as_str()),
-                module_path: cap.get(7).unwrap().as_str().to_string(),
-                timestamp: cap.get(8).unwrap().as_str().parse::<f64>().ok(),
+                defmt: Some(DefmtLogInfo {
+                    file_path: cap.get(2).unwrap().as_str().to_string(),
+                    line_number: cap.get(3).unwrap().as_str().to_string(),
+                    log_level: parse_log_level(cap.get(4).unwrap().as_str()),
+                    module_path: cap.get(5).unwrap().as_str().to_string(),
+                    timestamp: cap.get(6).unwrap().as_str().parse::<f64>().ok(),
+                }),
             };
             if logs_tx.send(log).is_err() {
                 break;

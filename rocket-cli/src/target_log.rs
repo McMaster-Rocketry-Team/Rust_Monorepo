@@ -29,25 +29,34 @@ impl NodeTypeEnum {
             NodeTypeEnum::EPS1 => "EP1",
             NodeTypeEnum::EPS2 => "EP2",
             NodeTypeEnum::AeroRust => "AR",
-            NodeTypeEnum::Other => "??"
+            NodeTypeEnum::Other => "??",
         }
     }
 
     pub fn background_color(&self) -> Color {
         match self {
-            NodeTypeEnum::VoidLake => Color::Rgb(255, 205, 245),
-            NodeTypeEnum::AMP => Color::Rgb(134, 219, 170),
-            NodeTypeEnum::ICARUS => Color::Rgb(219, 255, 183),
-            NodeTypeEnum::PayloadActivation => Color::Rgb(142, 174, 213),
-            NodeTypeEnum::RocketWifi => Color::Rgb(227, 211, 135),
-            NodeTypeEnum::OZYS => Color::Rgb(199, 212, 255),
-            NodeTypeEnum::Bulkhead => Color::Rgb(255, 203, 144),
-            NodeTypeEnum::EPS1 => Color::Rgb(117, 255, 249),
-            NodeTypeEnum::EPS2 => Color::Rgb(181, 195, 168),
-            NodeTypeEnum::AeroRust => Color::Rgb(172, 255, 230),
-            NodeTypeEnum::Other => Color::Rgb(255, 255, 255)
+            NodeTypeEnum::VoidLake => Color::Rgb(205, 232, 255),
+            NodeTypeEnum::AMP => Color::Rgb(255, 254, 233),
+            NodeTypeEnum::ICARUS => Color::Rgb(255, 227, 207),
+            NodeTypeEnum::PayloadActivation => Color::Rgb(207, 248, 255),
+            NodeTypeEnum::RocketWifi => Color::Rgb(245, 219, 239),
+            NodeTypeEnum::OZYS => Color::Rgb(232, 255, 231),
+            NodeTypeEnum::Bulkhead => Color::Rgb(229, 237, 255),
+            NodeTypeEnum::EPS1 => Color::Rgb(216, 255, 244),
+            NodeTypeEnum::EPS2 => Color::Rgb(204, 232, 238),
+            NodeTypeEnum::AeroRust => Color::Rgb(227, 242, 240),
+            NodeTypeEnum::Other => Color::Rgb(255, 255, 255),
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct DefmtLogInfo {
+    pub module_path: String,
+    pub file_path: String,
+    pub line_number: String,
+    pub log_level: Level,
+    pub timestamp: Option<f64>,
 }
 
 #[derive(Debug, Clone)]
@@ -55,13 +64,8 @@ pub struct TargetLog {
     pub node_type: NodeTypeEnum,
     pub node_id: Option<u16>,
     pub log_content: String,
-    pub crate_name: String,
-    pub file_name: String,
-    pub file_path: String,
-    pub line_number: String,
-    pub log_level: Level,
-    pub module_path: String,
-    pub timestamp: Option<f64>,
+
+    pub defmt: Option<DefmtLogInfo>,
 }
 
 pub fn parse_log_level(s: &str) -> Level {

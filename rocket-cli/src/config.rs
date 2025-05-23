@@ -115,17 +115,23 @@ impl LogViewerConfig {
     }
 
     pub fn matches(&self, log: &TargetLog) -> bool {
-        let module_matches = log.log_level == Level::Error
-            || log.log_level == Level::Warn
-            || log.module_path.starts_with(&self.module);
+        if let Some(defmt_info) = &log.defmt {
+            let module_matches = defmt_info.log_level == Level::Error
+                || defmt_info.log_level == Level::Warn
+                || defmt_info.module_path.starts_with(&self.module);
 
-        let level_matches = match log.log_level {
-            Level::Trace => self.levels.trace,
-            Level::Debug => self.levels.debug,
-            Level::Info => self.levels.info,
-            Level::Warn => self.levels.warn,
-            Level::Error => self.levels.error,
-        };
+            let level_matches = match defmt_info.log_level {
+                Level::Trace => self.levels.trace,
+                Level::Debug => self.levels.debug,
+                Level::Info => self.levels.info,
+                Level::Warn => self.levels.warn,
+                Level::Error => self.levels.error,
+            };
+
+            if !module_matches || !level_matches {
+                return false;
+            }
+        }
 
         let device_matches = match log.node_type {
             NodeTypeEnum::VoidLake => self.devices.void_lake,
@@ -141,6 +147,6 @@ impl LogViewerConfig {
             NodeTypeEnum::Other => self.devices.other,
         };
 
-        level_matches && device_matches && module_matches
+        device_matches
     }
 }

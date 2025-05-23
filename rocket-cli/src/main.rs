@@ -1,8 +1,8 @@
+mod config;
 mod download_probe;
 mod gen_ota_key;
 mod log_viewer_tui;
 mod target_log;
-mod config;
 
 use std::time::Duration;
 
@@ -17,6 +17,7 @@ use log::LevelFilter;
 use log::info;
 use log_viewer_tui::log_viewer_tui;
 use probe_rs::probe::list::Lister;
+use target_log::DefmtLogInfo;
 use target_log::NodeTypeEnum;
 use target_log::TargetLog;
 use tokio::sync::broadcast;
@@ -93,13 +94,13 @@ async fn main() -> Result<()> {
                                 node_type: NodeTypeEnum::VoidLake,
                                 node_id: Some(0xFFF),
                                 log_content: "Hello VLF5!".to_string(),
-                                crate_name: "".to_string(),
-                                file_name: "".to_string(),
-                                file_path: "".to_string(),
-                                line_number: "".to_string(),
-                                log_level: Level::Trace,
-                                module_path: "".to_string(),
-                                timestamp: Some(1.0),
+                                defmt: Some(DefmtLogInfo {
+                                    file_path: "".to_string(),
+                                    line_number: "".to_string(),
+                                    log_level: Level::Trace,
+                                    module_path: "".to_string(),
+                                    timestamp: Some(1.0),
+                                }),
                             })
                             .unwrap();
                         logs_tx
@@ -107,13 +108,7 @@ async fn main() -> Result<()> {
                                 node_type: NodeTypeEnum::VoidLake,
                                 node_id: Some(20),
                                 log_content: "Hello VLF5!".to_string(),
-                                crate_name: "".to_string(),
-                                file_name: "".to_string(),
-                                file_path: "".to_string(),
-                                line_number: "".to_string(),
-                                log_level: Level::Debug,
-                                module_path: "".to_string(),
-                                timestamp: Some(2.0),
+                                defmt: None,
                             })
                             .unwrap();
                         logs_tx
@@ -123,13 +118,7 @@ async fn main() -> Result<()> {
                                 log_content:
                                     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
                                         .to_string(),
-                                crate_name: "".to_string(),
-                                file_name: "".to_string(),
-                                file_path: "".to_string(),
-                                line_number: "".to_string(),
-                                log_level: Level::Info,
-                                module_path: "".to_string(),
-                                timestamp: Some(3.0),
+                                defmt: None,
                             })
                             .unwrap();
                         logs_tx
@@ -137,13 +126,7 @@ async fn main() -> Result<()> {
                                 node_type: NodeTypeEnum::ICARUS,
                                 node_id: None,
                                 log_content: "Hello ICARUS!".to_string(),
-                                crate_name: "".to_string(),
-                                file_name: "".to_string(),
-                                file_path: "".to_string(),
-                                line_number: "".to_string(),
-                                log_level: Level::Warn,
-                                module_path: "".to_string(),
-                                timestamp: None,
+                                defmt: None,
                             })
                             .unwrap();
                         logs_tx
@@ -151,13 +134,7 @@ async fn main() -> Result<()> {
                                 node_type: NodeTypeEnum::ICARUS,
                                 node_id: None,
                                 log_content: "Hello ICARUS!".to_string(),
-                                crate_name: "".to_string(),
-                                file_name: "".to_string(),
-                                file_path: "".to_string(),
-                                line_number: "".to_string(),
-                                log_level: Level::Error,
-                                module_path: "".to_string(),
-                                timestamp: Some(3600.0),
+                                defmt: None,
                             })
                             .unwrap();
                         tokio::time::sleep(Duration::from_secs(1)).await;

@@ -30,7 +30,8 @@ pub async fn log_viewer_tui(mut logs_rx: broadcast::Receiver<TargetLog>) -> Resu
     theme.palette = Palette::terminal_default();
     siv.set_theme(theme);
 
-    let paused = RwLock::new(false);
+    let paused = Arc::new(RwLock::new(false));
+    let paused_a = paused.clone();
     let first_time = !LogViewerConfig::exists();
     let config = Arc::new(RwLock::new(LogViewerConfig::load()?));
     let config_a = config.clone();
@@ -43,7 +44,6 @@ pub async fn log_viewer_tui(mut logs_rx: broadcast::Receiver<TargetLog>) -> Resu
                 LinearLayout::horizontal()
                     .child(
                         Button::new("Pause", move |siv| {
-                            siv.focus_name("search").unwrap();
                             let mut paused_guard = paused.write().unwrap();
                             *paused_guard = !*paused_guard;
 
@@ -54,8 +54,6 @@ pub async fn log_viewer_tui(mut logs_rx: broadcast::Receiver<TargetLog>) -> Resu
                             } else {
                                 pause_button.set_label("Pause");
                             }
-
-                            // TODO
                         })
                         .with_name("pause_button")
                         .fixed_width(9),
@@ -75,8 +73,6 @@ pub async fn log_viewer_tui(mut logs_rx: broadcast::Receiver<TargetLog>) -> Resu
                                 let mut config_guard = config.write().unwrap();
                                 config_guard.module = text.into();
                                 config_guard.save().ok();
-
-                                // TODO
                             })
                             .full_width()
                             .with_name("module"),
@@ -133,10 +129,12 @@ pub async fn log_viewer_tui(mut logs_rx: broadcast::Receiver<TargetLog>) -> Resu
         runner.step();
 
         while let Ok(log) = logs_rx.try_recv() {
-            let mut logs_view = runner.find_name::<LinearLayout>("logs").unwrap();
-            logs_view.add_child(LogRow::new(log, config.clone()));
-            while logs_view.len() > 500 {
-                logs_view.remove_child(0);
+            if !*paused_a.read().unwrap() {
+                let mut logs_view = runner.find_name::<LinearLayout>("logs").unwrap();
+                logs_view.add_child(LogRow::new(log, config.clone()));
+                while logs_view.len() > 500 {
+                    logs_view.remove_child(0);
+                }
             }
         }
 
@@ -322,11 +320,13 @@ struct LogRow {
     show_line_number: bool,
     config: Arc<RwLock<LogViewerConfig>>,
     matches: bool,
+    log_content_offset: usize,
 }
 
 impl LogRow {
     pub fn new(log: TargetLog, config: Arc<RwLock<LogViewerConfig>>) -> Self {
         return Self {
+            log_content_offset: if log.defmt.is_some() { 23 } else { 8 },
             log,
             last_size: Vec2::zero(),
             show_line_number: false,
@@ -356,39 +356,44 @@ impl View for LogRow {
                     format!("{:X} ", id).pad(4, '0', pad::Alignment::Right, false)
                 }),
             );
-            printer.print_styled(
-                (8, 0),
-                &StyledString::single_span(
-                    self.log.log_level.to_string().pad_to_width(6),
-                    Style {
-                        effects: Effects::default(),
-                        color: ColorStyle::new(log_level_foreground_color(self.log.log_level), bg),
-                    },
-                ),
-            );
-            let timestamp = self
-                .log
-                .timestamp
-                .map_or(String::new(), |t| format!("{:.2}", t))
-                .pad_to_width_with_alignment(7, pad::Alignment::Right)
-                .pad_to_width(8);
-            printer.print_styled(
-                (14, 0),
-                &StyledString::single_span(
-                    timestamp,
-                    Style {
-                        effects: Effects::default(),
-                        color: ColorStyle::new(Color::Rgb(100, 100, 100), bg),
-                    },
-                ),
-            );
 
-            if printer.size.x > 22 {
-                let log_content_width = printer.size.x - 22;
+            if let Some(defmt_info) = &self.log.defmt {
+                printer.print_styled(
+                    (8, 0),
+                    &StyledString::single_span(
+                        defmt_info.log_level.to_string().pad_to_width(6),
+                        Style {
+                            effects: Effects::default(),
+                            color: ColorStyle::new(
+                                log_level_foreground_color(defmt_info.log_level),
+                                bg,
+                            ),
+                        },
+                    ),
+                );
+                let timestamp = defmt_info
+                    .timestamp
+                    .map_or(String::new(), |t| format!("{:.3}", t))
+                    .pad_to_width_with_alignment(8, pad::Alignment::Right)
+                    .pad_to_width(9);
+                printer.print_styled(
+                    (14, 0),
+                    &StyledString::single_span(
+                        timestamp,
+                        Style {
+                            effects: Effects::default(),
+                            color: ColorStyle::new(Color::Rgb(100, 100, 100), bg),
+                        },
+                    ),
+                );
+            }
+
+            if printer.size.x > self.log_content_offset {
+                let log_content_width = printer.size.x - self.log_content_offset;
                 let mut i = 0;
                 for y in 0..(printer.size.y - if self.show_line_number { 1 } else { 0 }) {
                     printer.print(
-                        (22, y),
+                        (self.log_content_offset, y),
                         &self.log.log_content
                             [i..(i + log_content_width).min(self.log.log_content.len())],
                     );
@@ -397,13 +402,17 @@ impl View for LogRow {
             }
 
             if self.show_line_number {
-                printer.print(
-                    (0, printer.size.y - 1),
-                    &format!(
-                        "└─ {} @ {}:{}",
-                        self.log.module_path, self.log.file_path, self.log.line_number
-                    ),
-                );
+                if let Some(defmt_info) = &self.log.defmt {
+                    printer.print(
+                        (0, printer.size.y - 1),
+                        &format!(
+                            "└─ {} @ {}:{}",
+                            defmt_info.module_path, defmt_info.file_path, defmt_info.line_number
+                        ),
+                    );
+                } else {
+                    printer.print((0, printer.size.y - 1), "└─ Line number info not avaliable");
+                }
             }
         });
     }
@@ -414,14 +423,14 @@ impl View for LogRow {
             return Vec2::zero();
         }
 
-        if constraint.x <= 22 || self.log.log_content.len() == 0 {
+        if constraint.x <= self.log_content_offset || self.log.log_content.len() == 0 {
             return Vec2 {
                 x: constraint.x,
                 y: 1,
             };
         }
 
-        let log_content_width = constraint.x - 22;
+        let log_content_width = constraint.x - self.log_content_offset;
         let log_content_lines = (self.log.log_content.len() - 1) / log_content_width + 1;
 
         return Vec2 {
