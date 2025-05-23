@@ -77,8 +77,8 @@ pub fn parse_log_level(s: &str) -> Level {
 pub fn log_level_foreground_color(log_level: Level) -> Color {
     match log_level {
         Level::Trace => Color::Rgb(127, 127, 127),
-        Level::Debug => Color::Rgb(0, 0, 0),
-        Level::Info => Color::Rgb(0, 0, 255),
+        Level::Debug => Color::Rgb(0, 0, 255),
+        Level::Info => Color::Rgb(0, 160, 0),
         Level::Warn => Color::Rgb(127, 127, 0),
         Level::Error => Color::Rgb(255, 0, 0),
     }

@@ -177,7 +177,7 @@ async fn main() -> Result<()> {
 
             let viewer_future = async move {
                 ready_rx.await.unwrap();
-                log_viewer_tui(logs_rx).await;
+                log_viewer_tui(logs_rx).await.unwrap();
             };
 
             tokio::select! {

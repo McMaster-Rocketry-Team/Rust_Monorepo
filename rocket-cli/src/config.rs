@@ -10,6 +10,8 @@ use crate::target_log::{NodeTypeEnum, TargetLog};
 pub struct LogViewerConfig {
     pub levels: LevelFilters,
     pub devices: DeviceFilters,
+    pub module: String,
+    pub search: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -59,6 +61,8 @@ impl Default for LogViewerConfig {
                 aerorust: true,
                 other: true,
             },
+            module: String::new(),
+            search: String::new(),
         }
     }
 }
@@ -70,6 +74,17 @@ impl LogViewerConfig {
     }
 
     pub fn load() -> Result<Self> {
+        let config = Self::try_load();
+        if config.is_ok() {
+            return config;
+        }
+
+        let config = Self::default();
+        config.save()?;
+        return Ok(config);
+    }
+
+    pub fn try_load() -> Result<Self> {
         let config_path = Self::get_config_path();
 
         if !config_path.exists() {
@@ -100,6 +115,10 @@ impl LogViewerConfig {
     }
 
     pub fn matches(&self, log: &TargetLog) -> bool {
+        let module_matches = log.log_level == Level::Error
+            || log.log_level == Level::Warn
+            || log.module_path.starts_with(&self.module);
+
         let level_matches = match log.log_level {
             Level::Trace => self.levels.trace,
             Level::Debug => self.levels.debug,
@@ -122,6 +141,6 @@ impl LogViewerConfig {
             NodeTypeEnum::Other => self.devices.other,
         };
 
-        level_matches && device_matches
+        level_matches && device_matches && module_matches
     }
 }
