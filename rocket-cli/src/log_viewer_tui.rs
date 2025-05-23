@@ -1,13 +1,16 @@
 use std::{sync::RwLock, time::Duration};
 
 use cursive::{
-    theme::{BaseColor, Color, Palette, PaletteColor},
-    view::{Nameable as _, Resizable, ScrollStrategy, Scrollable as _},
-    views::{Button, EditView, LinearLayout, NamedView, ScrollView, TextView},
+    Printer, View, inner_getters,
+    theme::{BaseColor, Color, ColorStyle, Effect, Effects, Palette, PaletteColor, Style},
+    utils::markup::StyledString,
+    view::{Nameable as _, Resizable, ScrollStrategy, Scrollable as _, ViewWrapper},
+    views::{Button, EditView, LinearLayout, TextView},
+    wrap_impl,
 };
 use tokio::{sync::broadcast, time};
 
-use crate::target_log::TargetLog;
+use crate::target_log::{TargetLog, log_level_foreground_color};
 
 pub async fn log_viewer_tui(mut logs_rx: broadcast::Receiver<TargetLog>) {
     let mut siv = cursive::default();
@@ -52,7 +55,7 @@ pub async fn log_viewer_tui(mut logs_rx: broadcast::Receiver<TargetLog>) {
                     ),
             )
             .child(
-                TextView::new("")
+                LinearLayout::vertical()
                     .with_name("logs")
                     .scrollable()
                     .scroll_strategy(ScrollStrategy::StickToBottom),
@@ -69,10 +72,99 @@ pub async fn log_viewer_tui(mut logs_rx: broadcast::Receiver<TargetLog>) {
         runner.step();
 
         while let Ok(log) = logs_rx.try_recv() {
-            let mut logs_view = runner.find_name::<TextView>("logs").unwrap();
-            logs_view.append(format!("{}\n", log.log_content));
+            let color_style =
+                ColorStyle::new(Color::Rgb(0, 0, 0), log.node_type.background_color());
+
+            let mut layout = LinearLayout::horizontal()
+                .child(
+                    TextView::new(StyledString::single_span(
+                        log.node_type.short_name(),
+                        Style {
+                            effects: Default::default(),
+                            color: color_style,
+                        },
+                    ))
+                    .fixed_width(4),
+                )
+                .child(
+                    TextView::new(StyledString::single_span(
+                        log.log_level.to_string(),
+                        Style {
+                            effects: Effects::only(Effect::Bold),
+                            color: ColorStyle::new(
+                                log_level_foreground_color(log.log_level),
+                                log.node_type.background_color(),
+                            ),
+                        },
+                    ))
+                    .fixed_width(6),
+                );
+
+            if let Some(timestamp) = log.timestamp.map(|t| format!("{:>7.2}", t)) {
+                layout.add_child(
+                    TextView::new(StyledString::single_span(
+                        &timestamp,
+                        Style {
+                            effects: Default::default(),
+                            color: color_style,
+                        },
+                    ))
+                    .fixed_width(timestamp.len() + 1),
+                );
+            }
+            layout.add_child(
+                TextView::new(StyledString::single_span(
+                    log.log_content,
+                    Style {
+                        effects: Default::default(),
+                        color: color_style,
+                    },
+                ))
+                .full_width(),
+            );
+
+            let mut logs_view = runner.find_name::<LinearLayout>("logs").unwrap();
+            logs_view.add_child(layout.with_color(color_style));
         }
 
         interval.tick().await;
     }
 }
+
+/** Fill a region with an arbitrary color. */
+#[derive(Debug)]
+pub struct ColoredLayer<T: View> {
+    color: ColorStyle,
+    view: T,
+}
+
+impl<T: View> ColoredLayer<T> {
+    /// Wraps the given view.
+    pub fn new(color: ColorStyle, view: T) -> Self {
+        ColoredLayer { color, view }
+    }
+
+    inner_getters!(self.view: T);
+}
+
+impl<T: View> ViewWrapper for ColoredLayer<T> {
+    wrap_impl!(self.view: T);
+
+    fn wrap_draw(&self, printer: &Printer<'_, '_>) {
+        printer.with_color(self.color, |printer| {
+            for y in 0..printer.size.y {
+                printer.print_hline((0, y), printer.size.x, " ");
+            }
+        });
+        self.view.draw(printer);
+    }
+}
+
+pub trait Colorable: View + Sized {
+    /// Wraps `self` in a `ScrollView`.
+    fn with_color(self, color: ColorStyle) -> ColoredLayer<Self> {
+        ColoredLayer::new(color, self)
+    }
+}
+
+impl<T: View> Colorable for T {}

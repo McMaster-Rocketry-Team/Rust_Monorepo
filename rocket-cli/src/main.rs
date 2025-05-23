@@ -3,17 +3,21 @@ mod gen_ota_key;
 mod log_viewer_tui;
 mod target_log;
 
+use std::time::Duration;
+
 use anyhow::Result;
 use anyhow::bail;
 use clap::Parser;
 use clap::Subcommand;
 use download_probe::download_probe;
 use gen_ota_key::gen_ota_key;
+use log::Level;
 use log::LevelFilter;
 use log::info;
 use log_viewer_tui::log_viewer_tui;
 use probe_rs::probe::list::Lister;
-use tokio::join;
+use target_log::NodeTypeEnum;
+use target_log::TargetLog;
 use tokio::sync::broadcast;
 use tokio::sync::oneshot;
 
@@ -46,16 +50,6 @@ struct DownloadCli {
     firmware_elf_path: std::path::PathBuf,
 }
 
-#[derive(clap::ValueEnum, Clone, Debug)]
-enum NodeTypeEnum {
-    VoidLake,
-    AMP,
-    ICARUS,
-    OZYS,
-    PayloadActivation,
-    Bulkhead,
-}
-
 #[derive(Parser, Debug)]
 struct GenOtaKeyCli {
     secret_key_path: std::path::PathBuf,
@@ -68,7 +62,6 @@ async fn main() -> Result<()> {
         .filter_level(LevelFilter::Info)
         .try_init();
     let args = Cli::parse();
-    println!("{:?}", args);
 
     match args.mode {
         ModeSelect::Download(args) => {
@@ -86,17 +79,89 @@ async fn main() -> Result<()> {
                 probes.len() > 0
             };
 
-            let (ready_tx, ready_rx) = oneshot::channel();
-            let (logs_tx, logs_rx) = broadcast::channel(256);
-            
+            let (ready_tx, ready_rx) = oneshot::channel::<()>();
+            let (logs_tx, logs_rx) = broadcast::channel::<TargetLog>(256);
+
             let download_future = async move {
-                if use_probe {
-                    info!("Using debug probe because there are 1 or more probes connected.");
-                    download_probe(args, probes, ready_tx, logs_tx).await.unwrap();
-                } else {
-                    info!("Using OTA because there are no probe connected.");
-                    todo!()
+                ready_tx.send(()).unwrap();
+
+                loop {
+                    logs_tx
+                        .send(TargetLog {
+                            node_type: NodeTypeEnum::VoidLake,
+                            log_content: "Hello VLF5!".to_string(),
+                            crate_name: "".to_string(),
+                            file_name: "".to_string(),
+                            file_path: "".to_string(),
+                            line_number: "".to_string(),
+                            log_level: Level::Trace,
+                            module_path: "".to_string(),
+                            timestamp: Some(1.0),
+                        })
+                        .unwrap();
+                    logs_tx
+                        .send(TargetLog {
+                            node_type: NodeTypeEnum::VoidLake,
+                            log_content: "Hello VLF5!".to_string(),
+                            crate_name: "".to_string(),
+                            file_name: "".to_string(),
+                            file_path: "".to_string(),
+                            line_number: "".to_string(),
+                            log_level: Level::Debug,
+                            module_path: "".to_string(),
+                            timestamp: Some(2.0),
+                        })
+                        .unwrap();
+                    logs_tx
+                        .send(TargetLog {
+                            node_type: NodeTypeEnum::VoidLake,
+                            log_content: "Hello VLF5!".to_string(),
+                            crate_name: "".to_string(),
+                            file_name: "".to_string(),
+                            file_path: "".to_string(),
+                            line_number: "".to_string(),
+                            log_level: Level::Info,
+                            module_path: "".to_string(),
+                            timestamp: Some(3.0),
+                        })
+                        .unwrap();
+                    logs_tx
+                        .send(TargetLog {
+                            node_type: NodeTypeEnum::ICARUS,
+                            log_content: "Hello ICARUS!".to_string(),
+                            crate_name: "".to_string(),
+                            file_name: "".to_string(),
+                            file_path: "".to_string(),
+                            line_number: "".to_string(),
+                            log_level: Level::Warn,
+                            module_path: "".to_string(),
+                            timestamp: Some(4.0),
+                        })
+                        .unwrap();
+                    logs_tx
+                        .send(TargetLog {
+                            node_type: NodeTypeEnum::ICARUS,
+                            log_content: "Hello ICARUS!".to_string(),
+                            crate_name: "".to_string(),
+                            file_name: "".to_string(),
+                            file_path: "".to_string(),
+                            line_number: "".to_string(),
+                            log_level: Level::Error,
+                            module_path: "".to_string(),
+                            timestamp: Some(3600.0),
+                        })
+                        .unwrap();
+                    tokio::time::sleep(Duration::from_secs(1)).await;
                 }
+                // if use_probe {
+                //     info!("Using debug probe because there are 1 or more probes connected.");
+                //     download_probe(args, probes, ready_tx, logs_tx)
+                //         .await
+                //         .unwrap();
+                // } else {
+                //     info!("Using OTA because there are no probe connected.");
+                //     todo!()
+                // }
             };
 
             let viewer_future = async move {

@@ -1,15 +1,11 @@
-use std::process;
-
 use crate::DownloadCli;
-use crate::target_log::TargetLog;
+use crate::target_log::{parse_log_level, TargetLog};
 use anyhow::{Result, bail};
-use log::info;
 use probe_rs::probe::DebugProbeInfo;
 use prompted::input;
 use regex::Regex;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
-use tokio::signal;
 use tokio::sync::{broadcast, oneshot};
 
 pub async fn download_probe(
@@ -100,14 +96,15 @@ pub async fn download_probe(
     while let Some(line) = lines.next_line().await? {
         if let Some(cap) = re.captures(&line) {
             let log = TargetLog {
+                node_type: args.node_type,
                 log_content: cap.get(1).unwrap().as_str().to_string(),
                 crate_name: cap.get(2).unwrap().as_str().to_string(),
                 file_name: cap.get(3).unwrap().as_str().to_string(),
                 file_path: cap.get(4).unwrap().as_str().to_string(),
                 line_number: cap.get(5).unwrap().as_str().to_string(),
-                log_level: cap.get(6).unwrap().as_str().to_string(),
+                log_level: parse_log_level(cap.get(6).unwrap().as_str()),
                 module_path: cap.get(7).unwrap().as_str().to_string(),
-                timestamp: cap.get(8).unwrap().as_str().to_string(),
+                timestamp: cap.get(8).unwrap().as_str().parse::<f64>().ok(),
             };
             if logs_tx.send(log).is_err() {
                 break;
