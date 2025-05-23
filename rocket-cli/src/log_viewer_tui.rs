@@ -5,7 +5,7 @@ use cursive::{
     theme::{BaseColor, Color, ColorStyle, Effect, Effects, Palette, PaletteColor, Style},
     utils::markup::StyledString,
     view::{Nameable as _, Resizable, ScrollStrategy, Scrollable as _, ViewWrapper},
-    views::{Button, EditView, LinearLayout, TextView},
+    views::{Button, Checkbox, Dialog, EditView, LinearLayout, ListView, Panel, TextView},
     wrap_impl,
 };
 use tokio::{sync::broadcast, time};
@@ -27,7 +27,7 @@ pub async fn log_viewer_tui(mut logs_rx: broadcast::Receiver<TargetLog>) {
                 LinearLayout::horizontal()
                     .child(
                         Button::new("Pause", move |siv| {
-                            siv.focus_name("filter").unwrap();
+                            siv.focus_name("search").unwrap();
                             let mut paused_guard = paused.write().unwrap();
                             *paused_guard = !*paused_guard;
 
@@ -44,14 +44,59 @@ pub async fn log_viewer_tui(mut logs_rx: broadcast::Receiver<TargetLog>) {
                         .with_name("pause_button")
                         .fixed_width(9),
                     )
-                    .child(TextView::new("Filter: "))
+                    .child(
+                        Button::new("Filter", move |siv| {
+                            siv.add_layer(
+                                Dialog::around(
+                                    LinearLayout::horizontal()
+                                        .child(
+                                            Panel::new(
+                                                ListView::new()
+                                                    .child("Trace", Checkbox::new())
+                                                    .child("Debug", Checkbox::new())
+                                                    .child("Info", Checkbox::new())
+                                                    .child("Warn", Checkbox::new())
+                                                    .child("Error", Checkbox::new())
+                                                    .scrollable(),
+                                            )
+                                            .title("Level"),
+                                        )
+                                        .child(
+                                            Panel::new(
+                                                ListView::new()
+                                                    .child("Void Lake", Checkbox::new())
+                                                    .child("AMP", Checkbox::new())
+                                                    .child("ICARUS", Checkbox::new())
+                                                    .child("Payload Activation", Checkbox::new())
+                                                    .child("Rocket WiFi", Checkbox::new())
+                                                    .child("OZYS", Checkbox::new())
+                                                    .child("Bulkhead", Checkbox::new())
+                                                    .child("EPS 1", Checkbox::new())
+                                                    .child("EPS 2", Checkbox::new())
+                                                    .child("AeroRust", Checkbox::new())
+                                                    .scrollable(),
+                                            )
+                                            .title("Device"),
+                                        ),
+                                )
+                                .title("Filter")
+                                .button("OK", |siv| {
+                                    siv.pop_layer();
+                                    siv.focus_name("search").unwrap();
+                                }),
+                            );
+                        })
+                        .with_name("pause_button")
+                        .fixed_width(9),
+                    )
+                    .child(TextView::new("Search: "))
                     .child(
                         EditView::new()
                             .on_edit(|_, __, ___| {
                                 // TODO
                             })
                             .full_width()
-                            .with_name("filter"),
+                            .with_name("search"),
                     ),
             )
             .child(
@@ -62,7 +107,7 @@ pub async fn log_viewer_tui(mut logs_rx: broadcast::Receiver<TargetLog>) {
             ),
     );
 
-    siv.focus_name("filter").unwrap();
+    siv.focus_name("search").unwrap();
     siv.set_autorefresh(true);
 
     let mut runner = siv.runner();
