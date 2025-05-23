@@ -154,6 +154,8 @@ pub static ICARUS_STATUS_MESSAGE_TYPE: u8 = messages::ICARUS_STATUS_MESSAGE_TYPE
 pub static DATA_TRANSFER_MESSAGE_TYPE: u8 = messages::DATA_TRANSFER_MESSAGE_TYPE;
 #[unsafe(no_mangle)]
 pub static ACK_MESSAGE_TYPE: u8 = messages::ACK_MESSAGE_TYPE;
+#[unsafe(no_mangle)]
+pub static LOG_MESSAGE_TYPE: u8 = messages::LOG_MESSAGE_TYPE;
 
 #[cfg_attr(feature = "wasm", derive(Serialize, Deserialize, Tsify))]
 #[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]

@@ -235,6 +235,16 @@ pub const ACK_MESSAGE_TYPE: u8 = create_can_bus_message_type(
     },
     2,
 );
+pub const LOG_MESSAGE_TYPE: u8 = create_can_bus_message_type(
+    CanBusMessageTypeFlag {
+        is_measurement: false,
+        is_control: false,
+        is_status: false,
+        is_data: false,
+        is_misc: true,
+    },
+    0,
+);
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[cfg_attr(feature = "wasm", derive(Tsify))]

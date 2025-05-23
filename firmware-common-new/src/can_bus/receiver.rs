@@ -14,7 +14,7 @@ use crate::{sensor_reading::SensorReading, time::BootTimestamp};
 use super::{
     CanBusFrame, CanBusRX,
     id::CanBusExtendedId,
-    messages::CanBusMessageEnum,
+    messages::{CanBusMessageEnum, LOG_MESSAGE_TYPE},
     sender::{CAN_CRC, MAX_CAN_MESSAGE_SIZE, TailByte},
 };
 
@@ -178,6 +178,12 @@ impl<const Q: usize> CanBusMultiFrameDecoder<Q> {
         frame: &impl CanBusFrame,
     ) -> Option<SensorReading<BootTimestamp, ReceivedCanBusMessage>> {
         let id = CanBusExtendedId::from_raw(frame.id());
+        if id.message_type == LOG_MESSAGE_TYPE {
+            // log message is just a byte stream and is not encoded like other message types
+            // log message should be handled elsewhere instead of handing the frame to the decoder
+            // the decoder simply ignores log messages
+            return None;
+        }
 
         for state_machine in &mut self.state_machines {
             if state_machine.has_same_id(id) {
@@ -233,10 +239,7 @@ impl<M: RawMutex, const N: usize, const SUBS: usize> CanReceiver<M, N, SUBS> {
         self.self_node_id
     }
 
-    pub async fn run_daemon<R: CanBusRX, const Q: usize>(
-        &self,
-        rx: &mut R,
-    ) {
+    pub async fn run_daemon<R: CanBusRX, const Q: usize>(&self, rx: &mut R) {
         let mut decoder = CanBusMultiFrameDecoder::<Q>::new();
 
         loop {
