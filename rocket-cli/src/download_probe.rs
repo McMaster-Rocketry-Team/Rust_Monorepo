@@ -13,6 +13,7 @@ pub async fn download_probe(
     probes: Vec<DebugProbeInfo>,
     ready_tx: oneshot::Sender<()>,
     logs_tx: broadcast::Sender<TargetLog>,
+    stop_rx: oneshot::Receiver<()>,
 ) -> Result<()> {
     let probe = if probes.len() == 1 {
         probes[0].clone()
@@ -49,23 +50,23 @@ pub async fn download_probe(
     );
 
     // flash the firmware
-    // let probe_rs_args = [
-    //     "download",
-    //     "--non-interactive",
-    //     "--probe",
-    //     &probe_string,
-    //     "--chip",
-    //     &args.chip,
-    //     "--connect-under-reset",
-    //     args.firmware_elf_path.to_str().unwrap(),
-    // ];
-    // let output = std::process::Command::new("probe-rs")
-    //     .args(&probe_rs_args)
-    //     .status()?;
+    let probe_rs_args = [
+        "download",
+        "--non-interactive",
+        "--probe",
+        &probe_string,
+        "--chip",
+        &args.chip,
+        "--connect-under-reset",
+        args.firmware_elf_path.to_str().unwrap(),
+    ];
+    let output = std::process::Command::new("probe-rs")
+        .args(&probe_rs_args)
+        .status()?;
 
-    // if !output.success() {
-    //     bail!("probe-rs command failed");
-    // }
+    if !output.success() {
+        bail!("probe-rs command failed");
+    }
     ready_tx.send(()).unwrap();
 
     // attach to the target
@@ -91,27 +92,36 @@ pub async fn download_probe(
     let stdout = child.stdout.take().unwrap();
     let reader = BufReader::new(stdout);
     let mut lines = reader.lines();
-    let re = Regex::new(r">>>>>(.*?)\|\|\|\|\|(.*?)\|\|\|\|\|(.*?)\|\|\|\|\|(.*?)\|\|\|\|\|(.*?)\|\|\|\|\|(.*?)\|\|\|\|\|(.*?)\|\|\|\|\|(.*?)<<<<<").unwrap();
+    let re = Regex::new(r">>>>>(.*?)\|\|\|\|\|(.*?)\|\|\|\|\|(.*?)\|\|\|\|\|(.*?)\|\|\|\|\|(.*?)\|\|\|\|\|(.*?)<<<<<").unwrap();
 
-    while let Some(line) = lines.next_line().await? {
-        if let Some(cap) = re.captures(&line) {
-            let log = TargetLog {
-                node_type: args.node_type,
-                node_id: None,
-                log_content: cap.get(1).unwrap().as_str().to_string(),
-                defmt: Some(DefmtLogInfo {
-                    file_path: cap.get(2).unwrap().as_str().to_string(),
-                    line_number: cap.get(3).unwrap().as_str().to_string(),
-                    log_level: parse_log_level(cap.get(4).unwrap().as_str()),
-                    module_path: cap.get(5).unwrap().as_str().to_string(),
-                    timestamp: cap.get(6).unwrap().as_str().parse::<f64>().ok(),
-                }),
-            };
-            if logs_tx.send(log).is_err() {
-                break;
+    let read_logs_future = async move {
+        while let Some(line) = lines.next_line().await.unwrap() {
+            if let Some(cap) = re.captures(&line) {
+                let log = TargetLog {
+                    node_type: args.node_type,
+                    node_id: None,
+                    log_content: cap.get(1).unwrap().as_str().to_string(),
+                    defmt: Some(DefmtLogInfo {
+                        file_path: cap.get(2).unwrap().as_str().to_string(),
+                        line_number: cap.get(3).unwrap().as_str().to_string(),
+                        log_level: parse_log_level(cap.get(4).unwrap().as_str()),
+                        module_path: cap.get(5).unwrap().as_str().to_string(),
+                        timestamp: cap.get(6).unwrap().as_str().parse::<f64>().ok(),
+                    }),
+                };
+                if logs_tx.send(log).is_err() {
+                    break;
+                }
             }
         }
+    };
+
+    tokio::select! {
+        _ = read_logs_future => {},
+        _ = stop_rx => {},
     }
+
+    child.kill().await?;
 
     Ok(())
 }

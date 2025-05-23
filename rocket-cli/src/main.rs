@@ -83,6 +83,7 @@ async fn main() -> Result<()> {
 
             let (ready_tx, ready_rx) = oneshot::channel::<()>();
             let (logs_tx, logs_rx) = broadcast::channel::<TargetLog>(256);
+            let (stop_tx, stop_rx) = oneshot::channel::<()>();
 
             let download_future = async move {
                 if cfg!(debug_assertions) {
@@ -142,7 +143,7 @@ async fn main() -> Result<()> {
                 } else {
                     if use_probe {
                         info!("Using debug probe because there are 1 or more probes connected.");
-                        download_probe(args, probes, ready_tx, logs_tx)
+                        download_probe(args, probes, ready_tx, logs_tx, stop_rx)
                             .await
                             .unwrap();
                     } else {
@@ -155,12 +156,13 @@ async fn main() -> Result<()> {
             let viewer_future = async move {
                 ready_rx.await.unwrap();
                 log_viewer_tui(logs_rx).await.unwrap();
+                stop_tx.send(()).unwrap();
             };
 
-            tokio::select! {
-                _ = download_future => {},
-                _ = viewer_future => {},
-            }
+            tokio::join! {
+                download_future,
+                viewer_future,
+            };
 
             Ok(())
         }

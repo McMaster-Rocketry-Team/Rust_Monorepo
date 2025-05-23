@@ -3964,7 +3964,6 @@ dependencies = [
  "clap 4.5.37",
  "clap-num",
  "cursive",
- "directories",
  "env_logger",
  "firmware-common-new",
  "futures",
