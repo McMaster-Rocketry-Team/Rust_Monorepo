@@ -3156,6 +3156,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "rocket-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "btleplug",
+ "cargo-binutils",
+ "clap 4.5.37",
+ "clap-num",
+ "env_logger",
+ "firmware-common-new",
+ "futures",
+ "hex",
+ "indicatif",
+ "log",
+ "rand 0.9.1",
+ "salty",
+ "tempfile",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "rustc-cfg"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

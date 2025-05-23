@@ -1,0 +1,24 @@
+[package]
+name = "rocket-cli"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+firmware-common-new = { path = "../firmware-common-new", default-features = false, features = [
+    "log"
+]}
+anyhow = "1.0.86"
+clap = { version = "4.5.7", features = ["derive"] }
+clap-num = "1.1.1"
+tokio = { version = "1.45.0", features = ["full"] }
+env_logger = "0.11.3"
+log = "0.4.21"
+cargo-binutils = "0.3.6"
+tempfile = "3.20.0"
+salty = "0.3.0"
+hex = "0.4.3"
+rand = "0.9.1"
+btleplug = "0.11"
+uuid      = "1"
+futures   = "0.3"
+indicatif = "0.17"

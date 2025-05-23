@@ -18,7 +18,7 @@ members = [
 
     # commmented out because rust-analyzer dont like it on windows,
     # pre-compiled binaries are provided for win64 and linux x64.
-    "air-brakes-controller-matlab-client", "firmware-ota-updater",
+    "air-brakes-controller-matlab-client", "firmware-ota-updater", "rocket-cli",
 ]
 resolver = "2"
 
