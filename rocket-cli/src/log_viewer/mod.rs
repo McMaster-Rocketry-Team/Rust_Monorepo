@@ -1,5 +1,6 @@
 pub mod config;
 pub mod target_log;
+pub mod log_saver;
 
 use std::{
     sync::{Arc, RwLock},

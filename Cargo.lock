@@ -3961,6 +3961,7 @@ dependencies = [
  "anyhow",
  "btleplug",
  "cargo-binutils",
+ "chrono",
  "clap 4.5.37",
  "clap-num",
  "cursive",

@@ -13,6 +13,7 @@ use gen_ota_key::gen_ota_key;
 use log::Level;
 use log::LevelFilter;
 use log::info;
+use log_viewer::log_saver::LogSaver;
 use log_viewer::log_viewer_tui;
 use log_viewer::target_log::DefmtLogInfo;
 use log_viewer::target_log::NodeTypeEnum;
@@ -79,9 +80,18 @@ async fn main() -> Result<()> {
                 probes.len() > 0
             };
 
+            let mut log_saver = LogSaver::new(
+                args.firmware_elf_path
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string(),
+            )
+            .await?;
             let (ready_tx, ready_rx) = oneshot::channel::<()>();
             let (logs_tx, logs_rx) = broadcast::channel::<TargetLog>(256);
-            let (stop_tx, stop_rx) = oneshot::channel::<()>();
+            let mut logs_rx2 = logs_tx.subscribe();
+            let (stop_tx, mut stop_rx) = oneshot::channel::<()>();
 
             let download_future = async move {
                 if cfg!(debug_assertions) {
@@ -136,6 +146,9 @@ async fn main() -> Result<()> {
                                 defmt: None,
                             })
                             .unwrap();
+                        if stop_rx.try_recv().is_ok() {
+                            break;
+                        }
                         tokio::time::sleep(Duration::from_secs(1)).await;
                     }
                 } else {
@@ -157,9 +170,16 @@ async fn main() -> Result<()> {
                 stop_tx.send(()).unwrap();
             };
 
+            let logger_future = async move {
+                while let Ok(log) = logs_rx2.recv().await {
+                    log_saver.append_log(&log).await.unwrap();
+                }
+            };
+
             tokio::join! {
                 download_future,
                 viewer_future,
+                logger_future,
             };
 
             Ok(())
