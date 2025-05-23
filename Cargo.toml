@@ -25,9 +25,10 @@ resolver = "2"
 [profile.dev]
 opt-level = 1
 
-#[profile.dev.package."*"]
-#opt-level = 3
-
 [profile.release]
 lto = true
 codegen-units = 1
+
+[profile.rocket-cli]
+inherits = "release"
+opt-level = 1

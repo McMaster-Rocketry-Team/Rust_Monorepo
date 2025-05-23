@@ -1,67 +1,116 @@
-use std::sync::RwLock;
+mod download_probe;
+mod gen_ota_key;
+mod log_viewer_tui;
+mod target_log;
 
-use cursive::{
-    theme::{BaseColor, Color, Palette, PaletteColor},
-    view::{Nameable as _, Resizable, Scrollable as _},
-    views::{Button, EditView, LinearLayout, TextView},
-};
+use anyhow::Result;
+use anyhow::bail;
+use clap::Parser;
+use clap::Subcommand;
+use download_probe::download_probe;
+use gen_ota_key::gen_ota_key;
+use log::LevelFilter;
+use log::info;
+use log_viewer_tui::log_viewer_tui;
+use probe_rs::probe::list::Lister;
+use tokio::join;
+use tokio::sync::broadcast;
+use tokio::sync::oneshot;
 
-fn main() {
-    let mut siv = cursive::default();
-    let mut theme = siv.current_theme().clone();
+#[derive(Parser, Debug)]
+#[command(name = "Rocket CLI")]
+#[command(bin_name = "rocket-cli")]
+struct Cli {
+    #[clap(subcommand)]
+    mode: ModeSelect,
+}
 
-    theme.palette = Palette::terminal_default();
-    theme.palette[PaletteColor::Highlight] = Color::Light(BaseColor::White);
-    siv.set_theme(theme);
+#[derive(Subcommand, Debug)]
+enum ModeSelect {
+    #[command(about = "download firmware to target via probe or ota")]
+    Download(DownloadCli),
 
-    let paused = RwLock::new(false);
-    siv.add_fullscreen_layer(
-        LinearLayout::vertical()
-            .child(
-                LinearLayout::horizontal()
-                    .child(
-                        Button::new("Pause", move |siv| {
-                            siv.focus_name("filter").unwrap();
-                            let mut paused_guard = paused.write().unwrap();
-                            *paused_guard = !*paused_guard;
+    #[command(about = "generate private and public keys for ota")]
+    GenOtaKey(GenOtaKeyCli),
+}
 
-                            let mut pause_button = siv.find_name::<Button>("pause_button").unwrap();
+#[derive(Parser, Debug)]
+struct DownloadCli {
+    #[arg(long, help = "force using ota")]
+    force_ota: bool,
+    #[arg(long, help = "force using probe")]
+    force_probe: bool,
+    chip: String,
+    secret_path: std::path::PathBuf,
+    node_type: NodeTypeEnum,
+    firmware_elf_path: std::path::PathBuf,
+}
 
-                            if *paused_guard {
-                                pause_button.set_label("Paused");
-                            } else {
-                                pause_button.set_label("Pause");
-                            }
+#[derive(clap::ValueEnum, Clone, Debug)]
+enum NodeTypeEnum {
+    VoidLake,
+    AMP,
+    ICARUS,
+    OZYS,
+    PayloadActivation,
+    Bulkhead,
+}
 
-                            // TODO
-                        })
-                        .with_name("pause_button")
-                        .fixed_width(9),
-                    )
-                    .child(TextView::new("Filter: "))
-                    .child(
-                        EditView::new()
-                            .on_edit(|_, __, ___| {
-                                // TODO
-                            })
-                            .full_width()
-                            .with_name("filter"),
-                    ),
-            )
-            .child(TextView::new("").with_name("logs").scrollable()),
-    );
-    // ProgressBar
+#[derive(Parser, Debug)]
+struct GenOtaKeyCli {
+    secret_key_path: std::path::PathBuf,
+    public_key_path: std::path::PathBuf,
+}
 
-    siv.focus_name("filter").unwrap();
-    siv.set_autorefresh(true);
+#[tokio::main]
+async fn main() -> Result<()> {
+    let _ = env_logger::builder()
+        .filter_level(LevelFilter::Info)
+        .try_init();
+    let args = Cli::parse();
+    println!("{:?}", args);
 
-    let mut count = 0;
-    let mut runner = siv.runner();
-    runner.refresh();
-    while runner.is_running() {
-        runner.step();
-        count += 1;
-        let mut logs_view = runner.find_name::<TextView>("logs").unwrap();
-        logs_view.set_content(format!("{}", count));
+    match args.mode {
+        ModeSelect::Download(args) => {
+            if args.force_ota && args.force_probe {
+                bail!("--force-ota and --force-probe can not be set at the same time")
+            }
+
+            let lister = Lister::new();
+            let probes = lister.list_all();
+            let use_probe = if args.force_probe {
+                true
+            } else if args.force_ota {
+                false
+            } else {
+                probes.len() > 0
+            };
+
+            let (ready_tx, ready_rx) = oneshot::channel();
+            let (logs_tx, logs_rx) = broadcast::channel(256);
+            
+            let download_future = async move {
+                if use_probe {
+                    info!("Using debug probe because there are 1 or more probes connected.");
+                    download_probe(args, probes, ready_tx, logs_tx).await.unwrap();
+                } else {
+                    info!("Using OTA because there are no probe connected.");
+                    todo!()
+                }
+            };
+
+            let viewer_future = async move {
+                ready_rx.await.unwrap();
+                log_viewer_tui(logs_rx).await;
+            };
+
+            tokio::select! {
+                _ = download_future => {},
+                _ = viewer_future => {},
+            }
+
+            Ok(())
+        }
+        ModeSelect::GenOtaKey(args) => gen_ota_key(args),
     }
 }
