@@ -113,6 +113,7 @@ export interface CanBusMessageTypes {
     icarus_status: number;
     data_transfer: number;
     ack: number;
+    log: number;
 }
 
 export interface CanBusFrames {

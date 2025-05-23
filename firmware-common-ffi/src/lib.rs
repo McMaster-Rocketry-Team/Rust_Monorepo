@@ -96,6 +96,7 @@ pub struct CanBusMessageTypes {
     icarus_status: u8,
     data_transfer: u8,
     ack: u8,
+    log: u8,
 }
 
 #[cfg_attr(not(feature = "wasm"), unsafe(no_mangle))]
@@ -118,6 +119,7 @@ pub extern "C" fn get_can_bus_message_types() -> CanBusMessageTypes {
         icarus_status: messages::ICARUS_STATUS_MESSAGE_TYPE,
         data_transfer: messages::DATA_TRANSFER_MESSAGE_TYPE,
         ack: messages::ACK_MESSAGE_TYPE,
+        log: messages::LOG_MESSAGE_TYPE,
     }
 }
 
