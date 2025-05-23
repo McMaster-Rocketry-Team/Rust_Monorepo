@@ -1,5 +1,5 @@
 use crate::DownloadCli;
-use crate::target_log::{DefmtLogInfo, TargetLog, parse_log_level};
+use crate::log_viewer::target_log::{DefmtLogInfo, TargetLog, parse_log_level};
 use anyhow::{Result, bail};
 use probe_rs::probe::DebugProbeInfo;
 use prompted::input;

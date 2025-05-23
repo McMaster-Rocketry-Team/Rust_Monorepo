@@ -1,8 +1,6 @@
-mod config;
 mod download_probe;
 mod gen_ota_key;
-mod log_viewer_tui;
-mod target_log;
+mod log_viewer;
 
 use std::time::Duration;
 
@@ -15,11 +13,11 @@ use gen_ota_key::gen_ota_key;
 use log::Level;
 use log::LevelFilter;
 use log::info;
-use log_viewer_tui::log_viewer_tui;
+use log_viewer::log_viewer_tui;
+use log_viewer::target_log::DefmtLogInfo;
+use log_viewer::target_log::NodeTypeEnum;
+use log_viewer::target_log::TargetLog;
 use probe_rs::probe::list::Lister;
-use target_log::DefmtLogInfo;
-use target_log::NodeTypeEnum;
-use target_log::TargetLog;
 use tokio::sync::broadcast;
 use tokio::sync::oneshot;
 

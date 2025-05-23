@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
-use crate::target_log::{NodeTypeEnum, TargetLog};
+use super::target_log::{NodeTypeEnum, TargetLog};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LogViewerConfig {
