@@ -46,6 +46,7 @@ micromath = "2.1.0"
 tsify = { version = "0.5.5", optional = true, default-features = false, features = ["js"]}
 wasm-bindgen = { version = "0.2.100", default-features = false, optional = true }
 salty = "0.3.0"
+heatshrink-lib = "0.4.1"
 
 [dev-dependencies]
 approx = "0.5.1"

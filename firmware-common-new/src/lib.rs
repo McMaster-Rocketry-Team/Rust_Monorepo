@@ -21,3 +21,4 @@ pub mod time;
 pub mod variance;
 #[cfg(not(feature = "bootloader"))]
 pub mod vlp;
+pub mod heatshrink;

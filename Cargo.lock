@@ -1900,6 +1900,7 @@ dependencies = [
  "embedded-io-async",
  "env_logger",
  "heapless 0.8.0",
+ "heatshrink-lib",
  "icao-isa 1.0.0",
  "icao-units 1.0.0",
  "libm 0.2.13",
@@ -2333,6 +2334,12 @@ dependencies = [
  "serde",
  "stable_deref_trait",
 ]
+
+[[package]]
+name = "heatshrink-lib"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bd595a0ca030d4e50596e7bc25d07cd71d3b820ff3d9db34debd3c3573ddf481"
 
 [[package]]
 name = "heck"

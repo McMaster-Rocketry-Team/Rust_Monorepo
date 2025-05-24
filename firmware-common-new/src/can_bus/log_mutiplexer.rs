@@ -1,5 +1,8 @@
+use crate::heatshrink::HeatshrinkWrapper;
+
 use super::{CanBusFrame, id::CanBusExtendedId, messages::LOG_MESSAGE_TYPE};
 use heapless::{Deque, Vec};
+use heatshrink::{decoder::HeatshrinkDecoder, encoder::HeatshrinkEncoder};
 use packed_struct::prelude::*;
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
@@ -93,26 +96,25 @@ impl LogMultiplexer {
         self.queue.push_back((id, data)).unwrap();
     }
 
-    pub fn create_chunk(&mut self, chunk: &mut [u8]) -> usize {
-        let chunk_len = chunk.len();
-        let mut offset = 0usize;
+    pub fn create_chunk(&mut self, chunk: &mut [u8]) -> Result<usize, ()> {
         let mut last_id: Option<CanBusExtendedId> = None;
-        while chunk_len - offset >= 12 {
+        let mut enc: HeatshrinkWrapper<'_, HeatshrinkEncoder> = HeatshrinkWrapper::new(chunk);
+
+        while enc.buffer_free_space() >= 12 + 32 {
             if let Some((id, data)) = self.queue.pop_front() {
                 if Some(id) == last_id {
                     let header = ThinHeader::new(data.len());
-                    chunk[offset] = header.into();
-                    offset += 1;
+                    enc.sink(&[header.into()])?;
                 } else {
                     let header = FullHeader::new(data.len(), id.node_type, id.node_id);
-                    header.serialize(&mut chunk[offset..(offset + 4)]);
-                    offset += 4;
+                    let mut buffer = [0u8; 4];
+                    header.serialize(&mut buffer);
+                    enc.sink(&buffer)?;
 
                     last_id = Some(id);
                 }
 
-                chunk[offset..(offset + data.len())].copy_from_slice(&data);
-                offset += data.len();
+                enc.sink(&data)?;
             } else {
                 break;
             }
@@ -120,7 +122,7 @@ impl LogMultiplexer {
 
         self.overrun = false;
 
-        offset
+        enc.finish()
     }
 }
 
@@ -139,12 +141,23 @@ pub enum DemultiplexLogError {
     HeaderLenOutOfRange(u8),
     InvalidFullHeader,
     OutputFull(usize),
+    HeatshrinkError,
 }
 
 pub fn demultiplex_log(
     mut chunk: &[u8],
     output: &mut Vec<DemultiplexedLogFrame, 128>,
 ) -> Result<(), DemultiplexLogError> {
+    let mut decode_buffer = [0u8; 2048];
+    let mut dec: HeatshrinkWrapper<'_, HeatshrinkDecoder> =
+        HeatshrinkWrapper::new(&mut decode_buffer);
+    dec.sink(&chunk)
+        .map_err(|_| DemultiplexLogError::HeatshrinkError)?;
+    let decoded_len = dec
+        .finish()
+        .map_err(|_| DemultiplexLogError::HeatshrinkError)?;
+    let mut chunk = &decode_buffer[..decoded_len];
+
     let mut last_type_id: Option<(u8, u16)> = None;
 
     let peek_thin_header = |chunk: &[u8]| -> Result<ThinHeader, DemultiplexLogError> {
@@ -269,7 +282,7 @@ mod test {
 
         // Create a chunk to hold the multiplexed data
         let mut chunk = [0u8; 64];
-        let chunk_len = multiplexer.create_chunk(&mut chunk);
+        let chunk_len = multiplexer.create_chunk(&mut chunk).unwrap();
         info!("chunk_len: {}", chunk_len);
 
         // Demultiplex the chunk
