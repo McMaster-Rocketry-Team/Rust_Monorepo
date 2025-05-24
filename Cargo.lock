@@ -75,16 +75,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "air-brakes-controller-matlab-client"
-version = "0.1.0"
-dependencies = [
- "air-brakes-controller-matlab-server",
- "rustmex",
- "tarpc",
- "tokio",
-]
-
-[[package]]
 name = "air-brakes-controller-matlab-server"
 version = "0.1.0"
 dependencies = [
@@ -1932,28 +1922,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "firmware-ota-updater"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "btleplug",
- "cargo-binutils",
- "clap 4.5.37",
- "clap-num",
- "env_logger",
- "firmware-common-new",
- "futures",
- "hex",
- "indicatif",
- "log",
- "rand 0.9.1",
- "salty",
- "tempfile",
- "tokio",
- "uuid",
-]
-
-[[package]]
 name = "fixed"
 version = "1.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3039,16 +3007,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "matrixmultiply"
-version = "0.3.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9380b911e3e96d10c1f415da0876389aaf1b56759054eeb0de7df940c456ba1a"
-dependencies = [
- "autocfg",
- "rawpointer",
-]
-
-[[package]]
 name = "md-5"
 version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3172,12 +3130,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "more-asserts"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1fafa6961cabd9c63bcd77a45d7e3b7f3b552b70417831fb0f56db717e72407e"
-
-[[package]]
 name = "nalgebra"
 version = "0.31.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3212,19 +3164,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ffa00dec017b5b1a8b7cf5e2c008bfda1aa7e0697ac1508b491fdf2622fb4d8"
 dependencies = [
  "rand 0.8.5",
-]
-
-[[package]]
-name = "ndarray"
-version = "0.15.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "adb12d4e967ec485a5f71c6311fe28158e9d6f4bc4a447b474184d0f91a8fa32"
-dependencies = [
- "matrixmultiply",
- "num-complex",
- "num-integer",
- "num-traits",
- "rawpointer",
 ]
 
 [[package]]
@@ -4079,12 +4018,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rawpointer"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "60a357793950651c4ed0f3f52338f53b2f809f32d83a07f72909fa13e4c6c1e3"
-
-[[package]]
 name = "redox_syscall"
 version = "0.5.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4330,83 +4263,6 @@ dependencies = [
  "ring",
  "rustls-pki-types",
  "untrusted",
-]
-
-[[package]]
-name = "rustmex"
-version = "0.6.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "84acb63e4c3de9b6476ec668163bb3b00818157c6d4f51a21c9bdaac7b7111a3"
-dependencies = [
- "cfg-if",
- "more-asserts",
- "ndarray",
- "num-complex",
- "rustmex-entrypoint",
- "rustmex_core 0.3.0",
- "rustmex_interleaved_complex",
- "rustmex_matlab800",
- "rustmex_separated_complex",
-]
-
-[[package]]
-name = "rustmex-entrypoint"
-version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11619873359034387045dccfa9071a1a4066cc73db70ff9b3ead2bc8cf61dc72"
-dependencies = [
- "quote",
- "syn 1.0.109",
-]
-
-[[package]]
-name = "rustmex_core"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9dd66638592eeb8d23a68c96dffbb4f7763f087232faecd1012a94ab36b9722f"
-dependencies = [
- "num-complex",
-]
-
-[[package]]
-name = "rustmex_core"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "092c8b064a581f90fcfb5786b9a57deaf0ab3a2fa3dca3798b177e0af497bcc7"
-dependencies = [
- "num-complex",
-]
-
-[[package]]
-name = "rustmex_interleaved_complex"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cd0f7794ea7054f9e3de72a4023aa4817ac274309922dc0447c9bfcdee3a04cf"
-dependencies = [
- "ndarray",
- "num-complex",
- "rustmex_core 0.2.0",
-]
-
-[[package]]
-name = "rustmex_matlab800"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c75ebbdf40eb9f3ffcc7f099b557530ef35e04afe3cbaf6da4997fb8ac8e9fef"
-dependencies = [
- "num-complex",
- "rustmex_core 0.2.0",
-]
-
-[[package]]
-name = "rustmex_separated_complex"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bdd756f28644f8cea1ed6a3778184e74470b79476104fd8a438437f1b179ddc0"
-dependencies = [
- "ndarray",
- "num-complex",
- "rustmex_core 0.2.0",
 ]
 
 [[package]]
