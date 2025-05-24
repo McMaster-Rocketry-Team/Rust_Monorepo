@@ -1,9 +1,6 @@
 use anyhow::{Result, anyhow};
 use btleplug::api::{Characteristic, Peripheral as _, ValueNotification, WriteType};
 use btleplug::platform::Peripheral;
-use firmware_common_new::can_bus::node_types::{
-    AMP_NODE_TYPE, BULKHEAD_NODE_TYPE, ICARUS_NODE_TYPE, OZYS_NODE_TYPE, VOID_LAKE_NODE_TYPE,
-};
 use futures::stream::StreamExt;
 use indicatif::{ProgressBar, ProgressStyle};
 use log::info;
@@ -15,7 +12,6 @@ use uuid::Uuid;
 
 use crate::DownloadCli;
 use crate::bluetooth::extract_bin::extract_bin_and_sign;
-use crate::log_viewer::target_log::NodeTypeEnum;
 
 const CHUNK_CHAR_UUID: Uuid = Uuid::from_u128(0xfba7_891b_18cb_4055_ba5d_0e57396c2fcf);
 const READY_CHAR_UUID: Uuid = Uuid::from_u128(0x5ff9_e042_eced_4d02_8f82_c99e81df389b);

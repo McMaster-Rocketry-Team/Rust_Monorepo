@@ -7,6 +7,8 @@ pub const VOID_LAKE_NODE_TYPE: u8 = 5;
 /// Node controlling the power distribution system
 pub const AMP_NODE_TYPE: u8 = 10;
 
+pub const AMP_SPEED_BRIDGE_NODE_TYPE: u8 = 11;
+
 /// Air brakes node
 pub const ICARUS_NODE_TYPE: u8 = 15;
 

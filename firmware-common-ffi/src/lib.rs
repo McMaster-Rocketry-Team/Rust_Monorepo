@@ -29,6 +29,7 @@ use firmware_common_new::can_bus::sender::CanBusMultiFrameEncoder;
 pub struct CanBusNodeTypes {
     void_lake: u8,
     amp: u8,
+    amp_speed_bridge: u8,
     icarus: u8,
     payload_activation: u8,
     payload_rocket_wifi: u8,
@@ -45,6 +46,7 @@ pub extern "C" fn get_can_bus_node_types() -> CanBusNodeTypes {
     CanBusNodeTypes {
         void_lake: node_types::VOID_LAKE_NODE_TYPE,
         amp: node_types::AMP_NODE_TYPE,
+        amp_speed_bridge: node_types::AMP_SPEED_BRIDGE_NODE_TYPE,
         icarus: node_types::ICARUS_NODE_TYPE,
         payload_activation: node_types::PAYLOAD_ACTIVATION_NODE_TYPE,
         payload_rocket_wifi: node_types::PAYLOAD_ROCKET_WIFI_NODE_TYPE,
@@ -60,6 +62,8 @@ pub extern "C" fn get_can_bus_node_types() -> CanBusNodeTypes {
 pub static VOID_LAKE_NODE_TYPE: u8 = node_types::VOID_LAKE_NODE_TYPE;
 #[unsafe(no_mangle)]
 pub static AMP_NODE_TYPE: u8 = node_types::AMP_NODE_TYPE;
+#[unsafe(no_mangle)]
+pub static AMP_SPEED_BRIDGE_NODE_TYPE: u8 = node_types::AMP_SPEED_BRIDGE_NODE_TYPE;
 #[unsafe(no_mangle)]
 pub static ICARUS_NODE_TYPE: u8 = node_types::ICARUS_NODE_TYPE;
 #[unsafe(no_mangle)]

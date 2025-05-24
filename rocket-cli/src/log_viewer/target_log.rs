@@ -6,6 +6,7 @@ use log::Level;
 pub enum NodeTypeEnum {
     VoidLake,
     AMP,
+    AMPSpeedBridge,
     ICARUS,
     PayloadActivation,
     RocketWifi,
@@ -22,6 +23,7 @@ impl From<u8> for NodeTypeEnum {
         match value {
             VOID_LAKE_NODE_TYPE => Self::VoidLake,
             AMP_NODE_TYPE => Self::AMP,
+            AMP_SPEED_BRIDGE_NODE_TYPE => Self::AMPSpeedBridge,
             ICARUS_NODE_TYPE => Self::ICARUS,
             PAYLOAD_ACTIVATION_NODE_TYPE => Self::PayloadActivation,
             PAYLOAD_ROCKET_WIFI_NODE_TYPE => Self::RocketWifi,
@@ -40,6 +42,7 @@ impl Into<u8> for NodeTypeEnum {
         match self {
             NodeTypeEnum::VoidLake => VOID_LAKE_NODE_TYPE,
             NodeTypeEnum::AMP => AMP_NODE_TYPE,
+            NodeTypeEnum::AMPSpeedBridge => AMP_SPEED_BRIDGE_NODE_TYPE,
             NodeTypeEnum::ICARUS => ICARUS_NODE_TYPE,
             NodeTypeEnum::PayloadActivation => PAYLOAD_ACTIVATION_NODE_TYPE,
             NodeTypeEnum::RocketWifi => PAYLOAD_ROCKET_WIFI_NODE_TYPE,
@@ -53,12 +56,12 @@ impl Into<u8> for NodeTypeEnum {
     }
 }
 
-
 impl NodeTypeEnum {
     pub fn short_name(&self) -> &'static str {
         match self {
             NodeTypeEnum::VoidLake => "VL",
             NodeTypeEnum::AMP => "AMP",
+            NodeTypeEnum::AMPSpeedBridge => "ASB",
             NodeTypeEnum::ICARUS => "ICA",
             NodeTypeEnum::PayloadActivation => "PA",
             NodeTypeEnum::RocketWifi => "RW",
@@ -73,16 +76,17 @@ impl NodeTypeEnum {
 
     pub fn background_color(&self) -> Color {
         match self {
-            NodeTypeEnum::VoidLake => Color::Rgb(205, 232, 255),
-            NodeTypeEnum::AMP => Color::Rgb(255, 254, 233),
-            NodeTypeEnum::ICARUS => Color::Rgb(255, 227, 207),
-            NodeTypeEnum::PayloadActivation => Color::Rgb(207, 248, 255),
-            NodeTypeEnum::RocketWifi => Color::Rgb(245, 219, 239),
-            NodeTypeEnum::OZYS => Color::Rgb(232, 255, 231),
-            NodeTypeEnum::Bulkhead => Color::Rgb(229, 237, 255),
-            NodeTypeEnum::EPS1 => Color::Rgb(216, 255, 244),
-            NodeTypeEnum::EPS2 => Color::Rgb(204, 232, 238),
-            NodeTypeEnum::AeroRust => Color::Rgb(227, 242, 240),
+            NodeTypeEnum::VoidLake => Color::Rgb(194, 238, 218),
+            NodeTypeEnum::AMP => Color::Rgb(215, 215, 183),
+            NodeTypeEnum::AMPSpeedBridge => Color::Rgb(192, 248, 240),
+            NodeTypeEnum::ICARUS => Color::Rgb(212, 210, 240),
+            NodeTypeEnum::PayloadActivation => Color::Rgb(248, 219, 194),
+            NodeTypeEnum::RocketWifi => Color::Rgb(233, 242, 234),
+            NodeTypeEnum::OZYS => Color::Rgb(244, 230, 197),
+            NodeTypeEnum::Bulkhead => Color::Rgb(206, 234, 255),
+            NodeTypeEnum::EPS1 => Color::Rgb(228, 235, 227),
+            NodeTypeEnum::EPS2 => Color::Rgb(202, 217, 202),
+            NodeTypeEnum::AeroRust => Color::Rgb(252, 218, 246),
             NodeTypeEnum::Other => Color::Rgb(255, 255, 255),
         }
     }
@@ -99,7 +103,7 @@ pub struct DefmtLocationInfo {
 pub struct DefmtLogInfo {
     pub log_level: Level,
     pub timestamp: Option<f64>,
-    pub location: Option<DefmtLocationInfo>
+    pub location: Option<DefmtLocationInfo>,
 }
 
 #[derive(Debug, Clone)]

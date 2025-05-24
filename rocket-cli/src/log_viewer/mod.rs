@@ -263,6 +263,14 @@ fn create_filter_dialog(config: Arc<RwLock<LogViewerConfig>>) -> Dialog {
                             ),
                         )
                         .child(
+                            "AMP Speed Bridge",
+                            create_config_checkbox(
+                                config.clone(),
+                                |c| c.devices.amp_speed_bridge,
+                                |c, v| c.devices.amp_speed_bridge = v,
+                            ),
+                        )
+                        .child(
                             "ICARUS",
                             create_config_checkbox(
                                 config.clone(),
