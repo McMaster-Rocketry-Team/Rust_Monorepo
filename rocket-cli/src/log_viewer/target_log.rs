@@ -1,7 +1,7 @@
 use cursive::theme::Color;
 use log::Level;
 
-#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum NodeTypeEnum {
     VoidLake,
     AMP,

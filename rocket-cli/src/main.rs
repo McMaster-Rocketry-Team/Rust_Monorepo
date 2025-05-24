@@ -1,6 +1,7 @@
 mod download_probe;
 mod gen_ota_key;
 mod log_viewer;
+mod elf_locator;
 
 use std::time::Duration;
 
