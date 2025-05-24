@@ -9,7 +9,6 @@ mod bluetooth;
 use anyhow::Result;
 use attach::attach_target;
 use bluetooth::ble_download::ble_download;
-use bluetooth::extract_bin::extract_bin_and_sign;
 use bluetooth::find_esp::ble_dispose;
 use clap::Parser;
 use clap::Subcommand;

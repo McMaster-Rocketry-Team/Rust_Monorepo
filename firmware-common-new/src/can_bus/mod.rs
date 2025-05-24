@@ -5,6 +5,7 @@ pub mod messages;
 pub mod node_types;
 pub mod receiver;
 pub mod sender;
+pub mod log_mutiplexer;
 
 pub trait CanBusFrame {
     fn timestamp_us(&self) -> u64;

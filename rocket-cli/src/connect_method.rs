@@ -11,7 +11,7 @@ pub enum ConnectMethod {
 impl ConnectMethod {
     pub async fn new(args: &DownloadCli) -> Result<Self> {
         if args.force_ota && args.force_probe {
-            bail!("--force-ota and --force-probe can not be set at the same time")
+            bail!("--force-ota and --force-probe can not be selected at the same time")
         }
 
         let lister = Lister::new();

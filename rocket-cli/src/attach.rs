@@ -24,7 +24,7 @@ pub async fn attach_target(args: &DownloadCli, connect_method: &ConnectMethod) -
     let (stop_tx, stop_rx) = oneshot::channel::<()>();
 
     let elf_files = if matches!(connect_method, ConnectMethod::OTA(_)) {
-        Some(locate_elf_files())
+        Some(locate_elf_files()?)
     } else {
         None
     };
