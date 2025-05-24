@@ -1,6 +1,7 @@
 #![cfg_attr(not(feature = "wasm"), no_std)]
 #![allow(static_mut_refs)]
 
+use firmware_common_new::can_bus::log_mutiplexer::LogMultiplexer;
 use firmware_common_new::can_bus::messages::baro_measurement::BaroMeasurementMessage;
 use firmware_common_new::can_bus::messages::brightness_measurement::BrightnessMeasurementMessage;
 use firmware_common_new::can_bus::messages::icarus_status::IcarusStatusMessage;
@@ -262,6 +263,8 @@ pub fn encode_can_bus_message_js(
         buffer.len(),
     )
 }
+
+static mut LOG_MULTIPLEXER: Option<LogMultiplexer> = None;
 
 static mut CAN_DECODER: Option<CanBusMultiFrameDecoder<8>> = None;
 

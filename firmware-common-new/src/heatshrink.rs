@@ -36,8 +36,16 @@ impl HSEncoderDecoder for HeatshrinkDecoder {
     }
 }
 
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Debug, Clone)]
+pub enum HeatshrinkError {
+    OutBufferFull,
+    Internal,
+}
+
 pub struct HeatshrinkWrapper<'a, T: HSEncoderDecoder> {
     enc: T,
+    in_len: usize,
     out_buffer: &'a mut [u8],
     out_buffer_offset: usize,
 }
@@ -45,6 +53,7 @@ pub struct HeatshrinkWrapper<'a, T: HSEncoderDecoder> {
 impl<'a, T: HSEncoderDecoder> HeatshrinkWrapper<'a, T> {
     pub fn new(out_buffer: &'a mut [u8]) -> Self {
         Self {
+            in_len: 0,
             enc: T::default(),
             out_buffer,
             out_buffer_offset: 0,
@@ -52,12 +61,13 @@ impl<'a, T: HSEncoderDecoder> HeatshrinkWrapper<'a, T> {
     }
 
     /// returns free space avaliable in output buffer
-    pub fn sink(&mut self, mut data: &[u8]) -> Result<(), ()> {
+    pub fn sink(&mut self, mut data: &[u8]) -> Result<(), HeatshrinkError> {
+        self.in_len += data.len();
         while data.len() > 0 {
             if let (HSsinkRes::SinkOK, consumed_len) = self.enc.sink(data) {
                 data = &data[consumed_len..];
             } else {
-                return Err(());
+                return Err(HeatshrinkError::Internal);
             }
 
             self.poll_all()?;
@@ -65,12 +75,20 @@ impl<'a, T: HSEncoderDecoder> HeatshrinkWrapper<'a, T> {
         Ok(())
     }
 
+    pub fn in_len(&self) -> usize {
+        self.in_len
+    }
+
+    pub fn out_buffer_len(&self) -> usize {
+        self.out_buffer.len()
+    }
+
     pub fn buffer_free_space(&self) -> usize {
         self.out_buffer.len() - self.out_buffer_offset
     }
 
     /// returns length of compressed buffer
-    pub fn finish(mut self) -> Result<usize, ()> {
+    pub fn finish(mut self) -> Result<usize, HeatshrinkError> {
         while let HSfinishRes::FinishMore = self.enc.finish() {
             self.poll_all()?;
         }
@@ -78,7 +96,7 @@ impl<'a, T: HSEncoderDecoder> HeatshrinkWrapper<'a, T> {
         Ok(self.out_buffer_offset)
     }
 
-    fn poll_all(&mut self) -> Result<(), ()> {
+    fn poll_all(&mut self) -> Result<(), HeatshrinkError> {
         loop {
             match self
                 .enc
@@ -86,13 +104,16 @@ impl<'a, T: HSEncoderDecoder> HeatshrinkWrapper<'a, T> {
             {
                 (HSpollRes::PollMore, output_len) => {
                     self.out_buffer_offset += output_len;
+                    if output_len == 0 {
+                        return Err(HeatshrinkError::OutBufferFull);
+                    }
                 }
                 (HSpollRes::PollEmpty, output_len) => {
                     self.out_buffer_offset += output_len;
                     break;
                 }
                 (HSpollRes::PollErrorMisuse, _) => {
-                    return Err(());
+                    return Err(HeatshrinkError::Internal);
                 }
             }
         }

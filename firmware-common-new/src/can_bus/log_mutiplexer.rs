@@ -1,4 +1,6 @@
-use crate::heatshrink::HeatshrinkWrapper;
+use core::convert::Infallible;
+
+use crate::heatshrink::{HeatshrinkError, HeatshrinkWrapper};
 
 use super::{CanBusFrame, id::CanBusExtendedId, messages::LOG_MESSAGE_TYPE};
 use heapless::{Deque, Vec};
@@ -67,8 +69,72 @@ impl FullHeader {
     }
 }
 
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(PackedStruct, Default, Clone, Copy, Debug, PartialEq, Eq)]
+#[packed_struct(endian = "msb", bit_numbering = "msb0", size_bytes = "3")]
+#[repr(C)]
+struct ChunkHeader {
+    // the two reserved zeros indicate this chunk is a log multiplexer chunk
+    _reserved: ReservedZero<packed_bits::Bits<2>>,
+    overrun: bool,
+    #[packed_field(element_size_bits = "10")]
+    compressed_len: u16,
+    #[packed_field(element_size_bits = "10")]
+    uncompressed_len: u16,
+}
+
+impl ChunkHeader {
+    fn new(overrun: bool, compressed_len: usize, uncompressed_len: usize) -> Self {
+        Self {
+            _reserved: Default::default(),
+            overrun,
+            compressed_len: compressed_len as u16,
+            uncompressed_len: uncompressed_len as u16,
+        }
+    }
+
+    fn serialize(self, buffer: &mut [u8]) {
+        self.pack_to_slice(&mut buffer[..3]).unwrap();
+    }
+
+    fn deserialize(data: &[u8]) -> Option<Self> {
+        Self::unpack_from_slice(data).ok()
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct LogFrameEncoder {
+    last_id: Option<CanBusExtendedId>,
+    count: usize,
+}
+
+impl LogFrameEncoder {
+    fn encode<E, F: FnMut(&[u8]) -> Result<(), E>>(
+        &mut self,
+        (id, data): &(CanBusExtendedId, Vec<u8, 8>),
+        mut sink: F,
+    ) -> Result<(), E> {
+        if Some(id) == self.last_id.as_ref() {
+            let header = ThinHeader::new(data.len());
+            sink(&[header.into()])?;
+        } else {
+            let header = FullHeader::new(data.len(), id.node_type, id.node_id);
+            let mut buffer = [0u8; 4];
+            header.serialize(&mut buffer);
+            sink(&buffer)?;
+            self.last_id = Some(id.clone());
+        }
+        sink(&data)?;
+        self.count += 1;
+
+        Ok(())
+    }
+}
+
+const LOG_MULTIPLEXER_QUEUE_SIZE: usize = 128;
+
 pub struct LogMultiplexer {
-    queue: Deque<(CanBusExtendedId, Vec<u8, 8>), 128>,
+    queue: Deque<(CanBusExtendedId, Vec<u8, 8>), LOG_MULTIPLEXER_QUEUE_SIZE>,
     overrun: bool,
 }
 
@@ -96,33 +162,83 @@ impl LogMultiplexer {
         self.queue.push_back((id, data)).unwrap();
     }
 
-    pub fn create_chunk(&mut self, chunk: &mut [u8]) -> Result<usize, ()> {
-        let mut last_id: Option<CanBusExtendedId> = None;
-        let mut enc: HeatshrinkWrapper<'_, HeatshrinkEncoder> = HeatshrinkWrapper::new(chunk);
+    // compress at most chunk.len() length of data
+    // does not pop frames out of queue
+    // returns (frames_compressed, compressed_len)
+    // errors if compressed_len > chunk.len()
+    fn compress_at_most_chunk_len(
+        &self,
+        log_frame_enc: &mut LogFrameEncoder,
+        chunk: &mut [u8],
+    ) -> Result<(usize, usize), HeatshrinkError> {
+        let mut hs_enc: HeatshrinkWrapper<'_, HeatshrinkEncoder> = HeatshrinkWrapper::new(chunk);
+        let mut frame_iter = self.queue.iter();
 
-        while enc.buffer_free_space() >= 12 + 32 {
-            if let Some((id, data)) = self.queue.pop_front() {
-                if Some(id) == last_id {
-                    let header = ThinHeader::new(data.len());
-                    enc.sink(&[header.into()])?;
-                } else {
-                    let header = FullHeader::new(data.len(), id.node_type, id.node_id);
-                    let mut buffer = [0u8; 4];
-                    header.serialize(&mut buffer);
-                    enc.sink(&buffer)?;
-
-                    last_id = Some(id);
-                }
-
-                enc.sink(&data)?;
+        while hs_enc.in_len() + 12 <= hs_enc.out_buffer_len() {
+            if let Some(frame) = frame_iter.next() {
+                log_frame_enc.encode(frame, |data| hs_enc.sink(data))?;
             } else {
                 break;
             }
         }
 
+        let compressed_len = hs_enc.finish()?;
+        Ok((log_frame_enc.count, compressed_len))
+    }
+
+    pub fn create_chunk(&mut self, chunk: &mut [u8]) -> usize {
+        // to ensure compressed data always fit in the provided chunk in one pass,
+        // the following algorithm is used:
+        // 1. compress at most chunk.len() length of data using heatshrink
+        // 2. if compressed length is the same as chunk length, use the compressed data
+        // 3. if compressed length is longer than original length, dispose the compressed
+        //    data and fill chunk with original data
+        // 4. if compressed length is shorter than chunk length, fill the unused space with
+        //    uncompressed data
+        if chunk.len() <= 3 || self.queue.is_empty() {
+            return 0;
+        }
+        let (header_buffer, chunk) = chunk.split_at_mut(3);
+        let mut log_frame_enc = LogFrameEncoder::default();
+
+        let compressed_len = if let Ok((frames_compressed, compressed_len)) =
+            self.compress_at_most_chunk_len(&mut log_frame_enc, chunk)
+        {
+            // compressed_len <= chunk.len()
+
+            // pop all compressed frames
+            for _ in 0..frames_compressed {
+                self.queue.pop_front();
+            }
+
+            compressed_len
+        } else {
+            // compressed_len > chunk.len()
+            0
+        };
+
+        // fill the free space left with uncompressed data
+        let chunk = &mut chunk[compressed_len..];
+        let mut offset = 0;
+        while offset + 12 <= chunk.len() {
+            if let Some(frame) = self.queue.pop_front() {
+                log_frame_enc
+                    .encode(&frame, |data| {
+                        chunk[offset..(offset + data.len())].copy_from_slice(data);
+                        offset += data.len();
+                        Ok::<(), Infallible>(())
+                    })
+                    .unwrap();
+            } else {
+                break;
+            }
+        }
+
+        let header = ChunkHeader::new(self.overrun, compressed_len, offset);
+        header.serialize(header_buffer);
         self.overrun = false;
 
-        enc.finish()
+        3 + compressed_len + offset
     }
 }
 
@@ -137,30 +253,29 @@ pub struct DemultiplexedLogFrame {
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone)]
 pub enum DemultiplexLogError {
+    InvalidChunkHeader,
     ExpectMore(usize),
     HeaderLenOutOfRange(u8),
     InvalidFullHeader,
     OutputFull(usize),
-    HeatshrinkError,
+    HeatshrinkError(HeatshrinkError),
 }
 
-pub fn demultiplex_log(
-    mut chunk: &[u8],
-    output: &mut Vec<DemultiplexedLogFrame, 128>,
-) -> Result<(), DemultiplexLogError> {
-    let mut decode_buffer = [0u8; 2048];
-    let mut dec: HeatshrinkWrapper<'_, HeatshrinkDecoder> =
-        HeatshrinkWrapper::new(&mut decode_buffer);
-    dec.sink(&chunk)
-        .map_err(|_| DemultiplexLogError::HeatshrinkError)?;
-    let decoded_len = dec
-        .finish()
-        .map_err(|_| DemultiplexLogError::HeatshrinkError)?;
-    let mut chunk = &decode_buffer[..decoded_len];
+#[derive(Debug)]
+pub struct LogFrameDecoder<'a> {
+    last_type_id: Option<(u8, u16)>,
+    output: &'a mut Vec<DemultiplexedLogFrame, LOG_MULTIPLEXER_QUEUE_SIZE>,
+}
 
-    let mut last_type_id: Option<(u8, u16)> = None;
+impl<'a> LogFrameDecoder<'a> {
+    fn new(output: &'a mut Vec<DemultiplexedLogFrame, LOG_MULTIPLEXER_QUEUE_SIZE>) -> Self {
+        Self {
+            last_type_id: None,
+            output,
+        }
+    }
 
-    let peek_thin_header = |chunk: &[u8]| -> Result<ThinHeader, DemultiplexLogError> {
+    fn peek_thin_header(chunk: &[u8]) -> Result<ThinHeader, DemultiplexLogError> {
         if chunk.len() == 0 {
             return Err(DemultiplexLogError::ExpectMore(1));
         }
@@ -171,9 +286,9 @@ pub fn demultiplex_log(
         }
 
         Ok(header)
-    };
+    }
 
-    let consume_full_header = |chunk: &mut &[u8]| -> Result<FullHeader, DemultiplexLogError> {
+    fn consume_full_header(chunk: &mut &[u8]) -> Result<FullHeader, DemultiplexLogError> {
         if chunk.len() < 4 {
             return Err(DemultiplexLogError::ExpectMore(4 - chunk.len()));
         }
@@ -189,60 +304,105 @@ pub fn demultiplex_log(
         }
 
         Ok(header)
-    };
-
-    let mut consume_data =
-        |len: u8, chunk: &mut &[u8]| -> Result<Vec<u8, 8>, DemultiplexLogError> {
-            let len = len as usize;
-            if chunk.len() < len {
-                return Err(DemultiplexLogError::ExpectMore(len - chunk.len()));
-            }
-            let mut data = Vec::<u8, 8>::new();
-            data.extend_from_slice(&chunk[..len]).unwrap();
-            *chunk = &chunk[len..];
-            Ok(data)
-        };
-
-    while chunk.len() > 0 {
-        if output.is_full() {
-            return Err(DemultiplexLogError::OutputFull(chunk.len()));
-        }
-        if let Some((last_node_type, last_node_id)) = last_type_id {
-            let header = peek_thin_header(chunk)?;
-            if header.is_continue {
-                chunk = &chunk[1..];
-
-                output
-                    .push(DemultiplexedLogFrame {
-                        node_type: last_node_type,
-                        node_id: last_node_id,
-                        data: consume_data(header.len, &mut chunk)?,
-                    })
-                    .unwrap();
-                continue;
-            }
-        }
-
-        let header = consume_full_header(&mut chunk)?;
-        last_type_id = Some((header.node_type, header.node_id));
-
-        output
-            .push(DemultiplexedLogFrame {
-                node_type: header.node_type,
-                node_id: header.node_id,
-                data: consume_data(header.len, &mut chunk)?,
-            })
-            .unwrap();
     }
 
-    Ok(())
+    fn consume_data(len: u8, chunk: &mut &[u8]) -> Result<Vec<u8, 8>, DemultiplexLogError> {
+        let len = len as usize;
+        if chunk.len() < len {
+            return Err(DemultiplexLogError::ExpectMore(len - chunk.len()));
+        }
+        let mut data = Vec::<u8, 8>::new();
+        data.extend_from_slice(&chunk[..len]).unwrap();
+        *chunk = &chunk[len..];
+        Ok(data)
+    }
+
+    fn decode(&mut self, mut chunk: &[u8]) -> Result<(), DemultiplexLogError> {
+        while chunk.len() > 0 {
+            if self.output.is_full() {
+                return Err(DemultiplexLogError::OutputFull(chunk.len()));
+            }
+            if let Some((last_node_type, last_node_id)) = self.last_type_id {
+                let header = Self::peek_thin_header(chunk)?;
+                if header.is_continue {
+                    chunk = &chunk[1..];
+
+                    self.output
+                        .push(DemultiplexedLogFrame {
+                            node_type: last_node_type,
+                            node_id: last_node_id,
+                            data: Self::consume_data(header.len, &mut chunk)?,
+                        })
+                        .unwrap();
+                    continue;
+                }
+            }
+
+            let header = Self::consume_full_header(&mut chunk)?;
+            self.last_type_id = Some((header.node_type, header.node_id));
+
+            self.output
+                .push(DemultiplexedLogFrame {
+                    node_type: header.node_type,
+                    node_id: header.node_id,
+                    data: Self::consume_data(header.len, &mut chunk)?,
+                })
+                .unwrap();
+        }
+        Ok(())
+    }
+}
+
+/// returns is_overrun
+pub fn demultiplex_log(
+    chunk: &[u8],
+    output: &mut Vec<DemultiplexedLogFrame, 128>,
+) -> Result<bool, DemultiplexLogError> {
+    // the most data multiplexer can put in one chunk is LOG_MULTIPLEXER_QUEUE_SIZE frames, limited by the multiplexer queue
+    // worst case each frame has a 4 byte full header + 8 byte data, total LOG_MULTIPLEXER_QUEUE_SIZE * 12 bytes
+    // this is not optimized for memory, ideally we won't need decode_buffer, instead feeding outputs from
+    // the heatshrink decoder directly into consume_full_header etc.
+    // but this code only runs on a pc, so memory usage doesn't matter.
+
+    if chunk.len() < 3 {
+        return Err(DemultiplexLogError::InvalidChunkHeader);
+    }
+    let chunk_header =
+        ChunkHeader::deserialize(&chunk[..3]).ok_or(DemultiplexLogError::InvalidChunkHeader)?;
+    log_info!("chunk_header {:?}", chunk_header);
+    let (compressed_chunk, uncompressed_chunk) = chunk[3..]
+        .split_at_checked(chunk_header.compressed_len as usize)
+        .ok_or(DemultiplexLogError::InvalidChunkHeader)?;
+
+    // decompress
+    let mut decompress_buffer = [0u8; { LOG_MULTIPLEXER_QUEUE_SIZE * 12 }];
+    let mut dec: HeatshrinkWrapper<'_, HeatshrinkDecoder> =
+        HeatshrinkWrapper::new(&mut decompress_buffer);
+    dec.sink(compressed_chunk)
+        .map_err(DemultiplexLogError::HeatshrinkError)?;
+    let decompressed_len = dec.finish().map_err(DemultiplexLogError::HeatshrinkError)?;
+    // the lower the better
+    log_info!(
+        "{}B compressed + {}B uncompressed, compression ratio {}, total comperssion ratio {}",
+        compressed_chunk.len(),
+        uncompressed_chunk.len(),
+        compressed_chunk.len() as f32 / decompressed_len as f32,
+        chunk.len() as f32 / (decompressed_len + uncompressed_chunk.len()) as f32,
+    );
+
+    // decode log frames
+    let mut log_frame_decoder = LogFrameDecoder::new(output);
+    log_frame_decoder.decode(&decompress_buffer[..decompressed_len])?;
+    log_frame_decoder.decode(uncompressed_chunk)?;
+
+    Ok(chunk_header.overrun)
 }
 
 #[cfg(test)]
 mod test {
-    use log::info;
-
     use crate::tests::init_logger;
+    use lipsum::lipsum;
+    use log::info;
 
     use super::*;
 
@@ -250,66 +410,101 @@ mod test {
     fn test_multiplex_log() {
         init_logger();
 
-        let mut multiplexer = LogMultiplexer::new();
-
         // Create test frames with different IDs and data
-        let frame1 = (
-            0,
-            CanBusExtendedId::new(7, LOG_MESSAGE_TYPE, 1, 1).into(),
-            &[1, 2, 3],
-        );
-        let frame2 = (
-            0,
-            CanBusExtendedId::new(7, LOG_MESSAGE_TYPE, 1, 1).into(),
-            &[4, 5, 6],
-        );
-        let frame3 = (
-            0,
-            CanBusExtendedId::new(7, LOG_MESSAGE_TYPE, 2, 2).into(),
-            &[7, 8],
-        );
-        let frame4 = (
-            0,
-            CanBusExtendedId::new(7, LOG_MESSAGE_TYPE, 3, 3).into(),
-            &[9, 10, 11, 12],
-        );
+        let frames: std::vec::Vec<(u64, CanBusExtendedId, std::vec::Vec<u8>)> = vec![
+            (
+                0,
+                CanBusExtendedId::new(7, LOG_MESSAGE_TYPE, 1, 1),
+                vec![1, 2, 3],
+            ),
+            (
+                0,
+                CanBusExtendedId::new(7, LOG_MESSAGE_TYPE, 1, 1),
+                vec![4, 5, 6],
+            ),
+            (
+                0,
+                CanBusExtendedId::new(7, LOG_MESSAGE_TYPE, 2, 2),
+                vec![7, 8],
+            ),
+            (
+                0,
+                CanBusExtendedId::new(7, LOG_MESSAGE_TYPE, 3, 3),
+                vec![9, 10, 11, 12],
+            ),
+        ];
 
-        // Process all frames
-        multiplexer.process_frame(&frame1);
-        multiplexer.process_frame(&frame2);
-        multiplexer.process_frame(&frame3);
-        multiplexer.process_frame(&frame4);
+        let mut multiplexer = LogMultiplexer::new();
+        for frame in &frames {
+            multiplexer.process_frame(&(frame.0, frame.1.into(), frame.2.as_slice()));
+        }
 
         // Create a chunk to hold the multiplexed data
-        let mut chunk = [0u8; 64];
-        let chunk_len = multiplexer.create_chunk(&mut chunk).unwrap();
+        let mut chunk = [0u8; 512];
+        let chunk_len = multiplexer.create_chunk(&mut chunk);
         info!("chunk_len: {}", chunk_len);
+        assert_eq!(multiplexer.queue.len(), 0);
+        assert_eq!(multiplexer.overrun, false);
 
         // Demultiplex the chunk
-        let mut output = Vec::<DemultiplexedLogFrame, 128>::new();
-        demultiplex_log(&chunk[..chunk_len], &mut output).unwrap();
+        let mut outputs = Vec::<DemultiplexedLogFrame, 128>::new();
+        demultiplex_log(&chunk[..chunk_len], &mut outputs).unwrap();
 
         // Verify the results
-        assert_eq!(output.len(), 4);
+        assert_eq!(outputs.len(), frames.len());
 
-        // Check first frame
-        assert_eq!(output[0].node_type, 1);
-        assert_eq!(output[0].node_id, 1);
-        assert_eq!(output[0].data.as_slice(), &[1, 2, 3]);
+        for (i, frame) in frames.iter().enumerate() {
+            let output = &outputs[i];
+            assert_eq!(output.node_type, frame.1.node_type);
+            assert_eq!(output.node_id, frame.1.node_id);
+            assert_eq!(output.data.as_slice(), frame.2.as_slice());
+        }
+    }
 
-        // Check second frame (same ID as first)
-        assert_eq!(output[1].node_type, 1);
-        assert_eq!(output[1].node_id, 1);
-        assert_eq!(output[1].data.as_slice(), &[4, 5, 6]);
+    #[test]
+    fn test_multiplex_log_full() {
+        init_logger();
 
-        // Check third frame
-        assert_eq!(output[2].node_type, 2);
-        assert_eq!(output[2].node_id, 2);
-        assert_eq!(output[2].data.as_slice(), &[7, 8]);
+        let mut frames: std::vec::Vec<(u64, CanBusExtendedId, &[u8])> = vec![];
 
-        // Check fourth frame
-        assert_eq!(output[3].node_type, 3);
-        assert_eq!(output[3].node_id, 3);
-        assert_eq!(output[3].data.as_slice(), &[9, 10, 11, 12]);
+        let lip = lipsum(256);
+        let mut data = lip.as_bytes();
+        for i in 0..128 {
+            let frame: (u64, CanBusExtendedId, &[u8]) = (
+                i,
+                CanBusExtendedId::new(7, LOG_MESSAGE_TYPE, 1, 1),
+                &data[..8],
+            );
+            data = &data[8..];
+            frames.push(frame);
+        }
+
+        let mut multiplexer = LogMultiplexer::new();
+        for frame in &frames {
+            multiplexer.process_frame(&(frame.0, frame.1.into(), frame.2));
+        }
+
+        // Create a chunk to hold the multiplexed data
+        let mut chunk = [0u8; 512];
+        let chunk_len = multiplexer.create_chunk(&mut chunk);
+        info!(
+            "chunk_len: {}, queue left: {}",
+            chunk_len,
+            multiplexer.queue.len()
+        );
+        assert_eq!(multiplexer.queue.len(), 63);
+        assert_eq!(multiplexer.overrun, false);
+
+        // Demultiplex the chunk
+        let mut outputs = Vec::<DemultiplexedLogFrame, 128>::new();
+        demultiplex_log(&chunk[..chunk_len], &mut outputs).unwrap();
+
+        assert_eq!(outputs.len(), frames.len() - multiplexer.queue.len());
+        for (i, frame) in frames.iter().enumerate().take(outputs.len()) {
+            let output = &outputs[i];
+            assert_eq!(output.node_type, frame.1.node_type);
+            assert_eq!(output.node_id, frame.1.node_id);
+            assert_eq!(output.data.as_slice(), frame.2);
+        }
     }
 }
