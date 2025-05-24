@@ -1,4 +1,4 @@
-use crate::log_viewer::target_log::TargetLog;
+use crate::{connect_method::ConnectMethod, log_viewer::target_log::TargetLog};
 use anyhow::{Ok, Result};
 use chrono::Local;
 use pad::PadStr as _;
@@ -13,12 +13,20 @@ pub struct LogSaver {
 }
 
 impl LogSaver {
-    pub async fn new(bin_name: String) -> Result<Self> {
+    pub async fn new(bin_name: String, connect_method: &ConnectMethod) -> Result<Self> {
         let logs_dir = PathBuf::from("logs");
         fs::create_dir_all(&logs_dir).await?;
 
         let timestamp = Local::now().format("%Y-%m-%d_%H-%M-%S");
-        let log_path = logs_dir.join(format!("{}_{}.log", timestamp, bin_name));
+        let log_path = logs_dir.join(format!(
+            "{}_{}_{}.log",
+            timestamp,
+            bin_name,
+            match connect_method {
+                ConnectMethod::Probe(_) => "probe",
+                ConnectMethod::OTA(_) => "ota",
+            }
+        ));
         let file = File::create(log_path).await?;
 
         Ok(Self { file })

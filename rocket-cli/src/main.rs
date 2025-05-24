@@ -4,9 +4,13 @@ mod elf_locator;
 mod gen_ota_key;
 mod log_viewer;
 mod probe;
+mod bluetooth;
 
 use anyhow::Result;
 use attach::attach_target;
+use bluetooth::ble_download::ble_download;
+use bluetooth::extract_bin::extract_bin_and_sign;
+use bluetooth::find_esp::ble_dispose;
 use clap::Parser;
 use clap::Subcommand;
 use connect_method::ConnectMethod;
@@ -67,18 +71,26 @@ async fn main() -> Result<()> {
                 ConnectMethod::Probe(probe_string) => {
                     probe_download(&args, probe_string).await?;
                 }
-                ConnectMethod::OTA => {
-                    todo!();
+                ConnectMethod::OTA(esp) => {
+                    ble_download(&args, esp).await?;
                 }
             }
 
             attach_target(&args, &connect_method).await?;
+
+            if let ConnectMethod::OTA(esp) = connect_method {
+                ble_dispose(esp).await?;
+            }
             Ok(())
         }
         ModeSelect::Attach(args) => {
             let connect_method = ConnectMethod::new(&args).await?;
             
             attach_target(&args, &connect_method).await?;
+
+            if let ConnectMethod::OTA(esp) = connect_method {
+                ble_dispose(esp).await?;
+            }
             Ok(())
         }
         ModeSelect::GenOtaKey(args) => gen_ota_key(args),

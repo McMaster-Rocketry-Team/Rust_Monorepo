@@ -1,10 +1,11 @@
-use crate::{DownloadCli, probe::select_probe::select_probe};
+use crate::{DownloadCli, bluetooth::find_esp::find_esp, probe::select_probe::select_probe};
 use anyhow::{Result, bail};
+use btleplug::platform::Peripheral;
 use log::info;
 use probe_rs::probe::list::Lister;
 pub enum ConnectMethod {
     Probe(String),
-    OTA,
+    OTA(Peripheral),
 }
 
 impl ConnectMethod {
@@ -28,12 +29,13 @@ impl ConnectMethod {
         };
 
         if use_probe {
-            info!("Using debug probe.");
+            info!("Using debug probe");
             let probe_string = select_probe(probes).await?;
             Ok(Self::Probe(probe_string))
         } else {
-            info!("Using OTA.");
-            Ok(Self::OTA)
+            info!("Using OTA");
+            let esp = find_esp().await?;
+            Ok(Self::OTA(esp))
         }
     }
 }

@@ -1,10 +1,9 @@
 use crate::{
     DownloadCli,
     connect_method::ConnectMethod,
+    elf_locator::locate_elf_files,
     log_viewer::{log_saver::LogSaver, log_viewer_tui, target_log::TargetLog},
-    probe::{
-        probe_attach::probe_attach,
-    },
+    probe::probe_attach::probe_attach,
 };
 use anyhow::Result;
 use tokio::sync::{broadcast, oneshot};
@@ -16,19 +15,31 @@ pub async fn attach_target(args: &DownloadCli, connect_method: &ConnectMethod) -
             .unwrap()
             .to_string_lossy()
             .to_string(),
+        connect_method,
     )
     .await?;
 
     let (logs_tx, logs_rx) = broadcast::channel::<TargetLog>(256);
     let mut logs_rx2 = logs_tx.subscribe();
-    let (stop_tx, mut stop_rx) = oneshot::channel::<()>();
+    let (stop_tx, stop_rx) = oneshot::channel::<()>();
+
+    let elf_files = if matches!(connect_method, ConnectMethod::OTA(_)) {
+        Some(locate_elf_files())
+    } else {
+        None
+    };
 
     let receive_log_future = async move {
         match connect_method {
             ConnectMethod::Probe(probe_string) => {
-                probe_attach(args, probe_string, logs_tx, stop_rx).await.unwrap();
+                probe_attach(args, probe_string, logs_tx, stop_rx)
+                    .await
+                    .unwrap();
             }
-            ConnectMethod::OTA => todo!(),
+            ConnectMethod::OTA(_) => {
+                let elf_files = elf_files.unwrap();
+                todo!()
+            }
         }
     };
 
