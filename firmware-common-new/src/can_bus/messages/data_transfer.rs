@@ -70,7 +70,7 @@ impl DataTransferMessage {
 
 impl CanBusMessage for DataTransferMessage {
     fn priority(&self) -> u8 {
-        7
+        6
     }
 }
 

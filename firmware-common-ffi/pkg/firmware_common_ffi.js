@@ -263,6 +263,32 @@ export function parseCanBusId(id) {
 }
 
 /**
+ * @param {number} node_type
+ * @param {number} node_id
+ * @returns {CanBusExtendedId}
+ */
+export function createLogMessageCanBusId(node_type, node_id) {
+    const ret = wasm.canbusextendedid_log_message(node_type, node_id);
+    return CanBusExtendedId.__wrap(ret);
+}
+
+function _assertClass(instance, klass) {
+    if (!(instance instanceof klass)) {
+        throw new Error(`expected instance of ${klass.name}`);
+    }
+}
+/**
+ * @param {CanBusExtendedId} id
+ * @returns {number}
+ */
+export function canBusExtendedIdToU32(id) {
+    _assertClass(id, CanBusExtendedId);
+    var ptr0 = id.__destroy_into_raw();
+    const ret = wasm.canBusExtendedIdToU32(ptr0);
+    return ret >>> 0;
+}
+
+/**
  * @param {CanBusMessageEnum} message
  * @returns {number}
  */
@@ -591,6 +617,15 @@ export class CanBusExtendedId {
      */
     static from_raw(raw) {
         const ret = wasm.canbusextendedid_from_raw(raw);
+        return CanBusExtendedId.__wrap(ret);
+    }
+    /**
+     * @param {number} node_type
+     * @param {number} node_id
+     * @returns {CanBusExtendedId}
+     */
+    static log_message(node_type, node_id) {
+        const ret = wasm.canbusextendedid_log_message(node_type, node_id);
         return CanBusExtendedId.__wrap(ret);
     }
 }

@@ -342,6 +342,18 @@ pub extern "C" fn parse_can_bus_id(id: u32) -> CanBusExtendedId {
 }
 
 #[cfg_attr(not(feature = "wasm"), unsafe(no_mangle))]
+#[cfg_attr(feature = "wasm", wasm_bindgen(js_name = createLogMessageCanBusId))]
+pub extern "C" fn create_log_message_can_bus_id(node_type: u8, node_id: u16) -> CanBusExtendedId {
+    CanBusExtendedId::log_message(node_type, node_id)
+}
+
+#[cfg_attr(not(feature = "wasm"), unsafe(no_mangle))]
+#[cfg_attr(feature = "wasm", wasm_bindgen(js_name = canBusExtendedIdToU32))]
+pub extern "C" fn can_bus_extended_id_to_u32(id: CanBusExtendedId) -> u32 {
+    id.into()
+}
+
+#[cfg_attr(not(feature = "wasm"), unsafe(no_mangle))]
 #[cfg_attr(feature = "wasm", wasm_bindgen(js_name = getCanBusMessageType))]
 pub extern "C" fn get_can_bus_message_type(message: CanBusMessageEnum) -> u8 {
     message.get_message_type()

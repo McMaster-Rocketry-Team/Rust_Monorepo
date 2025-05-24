@@ -42,6 +42,8 @@ export function encodeCanBusMessage(message: CanBusMessageEnum, self_node_type: 
  */
 export function processCanBusFrame(timestamp: bigint, id: number, data: Uint8Array): ProcessCanBusFrameResult;
 export function parseCanBusId(id: number): CanBusExtendedId;
+export function createLogMessageCanBusId(node_type: number, node_id: number): CanBusExtendedId;
+export function canBusExtendedIdToU32(id: CanBusExtendedId): number;
 export function getCanBusMessageType(message: CanBusMessageEnum): number;
 /**
  * Calculates a CAN node ID from a serial number.
@@ -320,6 +322,7 @@ export class CanBusExtendedId {
   free(): void;
   constructor(priority: number, message_type: number, node_type: number, node_id: number);
   static from_raw(raw: number): CanBusExtendedId;
+  static log_message(node_type: number, node_id: number): CanBusExtendedId;
   priority: number;
   message_type: number;
   node_type: number;
@@ -338,6 +341,7 @@ export interface InitOutput {
   readonly getCanBusMessageTypes: () => any;
   readonly encodeCanBusMessage: (a: any, b: number, c: number, d: number, e: number, f: any) => any;
   readonly processCanBusFrame: (a: bigint, b: number, c: number, d: number) => any;
+  readonly canBusExtendedIdToU32: (a: number) => number;
   readonly getCanBusMessageType: (a: any) => number;
   readonly canNodeIdFromSerialNumber: (a: number, b: number) => number;
   readonly createCanBusMessageTypeFilterMask: (a: number, b: number) => number;
@@ -367,7 +371,9 @@ export interface InitOutput {
   readonly __wbg_set_canbusextendedid_node_id: (a: number, b: number) => void;
   readonly canbusextendedid_new: (a: number, b: number, c: number, d: number) => number;
   readonly canbusextendedid_from_raw: (a: number) => number;
+  readonly canbusextendedid_log_message: (a: number, b: number) => number;
   readonly brightnessmeasurementmessage_new: (a: bigint, b: number) => any;
+  readonly createLogMessageCanBusId: (a: number, b: number) => number;
   readonly parseCanBusId: (a: number) => number;
   readonly brightnessmeasurementmessage_brightness: (a: number) => number;
   readonly __wbindgen_malloc: (a: number, b: number) => number;

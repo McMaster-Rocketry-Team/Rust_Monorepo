@@ -2,7 +2,7 @@
 use wasm_bindgen::prelude::*;
 
 use super::{
-    messages::{RESET_MESSAGE_TYPE, UNIX_TIME_MESSAGE_TYPE},
+    messages::{LOG_MESSAGE_TYPE, RESET_MESSAGE_TYPE, UNIX_TIME_MESSAGE_TYPE},
     sender::CAN_CRC,
 };
 use core::fmt::Debug;
@@ -103,6 +103,16 @@ impl CanBusExtendedId {
         let mut packed = [0; 4];
         packed.copy_from_slice(&unpacked);
         Self::unpack(&packed).unwrap()
+    }
+
+    pub fn log_message(node_type: u8, node_id: u16) -> Self {
+        Self {
+            _reserved: Default::default(),
+            priority: 7,
+            message_type: LOG_MESSAGE_TYPE,
+            node_type: node_type,
+            node_id: node_id,
+        }
     }
 }
 
