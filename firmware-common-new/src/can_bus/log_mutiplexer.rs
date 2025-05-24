@@ -43,7 +43,7 @@ impl From<u8> for ThinHeader {
 #[packed_struct(endian = "msb", bit_numbering = "msb0", size_bytes = "4")]
 #[repr(C)]
 struct FullHeader {
-    is_continue: ReservedZero<packed_bits::Bits<1>>,
+    is_continue: bool,
     #[packed_field(element_size_bits = "7")]
     len: u8,
     node_type: u8,
@@ -53,7 +53,7 @@ struct FullHeader {
 impl FullHeader {
     fn new(len: usize, node_type: u8, node_id: u16) -> Self {
         Self {
-            is_continue: Default::default(),
+            is_continue: false,
             len: len as u8,
             node_type,
             node_id,
@@ -75,7 +75,8 @@ impl FullHeader {
 #[repr(C)]
 struct ChunkHeader {
     // the two reserved zeros indicate this chunk is a log multiplexer chunk
-    _reserved: ReservedZero<packed_bits::Bits<2>>,
+    #[packed_field(element_size_bits = "2")]
+    _reserved: u8,
     overrun: bool,
     #[packed_field(element_size_bits = "10")]
     compressed_len: u16,
@@ -86,7 +87,7 @@ struct ChunkHeader {
 impl ChunkHeader {
     fn new(overrun: bool, compressed_len: usize, uncompressed_len: usize) -> Self {
         Self {
-            _reserved: Default::default(),
+            _reserved: 0,
             overrun,
             compressed_len: compressed_len as u16,
             uncompressed_len: uncompressed_len as u16,

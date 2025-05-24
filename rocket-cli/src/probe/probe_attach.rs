@@ -1,14 +1,16 @@
 use crate::DownloadCli;
+use crate::log_viewer::LogViewerStatus;
 use crate::log_viewer::target_log::{DefmtLocationInfo, DefmtLogInfo, TargetLog, parse_log_level};
 use anyhow::Result;
 use regex::Regex;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
-use tokio::sync::{broadcast, oneshot};
+use tokio::sync::{broadcast, oneshot, watch};
 
 pub async fn probe_attach(
     args: &DownloadCli,
     probe_string: &String,
+    status_tx: watch::Sender<LogViewerStatus>,
     logs_tx: broadcast::Sender<TargetLog>,
     stop_rx: oneshot::Receiver<()>,
 ) -> Result<()> {
@@ -36,6 +38,7 @@ pub async fn probe_attach(
     let reader = BufReader::new(stdout);
     let mut lines = reader.lines();
     let re = Regex::new(r">>>>>(.*?)\|\|\|\|\|(.*?)\|\|\|\|\|(.*?)\|\|\|\|\|(.*?)\|\|\|\|\|(.*?)\|\|\|\|\|(.*?)<<<<<").unwrap();
+    status_tx.send(LogViewerStatus::Normal).ok();
 
     let read_logs_future = async move {
         while let Some(line) = lines.next_line().await.unwrap() {

@@ -13,7 +13,7 @@ use cursive::{
     Printer, Rect, Vec2, View,
     direction::Direction,
     event::{Callback, Event, EventResult, MouseButton, MouseEvent},
-    theme::{Color, ColorStyle, Effects, Palette, Style},
+    theme::{BaseColor, Color, ColorStyle, Effects, Palette, Style},
     utils::markup::StyledString,
     view::{CannotFocus, Nameable as _, Resizable, ScrollStrategy, Scrollable as _, scroll},
     views::{
@@ -23,9 +23,23 @@ use cursive::{
 };
 use pad::PadStr;
 use target_log::{DefmtLogInfo, TargetLog, log_level_foreground_color};
-use tokio::{sync::broadcast, time};
+use tokio::{
+    sync::{broadcast, watch},
+    time,
+};
 
-pub async fn log_viewer_tui(mut logs_rx: broadcast::Receiver<TargetLog>) -> Result<()> {
+#[derive(Debug, Clone, Copy)]
+pub enum LogViewerStatus {
+    Initialize,
+    Normal,
+    ChunkError,
+    Overrun,
+}
+
+pub async fn log_viewer_tui(
+    mut logs_rx: broadcast::Receiver<TargetLog>,
+    status_rx: watch::Receiver<LogViewerStatus>,
+) -> Result<()> {
     let mut siv = cursive::default();
     let mut theme = siv.current_theme().clone();
 
@@ -93,7 +107,8 @@ pub async fn log_viewer_tui(mut logs_rx: broadcast::Receiver<TargetLog>) -> Resu
                             })
                             .full_width()
                             .with_name("search"),
-                    ),
+                    )
+                    .child(TextView::new("").with_name("status").fixed_width(11)),
             )
             .child(
                 LinearLayout::vertical()
@@ -139,6 +154,38 @@ pub async fn log_viewer_tui(mut logs_rx: broadcast::Receiver<TargetLog>) -> Resu
                 }
             }
         }
+
+        let mut status_text = runner.find_name::<TextView>("status").unwrap();
+        status_text.set_content(match status_rx.borrow().clone() {
+            LogViewerStatus::Initialize => StyledString::single_span(
+                "Initialize".pad_to_width_with_alignment(11, pad::Alignment::Right),
+                Style {
+                    effects: Effects::default(),
+                    color: ColorStyle::front(BaseColor::Blue.dark()),
+                },
+            ),
+            LogViewerStatus::Normal => StyledString::single_span(
+                "Normal".pad_to_width_with_alignment(11, pad::Alignment::Right),
+                Style {
+                    effects: Effects::default(),
+                    color: ColorStyle::front(BaseColor::Green.dark()),
+                },
+            ),
+            LogViewerStatus::ChunkError => StyledString::single_span(
+                "Malformed".pad_to_width_with_alignment(11, pad::Alignment::Right),
+                Style {
+                    effects: Effects::default(),
+                    color: ColorStyle::front(BaseColor::Red.dark()),
+                },
+            ),
+            LogViewerStatus::Overrun => StyledString::single_span(
+                "Overrun".pad_to_width_with_alignment(11, pad::Alignment::Right),
+                Style {
+                    effects: Effects::default(),
+                    color: ColorStyle::front(BaseColor::Yellow.dark()),
+                },
+            ),
+        });
 
         interval.tick().await;
     }

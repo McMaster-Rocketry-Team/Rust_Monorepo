@@ -10,6 +10,11 @@ use crate::{
     log_viewer::target_log::{DefmtLocationInfo, DefmtLogInfo, NodeTypeEnum, TargetLog},
 };
 
+pub struct ProcessChunkResult {
+    pub is_overrun: bool,
+    pub is_error: bool,
+}
+
 pub struct LogDemultiplexer {
     current_dir: Option<PathBuf>,
     logs_tx: broadcast::Sender<TargetLog>,
@@ -36,9 +41,10 @@ impl LogDemultiplexer {
     }
 
     /// chunk from LogMultiplexer::create_chunk
-    pub fn process_chunk(&mut self, chunk: &[u8]) {
+    /// returns is_overrun
+    pub fn process_chunk(&mut self, chunk: &[u8]) -> ProcessChunkResult {
         // TODO: process overrun
-        decode_multiplexed_log_chunk(chunk, |frame| {
+        let decode_result = decode_multiplexed_log_chunk(chunk, |frame| {
             let node_type: NodeTypeEnum = frame.node_type.into();
             if let Some(elf_info) = self.elf_info_map.get(&node_type) {
                 // treat bytes as defmt log
@@ -132,8 +138,18 @@ impl LogDemultiplexer {
                         .ok();
                 });
             }
-        })
-        .ok();
+        });
+
+        match decode_result {
+            Ok(is_overrun) => ProcessChunkResult {
+                is_overrun,
+                is_error: false,
+            },
+            Err(_) => ProcessChunkResult {
+                is_overrun: false,
+                is_error: true,
+            },
+        }
     }
 }
 
