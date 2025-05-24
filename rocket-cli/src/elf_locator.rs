@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     fs::{self, File},
     io::Read as _,
     path::{Path, PathBuf},
@@ -7,11 +7,18 @@ use std::{
 };
 
 use crate::log_viewer::target_log::NodeTypeEnum;
-use anyhow::{Ok, Result};
+use anyhow::Result;
+use defmt_decoder::{Location, Table};
 use log::{info, warn};
 use pad::PadStr;
 
-pub fn locate_elf_files() -> Result<HashMap<NodeTypeEnum, ElfInfo>> {
+#[derive(Debug)]
+pub struct DefmtElfInfo {
+    table: Table,
+    locs: Option<BTreeMap<u64, Location>>,
+}
+
+pub fn locate_elf_files() -> Result<HashMap<NodeTypeEnum, DefmtElfInfo>> {
     let possible_paths = vec!["./Rust_Monorepo", "../Rust_Monorepo", "../../Rust_Monorepo"];
 
     let monorepo_path = possible_paths
@@ -44,7 +51,22 @@ pub fn locate_elf_files() -> Result<HashMap<NodeTypeEnum, ElfInfo>> {
                     .format("%Y-%m-%d %H:%M:%S")
                     .to_string()
             );
-            result.insert(node_type, elf);
+
+            let bytes = fs::read(elf.path)?;
+            let table = if let Ok(Some(table)) = Table::parse(&bytes) {
+                table
+            } else {
+                warn!("Failed to parse defmt table");
+                return Ok(());
+            };
+            let locs = table.get_locations(&bytes)?;
+            let locs = if table.indices().all(|idx| locs.contains_key(&(idx as u64))) {
+                Some(locs)
+            } else {
+                warn!("Location info is incomplete, it will be omitted from the output");
+                None
+            };
+            result.insert(node_type, DefmtElfInfo { table, locs });
         } else {
             warn!("ELF for {:?} not found, looked in {:?}", node_type, path);
         }
@@ -62,7 +84,7 @@ pub fn locate_elf_files() -> Result<HashMap<NodeTypeEnum, ElfInfo>> {
 }
 
 #[derive(Debug, Clone)]
-pub struct ElfInfo {
+struct ElfInfo {
     path: PathBuf,
     profile: String,
     created_time: SystemTime,

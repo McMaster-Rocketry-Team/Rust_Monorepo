@@ -1,74 +1,17 @@
 use crate::DownloadCli;
 use crate::log_viewer::target_log::{DefmtLogInfo, TargetLog, parse_log_level};
-use anyhow::{Result, bail};
-use probe_rs::probe::DebugProbeInfo;
-use prompted::input;
+use anyhow::Result;
 use regex::Regex;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::{broadcast, oneshot};
 
-pub async fn download_probe(
-    args: DownloadCli,
-    probes: Vec<DebugProbeInfo>,
-    ready_tx: oneshot::Sender<()>,
+pub async fn probe_attach(
+    args: &DownloadCli,
+    probe_string: &String,
     logs_tx: broadcast::Sender<TargetLog>,
     stop_rx: oneshot::Receiver<()>,
 ) -> Result<()> {
-    let probe = if probes.len() == 1 {
-        probes[0].clone()
-    } else {
-        for i in 0..probes.len() {
-            let probe = &probes[i];
-
-            println!(
-                "[{}]: {}, SN {}",
-                i + 1,
-                probe.identifier,
-                probe.serial_number.clone().unwrap_or("N/A".into())
-            );
-        }
-
-        let selection = input!("Select one probe (1-{}): ", probes.len());
-
-        let selection: usize = match selection.trim().parse() {
-            Err(_) => bail!("Invalid selection"),
-            Ok(num) if num > probes.len() => bail!("Invalid selection"),
-            Ok(num) => num,
-        };
-
-        probes[selection].clone()
-    };
-
-    let probe_string = format!(
-        "{:x}:{:x}{}",
-        probe.vendor_id,
-        probe.product_id,
-        probe
-            .serial_number
-            .map_or(String::new(), |sn| format!(":{}", sn))
-    );
-
-    // flash the firmware
-    let probe_rs_args = [
-        "download",
-        "--non-interactive",
-        "--probe",
-        &probe_string,
-        "--chip",
-        &args.chip,
-        "--connect-under-reset",
-        args.firmware_elf_path.to_str().unwrap(),
-    ];
-    let output = std::process::Command::new("probe-rs")
-        .args(&probe_rs_args)
-        .status()?;
-
-    if !output.success() {
-        bail!("probe-rs command failed");
-    }
-    ready_tx.send(()).unwrap();
-
     // attach to the target
     let probe_rs_args = [
         "attach",
@@ -82,7 +25,7 @@ pub async fn download_probe(
         ">>>>>{s}|||||{F}|||||{l}|||||{L}|||||{m}|||||{t}<<<<<",
         args.firmware_elf_path.to_str().unwrap(),
     ];
-
+    
     let mut child = Command::new("probe-rs")
         .args(&probe_rs_args)
         .stdout(std::process::Stdio::piped())
