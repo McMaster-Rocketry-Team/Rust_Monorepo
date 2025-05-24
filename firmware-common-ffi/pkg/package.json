@@ -1,7 +1,7 @@
 {
   "name": "firmware-common-ffi",
   "type": "module",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "files": [
     "firmware_common_ffi_bg.wasm",
     "firmware_common_ffi.js",

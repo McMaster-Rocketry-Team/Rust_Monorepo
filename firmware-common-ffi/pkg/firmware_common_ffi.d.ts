@@ -28,6 +28,22 @@ export function getCanBusMessageTypes(): CanBusMessageTypes;
  */
 export function encodeCanBusMessage(message: CanBusMessageEnum, self_node_type: number, self_node_id: number, buffer: Uint8Array): CanBusFrames;
 /**
+ * Creates a multiplexed log chunk for sending over bluetooth.
+ * The logs come from can bus frames processed by `process_can_bus_frame`
+ *
+ * # Parameters
+ * - `buffer`: buffer where the created chunk will be written to
+ *
+ * # Returns
+ * - Length of the created chunk
+ *
+ * # Safety
+ *
+ * The caller is responsible for ensuring `log_multiplexer_create_chunk` and
+ * `process_can_bus_frame` is not invoked concurrently
+ */
+export function logMultiplexerCreateChunk(buffer: Uint8Array): number;
+/**
  * Handles the processing of a CAN bus frame to extract a message.
  *
  * # Parameters
@@ -39,6 +55,11 @@ export function encodeCanBusMessage(message: CanBusMessageEnum, self_node_type: 
  * - `ProcessCanBusFrameResult`
  *     - `Message` if the frame was successfully processed and a complete message was extracted.
  *     - `Empty` if the frame is invalid or the message is incomplete (e.g., in the case of multi-frame messages).
+ *
+ * # Safety
+ *
+ * The caller is responsible for ensuring `log_multiplexer_create_chunk` and
+ * `process_can_bus_frame` is not invoked concurrently
  */
 export function processCanBusFrame(timestamp: bigint, id: number, data: Uint8Array): ProcessCanBusFrameResult;
 export function parseCanBusId(id: number): CanBusExtendedId;
@@ -334,12 +355,14 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
   readonly memory: WebAssembly.Memory;
   readonly encode_can_bus_message: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
+  readonly log_multiplexer_create_chunk: (a: number, b: number) => number;
   readonly process_can_bus_frame: (a: number, b: bigint, c: number, d: number, e: number) => void;
   readonly can_node_id_from_serial_number: (a: number, b: number) => number;
   readonly create_can_bus_message_type_filter_mask: (a: number, b: number) => number;
   readonly getCanBusNodeTypes: () => any;
   readonly getCanBusMessageTypes: () => any;
   readonly encodeCanBusMessage: (a: any, b: number, c: number, d: number, e: number, f: any) => any;
+  readonly logMultiplexerCreateChunk: (a: number, b: number, c: any) => number;
   readonly processCanBusFrame: (a: bigint, b: number, c: number, d: number) => any;
   readonly canBusExtendedIdToU32: (a: number) => number;
   readonly getCanBusMessageType: (a: any) => number;

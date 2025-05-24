@@ -266,6 +266,51 @@ pub fn encode_can_bus_message_js(
 
 static mut LOG_MULTIPLEXER: Option<LogMultiplexer> = None;
 
+/// Creates a multiplexed log chunk for sending over bluetooth.
+/// The logs come from can bus frames processed by `process_can_bus_frame`
+///
+/// # Parameters
+/// - `buffer`: A pointer to the buffer where the created chunk will be written to
+/// - `buffer_length`: The size of the buffer in bytes.
+///
+/// # Returns
+/// - Length of the created chunk
+///
+/// # Safety
+///
+/// The caller is responsible for ensuring `log_multiplexer_create_chunk` and
+/// `process_can_bus_frame` is not invoked concurrently
+#[unsafe(no_mangle)]
+pub extern "C" fn log_multiplexer_create_chunk(buffer: *mut u8, buffer_length: usize) -> usize {
+    let log_multiplexer = unsafe {
+        if LOG_MULTIPLEXER.is_none() {
+            LOG_MULTIPLEXER = Some(LogMultiplexer::new())
+        }
+        LOG_MULTIPLEXER.as_mut().unwrap()
+    };
+
+    let buffer = unsafe { core::slice::from_raw_parts_mut(buffer, buffer_length) };
+    log_multiplexer.create_chunk(buffer)
+}
+
+/// Creates a multiplexed log chunk for sending over bluetooth.
+/// The logs come from can bus frames processed by `process_can_bus_frame`
+///
+/// # Parameters
+/// - `buffer`: buffer where the created chunk will be written to
+///
+/// # Returns
+/// - Length of the created chunk
+///
+/// # Safety
+///
+/// The caller is responsible for ensuring `log_multiplexer_create_chunk` and
+/// `process_can_bus_frame` is not invoked concurrently
+#[cfg_attr(feature = "wasm", wasm_bindgen(js_name = logMultiplexerCreateChunk))]
+pub fn log_multiplexer_create_chunk_js(buffer: &mut [u8]) -> usize {
+    log_multiplexer_create_chunk(buffer.as_mut_ptr(), buffer.len())
+}
+
 static mut CAN_DECODER: Option<CanBusMultiFrameDecoder<8>> = None;
 
 #[cfg_attr(feature = "wasm", derive(Serialize, Deserialize, Tsify))]
@@ -294,6 +339,11 @@ pub enum ProcessCanBusFrameResult {
 /// - `ProcessCanBusFrameResult`
 ///     - `Message` if the frame was successfully processed and a complete message was extracted.
 ///     - `Empty` if the frame is invalid or the message is incomplete (e.g., in the case of multi-frame messages).
+///
+/// # Safety
+///
+/// The caller is responsible for ensuring `log_multiplexer_create_chunk` and
+/// `process_can_bus_frame` is not invoked concurrently
 #[unsafe(no_mangle)]
 pub extern "C" fn process_can_bus_frame(
     timestamp: u64,
@@ -311,6 +361,14 @@ pub extern "C" fn process_can_bus_frame(
         CAN_DECODER.as_mut().unwrap()
     };
 
+    let log_multiplexer = unsafe {
+        if LOG_MULTIPLEXER.is_none() {
+            LOG_MULTIPLEXER = Some(LogMultiplexer::new())
+        }
+        LOG_MULTIPLEXER.as_mut().unwrap()
+    };
+
+    log_multiplexer.process_frame(&frame);
     match decoder.process_frame(&frame) {
         Some(m) => ProcessCanBusFrameResult::Message {
             timestamp,
@@ -333,6 +391,11 @@ pub extern "C" fn process_can_bus_frame(
 /// - `ProcessCanBusFrameResult`
 ///     - `Message` if the frame was successfully processed and a complete message was extracted.
 ///     - `Empty` if the frame is invalid or the message is incomplete (e.g., in the case of multi-frame messages).
+///
+/// # Safety
+///
+/// The caller is responsible for ensuring `log_multiplexer_create_chunk` and
+/// `process_can_bus_frame` is not invoked concurrently
 #[cfg_attr(feature = "wasm", wasm_bindgen(js_name = processCanBusFrame))]
 pub fn process_can_bus_frame_js(timestamp: u64, id: u32, data: &[u8]) -> ProcessCanBusFrameResult {
     process_can_bus_frame(timestamp, id, data.as_ptr(), data.len())

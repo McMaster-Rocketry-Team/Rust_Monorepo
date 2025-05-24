@@ -230,6 +230,30 @@ export function encodeCanBusMessage(message, self_node_type, self_node_id, buffe
 }
 
 /**
+ * Creates a multiplexed log chunk for sending over bluetooth.
+ * The logs come from can bus frames processed by `process_can_bus_frame`
+ *
+ * # Parameters
+ * - `buffer`: buffer where the created chunk will be written to
+ *
+ * # Returns
+ * - Length of the created chunk
+ *
+ * # Safety
+ *
+ * The caller is responsible for ensuring `log_multiplexer_create_chunk` and
+ * `process_can_bus_frame` is not invoked concurrently
+ * @param {Uint8Array} buffer
+ * @returns {number}
+ */
+export function logMultiplexerCreateChunk(buffer) {
+    var ptr0 = passArray8ToWasm0(buffer, wasm.__wbindgen_malloc);
+    var len0 = WASM_VECTOR_LEN;
+    const ret = wasm.logMultiplexerCreateChunk(ptr0, len0, buffer);
+    return ret >>> 0;
+}
+
+/**
  * Handles the processing of a CAN bus frame to extract a message.
  *
  * # Parameters
@@ -241,6 +265,11 @@ export function encodeCanBusMessage(message, self_node_type, self_node_id, buffe
  * - `ProcessCanBusFrameResult`
  *     - `Message` if the frame was successfully processed and a complete message was extracted.
  *     - `Empty` if the frame is invalid or the message is incomplete (e.g., in the case of multi-frame messages).
+ *
+ * # Safety
+ *
+ * The caller is responsible for ensuring `log_multiplexer_create_chunk` and
+ * `process_can_bus_frame` is not invoked concurrently
  * @param {bigint} timestamp
  * @param {number} id
  * @param {Uint8Array} data
