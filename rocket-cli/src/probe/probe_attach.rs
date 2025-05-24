@@ -1,5 +1,5 @@
 use crate::DownloadCli;
-use crate::log_viewer::target_log::{DefmtLogInfo, TargetLog, parse_log_level};
+use crate::log_viewer::target_log::{DefmtLocationInfo, DefmtLogInfo, TargetLog, parse_log_level};
 use anyhow::Result;
 use regex::Regex;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -25,7 +25,7 @@ pub async fn probe_attach(
         ">>>>>{s}|||||{F}|||||{l}|||||{L}|||||{m}|||||{t}<<<<<",
         args.firmware_elf_path.to_str().unwrap(),
     ];
-    
+
     let mut child = Command::new("probe-rs")
         .args(&probe_rs_args)
         .stdout(std::process::Stdio::piped())
@@ -45,10 +45,12 @@ pub async fn probe_attach(
                     node_id: None,
                     log_content: cap.get(1).unwrap().as_str().to_string(),
                     defmt: Some(DefmtLogInfo {
-                        file_path: cap.get(2).unwrap().as_str().to_string(),
-                        line_number: cap.get(3).unwrap().as_str().to_string(),
+                        location: Some(DefmtLocationInfo {
+                            file_path: cap.get(2).unwrap().as_str().to_string(),
+                            line_number: cap.get(3).unwrap().as_str().to_string(),
+                            module_path: cap.get(5).unwrap().as_str().to_string(),
+                        }),
                         log_level: parse_log_level(cap.get(4).unwrap().as_str()),
-                        module_path: cap.get(5).unwrap().as_str().to_string(),
                         timestamp: cap.get(6).unwrap().as_str().parse::<f64>().ok(),
                     }),
                 };

@@ -1,6 +1,6 @@
 pub mod config;
-pub mod target_log;
 pub mod log_saver;
+pub mod target_log;
 
 use std::{
     sync::{Arc, RwLock},
@@ -22,7 +22,7 @@ use cursive::{
     },
 };
 use pad::PadStr;
-use target_log::{TargetLog, log_level_foreground_color};
+use target_log::{DefmtLogInfo, TargetLog, log_level_foreground_color};
 use tokio::{sync::broadcast, time};
 
 pub async fn log_viewer_tui(mut logs_rx: broadcast::Receiver<TargetLog>) -> Result<()> {
@@ -404,12 +404,16 @@ impl View for LogRow {
             }
 
             if self.show_line_number {
-                if let Some(defmt_info) = &self.log.defmt {
+                if let Some(DefmtLogInfo {
+                    location: Some(location),
+                    ..
+                }) = &self.log.defmt
+                {
                     printer.print(
                         (0, printer.size.y - 1),
                         &format!(
                             "└─ {} @ {}:{}",
-                            defmt_info.module_path, defmt_info.file_path, defmt_info.line_number
+                            location.module_path, location.file_path, location.line_number
                         ),
                     );
                 } else {

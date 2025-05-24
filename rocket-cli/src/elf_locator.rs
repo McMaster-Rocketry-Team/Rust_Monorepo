@@ -3,6 +3,7 @@ use std::{
     fs::{self, File},
     io::Read as _,
     path::{Path, PathBuf},
+    pin::Pin,
     time::SystemTime,
 };
 
@@ -14,11 +15,11 @@ use pad::PadStr;
 
 #[derive(Debug)]
 pub struct DefmtElfInfo {
-    table: Table,
-    locs: Option<BTreeMap<u64, Location>>,
+    pub table: Table,
+    pub locs: Option<BTreeMap<u64, Location>>,
 }
 
-pub fn locate_elf_files() -> Result<HashMap<NodeTypeEnum, DefmtElfInfo>> {
+pub fn locate_elf_files() -> Result<HashMap<NodeTypeEnum, Pin<Box<DefmtElfInfo>>>> {
     let possible_paths = vec!["./Rust_Monorepo", "../Rust_Monorepo", "../../Rust_Monorepo"];
 
     let monorepo_path = possible_paths
@@ -66,7 +67,7 @@ pub fn locate_elf_files() -> Result<HashMap<NodeTypeEnum, DefmtElfInfo>> {
                 warn!("Location info is incomplete, it will be omitted from the output");
                 None
             };
-            result.insert(node_type, DefmtElfInfo { table, locs });
+            result.insert(node_type, Box::pin(DefmtElfInfo { table, locs }));
         } else {
             warn!("ELF for {:?} not found, looked in {:?}", node_type, path);
         }

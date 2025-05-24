@@ -116,9 +116,14 @@ impl LogViewerConfig {
 
     pub fn matches(&self, log: &TargetLog) -> bool {
         if let Some(defmt_info) = &log.defmt {
+            let module_matches = if let Some(location) = &defmt_info.location {
+                location.module_path.starts_with(&self.module)
+            } else {
+                self.module.is_empty()
+            };
             let module_matches = defmt_info.log_level == Level::Error
                 || defmt_info.log_level == Level::Warn
-                || defmt_info.module_path.starts_with(&self.module);
+                || module_matches;
 
             let level_matches = match defmt_info.log_level {
                 Level::Trace => self.levels.trace,

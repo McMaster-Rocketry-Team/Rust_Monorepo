@@ -4180,6 +4180,7 @@ dependencies = [
  "clap-num",
  "cursive",
  "defmt-decoder",
+ "defmt-parser",
  "env_logger",
  "firmware-common-new",
  "futures",

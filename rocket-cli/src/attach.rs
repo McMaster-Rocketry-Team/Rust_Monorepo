@@ -1,5 +1,6 @@
 use crate::{
     DownloadCli,
+    bluetooth::demultiplex_log::LogDemultiplexer,
     connect_method::ConnectMethod,
     elf_locator::locate_elf_files,
     log_viewer::{log_saver::LogSaver, log_viewer_tui, target_log::TargetLog},
@@ -21,9 +22,9 @@ pub async fn attach_target(args: &DownloadCli, connect_method: &ConnectMethod) -
 
     let (logs_tx, logs_rx) = broadcast::channel::<TargetLog>(256);
     let mut logs_rx2 = logs_tx.subscribe();
-    let (stop_tx, stop_rx) = oneshot::channel::<()>();
+    let (stop_tx, mut stop_rx) = oneshot::channel::<()>();
 
-    let elf_files = if matches!(connect_method, ConnectMethod::OTA(_)) {
+    let elf_info_map = if matches!(connect_method, ConnectMethod::OTA(_)) {
         Some(locate_elf_files()?)
     } else {
         None
@@ -37,8 +38,13 @@ pub async fn attach_target(args: &DownloadCli, connect_method: &ConnectMethod) -
                     .unwrap();
             }
             ConnectMethod::OTA(_) => {
-                let elf_files = elf_files.unwrap();
-                todo!()
+                let elf_info_map = elf_info_map.unwrap();
+                let mut log_demultiplexer = LogDemultiplexer::new(logs_tx, elf_info_map);
+
+                // TODO
+                while stop_rx.try_recv().is_err() {
+                    log_demultiplexer.process_chunk(&[]);
+                }
             }
         }
     };

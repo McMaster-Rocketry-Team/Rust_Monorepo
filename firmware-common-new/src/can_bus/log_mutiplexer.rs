@@ -245,9 +245,9 @@ impl LogMultiplexer {
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone)]
 pub struct DemultiplexedLogFrame {
-    node_type: u8,
-    node_id: u16,
-    data: Vec<u8, 8>,
+    pub node_type: u8,
+    pub node_id: u16,
+    pub data: Vec<u8, 8>,
 }
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
@@ -257,21 +257,20 @@ pub enum DemultiplexLogError {
     ExpectMore(usize),
     HeaderLenOutOfRange(u8),
     InvalidFullHeader,
-    OutputFull(usize),
     HeatshrinkError(HeatshrinkError),
 }
 
 #[derive(Debug)]
-pub struct LogFrameDecoder<'a> {
+pub struct LogFrameDecoder<F: FnMut(DemultiplexedLogFrame)> {
     last_type_id: Option<(u8, u16)>,
-    output: &'a mut Vec<DemultiplexedLogFrame, LOG_MULTIPLEXER_QUEUE_SIZE>,
+    on_decoded_frame: F,
 }
 
-impl<'a> LogFrameDecoder<'a> {
-    fn new(output: &'a mut Vec<DemultiplexedLogFrame, LOG_MULTIPLEXER_QUEUE_SIZE>) -> Self {
+impl<F: FnMut(DemultiplexedLogFrame)> LogFrameDecoder<F> {
+    fn new(on_decoded_frame: F) -> Self {
         Self {
             last_type_id: None,
-            output,
+            on_decoded_frame,
         }
     }
 
@@ -319,21 +318,16 @@ impl<'a> LogFrameDecoder<'a> {
 
     fn decode(&mut self, mut chunk: &[u8]) -> Result<(), DemultiplexLogError> {
         while chunk.len() > 0 {
-            if self.output.is_full() {
-                return Err(DemultiplexLogError::OutputFull(chunk.len()));
-            }
             if let Some((last_node_type, last_node_id)) = self.last_type_id {
                 let header = Self::peek_thin_header(chunk)?;
                 if header.is_continue {
                     chunk = &chunk[1..];
 
-                    self.output
-                        .push(DemultiplexedLogFrame {
-                            node_type: last_node_type,
-                            node_id: last_node_id,
-                            data: Self::consume_data(header.len, &mut chunk)?,
-                        })
-                        .unwrap();
+                    (self.on_decoded_frame)(DemultiplexedLogFrame {
+                        node_type: last_node_type,
+                        node_id: last_node_id,
+                        data: Self::consume_data(header.len, &mut chunk)?,
+                    });
                     continue;
                 }
             }
@@ -341,22 +335,20 @@ impl<'a> LogFrameDecoder<'a> {
             let header = Self::consume_full_header(&mut chunk)?;
             self.last_type_id = Some((header.node_type, header.node_id));
 
-            self.output
-                .push(DemultiplexedLogFrame {
-                    node_type: header.node_type,
-                    node_id: header.node_id,
-                    data: Self::consume_data(header.len, &mut chunk)?,
-                })
-                .unwrap();
+            (self.on_decoded_frame)(DemultiplexedLogFrame {
+                node_type: header.node_type,
+                node_id: header.node_id,
+                data: Self::consume_data(header.len, &mut chunk)?,
+            });
         }
         Ok(())
     }
 }
 
 /// returns is_overrun
-pub fn demultiplex_log(
+pub fn decode_multiplexed_log_chunk(
     chunk: &[u8],
-    output: &mut Vec<DemultiplexedLogFrame, 128>,
+    on_decoded_frame: impl FnMut(DemultiplexedLogFrame),
 ) -> Result<bool, DemultiplexLogError> {
     // the most data multiplexer can put in one chunk is LOG_MULTIPLEXER_QUEUE_SIZE frames, limited by the multiplexer queue
     // worst case each frame has a 4 byte full header + 8 byte data, total LOG_MULTIPLEXER_QUEUE_SIZE * 12 bytes
@@ -391,7 +383,7 @@ pub fn demultiplex_log(
     );
 
     // decode log frames
-    let mut log_frame_decoder = LogFrameDecoder::new(output);
+    let mut log_frame_decoder = LogFrameDecoder::new(on_decoded_frame);
     log_frame_decoder.decode(&decompress_buffer[..decompressed_len])?;
     log_frame_decoder.decode(uncompressed_chunk)?;
 
@@ -446,9 +438,9 @@ mod test {
         assert_eq!(multiplexer.queue.len(), 0);
         assert_eq!(multiplexer.overrun, false);
 
-        // Demultiplex the chunk
-        let mut outputs = Vec::<DemultiplexedLogFrame, 128>::new();
-        demultiplex_log(&chunk[..chunk_len], &mut outputs).unwrap();
+        // Decode the chunk
+        let mut outputs = std::vec::Vec::<DemultiplexedLogFrame>::new();
+        decode_multiplexed_log_chunk(&chunk[..chunk_len], |frame| outputs.push(frame)).unwrap();
 
         // Verify the results
         assert_eq!(outputs.len(), frames.len());
@@ -495,9 +487,9 @@ mod test {
         assert_eq!(multiplexer.queue.len(), 63);
         assert_eq!(multiplexer.overrun, false);
 
-        // Demultiplex the chunk
-        let mut outputs = Vec::<DemultiplexedLogFrame, 128>::new();
-        demultiplex_log(&chunk[..chunk_len], &mut outputs).unwrap();
+        // Decode the chunk
+        let mut outputs = std::vec::Vec::<DemultiplexedLogFrame>::new();
+        decode_multiplexed_log_chunk(&chunk[..chunk_len], |frame| outputs.push(frame)).unwrap();
 
         assert_eq!(outputs.len(), frames.len() - multiplexer.queue.len());
         for (i, frame) in frames.iter().enumerate().take(outputs.len()) {

@@ -201,7 +201,7 @@ impl<'a, 'b, 'c, M: RawMutex, R: Radio> VLPGroundStationDaemon<'a, 'b, 'c, M, R>
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug)]
 enum VLPDaemonError {
-    Radio(RadioError),
+    Radio(#[allow(dead_code)] RadioError),
     DeserializeError,
     SignatureError,
     ECCError,

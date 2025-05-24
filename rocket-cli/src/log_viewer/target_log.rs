@@ -1,4 +1,5 @@
 use cursive::theme::Color;
+use firmware_common_new::can_bus::node_types::*;
 use log::Level;
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -15,6 +16,43 @@ pub enum NodeTypeEnum {
     AeroRust,
     Other,
 }
+
+impl From<u8> for NodeTypeEnum {
+    fn from(value: u8) -> Self {
+        match value {
+            VOID_LAKE_NODE_TYPE => Self::VoidLake,
+            AMP_NODE_TYPE => Self::AMP,
+            ICARUS_NODE_TYPE => Self::ICARUS,
+            PAYLOAD_ACTIVATION_NODE_TYPE => Self::PayloadActivation,
+            PAYLOAD_ROCKET_WIFI_NODE_TYPE => Self::RocketWifi,
+            OZYS_NODE_TYPE => Self::OZYS,
+            BULKHEAD_NODE_TYPE => Self::Bulkhead,
+            PAYLOAD_EPS1_NODE_TYPE => Self::EPS1,
+            PAYLOAD_EPS2_NODE_TYPE => Self::EPS2,
+            AERO_RUST_NODE_TYPE => Self::AeroRust,
+            _ => Self::Other,
+        }
+    }
+}
+
+impl Into<u8> for NodeTypeEnum {
+    fn into(self) -> u8 {
+        match self {
+            NodeTypeEnum::VoidLake => VOID_LAKE_NODE_TYPE,
+            NodeTypeEnum::AMP => AMP_NODE_TYPE,
+            NodeTypeEnum::ICARUS => ICARUS_NODE_TYPE,
+            NodeTypeEnum::PayloadActivation => PAYLOAD_ACTIVATION_NODE_TYPE,
+            NodeTypeEnum::RocketWifi => PAYLOAD_ROCKET_WIFI_NODE_TYPE,
+            NodeTypeEnum::OZYS => OZYS_NODE_TYPE,
+            NodeTypeEnum::Bulkhead => BULKHEAD_NODE_TYPE,
+            NodeTypeEnum::EPS1 => PAYLOAD_EPS1_NODE_TYPE,
+            NodeTypeEnum::EPS2 => PAYLOAD_EPS2_NODE_TYPE,
+            NodeTypeEnum::AeroRust => AERO_RUST_NODE_TYPE,
+            NodeTypeEnum::Other => unimplemented!(),
+        }
+    }
+}
+
 
 impl NodeTypeEnum {
     pub fn short_name(&self) -> &'static str {
@@ -51,12 +89,17 @@ impl NodeTypeEnum {
 }
 
 #[derive(Debug, Clone)]
-pub struct DefmtLogInfo {
+pub struct DefmtLocationInfo {
     pub module_path: String,
     pub file_path: String,
     pub line_number: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct DefmtLogInfo {
     pub log_level: Level,
     pub timestamp: Option<f64>,
+    pub location: Option<DefmtLocationInfo>
 }
 
 #[derive(Debug, Clone)]

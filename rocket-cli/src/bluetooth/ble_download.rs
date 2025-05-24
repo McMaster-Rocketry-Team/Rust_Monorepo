@@ -68,14 +68,7 @@ pub async fn ble_download(args: &DownloadCli, peripheral: &Peripheral) -> Result
     // 4) Ask the device how many chunks it can buffer (the “window”).
     let mut window = 64usize;
 
-    let nodetype = match args.node_type {
-        NodeTypeEnum::VoidLake => VOID_LAKE_NODE_TYPE,
-        NodeTypeEnum::AMP => AMP_NODE_TYPE,
-        NodeTypeEnum::ICARUS => ICARUS_NODE_TYPE,
-        NodeTypeEnum::OZYS => OZYS_NODE_TYPE,
-        NodeTypeEnum::Bulkhead => BULKHEAD_NODE_TYPE,
-        _ => unimplemented!(),
-    };
+    let nodetype: u8 = args.node_type.into();
 
     peripheral
         .write(
