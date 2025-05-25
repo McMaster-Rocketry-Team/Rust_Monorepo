@@ -1,3 +1,4 @@
+mod args;
 mod attach;
 mod bluetooth;
 mod connect_method;
@@ -5,11 +6,12 @@ mod elf_locator;
 mod gen_ota_key;
 mod log_viewer;
 mod probe;
-mod args;
+mod testing;
 
 use anyhow::Result;
 use args::Cli;
 use args::ModeSelect;
+use args::TestingModeSelect;
 use attach::attach_target;
 use bluetooth::ble_download::ble_download;
 use bluetooth::extract_bin::check_objcopy_installed;
@@ -20,13 +22,18 @@ use gen_ota_key::gen_ota_key;
 use log::LevelFilter;
 use probe::probe_download::check_probe_rs_installed;
 use probe::probe_download::probe_download;
+use testing::demultiplex_logs::demultiplex_logs;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let _ = env_logger::builder()
-        .filter_level(LevelFilter::Info)
-        .try_init();
     let args = Cli::parse();
+
+    if !matches!(args.mode, ModeSelect::Testing(_)) {
+        env_logger::builder()
+            .filter_level(LevelFilter::Info)
+            .try_init()
+            .ok();
+    }
 
     match args.mode {
         ModeSelect::Download(args) => {
@@ -68,5 +75,11 @@ async fn main() -> Result<()> {
             Ok(())
         }
         ModeSelect::GenOtaKey(args) => gen_ota_key(args),
+        ModeSelect::Testing(TestingModeSelect::DemultiplexLogs(args)) => {
+            demultiplex_logs(args)
+        },
+        ModeSelect::Testing(TestingModeSelect::DecodeAggregatedMessages) => {
+            todo!()
+        },
     }
 }

@@ -1,22 +1,19 @@
-#![allow(dead_code)]
-
-mod args;
-mod attach;
-mod bluetooth;
-mod connect_method;
-mod elf_locator;
-mod gen_ota_key;
-mod log_viewer;
-mod probe;
-
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use base64::prelude::*;
-use bluetooth::demultiplex_log::{LogDemultiplexer, ProcessChunkResult};
-use elf_locator::locate_elf_files;
-use log_viewer::target_log::TargetLog;
+use clap::Parser;
 use serde::{Deserialize, Serialize};
-use std::env;
 use tokio::sync::broadcast;
+
+use crate::{
+    bluetooth::demultiplex_log::{LogDemultiplexer, ProcessChunkResult},
+    elf_locator::locate_elf_files,
+    log_viewer::target_log::TargetLog,
+};
+
+#[derive(Parser, Debug)]
+pub struct DemultiPlexLogsArgs {
+    pub base64: String,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ReturnValue {
@@ -24,10 +21,8 @@ struct ReturnValue {
     logs: Vec<TargetLog>,
 }
 
-fn main() -> Result<()> {
-    let args: Vec<String> = env::args().collect();
-    let arg1 = args.get(1).ok_or(anyhow!("expect 1 arg"))?;
-    let chunk = BASE64_STANDARD.decode(arg1)?;
+pub fn demultiplex_logs(args: DemultiPlexLogsArgs) -> Result<()> {
+    let chunk = BASE64_STANDARD.decode(args.base64)?;
 
     let (logs_tx, mut logs_rx) = broadcast::channel::<TargetLog>(256);
     let mut log_demultiplexer =

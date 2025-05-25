@@ -2,6 +2,7 @@ use clap::Parser;
 use clap::Subcommand;
 
 use crate::log_viewer::target_log::NodeTypeEnum;
+use crate::testing::demultiplex_logs::DemultiPlexLogsArgs;
 
 #[derive(Parser, Debug)]
 #[command(name = "Rocket CLI")]
@@ -21,6 +22,10 @@ pub enum ModeSelect {
 
     #[command(about = "generate private and public keys for ota")]
     GenOtaKey(GenOtaKeyCli),
+
+    #[clap(subcommand)]
+    #[command(about = "functions used for testing")]
+    Testing(TestingModeSelect),
 }
 
 #[derive(Parser, Debug)]
@@ -39,4 +44,10 @@ pub struct DownloadCli {
 pub struct GenOtaKeyCli {
     pub secret_key_path: std::path::PathBuf,
     pub public_key_path: std::path::PathBuf,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum TestingModeSelect {
+    DemultiplexLogs(DemultiPlexLogsArgs),
+    DecodeAggregatedMessages,
 }
