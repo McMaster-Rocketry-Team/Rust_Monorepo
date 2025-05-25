@@ -5,6 +5,7 @@ mod message;
 use config::MonitorConfig;
 use cursive::{
     theme::Palette,
+    view::{Nameable, Resizable},
     views::{Dialog, TextView},
 };
 use firmware_common_new::can_bus::telemetry::message_aggregator::DecodedMessage;
@@ -96,7 +97,11 @@ async fn tui_task(
     siv.set_theme(theme);
     siv.set_autorefresh(true);
 
-    siv.add_fullscreen_layer(LogView::new(config, logs_rx));
+    siv.add_fullscreen_layer(
+        LogView::new(config, logs_rx)
+            .with_name("log_view")
+            .full_screen(),
+    );
 
     if first_time {
         siv.add_layer(
@@ -113,6 +118,11 @@ async fn tui_task(
     let mut interval = time::interval(Duration::from_millis(1000 / 30));
 
     while runner.is_running() {
+        {
+            let mut log_view = runner.find_name::<LogView>("log_view").unwrap();
+            log_view.receive_logs();
+        }
+
         runner.step();
         interval.tick().await;
     }

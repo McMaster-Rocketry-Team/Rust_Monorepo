@@ -166,9 +166,7 @@ impl ConnectionMethod for ProbeConnectionMethod {
                             timestamp: cap.get(6).unwrap().as_str().parse::<f64>().ok(),
                         }),
                     };
-                    if logs_tx.send(log).is_err() {
-                        break;
-                    }
+                    logs_tx.send(log).ok();
                 }
             }
         };

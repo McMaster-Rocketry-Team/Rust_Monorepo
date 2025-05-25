@@ -296,25 +296,23 @@ impl LogView {
                 }
             })
     }
-}
 
-impl ViewWrapper for LogView {
-    wrap_impl!(self.root: LinearLayout);
-
-    fn wrap_layout(&mut self, size: Vec2) {
+    pub fn receive_logs(&mut self) {
         let mut logs_rx = self.logs_rx.write().unwrap();
         let mut logs_view = self.root.find_name::<LinearLayout>("logs").unwrap();
         while let Ok(log) = logs_rx.try_recv() {
             if !*self.paused.read().unwrap() {
                 logs_view.add_child(LogRow::new(log, self.config.clone()));
-                while logs_view.len() > 500 {
+                while logs_view.len() > 200 {
                     logs_view.remove_child(0);
                 }
             }
         }
-
-        self.root.layout(size);
     }
+}
+
+impl ViewWrapper for LogView {
+    wrap_impl!(self.root: LinearLayout);
 
     fn wrap_needs_relayout(&self) -> bool {
         true

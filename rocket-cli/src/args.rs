@@ -51,6 +51,7 @@ pub struct GenOtaKeyCli {
 #[derive(Subcommand, Debug)]
 pub enum TestingModeSelect {
     DecodeBluetoothChunk(DecodeBluetoothChunkArgs),
+    MockConnection,
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
