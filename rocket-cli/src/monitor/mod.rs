@@ -4,9 +4,10 @@ mod message;
 
 use config::MonitorConfig;
 use cursive::{
+    align::HAlign,
     theme::Palette,
     view::{Nameable, Resizable},
-    views::{Dialog, TextView},
+    views::{Button, Dialog, LinearLayout, StackView, TextView},
 };
 use firmware_common_new::can_bus::telemetry::message_aggregator::DecodedMessage;
 pub use log::target_log;
@@ -98,9 +99,34 @@ async fn tui_task(
     siv.set_autorefresh(true);
 
     siv.add_fullscreen_layer(
-        LogView::new(config, logs_rx)
-            .with_name("log_view")
-            .full_screen(),
+        LinearLayout::vertical()
+            .child(
+                StackView::new()
+                    .fullscreen_layer(
+                        TextView::new("rocket-cli")
+                            .h_align(HAlign::Center)
+                            .full_width(),
+                    )
+                    .fullscreen_layer(
+                        TextView::new("")
+                            .h_align(HAlign::Right)
+                            .with_name("status_text")
+                            .full_width(),
+                    )
+                    .fullscreen_layer(
+                        LinearLayout::horizontal()
+                            .child(Button::new("Logs", |s| {}))
+                            .child(Button::new("Messages", |s| {}))
+                            .child(Button::new("Nodes", |s| {})),
+                    )
+                    .fixed_height(1)
+                    .full_width(),
+            )
+            .child(
+                LogView::new(config, logs_rx)
+                    .with_name("log_view")
+                    .full_screen(),
+            ),
     );
 
     if first_time {

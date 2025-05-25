@@ -15,7 +15,7 @@ use extract_bin::extract_bin_and_sign;
 use firmware_common_new::can_bus::telemetry::message_aggregator::{
     DecodedMessage, decode_aggregated_can_bus_messages,
 };
-use log::{info, warn};
+use log::{debug, info, warn};
 use tokio::{
     sync::{broadcast, oneshot, watch},
     time::sleep,
@@ -82,14 +82,20 @@ impl BluetoothConnectionMethod {
             bail!("Chunk too short");
         }
 
-        let chunk_type = chunk[0] << 6;
+        let chunk_type = chunk[0] >> 6;
         let is_overrun = match chunk_type {
-            0b00 => log_demultiplexer.process_chunk(chunk, logs_tx)?,
-            0b01 => decode_aggregated_can_bus_messages(chunk, |message| {
-                messages_tx.send(message).ok();
-            })
-            .map_err(|e| anyhow!("{:?}", e))?,
-            _ => bail!("Invalid chunk type"),
+            0b00 => {
+                debug!("received log multiplexer chunk");
+                log_demultiplexer.process_chunk(chunk, logs_tx)?
+            }
+            0b01 => {
+                debug!("received aggregated message chunk");
+                decode_aggregated_can_bus_messages(chunk, |message| {
+                    messages_tx.send(message).ok();
+                })
+                .map_err(|e| anyhow!("{:?}", e))?
+            }
+            typ => bail!("Invalid chunk type: {}", typ),
         };
 
         Ok(is_overrun)

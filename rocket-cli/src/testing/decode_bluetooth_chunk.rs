@@ -6,8 +6,9 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 
 use crate::{
-    bluetooth::{demultiplex_log::LogDemultiplexer, BluetoothConnectionMethod},
-    elf_locator::locate_elf_files, monitor::target_log::TargetLog,
+    bluetooth::{BluetoothConnectionMethod, demultiplex_log::LogDemultiplexer},
+    elf_locator::locate_elf_files,
+    monitor::target_log::TargetLog,
 };
 
 #[derive(Parser, Debug)]
@@ -45,11 +46,14 @@ pub fn test_decode_bluetooth_chunk(args: DecodeBluetoothChunkArgs) -> Result<()>
         messages.push(message);
     }
 
-    println!("{}", serde_json::to_string(&ReturnValue{
-        is_overrun,
-        logs,
-        messages,
-    })?);
+    println!(
+        "{}",
+        serde_json::to_string(&ReturnValue {
+            is_overrun,
+            logs,
+            messages,
+        })?
+    );
 
     Ok(())
 }

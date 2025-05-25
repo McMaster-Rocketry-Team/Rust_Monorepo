@@ -24,16 +24,12 @@ use testing::mock_connection_method::MockConnectionMethod;
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Cli::parse();
-
-    if !matches!(
-        args.mode,
-        ModeSelect::Testing(TestingModeSelect::DecodeBluetoothChunk(_))
-    ) {
-        env_logger::builder()
-            .filter_level(LevelFilter::Info)
-            .try_init()
-            .ok();
-    }
+    env_logger::builder()
+        .filter_level(LevelFilter::Info)
+        .filter_module("rocket_cli", LevelFilter::Trace)
+        .filter_module("firmware_common_new", LevelFilter::Trace)
+        .try_init()
+        .ok();
 
     match args.mode {
         ModeSelect::Download(args) => {
@@ -78,7 +74,7 @@ async fn main() -> Result<()> {
         }
         ModeSelect::GenOtaKey(args) => gen_ota_key(args),
         ModeSelect::Testing(TestingModeSelect::DecodeBluetoothChunk(args)) => {
-            test_decode_bluetooth_chunk(args).map_err(|_| anyhow!("Invalid message"))
+            test_decode_bluetooth_chunk(args).map_err(|e| anyhow!("{:?}", e))
         }
         ModeSelect::Testing(TestingModeSelect::MockConnection) => {
             let mut connection_method: Box<dyn ConnectionMethod> = Box::new(MockConnectionMethod);

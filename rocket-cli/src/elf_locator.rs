@@ -45,18 +45,18 @@ pub fn locate_elf_files(firmware_elf_path: Option<&PathBuf>) -> Result<ELFInfoMa
         );
     }
 
-    let possible_paths: Vec<PathBuf> = possible_paths
-        .into_iter()
+    let monorepo_path = possible_paths
+        .iter()
+        .cloned()
         .filter_map(|path| fs::canonicalize(path).ok())
-        .collect();
-    debug!("{:?}", possible_paths);
+        .next()
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "Could not find Rust_Monorepo directory, looked in {:?}",
+                possible_paths
+            )
+        })?;
 
-    let monorepo_path = possible_paths.first().ok_or_else(|| {
-        anyhow::anyhow!(
-            "Could not find Rust_Monorepo directory, looked in {:?}",
-            possible_paths
-        )
-    })?;
     let rocketry_path = monorepo_path.parent().unwrap();
     info!("Found rocketry root path: {:?}", rocketry_path);
 

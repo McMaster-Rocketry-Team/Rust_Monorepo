@@ -50,7 +50,7 @@ impl ConnectionMethod for MockConnectionMethod {
         mut stop_rx: oneshot::Receiver<()>,
     ) -> Result<()> {
         info!("Attaching.....");
-        sleep(Duration::from_secs(1)).await;
+        sleep(Duration::from_millis(500)).await;
         status_tx.send(MonitorStatus::Normal)?;
 
         loop {

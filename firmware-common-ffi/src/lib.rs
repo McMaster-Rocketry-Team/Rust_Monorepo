@@ -8,7 +8,7 @@ use firmware_common_new::can_bus::messages::imu_measurement::IMUMeasurementMessa
 use firmware_common_new::can_bus::messages::payload_eps_status::{
     PayloadEPSOutputStatus, PayloadEPSStatusMessage,
 };
-use firmware_common_new::can_bus::telemetry::log_mutiplexer::LogMultiplexer;
+use firmware_common_new::can_bus::telemetry::log_multiplexer::LogMultiplexer;
 use firmware_common_new::can_bus::telemetry::message_aggregator::CanBusMessageAggregator;
 #[cfg(feature = "wasm")]
 use serde::{Deserialize, Serialize};
