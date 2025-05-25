@@ -3,6 +3,7 @@
 export const memory: WebAssembly.Memory;
 export const encode_can_bus_message: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
 export const log_multiplexer_create_chunk: (a: number, b: number) => number;
+export const message_aggregator_create_chunk: (a: number, b: number) => number;
 export const process_can_bus_frame: (a: number, b: bigint, c: number, d: number, e: number) => void;
 export const can_node_id_from_serial_number: (a: number, b: number) => number;
 export const create_can_bus_message_type_filter_mask: (a: number, b: number) => number;
@@ -10,6 +11,7 @@ export const getCanBusNodeTypes: () => any;
 export const getCanBusMessageTypes: () => any;
 export const encodeCanBusMessage: (a: any, b: number, c: number, d: number, e: number, f: any) => any;
 export const logMultiplexerCreateChunk: (a: number, b: number, c: any) => number;
+export const messageAggregatorCreateChunk: (a: number, b: number, c: any) => number;
 export const processCanBusFrame: (a: bigint, b: number, c: number, d: number) => any;
 export const canBusExtendedIdToU32: (a: number) => number;
 export const getCanBusMessageType: (a: any) => number;

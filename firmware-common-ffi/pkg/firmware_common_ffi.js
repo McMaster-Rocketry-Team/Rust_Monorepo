@@ -254,6 +254,30 @@ export function logMultiplexerCreateChunk(buffer) {
 }
 
 /**
+ * Creates a aggregated can bus message chunk for sending over bluetooth.
+ * The messages come from can bus frames processed by `process_can_bus_frame`
+ *
+ * # Parameters
+ * - `buffer`: buffer where the created chunk will be written to
+ *
+ * # Returns
+ * - Length of the created chunk
+ *
+ * # Safety
+ *
+ * The caller is responsible for ensuring `message_aggregator_create_chunk` and
+ * `process_can_bus_frame` is not invoked concurrently
+ * @param {Uint8Array} buffer
+ * @returns {number}
+ */
+export function messageAggregatorCreateChunk(buffer) {
+    var ptr0 = passArray8ToWasm0(buffer, wasm.__wbindgen_malloc);
+    var len0 = WASM_VECTOR_LEN;
+    const ret = wasm.messageAggregatorCreateChunk(ptr0, len0, buffer);
+    return ret >>> 0;
+}
+
+/**
  * Handles the processing of a CAN bus frame to extract a message.
  *
  * # Parameters
@@ -268,7 +292,7 @@ export function logMultiplexerCreateChunk(buffer) {
  *
  * # Safety
  *
- * The caller is responsible for ensuring `log_multiplexer_create_chunk` and
+ * The caller is responsible for ensuring `log_multiplexer_create_chunk`, `message_aggregator_create_chunk` and
  * `process_can_bus_frame` is not invoked concurrently
  * @param {bigint} timestamp
  * @param {number} id

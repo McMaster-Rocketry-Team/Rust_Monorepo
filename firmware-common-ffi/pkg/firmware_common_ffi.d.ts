@@ -44,6 +44,22 @@ export function encodeCanBusMessage(message: CanBusMessageEnum, self_node_type: 
  */
 export function logMultiplexerCreateChunk(buffer: Uint8Array): number;
 /**
+ * Creates a aggregated can bus message chunk for sending over bluetooth.
+ * The messages come from can bus frames processed by `process_can_bus_frame`
+ *
+ * # Parameters
+ * - `buffer`: buffer where the created chunk will be written to
+ *
+ * # Returns
+ * - Length of the created chunk
+ *
+ * # Safety
+ *
+ * The caller is responsible for ensuring `message_aggregator_create_chunk` and
+ * `process_can_bus_frame` is not invoked concurrently
+ */
+export function messageAggregatorCreateChunk(buffer: Uint8Array): number;
+/**
  * Handles the processing of a CAN bus frame to extract a message.
  *
  * # Parameters
@@ -58,7 +74,7 @@ export function logMultiplexerCreateChunk(buffer: Uint8Array): number;
  *
  * # Safety
  *
- * The caller is responsible for ensuring `log_multiplexer_create_chunk` and
+ * The caller is responsible for ensuring `log_multiplexer_create_chunk`, `message_aggregator_create_chunk` and
  * `process_can_bus_frame` is not invoked concurrently
  */
 export function processCanBusFrame(timestamp: bigint, id: number, data: Uint8Array): ProcessCanBusFrameResult;
@@ -109,6 +125,7 @@ export function payloadEPSStatusMessageGetBattery2Temperature(message: PayloadEP
 export interface CanBusNodeTypes {
     void_lake: number;
     amp: number;
+    amp_speed_bridge: number;
     icarus: number;
     payload_activation: number;
     payload_rocket_wifi: number;
@@ -356,6 +373,7 @@ export interface InitOutput {
   readonly memory: WebAssembly.Memory;
   readonly encode_can_bus_message: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
   readonly log_multiplexer_create_chunk: (a: number, b: number) => number;
+  readonly message_aggregator_create_chunk: (a: number, b: number) => number;
   readonly process_can_bus_frame: (a: number, b: bigint, c: number, d: number, e: number) => void;
   readonly can_node_id_from_serial_number: (a: number, b: number) => number;
   readonly create_can_bus_message_type_filter_mask: (a: number, b: number) => number;
@@ -363,6 +381,7 @@ export interface InitOutput {
   readonly getCanBusMessageTypes: () => any;
   readonly encodeCanBusMessage: (a: any, b: number, c: number, d: number, e: number, f: any) => any;
   readonly logMultiplexerCreateChunk: (a: number, b: number, c: any) => number;
+  readonly messageAggregatorCreateChunk: (a: number, b: number, c: any) => number;
   readonly processCanBusFrame: (a: bigint, b: number, c: number, d: number) => any;
   readonly canBusExtendedIdToU32: (a: number) => number;
   readonly getCanBusMessageType: (a: any) => number;
