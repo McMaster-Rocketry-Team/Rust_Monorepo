@@ -1,4 +1,4 @@
-use crate::{connect_method::ConnectMethod, log_viewer::target_log::TargetLog};
+use crate::{connect_method::ConnectMethod};
 use anyhow::{Ok, Result};
 use chrono::Local;
 use pad::PadStr as _;
@@ -7,6 +7,8 @@ use tokio::{
     fs::{self, File},
     io::AsyncWriteExt,
 };
+
+use super::target_log::TargetLog;
 
 pub struct LogSaver {
     file: File,

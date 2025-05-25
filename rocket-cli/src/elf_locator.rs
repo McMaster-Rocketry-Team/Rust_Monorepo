@@ -7,11 +7,12 @@ use std::{
     time::SystemTime,
 };
 
-use crate::log_viewer::target_log::NodeTypeEnum;
 use anyhow::Result;
 use defmt_decoder::{Location, Table};
-use log::{info, warn};
+use log::{debug, info, warn};
 use pad::PadStr;
+
+use crate::args::NodeTypeEnum;
 
 #[derive(Debug)]
 pub struct DefmtElfInfo {
@@ -21,14 +22,41 @@ pub struct DefmtElfInfo {
 
 pub type ELFInfoMap = HashMap<NodeTypeEnum, Pin<Box<DefmtElfInfo>>>;
 
-pub fn locate_elf_files() -> Result<ELFInfoMap> {
-    let possible_paths = vec!["./Rust_Monorepo", "../Rust_Monorepo", "../../Rust_Monorepo"];
+pub fn locate_elf_files(firmware_elf_path: Option<&PathBuf>) -> Result<ELFInfoMap> {
+    let mut possible_paths: Vec<String> = vec![
+        "./Rust_Monorepo".into(),
+        "../Rust_Monorepo".into(),
+        "../../Rust_Monorepo".into(),
+    ];
+    if let Some(firmware_elf_path) = firmware_elf_path {
+        possible_paths.push(
+            firmware_elf_path
+                .join("../../../../../Rust_Monorepo")
+                .to_str()
+                .unwrap()
+                .into(),
+        );
+        possible_paths.push(
+            firmware_elf_path
+                .join("../../../../../../Rust_Monorepo")
+                .to_str()
+                .unwrap()
+                .into(),
+        );
+    }
 
-    let monorepo_path = possible_paths
+    let possible_paths: Vec<PathBuf> = possible_paths
         .into_iter()
         .filter_map(|path| fs::canonicalize(path).ok())
-        .next()
-        .ok_or_else(|| anyhow::anyhow!("Could not find Rust_Monorepo directory"))?;
+        .collect();
+    debug!("{:?}", possible_paths);
+
+    let monorepo_path = possible_paths.first().ok_or_else(|| {
+        anyhow::anyhow!(
+            "Could not find Rust_Monorepo directory, looked in {:?}",
+            possible_paths
+        )
+    })?;
     let rocketry_path = monorepo_path.parent().unwrap();
     info!("Found rocketry root path: {:?}", rocketry_path);
 
@@ -144,6 +172,6 @@ mod test {
         let _ = env_logger::builder()
             .filter_level(LevelFilter::Info)
             .try_init();
-        locate_elf_files().unwrap();
+        locate_elf_files(Some(&PathBuf::from("./elf"))).unwrap();
     }
 }

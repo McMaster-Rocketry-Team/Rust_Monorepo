@@ -1,41 +1,70 @@
-use crate::{args::DownloadCli, bluetooth::find_esp::find_esp, probe::select_probe::select_probe};
+use std::path::PathBuf;
+
+use crate::{
+    args::NodeTypeEnum,
+    bluetooth::BluetoothConnectionMethod,
+    monitor::{LogViewerStatus, target_log::TargetLog},
+    probe::ProbeConnectionMethod,
+};
 use anyhow::{Result, bail};
+use async_trait::async_trait;
 use btleplug::platform::Peripheral;
-use log::info;
+use firmware_common_new::can_bus::telemetry::message_aggregator::DecodedMessage;
 use probe_rs::probe::list::Lister;
+use tokio::sync::{broadcast, oneshot, watch};
+
 pub enum ConnectMethod {
     Probe(String),
     OTA(Peripheral),
 }
 
-impl ConnectMethod {
-    pub async fn new(args: &DownloadCli) -> Result<Self> {
-        if args.force_ota && args.force_probe {
-            bail!("--force-ota and --force-probe can not be selected at the same time")
-        }
+pub async fn get_connection_method(
+    force_bluetooth: bool,
+    force_probe: bool,
+) -> Result<Box<dyn ConnectionMethod>> {
+    let connection_method: Box<dyn ConnectionMethod> = match (force_bluetooth, force_probe) {
+        (false, false) => {
+            let lister = Lister::new();
+            let probe_connected = !lister.list_all().is_empty();
 
-        let lister = Lister::new();
-        let probes = lister.list_all();
-        let use_probe = if args.force_probe {
-            if probes.len() == 0 {
-                bail!("--force-probe is selected but no probe is connected")
+            if probe_connected {
+                Box::new(ProbeConnectionMethod::initialize().await?)
             } else {
-                true
+                Box::new(BluetoothConnectionMethod::initialize().await?)
             }
-        } else if args.force_ota {
-            false
-        } else {
-            probes.len() > 0
-        };
-
-        if use_probe {
-            info!("Using debug probe");
-            let probe_string = select_probe(probes).await?;
-            Ok(Self::Probe(probe_string))
-        } else {
-            info!("Using OTA");
-            let esp = find_esp().await?;
-            Ok(Self::OTA(esp))
         }
+        (false, true) => Box::new(ProbeConnectionMethod::initialize().await?),
+        (true, false) => Box::new(BluetoothConnectionMethod::initialize().await?),
+        _ => {
+            bail!("--force-bluetooth and --force-probe can not be selected at the same time")
+        }
+    };
+
+    Ok(connection_method)
+}
+
+#[async_trait(?Send)]
+pub trait ConnectionMethod {
+    async fn name(&self) -> String;
+    async fn download(
+        &mut self,
+        chip: &String,
+        secret_path: &PathBuf,
+        node_type: &NodeTypeEnum,
+        firmware_elf_path: &PathBuf,
+    ) -> Result<()>;
+    async fn attach(
+        &mut self,
+        chip: &String,
+        secret_path: &PathBuf,
+        node_type: &NodeTypeEnum,
+        firmware_elf_path: &PathBuf,
+        status_tx: watch::Sender<LogViewerStatus>,
+        logs_tx: broadcast::Sender<TargetLog>,
+        messages_tx: broadcast::Sender<DecodedMessage>,
+        stop_rx: oneshot::Receiver<()>,
+    ) -> Result<()>;
+    async fn dispose(&mut self) -> Result<()> {
+        Ok(())
     }
 }

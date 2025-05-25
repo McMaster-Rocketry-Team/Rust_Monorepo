@@ -10,8 +10,7 @@ use tokio::{
 };
 use uuid::Uuid;
 
-use crate::args::DownloadCli;
-use crate::bluetooth::extract_bin::extract_bin_and_sign;
+use crate::args::NodeTypeEnum;
 
 const CHUNK_CHAR_UUID: Uuid = Uuid::from_u128(0xfba7_891b_18cb_4055_ba5d_0e57396c2fcf);
 const READY_CHAR_UUID: Uuid = Uuid::from_u128(0x5ff9_e042_eced_4d02_8f82_c99e81df389b);
@@ -39,9 +38,11 @@ fn explain_status(stat: i32) -> &'static str {
 /// `chunk_size` is an upper bound; the effective size is limited to *(MTU-3)*  
 /// because BLE subtracts three control-bytes from each ATT packet.
 
-pub async fn ble_download(args: &DownloadCli, peripheral: &Peripheral) -> Result<()> {
-    let firmware_bytes = extract_bin_and_sign(&args).await?;
-
+pub async fn ble_download(
+    firmware_bytes: &[u8],
+    node_type: NodeTypeEnum,
+    peripheral: &Peripheral,
+) -> Result<()> {
     // 1) Ensure we have performed service discovery.
     peripheral.discover_services().await?;
 
@@ -64,7 +65,7 @@ pub async fn ble_download(args: &DownloadCli, peripheral: &Peripheral) -> Result
     // 4) Ask the device how many chunks it can buffer (the “window”).
     let mut window = 64usize;
 
-    let nodetype: u8 = args.node_type.into();
+    let nodetype: u8 = node_type.into();
 
     peripheral
         .write(

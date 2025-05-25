@@ -1,20 +1,17 @@
-use std::{collections::HashMap, env, mem::transmute, path::PathBuf, pin::Pin};
+use std::{collections::HashMap, env, mem::transmute, path::PathBuf};
 
 use anyhow::{Result, anyhow};
 use defmt_decoder::{DecodeError, StreamDecoder};
 use firmware_common_new::can_bus::telemetry::log_mutiplexer::decode_multiplexed_log_chunk;
 use log::Level;
-use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 
 use crate::{
-    elf_locator::{DefmtElfInfo, ELFInfoMap},
-    log_viewer::target_log::{DefmtLocationInfo, DefmtLogInfo, NodeTypeEnum, TargetLog},
+    args::NodeTypeEnum, elf_locator::{DefmtElfInfo, ELFInfoMap}, monitor::target_log::{DefmtLocationInfo, DefmtLogInfo, TargetLog}
 };
 
 pub struct LogDemultiplexer {
     current_dir: Option<PathBuf>,
-    logs_tx: broadcast::Sender<TargetLog>,
     elf_info_map: ELFInfoMap,
     /// node id -> line buffer
     plain_text_log_line_buffers: HashMap<u16, LineBuffer>,
@@ -24,10 +21,9 @@ pub struct LogDemultiplexer {
 }
 
 impl LogDemultiplexer {
-    pub fn new(logs_tx: broadcast::Sender<TargetLog>, elf_info_map: ELFInfoMap) -> Self {
+    pub fn new(elf_info_map: ELFInfoMap) -> Self {
         Self {
             current_dir: env::current_dir().ok(),
-            logs_tx,
             elf_info_map,
             plain_text_log_line_buffers: HashMap::new(),
             defmt_decoders: HashMap::new(),
@@ -36,7 +32,7 @@ impl LogDemultiplexer {
 
     /// chunk from LogMultiplexer::create_chunk
     /// returns is_overrun
-    pub fn process_chunk(&mut self, chunk: &[u8]) -> Result<bool> {
+    pub fn process_chunk(&mut self, chunk: &[u8], logs_tx: &broadcast::Sender<TargetLog>) -> Result<bool> {
         decode_multiplexed_log_chunk(chunk, |frame| {
             let node_type: NodeTypeEnum = frame.node_type.into();
             if let Some(elf_info) = self.elf_info_map.get(&node_type) {
@@ -90,7 +86,7 @@ impl LogDemultiplexer {
                                 })
                                 .unwrap_or(Level::Info);
                             let log_content = defmt_frame.display_message().to_string();
-                            self.logs_tx
+                            logs_tx
                                 .send(TargetLog {
                                     node_type,
                                     node_id: Some(frame.node_id),
@@ -121,7 +117,7 @@ impl LogDemultiplexer {
                     .entry(frame.node_id)
                     .or_default();
                 line_buffer.push_bytes(&frame.data, |line| {
-                    self.logs_tx
+                    logs_tx
                         .send(TargetLog {
                             node_type,
                             node_id: Some(frame.node_id),

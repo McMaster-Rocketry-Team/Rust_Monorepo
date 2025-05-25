@@ -2,9 +2,7 @@ use std::hint::black_box;
 
 use crate::{
     args::DownloadCli,
-    bluetooth::{
-        bluetooth_chunk_decoder::BluetoothChunkDecoder
-    },
+    bluetooth::bluetooth_chunk_decoder::BluetoothChunkDecoder,
     connect_method::ConnectMethod,
     elf_locator::locate_elf_files,
     log_viewer::{LogViewerStatus, log_saver::LogSaver, log_viewer_tui, target_log::TargetLog},

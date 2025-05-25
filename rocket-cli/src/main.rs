@@ -1,10 +1,10 @@
 mod args;
-mod attach;
 mod bluetooth;
+mod can_message_viewer;
 mod connect_method;
 mod elf_locator;
 mod gen_ota_key;
-mod log_viewer;
+mod monitor;
 mod probe;
 mod testing;
 
@@ -12,16 +12,11 @@ use anyhow::{Result, anyhow};
 use args::Cli;
 use args::ModeSelect;
 use args::TestingModeSelect;
-use attach::attach_target;
-use bluetooth::ble_download::ble_download;
-use bluetooth::extract_bin::check_objcopy_installed;
-use bluetooth::find_esp::ble_dispose;
 use clap::Parser;
-use connect_method::ConnectMethod;
+use connect_method::get_connection_method;
 use gen_ota_key::gen_ota_key;
 use log::LevelFilter;
-use probe::probe_download::check_probe_rs_installed;
-use probe::probe_download::probe_download;
+use monitor::monitor_tui;
 use testing::decode_bluetooth_chunk::test_decode_bluetooth_chunk;
 
 #[tokio::main]
@@ -40,41 +35,43 @@ async fn main() -> Result<()> {
 
     match args.mode {
         ModeSelect::Download(args) => {
-            let connect_method = ConnectMethod::new(&args).await?;
-            match &connect_method {
-                ConnectMethod::Probe(probe_string) => {
-                    check_probe_rs_installed()?;
-                    probe_download(&args, probe_string).await?;
-                }
-                ConnectMethod::OTA(esp) => {
-                    check_objcopy_installed()?;
-                    ble_download(&args, esp).await?;
-                }
-            }
+            let mut connection_method =
+                get_connection_method(args.force_ota, args.force_probe).await?;
 
-            attach_target(&args, &connect_method).await?;
+            connection_method
+                .download(
+                    &args.chip,
+                    &args.secret_path,
+                    &args.node_type,
+                    &args.firmware_elf_path,
+                )
+                .await?;
+            monitor_tui(
+                &mut connection_method,
+                &args.chip,
+                &args.secret_path,
+                &args.node_type,
+                &args.firmware_elf_path,
+            )
+            .await?;
 
-            if let ConnectMethod::OTA(esp) = connect_method {
-                ble_dispose(esp).await?;
-            }
+            connection_method.dispose().await?;
             Ok(())
         }
         ModeSelect::Attach(args) => {
-            let connect_method = ConnectMethod::new(&args).await?;
-            match &connect_method {
-                ConnectMethod::Probe(_) => {
-                    check_probe_rs_installed()?;
-                }
-                ConnectMethod::OTA(_) => {
-                    check_objcopy_installed()?;
-                }
-            }
+            let mut connection_method =
+                get_connection_method(args.force_ota, args.force_probe).await?;
 
-            attach_target(&args, &connect_method).await?;
+            monitor_tui(
+                &mut connection_method,
+                &args.chip,
+                &args.secret_path,
+                &args.node_type,
+                &args.firmware_elf_path,
+            )
+            .await?;
 
-            if let ConnectMethod::OTA(esp) = connect_method {
-                ble_dispose(esp).await?;
-            }
+            connection_method.dispose().await?;
             Ok(())
         }
         ModeSelect::GenOtaKey(args) => gen_ota_key(args),

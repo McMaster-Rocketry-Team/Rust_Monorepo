@@ -1,6 +1,6 @@
 use crate::args::DownloadCli;
-use crate::log_viewer::LogViewerStatus;
-use crate::log_viewer::target_log::{DefmtLocationInfo, DefmtLogInfo, TargetLog, parse_log_level};
+use crate::monitor::target_log::{parse_log_level, DefmtLocationInfo, DefmtLogInfo, TargetLog};
+use crate::monitor::LogViewerStatus;
 use anyhow::Result;
 use regex::Regex;
 use tokio::io::{AsyncBufReadExt, BufReader};
