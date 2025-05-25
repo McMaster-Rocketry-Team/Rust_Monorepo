@@ -121,7 +121,7 @@ impl LogDemultiplexer {
                 let line_buffer = self
                     .plain_text_log_line_buffers
                     .entry(frame.node_id)
-                    .or_default();
+                    .or_insert_with(|| LineBuffer::new(node_type));
                 line_buffer.push_bytes(&frame.data, |line| {
                     logs_tx
                         .send(TargetLog {
@@ -136,23 +136,57 @@ impl LogDemultiplexer {
         })
         .map_err(|e| anyhow!("{:?}", e))
     }
+
+    pub fn flush(&mut self, logs_tx: &broadcast::Sender<TargetLog>) {
+        for (node_id, line_buffer) in self.plain_text_log_line_buffers.iter_mut() {
+            if let Some(log_content) = line_buffer.flush() {
+                logs_tx
+                    .send(TargetLog {
+                        node_type: line_buffer.node_type,
+                        node_id: Some(*node_id),
+                        log_content,
+                        defmt: None,
+                    })
+                    .ok();
+            }
+        }
+    }
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Debug, Clone)]
 struct LineBuffer {
+    node_type: NodeTypeEnum,
     buffer: Vec<u8>,
 }
 
 impl LineBuffer {
+    fn new(node_type: NodeTypeEnum) -> Self {
+        LineBuffer {
+            node_type,
+            buffer: Vec::new(),
+        }
+    }
+
     fn push_bytes(&mut self, data: &[u8], mut on_line: impl FnMut(String)) {
         for c in data.iter() {
             if *c as char == '\r' || *c as char == '\n' {
                 if !self.buffer.is_empty() {
-                    on_line(String::from_utf8_lossy(&self.buffer).into())
+                    on_line(String::from_utf8_lossy(&self.buffer).into());
+                    self.buffer.clear();
                 }
             } else {
                 self.buffer.push(*c);
             }
+        }
+    }
+
+    fn flush(&mut self) -> Option<String> {
+        if self.buffer.is_empty() {
+            None
+        } else {
+            let line = String::from_utf8_lossy(&self.buffer).into();
+            self.buffer.clear();
+            Some(line)
         }
     }
 }

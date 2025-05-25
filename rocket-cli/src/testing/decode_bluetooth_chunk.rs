@@ -40,6 +40,7 @@ pub fn test_decode_bluetooth_chunk(args: DecodeBluetoothChunkArgs) -> Result<()>
         &logs_tx,
         &messages_tx,
     )?;
+    log_demultiplexer.flush(&logs_tx);
 
     let mut logs = Vec::new();
     while let Ok(log) = logs_rx.try_recv() {
