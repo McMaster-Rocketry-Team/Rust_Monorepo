@@ -11,12 +11,13 @@ use crate::{
 use heapless::Vec;
 use heatshrink::{decoder::HeatshrinkDecoder, encoder::HeatshrinkEncoder};
 use packed_struct::prelude::*;
+use serde::{Deserialize, Serialize};
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PackedStruct, Default, Clone, Copy, Debug, PartialEq, Eq)]
 #[packed_struct(endian = "msb", bit_numbering = "msb0", size_bytes = "3")]
 struct ChunkHeader {
-    // 01 indicate this chunk is a log multiplexer chunk
+    // 01 indicate this chunk is a message aggregator chunk
     #[packed_field(element_size_bits = "2")]
     _reserved: u8,
     overrun: bool,
@@ -235,7 +236,7 @@ impl CanBusMessageAggregator {
 }
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DecodedMessage {
     pub node_type: u8,
     pub node_id: u16,
@@ -400,7 +401,7 @@ mod test {
 
         // decode the chunk
         let mut outputs = std::vec::Vec::<DecodedMessage>::new();
-        decode_aggregated_can_bus_messages(&chunk[..chunk_len], |frame| outputs.push(frame))
+        decode_aggregated_can_bus_messages(&chunk[..chunk_len], |message| outputs.push(message))
             .unwrap();
 
         assert_eq!(outputs.len(), 2);

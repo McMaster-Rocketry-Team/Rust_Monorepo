@@ -2,7 +2,7 @@ use clap::Parser;
 use clap::Subcommand;
 
 use crate::log_viewer::target_log::NodeTypeEnum;
-use crate::testing::demultiplex_logs::DemultiPlexLogsArgs;
+use crate::testing::decode_bluetooth_chunk::DecodeBluetoothChunkArgs;
 
 #[derive(Parser, Debug)]
 #[command(name = "Rocket CLI")]
@@ -48,6 +48,5 @@ pub struct GenOtaKeyCli {
 
 #[derive(Subcommand, Debug)]
 pub enum TestingModeSelect {
-    DemultiplexLogs(DemultiPlexLogsArgs),
-    DecodeAggregatedMessages,
+    DecodeBluetoothChunk(DecodeBluetoothChunkArgs),
 }

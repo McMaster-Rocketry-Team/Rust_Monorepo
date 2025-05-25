@@ -8,7 +8,7 @@ mod log_viewer;
 mod probe;
 mod testing;
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use args::Cli;
 use args::ModeSelect;
 use args::TestingModeSelect;
@@ -22,13 +22,16 @@ use gen_ota_key::gen_ota_key;
 use log::LevelFilter;
 use probe::probe_download::check_probe_rs_installed;
 use probe::probe_download::probe_download;
-use testing::demultiplex_logs::demultiplex_logs;
+use testing::decode_bluetooth_chunk::test_decode_bluetooth_chunk;
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Cli::parse();
 
-    if !matches!(args.mode, ModeSelect::Testing(_)) {
+    if !matches!(
+        args.mode,
+        ModeSelect::Testing(TestingModeSelect::DecodeBluetoothChunk(_))
+    ) {
         env_logger::builder()
             .filter_level(LevelFilter::Info)
             .try_init()
@@ -75,11 +78,8 @@ async fn main() -> Result<()> {
             Ok(())
         }
         ModeSelect::GenOtaKey(args) => gen_ota_key(args),
-        ModeSelect::Testing(TestingModeSelect::DemultiplexLogs(args)) => {
-            demultiplex_logs(args)
-        },
-        ModeSelect::Testing(TestingModeSelect::DecodeAggregatedMessages) => {
-            todo!()
-        },
+        ModeSelect::Testing(TestingModeSelect::DecodeBluetoothChunk(args)) => {
+            test_decode_bluetooth_chunk(args).map_err(|_| anyhow!("Invalid message"))
+        }
     }
 }
