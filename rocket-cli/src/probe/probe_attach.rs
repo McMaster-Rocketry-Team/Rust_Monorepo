@@ -1,4 +1,4 @@
-use crate::DownloadCli;
+use crate::args::DownloadCli;
 use crate::log_viewer::LogViewerStatus;
 use crate::log_viewer::target_log::{DefmtLocationInfo, DefmtLogInfo, TargetLog, parse_log_level};
 use anyhow::Result;

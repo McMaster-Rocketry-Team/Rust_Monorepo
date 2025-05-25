@@ -10,7 +10,7 @@ use tokio::{
 };
 use uuid::Uuid;
 
-use crate::DownloadCli;
+use crate::args::DownloadCli;
 use crate::bluetooth::extract_bin::extract_bin_and_sign;
 
 const CHUNK_CHAR_UUID: Uuid = Uuid::from_u128(0xfba7_891b_18cb_4055_ba5d_0e57396c2fcf);

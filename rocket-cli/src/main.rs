@@ -5,58 +5,21 @@ mod elf_locator;
 mod gen_ota_key;
 mod log_viewer;
 mod probe;
+mod args;
 
 use anyhow::Result;
+use args::Cli;
+use args::ModeSelect;
 use attach::attach_target;
 use bluetooth::ble_download::ble_download;
 use bluetooth::extract_bin::check_objcopy_installed;
 use bluetooth::find_esp::ble_dispose;
 use clap::Parser;
-use clap::Subcommand;
 use connect_method::ConnectMethod;
 use gen_ota_key::gen_ota_key;
 use log::LevelFilter;
-use log_viewer::target_log::NodeTypeEnum;
 use probe::probe_download::check_probe_rs_installed;
 use probe::probe_download::probe_download;
-
-#[derive(Parser, Debug)]
-#[command(name = "Rocket CLI")]
-#[command(bin_name = "rocket-cli")]
-struct Cli {
-    #[clap(subcommand)]
-    mode: ModeSelect,
-}
-
-#[derive(Subcommand, Debug)]
-enum ModeSelect {
-    #[command(about = "download firmware to target via probe or ota")]
-    Download(DownloadCli),
-
-    #[command(about = "attach to target via probe or ota")]
-    Attach(DownloadCli),
-
-    #[command(about = "generate private and public keys for ota")]
-    GenOtaKey(GenOtaKeyCli),
-}
-
-#[derive(Parser, Debug)]
-struct DownloadCli {
-    #[arg(long, help = "force using ota")]
-    force_ota: bool,
-    #[arg(long, help = "force using probe")]
-    force_probe: bool,
-    chip: String,
-    secret_path: std::path::PathBuf,
-    node_type: NodeTypeEnum,
-    firmware_elf_path: std::path::PathBuf,
-}
-
-#[derive(Parser, Debug)]
-struct GenOtaKeyCli {
-    secret_key_path: std::path::PathBuf,
-    public_key_path: std::path::PathBuf,
-}
 
 #[tokio::main]
 async fn main() -> Result<()> {

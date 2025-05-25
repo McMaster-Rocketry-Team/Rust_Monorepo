@@ -4209,6 +4209,7 @@ name = "rocket-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64",
  "btleplug",
  "cargo-binutils",
  "chrono",
@@ -4232,6 +4233,7 @@ dependencies = [
  "regex",
  "salty",
  "serde",
+ "serde_json",
  "tempfile",
  "tokio",
  "toml 0.8.22",

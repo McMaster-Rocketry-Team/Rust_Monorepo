@@ -12,7 +12,6 @@ use packed_struct::prelude::*;
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PackedStruct, Default, Clone, Copy, Debug, PartialEq, Eq)]
 #[packed_struct(endian = "msb", bit_numbering = "msb0", size_bytes = "1")]
-#[repr(C)]
 struct ThinHeader {
     is_continue: bool,
     #[packed_field(element_size_bits = "7")]
@@ -43,7 +42,6 @@ impl From<u8> for ThinHeader {
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PackedStruct, Default, Clone, Copy, Debug, PartialEq, Eq)]
 #[packed_struct(endian = "msb", bit_numbering = "msb0", size_bytes = "4")]
-#[repr(C)]
 struct FullHeader {
     is_continue: bool,
     #[packed_field(element_size_bits = "7")]
@@ -74,7 +72,6 @@ impl FullHeader {
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PackedStruct, Default, Clone, Copy, Debug, PartialEq, Eq)]
 #[packed_struct(endian = "msb", bit_numbering = "msb0", size_bytes = "3")]
-#[repr(C)]
 struct ChunkHeader {
     // the two reserved zeros indicate this chunk is a log multiplexer chunk
     #[packed_field(element_size_bits = "2")]

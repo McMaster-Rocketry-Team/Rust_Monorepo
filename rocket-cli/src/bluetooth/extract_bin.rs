@@ -6,7 +6,7 @@ use log::info;
 use salty::Sha512;
 use tempfile::NamedTempFile;
 
-use crate::DownloadCli;
+use crate::args::DownloadCli;
 
 pub fn check_objcopy_installed() -> Result<()> {
     if cargo_binutils::Tool::Objcopy.path().is_err() {

@@ -1,5 +1,6 @@
-use crate::DownloadCli;
 use anyhow::{Result, bail};
+
+use crate::args::DownloadCli;
 
 pub fn check_probe_rs_installed() -> Result<()> {
     let output = std::process::Command::new("probe-rs")
@@ -7,7 +8,9 @@ pub fn check_probe_rs_installed() -> Result<()> {
         .output();
 
     if output.is_err() {
-        bail!("probe-rs not found. Please install it by running 'cargo install probe-rs-tools --locked'");
+        bail!(
+            "probe-rs not found. Please install it by running 'cargo install probe-rs-tools --locked'"
+        );
     }
 
     Ok(())

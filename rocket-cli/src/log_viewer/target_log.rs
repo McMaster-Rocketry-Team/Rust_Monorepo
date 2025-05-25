@@ -1,8 +1,9 @@
 use cursive::theme::Color;
 use firmware_common_new::can_bus::node_types::*;
 use log::Level;
+use serde::{Deserialize, Serialize};
 
-#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum NodeTypeEnum {
     VoidLake,
     AMP,
@@ -92,21 +93,21 @@ impl NodeTypeEnum {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DefmtLocationInfo {
     pub module_path: String,
     pub file_path: String,
     pub line_number: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DefmtLogInfo {
     pub log_level: Level,
     pub timestamp: Option<f64>,
     pub location: Option<DefmtLocationInfo>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TargetLog {
     pub node_type: NodeTypeEnum,
     pub node_id: Option<u16>,

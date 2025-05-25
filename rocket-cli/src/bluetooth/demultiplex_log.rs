@@ -3,6 +3,7 @@ use std::{collections::HashMap, env, mem::transmute, path::PathBuf, pin::Pin};
 use defmt_decoder::{DecodeError, StreamDecoder};
 use firmware_common_new::can_bus::telemetry::log_mutiplexer::decode_multiplexed_log_chunk;
 use log::Level;
+use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 
 use crate::{
@@ -10,6 +11,7 @@ use crate::{
     log_viewer::target_log::{DefmtLocationInfo, DefmtLogInfo, NodeTypeEnum, TargetLog},
 };
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessChunkResult {
     pub is_overrun: bool,
     pub is_error: bool,

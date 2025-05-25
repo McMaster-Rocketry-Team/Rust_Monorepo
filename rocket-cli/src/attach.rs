@@ -1,12 +1,7 @@
 use std::hint::black_box;
 
 use crate::{
-    DownloadCli,
-    bluetooth::demultiplex_log::LogDemultiplexer,
-    connect_method::ConnectMethod,
-    elf_locator::locate_elf_files,
-    log_viewer::{LogViewerStatus, log_saver::LogSaver, log_viewer_tui, target_log::TargetLog},
-    probe::probe_attach::probe_attach,
+    args::DownloadCli, bluetooth::demultiplex_log::LogDemultiplexer, connect_method::ConnectMethod, elf_locator::locate_elf_files, log_viewer::{log_saver::LogSaver, log_viewer_tui, target_log::TargetLog, LogViewerStatus}, probe::probe_attach::probe_attach
 };
 use anyhow::Result;
 use tokio::sync::{broadcast, oneshot, watch};
