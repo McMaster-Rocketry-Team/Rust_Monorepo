@@ -132,9 +132,7 @@ impl ConnectionMethod for BluetoothConnectionMethod {
         stop_rx: oneshot::Receiver<()>,
     ) -> Result<()> {
         let elf_info_map = locate_elf_files(Some(firmware_elf_path))
-            .map_err(|e| {
-                warn!("{:?}", e);
-            })
+            .map_err(|e| warn!("{:?}", e))
             .unwrap_or_default();
         let mut log_demultiplexer = LogDemultiplexer::new(elf_info_map);
 

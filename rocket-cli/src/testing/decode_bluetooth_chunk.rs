@@ -2,6 +2,7 @@ use anyhow::Result;
 use base64::prelude::*;
 use clap::Parser;
 use firmware_common_new::can_bus::telemetry::message_aggregator::DecodedMessage;
+use log::warn;
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 
@@ -26,7 +27,11 @@ struct ReturnValue {
 pub fn test_decode_bluetooth_chunk(args: DecodeBluetoothChunkArgs) -> Result<()> {
     let chunk = BASE64_STANDARD.decode(args.base64)?;
 
-    let mut log_demultiplexer = LogDemultiplexer::new(locate_elf_files(None).unwrap_or_default());
+    let mut log_demultiplexer = LogDemultiplexer::new(
+        locate_elf_files(None)
+            .map_err(|e| warn!("{:?}", e))
+            .unwrap_or_default(),
+    );
     let (logs_tx, mut logs_rx) = broadcast::channel::<TargetLog>(256);
     let (messages_tx, mut messages_rx) = broadcast::channel::<DecodedMessage>(32);
     let is_overrun = BluetoothConnectionMethod::process_chunk(

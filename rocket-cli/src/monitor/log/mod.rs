@@ -28,14 +28,14 @@ use tokio::sync::broadcast;
 use super::config::MonitorConfig;
 
 
-pub struct LogView {
+pub struct LogViewer {
     root: LinearLayout,
     logs_rx: Arc<RwLock<broadcast::Receiver<TargetLog>>>,
     paused: Arc<RwLock<bool>>,
     config: Arc<RwLock<MonitorConfig>>,
 }
 
-impl LogView {
+impl LogViewer {
     pub fn new(
         config: Arc<RwLock<MonitorConfig>>,
         logs_rx: broadcast::Receiver<TargetLog>,
@@ -311,12 +311,8 @@ impl LogView {
     }
 }
 
-impl ViewWrapper for LogView {
+impl ViewWrapper for LogViewer {
     wrap_impl!(self.root: LinearLayout);
-
-    fn wrap_needs_relayout(&self) -> bool {
-        true
-    }
 }
 
 struct LogRow {

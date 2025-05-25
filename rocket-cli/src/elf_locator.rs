@@ -9,7 +9,7 @@ use std::{
 
 use anyhow::Result;
 use defmt_decoder::{Location, Table};
-use log::{debug, info, warn};
+use log::{info, warn};
 use pad::PadStr;
 
 use crate::args::NodeTypeEnum;

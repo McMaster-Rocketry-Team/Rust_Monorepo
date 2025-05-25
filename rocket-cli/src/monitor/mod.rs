@@ -1,17 +1,18 @@
 mod config;
 mod log;
 mod message;
+mod status_bar;
 
 use config::MonitorConfig;
 use cursive::{
-    align::HAlign,
-    theme::Palette,
+    theme::{Palette, PaletteStyle},
     view::{Nameable, Resizable},
-    views::{Button, Dialog, LinearLayout, StackView, TextView},
+    views::{BoxedView, Dialog, HideableView, LinearLayout, TextView},
 };
 use firmware_common_new::can_bus::telemetry::message_aggregator::DecodedMessage;
 pub use log::target_log;
-use log::{LogView, log_saver::LogSaver};
+use log::{LogViewer, log_saver::LogSaver};
+use status_bar::{SelectedTab, StatusBar};
 use tokio::{
     sync::{broadcast, oneshot, watch},
     time,
@@ -58,6 +59,8 @@ pub async fn monitor_tui(
     let (messages_tx, messages_rx) = broadcast::channel::<DecodedMessage>(32);
     let (stop_tx, stop_rx) = oneshot::channel::<()>();
 
+    let tui_future = tui_task(connection_method.name(), status_rx, logs_rx, stop_tx);
+
     let attach_future = connection_method.attach(
         chip,
         secret_path,
@@ -68,8 +71,6 @@ pub async fn monitor_tui(
         messages_tx,
         stop_rx,
     );
-
-    let tui_future = tui_task(status_rx, logs_rx, stop_tx);
 
     let log_saver_future = log_saver_task(log_saver, logs_rx2);
 
@@ -83,6 +84,7 @@ pub async fn monitor_tui(
 }
 
 async fn tui_task(
+    connection_method_name: String,
     mut status_rx: watch::Receiver<MonitorStatus>,
     logs_rx: broadcast::Receiver<TargetLog>,
     stop_tx: oneshot::Sender<()>,
@@ -95,37 +97,41 @@ async fn tui_task(
     let mut siv = cursive::default();
     let mut theme = siv.current_theme().clone();
     theme.palette = Palette::terminal_default();
+    theme.palette[PaletteStyle::EditableTextCursor] = theme.palette[PaletteStyle::EditableText];
+    theme.palette[PaletteStyle::EditableText] = theme.palette[PaletteStyle::Primary];
     siv.set_theme(theme);
     siv.set_autorefresh(true);
 
     siv.add_fullscreen_layer(
         LinearLayout::vertical()
             .child(
-                StackView::new()
-                    .fullscreen_layer(
-                        TextView::new("rocket-cli")
-                            .h_align(HAlign::Center)
-                            .full_width(),
-                    )
-                    .fullscreen_layer(
-                        TextView::new("")
-                            .h_align(HAlign::Right)
-                            .with_name("status_text")
-                            .full_width(),
-                    )
-                    .fullscreen_layer(
-                        LinearLayout::horizontal()
-                            .child(Button::new("Logs", |s| {}))
-                            .child(Button::new("Messages", |s| {}))
-                            .child(Button::new("Nodes", |s| {})),
-                    )
+                StatusBar::new(connection_method_name, status_rx)
+                    .with_name("status_bar")
                     .fixed_height(1)
                     .full_width(),
             )
             .child(
-                LogView::new(config, logs_rx)
-                    .with_name("log_view")
-                    .full_screen(),
+                HideableView::new(BoxedView::new(Box::new(
+                    LogViewer::new(config, logs_rx)
+                        .with_name("log_viewer")
+                        .full_screen(),
+                )))
+                .visible(true)
+                .with_name("log_viewer_hideable"),
+            )
+            .child(
+                HideableView::new(BoxedView::new(Box::new(
+                    TextView::new("Messages").full_screen(),
+                )))
+                .visible(false)
+                .with_name("message_viewer_hideable"),
+            )
+            .child(
+                HideableView::new(BoxedView::new(Box::new(
+                    TextView::new("Node Status").full_screen(),
+                )))
+                .visible(false)
+                .with_name("node_status_hideable"),
             ),
     );
 
@@ -145,8 +151,37 @@ async fn tui_task(
 
     while runner.is_running() {
         {
-            let mut log_view = runner.find_name::<LogView>("log_view").unwrap();
+            let mut log_view = runner.find_name::<LogViewer>("log_viewer").unwrap();
             log_view.receive_logs();
+
+            let status_bar = runner.find_name::<StatusBar>("status_bar").unwrap();
+            let mut log_viewer_hideable = runner
+                .find_name::<HideableView<BoxedView>>("log_viewer_hideable")
+                .unwrap();
+            let mut message_viewer_hideable = runner
+                .find_name::<HideableView<BoxedView>>("message_viewer_hideable")
+                .unwrap();
+            let mut node_status_hideable = runner
+                .find_name::<HideableView<BoxedView>>("node_status_hideable")
+                .unwrap();
+
+            match status_bar.selected_tab() {
+                SelectedTab::LogViewer => {
+                    log_viewer_hideable.set_visible(true);
+                    message_viewer_hideable.set_visible(false);
+                    node_status_hideable.set_visible(false);
+                }
+                SelectedTab::CanMessageViewer => {
+                    log_viewer_hideable.set_visible(false);
+                    message_viewer_hideable.set_visible(true);
+                    node_status_hideable.set_visible(false);
+                }
+                SelectedTab::NodeStatus => {
+                    log_viewer_hideable.set_visible(false);
+                    message_viewer_hideable.set_visible(false);
+                    node_status_hideable.set_visible(true);
+                }
+            }
         }
 
         runner.step();
