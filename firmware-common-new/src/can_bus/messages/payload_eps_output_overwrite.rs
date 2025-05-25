@@ -1,19 +1,17 @@
 #[cfg(feature = "wasm")]
-use wasm_bindgen::prelude::*;
-#[cfg(feature = "wasm")]
 use tsify::Tsify;
+#[cfg(feature = "wasm")]
+use wasm_bindgen::prelude::*;
 
 use packed_struct::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use super::{amp_overwrite::PowerOutputOverwrite, CanBusMessage, CanBusMessageEnum};
-
-
+use super::{CanBusMessage, CanBusMessageEnum, amp_overwrite::PowerOutputOverwrite};
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[cfg_attr(feature = "wasm", derive(Tsify))]
 #[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
-#[derive(PackedStruct, Clone, Debug, Serialize, Deserialize)]
+#[derive(PackedStruct, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "3")]
 #[repr(C)]
 pub struct PayloadEPSOutputOverwriteMessage {

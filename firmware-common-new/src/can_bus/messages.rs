@@ -153,7 +153,7 @@ pub const AMP_OVERWRITE_MESSAGE_TYPE: u8 = create_can_bus_message_type(
         is_data: false,
         is_misc: false,
     },
-    2,
+    3,
 );
 pub const AMP_CONTROL_MESSAGE_TYPE: u8 = create_can_bus_message_type(
     CanBusMessageTypeFlag {
@@ -249,7 +249,7 @@ pub const LOG_MESSAGE_TYPE: u8 = create_can_bus_message_type(
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[cfg_attr(feature = "wasm", derive(Tsify))]
 #[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(C)]
 pub enum CanBusMessageEnum {
     Reset(ResetMessage),
@@ -367,7 +367,47 @@ impl CanBusMessageEnum {
         CanBusExtendedId::new(self.priority(), self.get_message_type(), node_type, node_id)
     }
 
-    pub fn serialize(self, buffer: &mut [u8]) -> usize {
+    pub fn serialized_len(message_type: u8) -> Option<usize> {
+        match message_type {
+            #[cfg(not(feature = "bootloader"))]
+            UNIX_TIME_MESSAGE_TYPE => Some(UnixTimeMessage::serialized_len()),
+            #[cfg(not(feature = "bootloader"))]
+            PRE_UNIX_TIME_MESSAGE_TYPE => Some(0),
+            NODE_STATUS_MESSAGE_TYPE => Some(NodeStatusMessage::serialized_len()),
+            RESET_MESSAGE_TYPE => Some(ResetMessage::serialized_len()),
+            #[cfg(not(feature = "bootloader"))]
+            BARO_MEASUREMENT_MESSAGE_TYPE => Some(BaroMeasurementMessage::serialized_len()),
+            #[cfg(not(feature = "bootloader"))]
+            IMU_MEASUREMENT_MESSAGE_TYPE => Some(IMUMeasurementMessage::serialized_len()),
+            #[cfg(not(feature = "bootloader"))]
+            BRIGHTNESS_MEASUREMENT_MESSAGE_TYPE => {
+                Some(BrightnessMeasurementMessage::serialized_len())
+            }
+            #[cfg(not(feature = "bootloader"))]
+            AMP_STATUS_MESSAGE_TYPE => Some(AmpStatusMessage::serialized_len()),
+            #[cfg(not(feature = "bootloader"))]
+            AMP_OVERWRITE_MESSAGE_TYPE => Some(AmpOverwriteMessage::serialized_len()),
+            #[cfg(not(feature = "bootloader"))]
+            AMP_CONTROL_MESSAGE_TYPE => Some(AmpControlMessage::serialized_len()),
+            #[cfg(not(feature = "bootloader"))]
+            PAYLOAD_EPS_STATUS_MESSAGE_TYPE => Some(PayloadEPSStatusMessage::serialized_len()),
+            #[cfg(not(feature = "bootloader"))]
+            PAYLOAD_EPS_OUTPUT_OVERWRITE_MESSAGE_TYPE => {
+                Some(PayloadEPSOutputOverwriteMessage::serialized_len())
+            }
+            #[cfg(not(feature = "bootloader"))]
+            PAYLOAD_EPS_SELF_TEST_MESSAGE_TYPE => Some(PayloadEPSSelfTestMessage::serialized_len()),
+            #[cfg(not(feature = "bootloader"))]
+            AVIONICS_STATUS_MESSAGE_TYPE => Some(AvionicsStatusMessage::serialized_len()),
+            #[cfg(not(feature = "bootloader"))]
+            ICARUS_STATUS_MESSAGE_TYPE => Some(IcarusStatusMessage::serialized_len()),
+            DATA_TRANSFER_MESSAGE_TYPE => Some(DataTransferMessage::serialized_len()),
+            ACK_MESSAGE_TYPE => Some(AckMessage::serialized_len()),
+            _ => None,
+        }
+    }
+
+    pub fn serialize(&self, buffer: &mut [u8]) -> usize {
         match self {
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::UnixTime(m) => m.serialize(buffer),
@@ -404,16 +444,17 @@ impl CanBusMessageEnum {
 
     pub fn deserialize(message_type: u8, data: &[u8]) -> Option<Self> {
         match message_type {
+            RESET_MESSAGE_TYPE => ResetMessage::deserialize(data).map(CanBusMessageEnum::Reset),
+            #[cfg(not(feature = "bootloader"))]
+            PRE_UNIX_TIME_MESSAGE_TYPE => Some(CanBusMessageEnum::PreUnixTime(0)),
             #[cfg(not(feature = "bootloader"))]
             UNIX_TIME_MESSAGE_TYPE => {
                 UnixTimeMessage::deserialize(data).map(CanBusMessageEnum::UnixTime)
             }
-            #[cfg(not(feature = "bootloader"))]
-            PRE_UNIX_TIME_MESSAGE_TYPE => Some(CanBusMessageEnum::PreUnixTime(0)),
             NODE_STATUS_MESSAGE_TYPE => {
                 NodeStatusMessage::deserialize(data).map(CanBusMessageEnum::NodeStatus)
             }
-            RESET_MESSAGE_TYPE => ResetMessage::deserialize(data).map(CanBusMessageEnum::Reset),
+
             #[cfg(not(feature = "bootloader"))]
             BARO_MEASUREMENT_MESSAGE_TYPE => {
                 BaroMeasurementMessage::deserialize(data).map(CanBusMessageEnum::BaroMeasurement)
@@ -425,14 +466,20 @@ impl CanBusMessageEnum {
             #[cfg(not(feature = "bootloader"))]
             BRIGHTNESS_MEASUREMENT_MESSAGE_TYPE => BrightnessMeasurementMessage::deserialize(data)
                 .map(CanBusMessageEnum::BrightnessMeasurement),
+
             #[cfg(not(feature = "bootloader"))]
             AMP_STATUS_MESSAGE_TYPE => {
                 AmpStatusMessage::deserialize(data).map(CanBusMessageEnum::AmpStatus)
             }
             #[cfg(not(feature = "bootloader"))]
+            AMP_OVERWRITE_MESSAGE_TYPE => {
+                AmpOverwriteMessage::deserialize(data).map(CanBusMessageEnum::AmpOverwrite)
+            }
+            #[cfg(not(feature = "bootloader"))]
             AMP_CONTROL_MESSAGE_TYPE => {
                 AmpControlMessage::deserialize(data).map(CanBusMessageEnum::AmpControl)
             }
+
             #[cfg(not(feature = "bootloader"))]
             PAYLOAD_EPS_STATUS_MESSAGE_TYPE => {
                 PayloadEPSStatusMessage::deserialize(data).map(CanBusMessageEnum::PayloadEPSStatus)
@@ -445,6 +492,7 @@ impl CanBusMessageEnum {
             #[cfg(not(feature = "bootloader"))]
             PAYLOAD_EPS_SELF_TEST_MESSAGE_TYPE => PayloadEPSSelfTestMessage::deserialize(data)
                 .map(CanBusMessageEnum::PayloadEPSSelfTest),
+
             #[cfg(not(feature = "bootloader"))]
             AVIONICS_STATUS_MESSAGE_TYPE => {
                 AvionicsStatusMessage::deserialize(data).map(CanBusMessageEnum::AvionicsStatus)
@@ -453,6 +501,7 @@ impl CanBusMessageEnum {
             ICARUS_STATUS_MESSAGE_TYPE => {
                 IcarusStatusMessage::deserialize(data).map(CanBusMessageEnum::IcarusStatus)
             }
+
             DATA_TRANSFER_MESSAGE_TYPE => {
                 DataTransferMessage::deserialize(data).map(CanBusMessageEnum::DataTransfer)
             }
