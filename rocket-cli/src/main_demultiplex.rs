@@ -30,7 +30,8 @@ fn main() -> Result<()> {
     let chunk = BASE64_STANDARD.decode(arg1)?;
 
     let (logs_tx, mut logs_rx) = broadcast::channel::<TargetLog>(256);
-    let mut log_demultiplexer = LogDemultiplexer::new(logs_tx, locate_elf_files()?);
+    let mut log_demultiplexer =
+        LogDemultiplexer::new(logs_tx, locate_elf_files().unwrap_or_default());
     let process_result = log_demultiplexer.process_chunk(&chunk);
 
     let mut return_value = ReturnValue {
