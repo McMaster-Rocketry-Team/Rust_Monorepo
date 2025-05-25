@@ -1,7 +1,7 @@
 #![cfg_attr(not(feature = "wasm"), no_std)]
 #![allow(static_mut_refs)]
 
-use firmware_common_new::can_bus::log_mutiplexer::LogMultiplexer;
+use firmware_common_new::can_bus::telemetry::log_mutiplexer::LogMultiplexer;
 use firmware_common_new::can_bus::messages::baro_measurement::BaroMeasurementMessage;
 use firmware_common_new::can_bus::messages::brightness_measurement::BrightnessMeasurementMessage;
 use firmware_common_new::can_bus::messages::icarus_status::IcarusStatusMessage;

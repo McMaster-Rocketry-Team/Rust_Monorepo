@@ -1,8 +1,10 @@
 use core::convert::Infallible;
 
-use crate::heatshrink::{HeatshrinkError, HeatshrinkWrapper};
+use crate::{
+    can_bus::{CanBusFrame, id::CanBusExtendedId, messages::LOG_MESSAGE_TYPE},
+    heatshrink::{HeatshrinkError, HeatshrinkWrapper},
+};
 
-use super::{CanBusFrame, id::CanBusExtendedId, messages::LOG_MESSAGE_TYPE};
 use heapless::{Deque, Vec};
 use heatshrink::{decoder::HeatshrinkDecoder, encoder::HeatshrinkEncoder};
 use packed_struct::prelude::*;

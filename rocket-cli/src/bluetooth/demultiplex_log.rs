@@ -1,7 +1,7 @@
 use std::{collections::HashMap, env, mem::transmute, path::PathBuf, pin::Pin};
 
 use defmt_decoder::{DecodeError, StreamDecoder};
-use firmware_common_new::can_bus::log_mutiplexer::decode_multiplexed_log_chunk;
+use firmware_common_new::can_bus::telemetry::log_mutiplexer::decode_multiplexed_log_chunk;
 use log::Level;
 use tokio::sync::broadcast;
 
