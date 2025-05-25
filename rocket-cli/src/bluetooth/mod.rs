@@ -79,7 +79,7 @@ impl BluetoothConnectionMethod {
         messages_tx: &broadcast::Sender<DecodedMessage>,
     ) -> Result<bool> {
         if chunk.len() == 0 {
-            bail!("Invalid bluetooth chunk");
+            bail!("Chunk too short");
         }
 
         let chunk_type = chunk[0] << 6;
@@ -88,8 +88,8 @@ impl BluetoothConnectionMethod {
             0b01 => decode_aggregated_can_bus_messages(chunk, |message| {
                 messages_tx.send(message).ok();
             })
-            .map_err(|_| anyhow!("Invalid bluetooth chunk"))?,
-            _ => bail!("Invalid bluetooth chunk"),
+            .map_err(|e| anyhow!("{:?}", e))?,
+            _ => bail!("Invalid chunk type"),
         };
 
         Ok(is_overrun)
