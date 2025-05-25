@@ -76,17 +76,17 @@ impl NodeTypeEnum {
 
     pub fn background_color(&self) -> Color {
         match self {
-            NodeTypeEnum::VoidLake => Color::Rgb(194, 238, 218),
-            NodeTypeEnum::AMP => Color::Rgb(215, 215, 183),
-            NodeTypeEnum::AMPSpeedBridge => Color::Rgb(192, 248, 240),
-            NodeTypeEnum::ICARUS => Color::Rgb(212, 210, 240),
-            NodeTypeEnum::PayloadActivation => Color::Rgb(248, 219, 194),
-            NodeTypeEnum::RocketWifi => Color::Rgb(233, 242, 234),
-            NodeTypeEnum::OZYS => Color::Rgb(244, 230, 197),
-            NodeTypeEnum::Bulkhead => Color::Rgb(206, 234, 255),
-            NodeTypeEnum::EPS1 => Color::Rgb(228, 235, 227),
-            NodeTypeEnum::EPS2 => Color::Rgb(202, 217, 202),
-            NodeTypeEnum::AeroRust => Color::Rgb(252, 218, 246),
+            NodeTypeEnum::VoidLake => Color::Rgb(224, 246, 236),
+            NodeTypeEnum::AMP => Color::Rgb(235, 235, 219),
+            NodeTypeEnum::AMPSpeedBridge => Color::Rgb(224, 252, 248),
+            NodeTypeEnum::ICARUS => Color::Rgb(234, 232, 248),
+            NodeTypeEnum::PayloadActivation => Color::Rgb(252, 237, 224),
+            NodeTypeEnum::RocketWifi => Color::Rgb(244, 248, 244),
+            NodeTypeEnum::OZYS => Color::Rgb(250, 242, 226),
+            NodeTypeEnum::Bulkhead => Color::Rgb(230, 244, 255),
+            NodeTypeEnum::EPS1 => Color::Rgb(242, 245, 241),
+            NodeTypeEnum::EPS2 => Color::Rgb(228, 236, 228),
+            NodeTypeEnum::AeroRust => Color::Rgb(254, 236, 250),
             NodeTypeEnum::Other => Color::Rgb(255, 255, 255),
         }
     }

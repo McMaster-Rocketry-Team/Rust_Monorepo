@@ -1,6 +1,18 @@
 use crate::DownloadCli;
 use anyhow::{Result, bail};
 
+pub fn check_probe_rs_installed() -> Result<()> {
+    let output = std::process::Command::new("probe-rs")
+        .arg("--version")
+        .output();
+
+    if output.is_err() {
+        bail!("probe-rs not found. Please install it by running 'cargo install probe-rs-tools --locked'");
+    }
+
+    Ok(())
+}
+
 pub async fn probe_download(args: &DownloadCli, probe_string: &String) -> Result<()> {
     // flash the firmware
     let probe_rs_args = [
