@@ -1,6 +1,5 @@
 mod args;
 mod bluetooth;
-mod can_message_viewer;
 mod connect_method;
 mod elf_locator;
 mod gen_ota_key;

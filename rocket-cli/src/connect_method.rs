@@ -3,20 +3,13 @@ use std::path::PathBuf;
 use crate::{
     args::NodeTypeEnum,
     bluetooth::BluetoothConnectionMethod,
-    monitor::{LogViewerStatus, target_log::TargetLog},
+    monitor::{MonitorStatus, target_log::TargetLog},
     probe::ProbeConnectionMethod,
 };
 use anyhow::{Result, bail};
 use async_trait::async_trait;
-use btleplug::platform::Peripheral;
 use firmware_common_new::can_bus::telemetry::message_aggregator::DecodedMessage;
-use probe_rs::probe::list::Lister;
 use tokio::sync::{broadcast, oneshot, watch};
-
-pub enum ConnectMethod {
-    Probe(String),
-    OTA(Peripheral),
-}
 
 pub async fn get_connection_method(
     force_bluetooth: bool,
@@ -24,8 +17,7 @@ pub async fn get_connection_method(
 ) -> Result<Box<dyn ConnectionMethod>> {
     let connection_method: Box<dyn ConnectionMethod> = match (force_bluetooth, force_probe) {
         (false, false) => {
-            let lister = Lister::new();
-            let probe_connected = !lister.list_all().is_empty();
+            let probe_connected = ProbeConnectionMethod::has_probe_connected().await;
 
             if probe_connected {
                 Box::new(ProbeConnectionMethod::initialize().await?)
@@ -45,7 +37,7 @@ pub async fn get_connection_method(
 
 #[async_trait(?Send)]
 pub trait ConnectionMethod {
-    async fn name(&self) -> String;
+    fn name(&self) -> String;
     async fn download(
         &mut self,
         chip: &String,
@@ -59,7 +51,7 @@ pub trait ConnectionMethod {
         secret_path: &PathBuf,
         node_type: &NodeTypeEnum,
         firmware_elf_path: &PathBuf,
-        status_tx: watch::Sender<LogViewerStatus>,
+        status_tx: watch::Sender<MonitorStatus>,
         logs_tx: broadcast::Sender<TargetLog>,
         messages_tx: broadcast::Sender<DecodedMessage>,
         stop_rx: oneshot::Receiver<()>,

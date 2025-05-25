@@ -1,7 +1,7 @@
 use std::{path::PathBuf, process::Stdio};
 
 use crate::{
-    args::NodeTypeEnum, connect_method::ConnectionMethod, monitor::{target_log::{parse_log_level, DefmtLocationInfo, DefmtLogInfo, TargetLog}, LogViewerStatus}
+    args::NodeTypeEnum, connect_method::ConnectionMethod, monitor::{target_log::{parse_log_level, DefmtLocationInfo, DefmtLogInfo, TargetLog}, MonitorStatus}
 };
 use anyhow::{Result, bail};
 use async_trait::async_trait;
@@ -14,10 +14,6 @@ use tokio::{
     process::Command,
     sync::{broadcast, oneshot, watch},
 };
-
-pub mod probe_attach;
-pub mod probe_download;
-pub mod select_probe;
 
 pub struct ProbeConnectionMethod {
     probe_string: String,
@@ -85,7 +81,7 @@ impl ProbeConnectionMethod {
 
 #[async_trait(?Send)]
 impl ConnectionMethod for ProbeConnectionMethod {
-    async fn name(&self) -> String {
+    fn name(&self) -> String {
         self.probe_string.clone()
     }
 
@@ -123,7 +119,7 @@ impl ConnectionMethod for ProbeConnectionMethod {
         _secret_path: &PathBuf,
         node_type: &NodeTypeEnum,
         firmware_elf_path: &PathBuf,
-        status_tx: watch::Sender<LogViewerStatus>,
+        status_tx: watch::Sender<MonitorStatus>,
         logs_tx: broadcast::Sender<TargetLog>,
         _messages_tx: broadcast::Sender<DecodedMessage>,
         stop_rx: oneshot::Receiver<()>,
@@ -151,7 +147,7 @@ impl ConnectionMethod for ProbeConnectionMethod {
         let reader = BufReader::new(stdout);
         let mut lines = reader.lines();
         let re = Regex::new(r">>>>>(.*?)\|\|\|\|\|(.*?)\|\|\|\|\|(.*?)\|\|\|\|\|(.*?)\|\|\|\|\|(.*?)\|\|\|\|\|(.*?)<<<<<").unwrap();
-        status_tx.send(LogViewerStatus::Normal).ok();
+        status_tx.send(MonitorStatus::Normal).ok();
 
         let read_logs_future = async move {
             while let Some(line) = lines.next_line().await.unwrap() {

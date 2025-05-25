@@ -1,12 +1,9 @@
 use std::{hint::black_box, path::PathBuf, time::Duration};
 
 use crate::args::NodeTypeEnum;
+use crate::monitor::MonitorStatus;
 use crate::monitor::target_log::TargetLog;
-use crate::monitor::LogViewerStatus;
-use crate::{
-    connect_method::ConnectionMethod,
-    elf_locator::locate_elf_files,
-};
+use crate::{connect_method::ConnectionMethod, elf_locator::locate_elf_files};
 use anyhow::{Result, anyhow, bail};
 use async_trait::async_trait;
 use ble_download::ble_download;
@@ -27,7 +24,6 @@ use tokio::{
 mod ble_download;
 pub mod demultiplex_log;
 mod extract_bin;
-mod find_esp;
 
 pub struct BluetoothConnectionMethod {
     peripheral: Peripheral,
@@ -90,7 +86,7 @@ impl BluetoothConnectionMethod {
         let is_overrun = match chunk_type {
             0b00 => log_demultiplexer.process_chunk(chunk, logs_tx)?,
             0b01 => decode_aggregated_can_bus_messages(chunk, |message| {
-                messages_tx.send(message);
+                messages_tx.send(message).ok();
             })
             .map_err(|_| anyhow!("Invalid bluetooth chunk"))?,
             _ => bail!("Invalid bluetooth chunk"),
@@ -102,7 +98,7 @@ impl BluetoothConnectionMethod {
 
 #[async_trait(?Send)]
 impl ConnectionMethod for BluetoothConnectionMethod {
-    async fn name(&self) -> String {
+    fn name(&self) -> String {
         String::from("RocketOTA")
     }
 
@@ -124,7 +120,7 @@ impl ConnectionMethod for BluetoothConnectionMethod {
         _secret_path: &PathBuf,
         _node_type: &NodeTypeEnum,
         firmware_elf_path: &PathBuf,
-        status_tx: watch::Sender<LogViewerStatus>,
+        status_tx: watch::Sender<MonitorStatus>,
         logs_tx: broadcast::Sender<TargetLog>,
         messages_tx: broadcast::Sender<DecodedMessage>,
         stop_rx: oneshot::Receiver<()>,
@@ -136,6 +132,7 @@ impl ConnectionMethod for BluetoothConnectionMethod {
             .unwrap_or_default();
         let mut log_demultiplexer = LogDemultiplexer::new(elf_info_map);
 
+        // sleep for 1 sec so we have time to see the logs before monitor takes over
         sleep(Duration::from_secs(1)).await;
 
         let receive_future = async {
@@ -148,9 +145,9 @@ impl ConnectionMethod for BluetoothConnectionMethod {
                     &logs_tx,
                     &messages_tx,
                 ) {
-                    Ok(false) => LogViewerStatus::Normal,
-                    Ok(true) => LogViewerStatus::Overrun,
-                    Err(_) => LogViewerStatus::ChunkError,
+                    Ok(false) => MonitorStatus::Normal,
+                    Ok(true) => MonitorStatus::Overrun,
+                    Err(_) => MonitorStatus::ChunkError,
                 };
                 status_tx.send(status).ok();
             }

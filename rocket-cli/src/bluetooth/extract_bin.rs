@@ -1,29 +1,25 @@
 use std::{path::PathBuf, process::Output};
 
-use anyhow::{anyhow, bail, Ok, Result};
+use anyhow::{Ok, Result, anyhow, bail};
 use firmware_common_new::bootloader::sign_firmware;
 use log::info;
 use salty::Sha512;
 use tempfile::NamedTempFile;
 
-pub fn check_objcopy_installed() -> Result<()> {
-    if cargo_binutils::Tool::Objcopy.path().is_err() {
-        bail!(
-            "llvm-objcopy not found, Please install it by running 'rustup component add llvm-tools'"
-        )
-    }
-    Ok(())
-}
-
-pub async fn extract_bin_and_sign(secret_path: &PathBuf,firmware_elf_path: &PathBuf) -> Result<Vec<u8>> {
+pub async fn extract_bin_and_sign(
+    secret_path: &PathBuf,
+    firmware_elf_path: &PathBuf,
+) -> Result<Vec<u8>> {
     let secret = std::fs::read(secret_path)?;
     if secret.len() != 32 {
         bail!("Secret must be 32 bytes long.");
     }
 
-    let objcopy_path = cargo_binutils::Tool::Objcopy
-        .path()
-        .map_err(|_|anyhow!("llvm-objcopy not found, Please install it by running 'rustup component add llvm-tools'"))?;
+    let objcopy_path = cargo_binutils::Tool::Objcopy.path().map_err(|_| {
+        anyhow!(
+            "llvm-objcopy not found, Please install it by running 'rustup component add llvm-tools'"
+        )
+    })?;
 
     let firmware_binary = NamedTempFile::new()?;
     let Output { status, stderr, .. } = std::process::Command::new(objcopy_path)

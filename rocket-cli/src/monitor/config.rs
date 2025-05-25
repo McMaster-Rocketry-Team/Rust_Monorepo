@@ -10,7 +10,7 @@ use super::log::target_log::TargetLog;
 
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct LogViewerConfig {
+pub struct MonitorConfig {
     pub levels: LevelFilters,
     pub devices: DeviceFilters,
     pub module: String,
@@ -42,7 +42,7 @@ pub struct DeviceFilters {
     pub other: bool,
 }
 
-impl Default for LogViewerConfig {
+impl Default for MonitorConfig {
     fn default() -> Self {
         Self {
             levels: LevelFilters {
@@ -72,7 +72,7 @@ impl Default for LogViewerConfig {
     }
 }
 
-impl LogViewerConfig {
+impl MonitorConfig {
     pub fn exists() -> bool {
         let config_path = Self::get_config_path();
         config_path.exists()

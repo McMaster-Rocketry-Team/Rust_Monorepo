@@ -7,7 +7,9 @@ use log::Level;
 use tokio::sync::broadcast;
 
 use crate::{
-    args::NodeTypeEnum, elf_locator::{DefmtElfInfo, ELFInfoMap}, monitor::target_log::{DefmtLocationInfo, DefmtLogInfo, TargetLog}
+    args::NodeTypeEnum,
+    elf_locator::{DefmtElfInfo, ELFInfoMap},
+    monitor::target_log::{DefmtLocationInfo, DefmtLogInfo, TargetLog},
 };
 
 pub struct LogDemultiplexer {
@@ -32,7 +34,11 @@ impl LogDemultiplexer {
 
     /// chunk from LogMultiplexer::create_chunk
     /// returns is_overrun
-    pub fn process_chunk(&mut self, chunk: &[u8], logs_tx: &broadcast::Sender<TargetLog>) -> Result<bool> {
+    pub fn process_chunk(
+        &mut self,
+        chunk: &[u8],
+        logs_tx: &broadcast::Sender<TargetLog>,
+    ) -> Result<bool> {
         decode_multiplexed_log_chunk(chunk, |frame| {
             let node_type: NodeTypeEnum = frame.node_type.into();
             if let Some(elf_info) = self.elf_info_map.get(&node_type) {

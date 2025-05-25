@@ -1,4 +1,3 @@
-use crate::{connect_method::ConnectMethod};
 use anyhow::{Ok, Result};
 use chrono::Local;
 use pad::PadStr as _;
@@ -8,6 +7,8 @@ use tokio::{
     io::AsyncWriteExt,
 };
 
+use crate::connect_method::ConnectionMethod;
+
 use super::target_log::TargetLog;
 
 pub struct LogSaver {
@@ -15,7 +16,7 @@ pub struct LogSaver {
 }
 
 impl LogSaver {
-    pub async fn new(bin_name: String, connect_method: &ConnectMethod) -> Result<Self> {
+    pub async fn new(bin_name: String,  connection_method: &mut Box<dyn ConnectionMethod>,) -> Result<Self> {
         let logs_dir = PathBuf::from("logs");
         fs::create_dir_all(&logs_dir).await?;
 
@@ -24,10 +25,7 @@ impl LogSaver {
             "{}_{}_{}.log",
             timestamp,
             bin_name,
-            match connect_method {
-                ConnectMethod::Probe(_) => "probe",
-                ConnectMethod::OTA(_) => "ota",
-            }
+            connection_method.name(),
         ));
         let file = File::create(log_path).await?;
 
