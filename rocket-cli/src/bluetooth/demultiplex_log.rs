@@ -1,5 +1,6 @@
 use std::{collections::HashMap, env, mem::transmute, path::PathBuf, pin::Pin};
 
+use anyhow::{Result, anyhow};
 use defmt_decoder::{DecodeError, StreamDecoder};
 use firmware_common_new::can_bus::telemetry::log_mutiplexer::decode_multiplexed_log_chunk;
 use log::Level;
@@ -7,20 +8,14 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 
 use crate::{
-    elf_locator::DefmtElfInfo,
+    elf_locator::{DefmtElfInfo, ELFInfoMap},
     log_viewer::target_log::{DefmtLocationInfo, DefmtLogInfo, NodeTypeEnum, TargetLog},
 };
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProcessChunkResult {
-    pub is_overrun: bool,
-    pub is_error: bool,
-}
 
 pub struct LogDemultiplexer {
     current_dir: Option<PathBuf>,
     logs_tx: broadcast::Sender<TargetLog>,
-    elf_info_map: HashMap<NodeTypeEnum, Pin<Box<DefmtElfInfo>>>,
+    elf_info_map: ELFInfoMap,
     /// node id -> line buffer
     plain_text_log_line_buffers: HashMap<u16, LineBuffer>,
 
@@ -29,10 +24,7 @@ pub struct LogDemultiplexer {
 }
 
 impl LogDemultiplexer {
-    pub fn new(
-        logs_tx: broadcast::Sender<TargetLog>,
-        elf_info_map: HashMap<NodeTypeEnum, Pin<Box<DefmtElfInfo>>>,
-    ) -> Self {
+    pub fn new(logs_tx: broadcast::Sender<TargetLog>, elf_info_map: ELFInfoMap) -> Self {
         Self {
             current_dir: env::current_dir().ok(),
             logs_tx,
@@ -44,9 +36,8 @@ impl LogDemultiplexer {
 
     /// chunk from LogMultiplexer::create_chunk
     /// returns is_overrun
-    pub fn process_chunk(&mut self, chunk: &[u8]) -> ProcessChunkResult {
-        // TODO: process overrun
-        let decode_result = decode_multiplexed_log_chunk(chunk, |frame| {
+    pub fn process_chunk(&mut self, chunk: &[u8]) -> Result<bool> {
+        decode_multiplexed_log_chunk(chunk, |frame| {
             let node_type: NodeTypeEnum = frame.node_type.into();
             if let Some(elf_info) = self.elf_info_map.get(&node_type) {
                 // treat bytes as defmt log
@@ -140,18 +131,8 @@ impl LogDemultiplexer {
                         .ok();
                 });
             }
-        });
-
-        match decode_result {
-            Ok(is_overrun) => ProcessChunkResult {
-                is_overrun,
-                is_error: false,
-            },
-            Err(_) => ProcessChunkResult {
-                is_overrun: false,
-                is_error: true,
-            },
-        }
+        })
+        .map_err(|e| anyhow!("{:?}", e))
     }
 }
 

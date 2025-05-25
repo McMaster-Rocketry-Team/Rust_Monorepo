@@ -19,7 +19,9 @@ pub struct DefmtElfInfo {
     pub locs: Option<BTreeMap<u64, Location>>,
 }
 
-pub fn locate_elf_files() -> Result<HashMap<NodeTypeEnum, Pin<Box<DefmtElfInfo>>>> {
+pub type ELFInfoMap = HashMap<NodeTypeEnum, Pin<Box<DefmtElfInfo>>>;
+
+pub fn locate_elf_files() -> Result<ELFInfoMap> {
     let possible_paths = vec!["./Rust_Monorepo", "../Rust_Monorepo", "../../Rust_Monorepo"];
 
     let monorepo_path = possible_paths

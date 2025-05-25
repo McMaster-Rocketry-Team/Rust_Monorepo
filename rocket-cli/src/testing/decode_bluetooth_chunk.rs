@@ -48,21 +48,14 @@ fn test_demultiplex_logs(chunk: &[u8]) -> Result<ReturnValue> {
     let (logs_tx, mut logs_rx) = broadcast::channel::<TargetLog>(256);
     let mut log_demultiplexer =
         LogDemultiplexer::new(logs_tx, locate_elf_files().unwrap_or_default());
-    let process_result = log_demultiplexer.process_chunk(&chunk);
-
-    if process_result.is_error {
-        bail!("Invalid message")
-    }
+    let is_overrun = log_demultiplexer.process_chunk(&chunk)?;
 
     let mut logs = Vec::new();
     while let Ok(log) = logs_rx.try_recv() {
         logs.push(log);
     }
 
-    Ok(ReturnValue::DemultiplexedLogs {
-        is_overrun: process_result.is_overrun,
-        logs,
-    })
+    Ok(ReturnValue::DemultiplexedLogs { is_overrun, logs })
 }
 
 fn test_decode_aggregated_messages(chunk: &[u8]) -> Result<ReturnValue> {

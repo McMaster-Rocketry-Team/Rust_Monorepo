@@ -1,7 +1,14 @@
 use std::hint::black_box;
 
 use crate::{
-    args::DownloadCli, bluetooth::demultiplex_log::LogDemultiplexer, connect_method::ConnectMethod, elf_locator::locate_elf_files, log_viewer::{log_saver::LogSaver, log_viewer_tui, target_log::TargetLog, LogViewerStatus}, probe::probe_attach::probe_attach
+    args::DownloadCli,
+    bluetooth::{
+        bluetooth_chunk_decoder::BluetoothChunkDecoder
+    },
+    connect_method::ConnectMethod,
+    elf_locator::locate_elf_files,
+    log_viewer::{LogViewerStatus, log_saver::LogSaver, log_viewer_tui, target_log::TargetLog},
+    probe::probe_attach::probe_attach,
 };
 use anyhow::Result;
 use tokio::sync::{broadcast, oneshot, watch};
@@ -37,18 +44,17 @@ pub async fn attach_target(args: &DownloadCli, connect_method: &ConnectMethod) -
             }
             ConnectMethod::OTA(_) => {
                 let elf_info_map = elf_info_map.unwrap();
-                let mut log_demultiplexer = LogDemultiplexer::new(logs_tx, elf_info_map);
+                let mut bluetooth_chunk_decoder = BluetoothChunkDecoder::new(logs_tx, elf_info_map);
 
                 // TODO
                 while stop_rx.try_recv().is_err() {
-                    let result = log_demultiplexer.process_chunk(black_box(&[]));
-                    if result.is_error {
-                        status_tx.send(LogViewerStatus::ChunkError).ok();
-                    } else if result.is_overrun {
-                        status_tx.send(LogViewerStatus::Overrun).ok();
-                    } else {
-                        status_tx.send(LogViewerStatus::Normal).ok();
-                    }
+                    let result = bluetooth_chunk_decoder.process_chunk(black_box(&[]));
+                    let status = match result {
+                        Ok(false) => LogViewerStatus::Normal,
+                        Ok(true) => LogViewerStatus::Overrun,
+                        Err(_) => LogViewerStatus::ChunkError,
+                    };
+                    status_tx.send(status).ok();
                 }
             }
         }
