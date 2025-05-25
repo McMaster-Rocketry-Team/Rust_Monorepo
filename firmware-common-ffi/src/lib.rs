@@ -1,7 +1,6 @@
 #![cfg_attr(not(feature = "wasm"), no_std)]
 #![allow(static_mut_refs)]
 
-use firmware_common_new::can_bus::telemetry::log_mutiplexer::LogMultiplexer;
 use firmware_common_new::can_bus::messages::baro_measurement::BaroMeasurementMessage;
 use firmware_common_new::can_bus::messages::brightness_measurement::BrightnessMeasurementMessage;
 use firmware_common_new::can_bus::messages::icarus_status::IcarusStatusMessage;
@@ -9,6 +8,8 @@ use firmware_common_new::can_bus::messages::imu_measurement::IMUMeasurementMessa
 use firmware_common_new::can_bus::messages::payload_eps_status::{
     PayloadEPSOutputStatus, PayloadEPSStatusMessage,
 };
+use firmware_common_new::can_bus::telemetry::log_mutiplexer::LogMultiplexer;
+use firmware_common_new::can_bus::telemetry::message_aggregator::{self, CanBusMessageAggregator};
 #[cfg(feature = "wasm")]
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "wasm")]
@@ -315,6 +316,53 @@ pub fn log_multiplexer_create_chunk_js(buffer: &mut [u8]) -> usize {
     log_multiplexer_create_chunk(buffer.as_mut_ptr(), buffer.len())
 }
 
+static mut MESSAGE_AGGREGATOR: Option<CanBusMessageAggregator> = None;
+
+/// Creates a aggregated can bus message chunk for sending over bluetooth.
+/// The messages come from can bus frames processed by `process_can_bus_frame`
+///
+/// # Parameters
+/// - `buffer`: A pointer to the buffer where the created chunk will be written to
+/// - `buffer_length`: The size of the buffer in bytes.
+///
+/// # Returns
+/// - Length of the created chunk
+///
+/// # Safety
+///
+/// The caller is responsible for ensuring `message_aggregator_create_chunk` and
+/// `process_can_bus_frame` is not invoked concurrently
+#[unsafe(no_mangle)]
+pub extern "C" fn message_aggregator_create_chunk(buffer: *mut u8, buffer_length: usize) -> usize {
+    let message_aggregator = unsafe {
+        if MESSAGE_AGGREGATOR.is_none() {
+            MESSAGE_AGGREGATOR = Some(CanBusMessageAggregator::new())
+        }
+        MESSAGE_AGGREGATOR.as_mut().unwrap()
+    };
+
+    let buffer = unsafe { core::slice::from_raw_parts_mut(buffer, buffer_length) };
+    message_aggregator.create_chunk(buffer)
+}
+
+/// Creates a aggregated can bus message chunk for sending over bluetooth.
+/// The messages come from can bus frames processed by `process_can_bus_frame`
+///
+/// # Parameters
+/// - `buffer`: buffer where the created chunk will be written to
+///
+/// # Returns
+/// - Length of the created chunk
+///
+/// # Safety
+///
+/// The caller is responsible for ensuring `message_aggregator_create_chunk` and
+/// `process_can_bus_frame` is not invoked concurrently
+#[cfg_attr(feature = "wasm", wasm_bindgen(js_name = messageAggregatorCreateChunk))]
+pub fn message_aggregator_create_chunk_js(buffer: &mut [u8]) -> usize {
+    message_aggregator_create_chunk(buffer.as_mut_ptr(), buffer.len())
+}
+
 static mut CAN_DECODER: Option<CanBusMultiFrameDecoder<8>> = None;
 
 #[cfg_attr(feature = "wasm", derive(Serialize, Deserialize, Tsify))]
@@ -346,7 +394,7 @@ pub enum ProcessCanBusFrameResult {
 ///
 /// # Safety
 ///
-/// The caller is responsible for ensuring `log_multiplexer_create_chunk` and
+/// The caller is responsible for ensuring `log_multiplexer_create_chunk`, `message_aggregator_create_chunk` and
 /// `process_can_bus_frame` is not invoked concurrently
 #[unsafe(no_mangle)]
 pub extern "C" fn process_can_bus_frame(
@@ -372,14 +420,25 @@ pub extern "C" fn process_can_bus_frame(
         LOG_MULTIPLEXER.as_mut().unwrap()
     };
 
+    let message_aggregator = unsafe {
+        if MESSAGE_AGGREGATOR.is_none() {
+            MESSAGE_AGGREGATOR = Some(CanBusMessageAggregator::new())
+        }
+        MESSAGE_AGGREGATOR.as_mut().unwrap()
+    };
+
     log_multiplexer.process_frame(&frame);
     match decoder.process_frame(&frame) {
-        Some(m) => ProcessCanBusFrameResult::Message {
-            timestamp,
-            id: CanBusExtendedId::from_raw(id),
-            crc: m.data.crc,
-            message: m.data.message,
-        },
+        Some(m) => {
+            let id = CanBusExtendedId::from_raw(id);
+            message_aggregator.process_message(&id, &m.data.message, timestamp);
+            ProcessCanBusFrameResult::Message {
+                timestamp,
+                id,
+                crc: m.data.crc,
+                message: m.data.message,
+            }
+        }
         None => ProcessCanBusFrameResult::Empty(0),
     }
 }
@@ -398,7 +457,7 @@ pub extern "C" fn process_can_bus_frame(
 ///
 /// # Safety
 ///
-/// The caller is responsible for ensuring `log_multiplexer_create_chunk` and
+/// The caller is responsible for ensuring `log_multiplexer_create_chunk`, `message_aggregator_create_chunk` and
 /// `process_can_bus_frame` is not invoked concurrently
 #[cfg_attr(feature = "wasm", wasm_bindgen(js_name = processCanBusFrame))]
 pub fn process_can_bus_frame_js(timestamp: u64, id: u32, data: &[u8]) -> ProcessCanBusFrameResult {
