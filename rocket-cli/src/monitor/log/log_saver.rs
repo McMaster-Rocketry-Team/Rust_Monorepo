@@ -7,7 +7,7 @@ use tokio::{
     io::AsyncWriteExt,
 };
 
-use crate::connect_method::ConnectionMethod;
+use crate::connection_method::ConnectionMethod;
 
 use super::target_log::TargetLog;
 

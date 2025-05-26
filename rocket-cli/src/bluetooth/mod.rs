@@ -3,7 +3,7 @@ use std::{hint::black_box, path::PathBuf, time::Duration};
 use crate::args::NodeTypeEnum;
 use crate::monitor::MonitorStatus;
 use crate::monitor::target_log::TargetLog;
-use crate::{connect_method::ConnectionMethod, elf_locator::locate_elf_files};
+use crate::{connection_method::ConnectionMethod, elf_locator::locate_elf_files};
 use anyhow::{Result, anyhow, bail};
 use async_trait::async_trait;
 use ble_download::ble_download;

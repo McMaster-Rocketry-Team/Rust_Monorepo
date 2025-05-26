@@ -1,6 +1,6 @@
 mod args;
 mod bluetooth;
-mod connect_method;
+mod connection_method;
 mod elf_locator;
 mod gen_ota_key;
 mod monitor;
@@ -13,8 +13,8 @@ use args::ModeSelect;
 use args::NodeTypeEnum;
 use args::TestingModeSelect;
 use clap::Parser;
-use connect_method::ConnectionMethod;
-use connect_method::get_connection_method;
+use connection_method::ConnectionMethod;
+use connection_method::get_connection_method;
 use gen_ota_key::gen_ota_key;
 use log::LevelFilter;
 use monitor::monitor_tui;

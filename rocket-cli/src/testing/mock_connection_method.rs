@@ -2,7 +2,7 @@ use std::{path::PathBuf, time::Duration};
 
 use crate::{
     args::NodeTypeEnum,
-    connect_method::ConnectionMethod,
+    connection_method::ConnectionMethod,
     monitor::{
         MonitorStatus,
         target_log::{DefmtLocationInfo, DefmtLogInfo, TargetLog},

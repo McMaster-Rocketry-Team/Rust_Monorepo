@@ -38,6 +38,7 @@ pub async fn get_connection_method(
 #[async_trait(?Send)]
 pub trait ConnectionMethod {
     fn name(&self) -> String;
+
     async fn download(
         &mut self,
         chip: &String,
@@ -45,6 +46,7 @@ pub trait ConnectionMethod {
         node_type: &NodeTypeEnum,
         firmware_elf_path: &PathBuf,
     ) -> Result<()>;
+
     async fn attach(
         &mut self,
         chip: &String,
@@ -56,6 +58,7 @@ pub trait ConnectionMethod {
         messages_tx: broadcast::Sender<DecodedMessage>,
         stop_rx: oneshot::Receiver<()>,
     ) -> Result<()>;
+
     async fn dispose(&mut self) -> Result<()> {
         Ok(())
     }

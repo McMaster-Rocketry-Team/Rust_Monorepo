@@ -18,7 +18,7 @@ use tokio::{
     time,
 };
 
-use crate::{args::NodeTypeEnum, connect_method::ConnectionMethod};
+use crate::{args::NodeTypeEnum, connection_method::ConnectionMethod};
 use anyhow::Result;
 use std::{
     path::PathBuf,
