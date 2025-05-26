@@ -8,7 +8,6 @@ use crate::args::NodeTypeEnum;
 
 use super::log::target_log::TargetLog;
 
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MonitorConfig {
     pub levels: LevelFilters,
@@ -24,6 +23,7 @@ pub struct LevelFilters {
     pub info: bool,
     pub warn: bool,
     pub error: bool,
+    pub plain_text: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -51,6 +51,7 @@ impl Default for MonitorConfig {
                 info: true,
                 warn: true,
                 error: true,
+                plain_text: true,
             },
             devices: DeviceFilters {
                 void_lake: true,
@@ -130,6 +131,10 @@ impl MonitorConfig {
                 || defmt_info.log_level == Level::Warn
                 || module_matches;
 
+            if !module_matches  {
+                    return false;
+            }
+
             let level_matches = match defmt_info.log_level {
                 Level::Trace => self.levels.trace,
                 Level::Debug => self.levels.debug,
@@ -138,7 +143,11 @@ impl MonitorConfig {
                 Level::Error => self.levels.error,
             };
 
-            if !module_matches || !level_matches {
+            if !level_matches {
+                return false;
+            }
+        } else {
+            if !self.levels.plain_text || !self.module.is_empty() {
                 return false;
             }
         }

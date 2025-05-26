@@ -165,6 +165,14 @@ impl LogViewer {
                                     |c, v| c.levels.error = v,
                                 ),
                             )
+                            .child(
+                                "Plain Text",
+                                Self::create_config_checkbox(
+                                    config.clone(),
+                                    |c| c.levels.plain_text,
+                                    |c, v| c.levels.plain_text = v,
+                                ),
+                            )
                             .scrollable(),
                     )
                     .title("Level"),
@@ -303,7 +311,7 @@ impl LogViewer {
         while let Ok(log) = logs_rx.try_recv() {
             if !*self.paused.read().unwrap() {
                 logs_view.add_child(LogRow::new(log, self.config.clone()));
-                while logs_view.len() > 200 {
+                while logs_view.len() > 500 {
                     logs_view.remove_child(0);
                 }
             }
