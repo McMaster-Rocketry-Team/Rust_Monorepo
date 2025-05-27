@@ -15,8 +15,8 @@ use cursive::{
         ViewWrapper, scroll,
     },
     views::{
-        Button, Checkbox, Dialog, EditView, LinearLayout, ListView, NamedView, Panel,
-        ScrollView, TextView,
+        Button, Checkbox, Dialog, EditView, LinearLayout, ListView, NamedView, Panel, ScrollView,
+        TextView,
     },
     wrap_impl,
 };
@@ -26,7 +26,6 @@ use target_log::{DefmtLogInfo, TargetLog};
 use tokio::sync::broadcast;
 
 use super::config::MonitorConfig;
-
 
 pub struct LogViewer {
     root: LinearLayout,
@@ -371,13 +370,9 @@ impl View for LogRow {
                     (8, 0),
                     &StyledString::single_span(
                         defmt_info.log_level.to_string().pad_to_width(6),
-                        Style {
-                            effects: Effects::default(),
-                            color: ColorStyle::new(
-                                log_level_foreground_color(defmt_info.log_level),
-                                bg,
-                            ),
-                        },
+                        Style::from_color_style(ColorStyle::front(log_level_foreground_color(
+                            defmt_info.log_level,
+                        ))),
                     ),
                 );
                 let timestamp = defmt_info
@@ -389,10 +384,7 @@ impl View for LogRow {
                     (14, 0),
                     &StyledString::single_span(
                         timestamp,
-                        Style {
-                            effects: Effects::default(),
-                            color: ColorStyle::new(Color::Rgb(100, 100, 100), bg),
-                        },
+                        Style::from_color_style(ColorStyle::front(Color::Rgb(100, 100, 100))),
                     ),
                 );
             }
@@ -430,7 +422,7 @@ impl View for LogRow {
         });
     }
 
-    fn required_size(&mut self, constraint: cursive::Vec2) -> cursive::Vec2 {
+    fn required_size(&mut self, constraint: Vec2) -> Vec2 {
         self.matches = self.config.read().unwrap().matches(&self.log);
         if !self.matches {
             return Vec2::zero();

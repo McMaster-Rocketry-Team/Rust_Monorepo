@@ -54,7 +54,7 @@ pub enum TestingModeSelect {
     MockConnection,
 }
 
-#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, PartialOrd, Ord)]
 pub enum NodeTypeEnum {
     VoidLake,
     AMP,

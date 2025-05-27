@@ -1,9 +1,8 @@
 use anyhow::Result;
 use chrono::{DateTime, Local};
-use pad::PadStr as _;
+use firmware_common_new::can_bus::telemetry::message_aggregator::DecodedMessage;
 use sanitise_file_name::sanitise;
-use std::path::PathBuf;
-use std::time::Instant;
+use std::{path::PathBuf, time::Instant};
 use tokio::{
     fs::{self, File},
     io::AsyncWriteExt,
@@ -11,14 +10,12 @@ use tokio::{
 
 use crate::connection_method::ConnectionMethod;
 
-use super::target_log::TargetLog;
-
-pub struct LogSaver {
+pub struct CanMessageSaver {
     file: File,
     start_time: Instant,
 }
 
-impl LogSaver {
+impl CanMessageSaver {
     pub async fn new(
         start_time: (DateTime<Local>, Instant),
         bin_name: &str,
@@ -29,7 +26,7 @@ impl LogSaver {
 
         let timestamp = start_time.0.format("%Y-%m-%d_%H-%M-%S");
         let log_path = logs_dir.join(format!(
-            "{}_{}_{}.log",
+            "{}_{}_{}.message.log",
             timestamp,
             bin_name,
             sanitise(
@@ -48,7 +45,7 @@ impl LogSaver {
         })
     }
 
-    pub async fn append_log(&mut self, log: &TargetLog) -> Result<()> {
+    pub async fn append_message(&mut self, message: &DecodedMessage) -> Result<()> {
         let elapsed = self.start_time.elapsed();
         let seconds = elapsed.as_secs();
         let nanos = elapsed.subsec_nanos();
@@ -57,37 +54,13 @@ impl LogSaver {
         self.file
             .write_all(
                 &format!(
-                    "{} {} {} ",
+                    "{} {}\n",
                     relative_time,
-                    &log.node_type.short_name().pad_to_width(3),
-                    &log.node_id.map_or(String::from("xxx"), |id| {
-                        format!("{:X}", id).pad(3, '0', pad::Alignment::Right, false)
-                    }),
+                    serde_json::to_string(&message).unwrap(),
                 )
                 .as_bytes(),
             )
             .await?;
-
-        if let Some(defmt_info) = &log.defmt {
-            self.file
-                .write_all(
-                    &format!("[{}]", &defmt_info.log_level.to_string())
-                        .pad_to_width(8)
-                        .as_bytes(),
-                )
-                .await?;
-
-            if let Some(timestamp) = &defmt_info.timestamp {
-                self.file
-                    .write_all(&format!("{:.6} ", &timestamp,).as_bytes())
-                    .await?;
-            }
-        }
-
-        self.file
-            .write_all(&format!("{}\n", &log.log_content).as_bytes())
-            .await?;
-
         Ok(())
     }
 

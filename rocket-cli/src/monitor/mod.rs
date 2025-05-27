@@ -3,6 +3,7 @@ mod log;
 mod message;
 mod status_bar;
 
+use chrono::Local;
 use config::MonitorConfig;
 use cursive::{
     theme::{Palette, PaletteStyle},
@@ -12,6 +13,7 @@ use cursive::{
 use firmware_common_new::can_bus::telemetry::message_aggregator::DecodedMessage;
 pub use log::target_log;
 use log::{LogViewer, log_saver::LogSaver};
+use message::message_saver::CanMessageSaver;
 use status_bar::{SelectedTab, StatusBar};
 use tokio::{
     sync::{broadcast, oneshot, watch},
@@ -23,7 +25,7 @@ use anyhow::Result;
 use std::{
     path::PathBuf,
     sync::{Arc, RwLock},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use self::target_log::TargetLog;
@@ -43,20 +45,20 @@ pub async fn monitor_tui(
     node_type: &NodeTypeEnum,
     firmware_elf_path: &PathBuf,
 ) -> Result<()> {
-    let log_saver = LogSaver::new(
-        firmware_elf_path
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .to_string(),
-        connection_method,
-    )
-    .await?;
+    let start_time = (Local::now(), Instant::now());
+    let bin_name = firmware_elf_path
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+    let log_saver = LogSaver::new(start_time, &bin_name, connection_method).await?;
+    let message_saver = CanMessageSaver::new(start_time, &bin_name, connection_method).await?;
 
     let (status_tx, status_rx) = watch::channel(MonitorStatus::Initialize);
     let (logs_tx, logs_rx) = broadcast::channel::<TargetLog>(256);
     let logs_rx2 = logs_tx.subscribe();
     let (messages_tx, messages_rx) = broadcast::channel::<DecodedMessage>(32);
+    let messages_rx2 = messages_tx.subscribe();
     let (stop_tx, stop_rx) = oneshot::channel::<()>();
 
     let tui_future = tui_task(connection_method.name(), status_rx, logs_rx, stop_tx);
@@ -73,12 +75,18 @@ pub async fn monitor_tui(
     );
 
     let log_saver_future = log_saver_task(log_saver, logs_rx2);
+    let message_saver_future = message_saver_task(message_saver, messages_rx2);
 
-    let (attach_result, tui_result, log_saver_result) =
-        tokio::join!(attach_future, tui_future, log_saver_future);
+    let (attach_result, tui_result, log_saver_result, message_saver_result) = tokio::join!(
+        attach_future,
+        tui_future,
+        log_saver_future,
+        message_saver_future
+    );
     attach_result?;
     tui_result?;
     log_saver_result?;
+    message_saver_result?;
 
     Ok(())
 }
@@ -200,6 +208,18 @@ async fn log_saver_task(
         log_saver.append_log(&log).await.unwrap();
     }
     log_saver.flush().await.unwrap();
+
+    Ok(())
+}
+
+async fn message_saver_task(
+    mut message_saver: CanMessageSaver,
+    mut messages_rx: broadcast::Receiver<DecodedMessage>,
+) -> Result<()> {
+    while let Ok(message) = messages_rx.recv().await {
+        message_saver.append_message(&message).await.unwrap();
+    }
+    message_saver.flush().await.unwrap();
 
     Ok(())
 }

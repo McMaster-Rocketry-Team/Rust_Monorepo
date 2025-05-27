@@ -11,7 +11,7 @@ use super::{amp_status::PowerOutputStatus, CanBusMessage, CanBusMessageEnum};
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[cfg_attr(feature = "wasm", derive(Tsify))]
 #[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
-#[derive(PackedStruct, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(PackedStruct, Clone, Debug, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize)]
 #[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "2")]
 #[repr(C)]
 pub struct PayloadEPSOutputStatus {
@@ -26,7 +26,7 @@ pub struct PayloadEPSOutputStatus {
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[cfg_attr(feature = "wasm", derive(Tsify))]
 #[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
-#[derive(PackedStruct, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(PackedStruct, Clone, Debug, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize)]
 #[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "14")]
 #[repr(C)]
 pub struct PayloadEPSStatusMessage {
