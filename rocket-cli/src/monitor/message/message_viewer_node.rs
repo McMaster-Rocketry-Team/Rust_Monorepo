@@ -13,7 +13,7 @@ pub struct CanMessageViewerNode {
     node_type: u8,
     node_id: u16,
     status: Option<(NodeStatusMessage, Instant)>,
-    pub messages: Vec<CanMessageViewerMessage>,
+    messages: Vec<CanMessageViewerMessage>,
 }
 
 impl CanMessageViewerNode {
@@ -49,6 +49,10 @@ impl CanMessageViewerNode {
                 self.messages.sort_unstable();
             };
         }
+    }
+
+    pub fn height(&self)-> usize {
+        1 + self.messages.iter().map(|m|m.height()).sum::<usize>()
     }
 
     pub fn node_type_enum(&self) -> NodeTypeEnum {

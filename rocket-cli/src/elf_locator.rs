@@ -10,7 +10,6 @@ use std::{
 use anyhow::Result;
 use defmt_decoder::{Location, Table};
 use log::{info, warn};
-use pad::PadStr;
 
 use crate::args::NodeTypeEnum;
 

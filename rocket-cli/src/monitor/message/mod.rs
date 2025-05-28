@@ -63,7 +63,7 @@ impl View for CanMessageViewerChild {
     }
 
     fn required_size(&mut self, constraint: Vec2) -> Vec2 {
-        let h = self.nodes.iter().map(|n| n.messages.len() + 1).sum();
+        let h = self.nodes.iter().map(|n| n.height()).sum();
         Vec2::new(constraint.x, h)
     }
 }
