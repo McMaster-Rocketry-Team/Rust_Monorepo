@@ -57,12 +57,10 @@ impl LogSaver {
         self.file
             .write_all(
                 &format!(
-                    "{} {} {} ",
+                    "{} {:<3} {} ",
                     relative_time,
-                    &log.node_type.short_name().pad_to_width(3),
-                    &log.node_id.map_or(String::from("xxx"), |id| {
-                        format!("{:X}", id).pad(3, '0', pad::Alignment::Right, false)
-                    }),
+                    &log.node_type.short_name(),
+                    &log.node_id.map_or(String::from("xxx"), |id| format!("{:0>3X}", id)),
                 )
                 .as_bytes(),
             )
@@ -79,7 +77,7 @@ impl LogSaver {
 
             if let Some(timestamp) = &defmt_info.timestamp {
                 self.file
-                    .write_all(&format!("{:.6} ", &timestamp,).as_bytes())
+                    .write_all(&format!("{:.6} ", &timestamp).as_bytes())
                     .await?;
             }
         }

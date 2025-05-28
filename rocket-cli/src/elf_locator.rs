@@ -67,17 +67,14 @@ pub fn locate_elf_files(firmware_elf_path: Option<&PathBuf>) -> Result<ELFInfoMa
     let mut find_elf_and_add_to_map = |node_type: NodeTypeEnum, path: &str| -> Result<()> {
         let path = rocketry_path.join(Path::new(path));
         if let Some(elf) = find_newest_elf(&path)? {
-            let a = format!("ELF for {:?} found:", node_type).pad_to_width(25);
-            let b = format!(
-                "{} ({})",
-                elf.path.file_name().unwrap().to_str().unwrap(),
-                elf.profile,
-            )
-            .pad_to_width(20);
             info!(
-                "{}{} built at {}",
-                a,
-                b,
+                "{:<30}{:<20} built at {}",
+                format!("ELF for {:?} found:", node_type),
+                format!(
+                    "{} ({})",
+                    elf.path.file_name().unwrap().to_str().unwrap(),
+                    elf.profile,
+                ),
                 chrono::DateTime::<chrono::Local>::from(elf.created_time)
                     .format("%Y-%m-%d %H:%M:%S")
                     .to_string()

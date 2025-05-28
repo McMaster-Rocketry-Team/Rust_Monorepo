@@ -360,9 +360,7 @@ impl View for LogRow {
             printer.print((0, 0), &self.log.node_type.short_name().pad_to_width(4));
             printer.print(
                 (4, 0),
-                &self.log.node_id.map_or(String::from("xxx "), |id| {
-                    format!("{:X} ", id).pad(4, '0', pad::Alignment::Right, false)
-                }),
+                &self.log.node_id.map_or(String::from("xxx"), |id| format!("{:0>3X}", id)),
             );
 
             if let Some(defmt_info) = &self.log.defmt {
@@ -377,9 +375,7 @@ impl View for LogRow {
                 );
                 let timestamp = defmt_info
                     .timestamp
-                    .map_or(String::new(), |t| format!("{:.3}", t))
-                    .pad_to_width_with_alignment(8, pad::Alignment::Right)
-                    .pad_to_width(9);
+                    .map_or(String::new(), |t| format!("{:>8.3}", t));
                 printer.print_styled(
                     (14, 0),
                     &StyledString::single_span(

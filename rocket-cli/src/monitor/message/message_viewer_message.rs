@@ -157,13 +157,7 @@ impl CanMessageViewerMessage {
             CanBusMessageEnum::Reset(m) => self.draw_fields(
                 printer,
                 &[
-                    (
-                        "reset node id",
-                        true,
-                        format!("{:X}", m.node_id)
-                            .pad(3, '0', pad::Alignment::Right, false)
-                            .into(),
-                    ),
+                    ("reset node id", true, format!("{:0>3X}", m.node_id).into()),
                     (
                         "into bootloader",
                         true,
@@ -188,28 +182,29 @@ impl CanMessageViewerMessage {
             ),
             CanBusMessageEnum::BaroMeasurement(m) => self.draw_fields(
                 printer,
-                &[(
-                    "pressure",
-                    false,
+                &[
+                    (
+                        "pressure",
+                        false,
+                        format!("{:.1}Pa", m.pressure())
+                            .pad_to_width_with_alignment(8, Alignment::Left)
+                            .into(),
+                    ),
                     // TODO
-                    format!("{}", m.pressure())
-                        .pad(3, '0', pad::Alignment::Right, false)
-                        .into(),
-                )],
+                ],
             ),
             CanBusMessageEnum::NodeStatus(_) => unreachable!(),
             CanBusMessageEnum::PreUnixTime(_) => unreachable!(),
             _ => todo!(),
         }
 
-        let count_str = format!("x{}", self.count).pad_to_width(6);
+        let count_str = format!("x{:<5}", self.count);
         printer.print((printer.size.x - 6, 0), &count_str);
 
         let time_str = format!(
-            "{}s ago",
+            "{:>5}s ago",
             (Instant::now() - self.last_received_time).as_secs()
-        )
-        .pad_to_width_with_alignment(10, Alignment::Right);
+        );
         printer.print((printer.size.x - 17, 0), &time_str);
     }
 }
