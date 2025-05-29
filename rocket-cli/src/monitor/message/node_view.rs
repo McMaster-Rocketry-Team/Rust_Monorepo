@@ -2,6 +2,7 @@ use cursive::{Printer, Rect, Vec2, theme::ColorStyle};
 use firmware_common_new::can_bus::{
     messages::CanBusMessageEnum, telemetry::message_aggregator::DecodedMessage,
 };
+use log::warn;
 
 use crate::args::NodeTypeEnum;
 
@@ -26,7 +27,8 @@ impl NodeView {
 
     pub fn update(&mut self, message: &DecodedMessage) {
         if message.node_type != self.node_type || message.node_id != self.node_id {
-            panic!("node type or ID mismatch");
+            warn!("node type or ID mismatch");
+            return;
         }
 
         self.status_row.update(&message);

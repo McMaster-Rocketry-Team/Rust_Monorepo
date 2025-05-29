@@ -14,6 +14,7 @@ use firmware_common_new::can_bus::{
     },
     telemetry::message_aggregator::DecodedMessage,
 };
+use log::warn;
 use pad::{Alignment, PadStr as _};
 
 struct FieldWidget {
@@ -103,7 +104,8 @@ impl MessageRow {
 
     pub fn update(&mut self, message: &DecodedMessage) {
         if message.message.get_message_type() != self.message.get_message_type() {
-            panic!("message type mismatch")
+            warn!("message type mismatch");
+            return;
         }
 
         self.message = message.message.clone();

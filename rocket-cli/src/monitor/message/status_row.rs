@@ -9,6 +9,7 @@ use firmware_common_new::can_bus::{
     messages::{CanBusMessageEnum, node_status::NodeStatusMessage},
     telemetry::message_aggregator::DecodedMessage,
 };
+use log::warn;
 
 use crate::args::NodeTypeEnum;
 
@@ -59,7 +60,8 @@ impl NodeStatusRow {
 
     pub fn update(&mut self, message: &DecodedMessage) {
         if message.node_type != self.node_type() {
-            panic!("node type mismatch");
+            warn!("node type mismatch");
+            return;
         }
 
         match self {
@@ -80,7 +82,8 @@ impl NodeStatusRow {
             }
             NodeStatusRow::Unknown { node_id, .. } => {
                 if *node_id != message.node_id {
-                    panic!("node id mismatch");
+                    warn!("node id mismatch");
+                    return;
                 }
                 if let CanBusMessageEnum::NodeStatus(status) = &message.message {
                     *self = NodeStatusRow::Normal {
@@ -98,7 +101,8 @@ impl NodeStatusRow {
                 ..
             } => {
                 if *node_id != message.node_id {
-                    panic!("node id mismatch");
+                    warn!("node id mismatch");
+                    return;
                 }
                 if let CanBusMessageEnum::NodeStatus(new_status) = &message.message {
                     *status = new_status.clone();

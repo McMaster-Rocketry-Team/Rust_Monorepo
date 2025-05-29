@@ -15,6 +15,7 @@ use firmware_common_new::can_bus::telemetry::message_aggregator::DecodedMessage;
 pub use log::target_log;
 use log::{LogViewer, log_saver::LogSaver};
 use message::{CanMessageViewer, message_saver::CanMessageSaver};
+use node::NodeStatusViewer;
 use status_bar::{SelectedTab, StatusBar};
 use tokio::{
     sync::{broadcast, oneshot, watch},
@@ -62,7 +63,13 @@ pub async fn monitor_tui(
     let messages_rx2 = messages_tx.subscribe();
     let (stop_tx, stop_rx) = oneshot::channel::<()>();
 
-    let tui_future = tui_task(connection_method.name(), status_rx, logs_rx, messages_rx, stop_tx);
+    let tui_future = tui_task(
+        connection_method.name(),
+        status_rx,
+        logs_rx,
+        messages_rx,
+        stop_tx,
+    );
 
     let attach_future = connection_method.attach(
         chip,
@@ -101,6 +108,7 @@ async fn tui_task(
 ) -> Result<()> {
     let first_time = !MonitorConfig::exists();
     let config = Arc::new(RwLock::new(MonitorConfig::load()?));
+    let messages_rx2 = messages_rx.resubscribe();
 
     status_rx.changed().await?;
 
@@ -139,9 +147,13 @@ async fn tui_task(
                 .with_name("message_viewer_hideable"),
             )
             .child(
-                HideableView::new(BoxedView::boxed(TextView::new("Node Status").full_screen()))
-                    .visible(false)
-                    .with_name("node_status_hideable"),
+                HideableView::new(BoxedView::boxed(
+                    NodeStatusViewer::new(messages_rx2)
+                        .with_name("node_status_viewer")
+                        .full_screen(),
+                ))
+                .visible(false)
+                .with_name("node_status_hideable"),
             ),
     );
 
@@ -168,6 +180,11 @@ async fn tui_task(
                 .find_name::<CanMessageViewer>("can_message_viewer")
                 .unwrap();
             can_message_viewer.receive_messages();
+
+            let mut node_status_viewer = runner
+                .find_name::<NodeStatusViewer>("node_status_viewer")
+                .unwrap();
+            node_status_viewer.receive_messages();
         }
         {
             let status_bar = runner.find_name::<StatusBar>("status_bar").unwrap();
