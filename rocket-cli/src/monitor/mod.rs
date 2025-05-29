@@ -13,7 +13,7 @@ use cursive::{
 use firmware_common_new::can_bus::telemetry::message_aggregator::DecodedMessage;
 pub use log::target_log;
 use log::{LogViewer, log_saver::LogSaver};
-use message::message_saver::CanMessageSaver;
+use message::{CanMessageViewer, message_saver::CanMessageSaver};
 use status_bar::{SelectedTab, StatusBar};
 use tokio::{
     sync::{broadcast, oneshot, watch},
@@ -61,7 +61,7 @@ pub async fn monitor_tui(
     let messages_rx2 = messages_tx.subscribe();
     let (stop_tx, stop_rx) = oneshot::channel::<()>();
 
-    let tui_future = tui_task(connection_method.name(), status_rx, logs_rx, stop_tx);
+    let tui_future = tui_task(connection_method.name(), status_rx, logs_rx, messages_rx, stop_tx);
 
     let attach_future = connection_method.attach(
         chip,
@@ -95,6 +95,7 @@ async fn tui_task(
     connection_method_name: String,
     mut status_rx: watch::Receiver<MonitorStatus>,
     logs_rx: broadcast::Receiver<TargetLog>,
+    messages_rx: broadcast::Receiver<DecodedMessage>,
     stop_tx: oneshot::Sender<()>,
 ) -> Result<()> {
     let first_time = !MonitorConfig::exists();
@@ -119,27 +120,27 @@ async fn tui_task(
                     .full_width(),
             )
             .child(
-                HideableView::new(BoxedView::new(Box::new(
+                HideableView::new(BoxedView::boxed(
                     LogViewer::new(config, logs_rx)
                         .with_name("log_viewer")
                         .full_screen(),
-                )))
+                ))
                 .visible(true)
                 .with_name("log_viewer_hideable"),
             )
             .child(
-                HideableView::new(BoxedView::new(Box::new(
-                    TextView::new("Messages").full_screen(),
-                )))
+                HideableView::new(BoxedView::boxed(
+                    CanMessageViewer::new(messages_rx)
+                        .with_name("can_message_viewer")
+                        .full_screen(),
+                ))
                 .visible(false)
                 .with_name("message_viewer_hideable"),
             )
             .child(
-                HideableView::new(BoxedView::new(Box::new(
-                    TextView::new("Node Status").full_screen(),
-                )))
-                .visible(false)
-                .with_name("node_status_hideable"),
+                HideableView::new(BoxedView::boxed(TextView::new("Node Status").full_screen()))
+                    .visible(false)
+                    .with_name("node_status_hideable"),
             ),
     );
 
@@ -159,9 +160,15 @@ async fn tui_task(
 
     while runner.is_running() {
         {
-            let mut log_view = runner.find_name::<LogViewer>("log_viewer").unwrap();
-            log_view.receive_logs();
+            let mut log_viewer = runner.find_name::<LogViewer>("log_viewer").unwrap();
+            log_viewer.receive_logs();
 
+            let mut can_message_viewer = runner
+                .find_name::<CanMessageViewer>("can_message_viewer")
+                .unwrap();
+            can_message_viewer.receive_messages();
+        }
+        {
             let status_bar = runner.find_name::<StatusBar>("status_bar").unwrap();
             let mut log_viewer_hideable = runner
                 .find_name::<HideableView<BoxedView>>("log_viewer_hideable")

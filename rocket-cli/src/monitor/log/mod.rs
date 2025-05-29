@@ -8,7 +8,7 @@ use cursive::{
     Printer, Rect, Vec2, View,
     direction::Direction,
     event::{Callback, Event, EventResult, MouseButton, MouseEvent},
-    theme::{Color, ColorStyle, Effects, Style},
+    theme::{Color, ColorStyle, Style},
     utils::markup::StyledString,
     view::{
         CannotFocus, Finder, Nameable as _, Resizable, ScrollStrategy, Scrollable as _,

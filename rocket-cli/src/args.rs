@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use clap::Parser;
 use clap::Subcommand;
 use serde::Deserialize;
@@ -68,6 +70,25 @@ pub enum NodeTypeEnum {
     EPS2,
     AeroRust,
     Other,
+}
+
+impl Display for NodeTypeEnum {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NodeTypeEnum::VoidLake => write!(f, "Void Lake"),
+            NodeTypeEnum::AMP => write!(f, "AMP"),
+            NodeTypeEnum::AMPSpeedBridge => write!(f, "AMP Speed Bridge"), 
+            NodeTypeEnum::ICARUS => write!(f, "ICARUS"),
+            NodeTypeEnum::PayloadActivation => write!(f, "Payload Activation"),
+            NodeTypeEnum::RocketWifi => write!(f, "Rocket WiFi"),
+            NodeTypeEnum::OZYS => write!(f, "OZYS"),
+            NodeTypeEnum::Bulkhead => write!(f, "Bulkhead"),
+            NodeTypeEnum::EPS1 => write!(f, "EPS1"),
+            NodeTypeEnum::EPS2 => write!(f, "EPS2"),
+            NodeTypeEnum::AeroRust => write!(f, "AeroRust"),
+            NodeTypeEnum::Other => write!(f, "Other"),
+        }
+    }
 }
 
 impl From<u8> for NodeTypeEnum {

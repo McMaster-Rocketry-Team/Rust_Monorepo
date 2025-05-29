@@ -10,7 +10,15 @@ use crate::{
 };
 use anyhow::Result;
 use async_trait::async_trait;
-use firmware_common_new::can_bus::telemetry::message_aggregator::DecodedMessage;
+use firmware_common_new::can_bus::{
+    messages::{
+        avionics_status::{AvionicsStatusMessage, FlightStage},
+        baro_measurement::BaroMeasurementMessage,
+        node_status::{NodeHealth, NodeMode, NodeStatusMessage},
+    },
+    node_types::{OZYS_NODE_TYPE, VOID_LAKE_NODE_TYPE},
+    telemetry::message_aggregator::DecodedMessage,
+};
 use log::{Level, info};
 use tokio::{
     sync::{broadcast, oneshot, watch},
@@ -46,13 +54,15 @@ impl ConnectionMethod for MockConnectionMethod {
         _firmware_elf_path: &PathBuf,
         status_tx: watch::Sender<MonitorStatus>,
         logs_tx: broadcast::Sender<TargetLog>,
-        _messages_tx: broadcast::Sender<DecodedMessage>,
+        messages_tx: broadcast::Sender<DecodedMessage>,
         mut stop_rx: oneshot::Receiver<()>,
     ) -> Result<()> {
         info!("Attaching.....");
         sleep(Duration::from_millis(500)).await;
         status_tx.send(MonitorStatus::Normal)?;
 
+        let mut void_lake_uptime_s = 0u32;
+        let mut ozys_uptime_s = 0u32;
         loop {
             logs_tx
                 .send(TargetLog {
@@ -114,6 +124,61 @@ impl ConnectionMethod for MockConnectionMethod {
                     defmt: None,
                 })
                 .ok();
+
+            messages_tx
+                .send(DecodedMessage {
+                    node_type: VOID_LAKE_NODE_TYPE,
+                    node_id: 0xAB,
+                    message: NodeStatusMessage {
+                        uptime_s: void_lake_uptime_s,
+                        health: NodeHealth::Healthy,
+                        mode: NodeMode::Operational,
+                        custom_status: 0,
+                    }
+                    .into(),
+                    count: 2,
+                })
+                .ok();
+
+            messages_tx
+                .send(DecodedMessage {
+                    node_type: VOID_LAKE_NODE_TYPE,
+                    node_id: 0xAB,
+                    message: AvionicsStatusMessage {
+                        flight_stage: FlightStage::ReadyToLaunch,
+                    }
+                    .into(),
+                    count: 2,
+                })
+                .ok();
+
+            messages_tx
+                .send(DecodedMessage {
+                    node_type: VOID_LAKE_NODE_TYPE,
+                    node_id: 0xAB,
+                    message: BaroMeasurementMessage::new(0, 101325.5, 25.7).into(),
+                    count: 2,
+                })
+                .ok();
+
+            messages_tx
+                .send(DecodedMessage {
+                    node_type: OZYS_NODE_TYPE,
+                    node_id: 0xFAF,
+                    message: NodeStatusMessage {
+                        uptime_s: ozys_uptime_s,
+                        health: NodeHealth::Healthy,
+                        mode: NodeMode::Operational,
+                        custom_status: 0,
+                    }
+                    .into(),
+                    count: 2,
+                })
+                .ok();
+
+            void_lake_uptime_s += 1;
+            ozys_uptime_s += 1;
+
             sleep(Duration::from_secs(1)).await;
 
             if stop_rx.try_recv().is_ok() {

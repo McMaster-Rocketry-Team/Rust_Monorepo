@@ -1,4 +1,4 @@
-use std::{os::linux::raw::stat, sync::RwLock, time::Instant};
+use std::{sync::RwLock, time::Instant};
 
 use convert_case::{Case, Casing};
 use cursive::{
@@ -11,7 +11,6 @@ use firmware_common_new::can_bus::{
         CanBusMessageEnum,
         amp_overwrite::PowerOutputOverwrite,
         amp_status::{AmpOutputStatus, PowerOutputStatus},
-        payload_eps_status::PayloadEPSOutputStatus,
     },
     telemetry::message_aggregator::DecodedMessage,
 };
@@ -202,17 +201,6 @@ impl CanMessageViewerMessage {
         s
     }
 
-    fn format_eps_output_status(status: &PayloadEPSOutputStatus) -> StyledString {
-        let mut s = StyledString::plain(format!("{:>4}mA, ", status.current_ma as f32 / 1000.0));
-
-        s.append(Self::format_amp_output_status(&AmpOutputStatus {
-            overwrote: status.overwrote,
-            status: status.status,
-        }));
-
-        s
-    }
-
     fn format_power_output_overwrite(overwrite: PowerOutputOverwrite) -> StyledString {
         let mut s = match overwrite {
             PowerOutputOverwrite::NoOverwrite => StyledString::single_span(
@@ -233,7 +221,7 @@ impl CanMessageViewerMessage {
         s
     }
 
-    fn draw(&self, printer: &Printer) {
+    pub fn draw(&self, printer: &Printer) {
         // max length 22 characters
         printer.print((0, 0), &self.message_name());
 
@@ -447,9 +435,21 @@ impl CanMessageViewerMessage {
                 printer,
                 1,
                 &[
-                    ("3v3 out", true, Self::format_power_output_overwrite(m.out_3v3)),
-                    ("5v out", true, Self::format_power_output_overwrite(m.out_5v)),
-                    ("9v out", true, Self::format_power_output_overwrite(m.out_9v)),
+                    (
+                        "3v3 out",
+                        true,
+                        Self::format_power_output_overwrite(m.out_3v3),
+                    ),
+                    (
+                        "5v out",
+                        true,
+                        Self::format_power_output_overwrite(m.out_5v),
+                    ),
+                    (
+                        "9v out",
+                        true,
+                        Self::format_power_output_overwrite(m.out_9v),
+                    ),
                 ],
             ),
             CanBusMessageEnum::PayloadEPSSelfTest(m) => self.draw_fields(
@@ -466,24 +466,42 @@ impl CanMessageViewerMessage {
             CanBusMessageEnum::AvionicsStatus(m) => self.draw_fields(
                 printer,
                 1,
-                &[
-                    ("flight stage", true, format!("{:?}", m.flight_stage).to_case(Case::Lower).into()),
-                ],
+                &[(
+                    "flight stage",
+                    true,
+                    format!("{:?}", m.flight_stage).to_case(Case::Lower).into(),
+                )],
             ),
             CanBusMessageEnum::IcarusStatus(m) => self.draw_fields(
                 printer,
                 1,
                 &[
-                    ("air brakes extension", false, format!("{:.2}in", m.extended_inches()).into()),
-                    ("servo current", false, format!("{:.2}A", m.servo_current()).into()),
-                    ("servo speed", false, format!("{:>4}deg/s", m.servo_angular_velocity).into()),
+                    (
+                        "air brakes extension",
+                        false,
+                        format!("{:.2}in", m.extended_inches()).into(),
+                    ),
+                    (
+                        "servo current",
+                        false,
+                        format!("{:.2}A", m.servo_current()).into(),
+                    ),
+                    (
+                        "servo speed",
+                        false,
+                        format!("{:>4}deg/s", m.servo_angular_velocity).into(),
+                    ),
                 ],
             ),
             CanBusMessageEnum::DataTransfer(m) => self.draw_fields(
                 printer,
                 1,
                 &[
-                    ("destination node id", true, format!("{:0>3X}", m.destination_node_id).into()),
+                    (
+                        "destination node id",
+                        true,
+                        format!("{:0>3X}", m.destination_node_id).into(),
+                    ),
                     ("data len", false, format!("{:>2}", m.data().len()).into()),
                     ("start", true, Self::format_bool(m.start_of_transfer)),
                     ("end", true, Self::format_bool(m.end_of_transfer)),
@@ -501,14 +519,12 @@ impl CanMessageViewerMessage {
             CanBusMessageEnum::PreUnixTime(_) => unreachable!(),
         }
 
-        let count_str = format!("x{:<5}", self.count);
-        printer.print((printer.size.x - 6, 0), &count_str);
-
         let time_str = format!(
-            "{:>5}s ago",
-            (Instant::now() - self.last_received_time).as_secs()
+            "{:>5}s ago  x{}",
+            (Instant::now() - self.last_received_time).as_secs(),
+            self.count
         );
-        printer.print((printer.size.x - 17, 0), &time_str);
+        printer.print((printer.size.x - time_str.len(), 0), &time_str);
     }
 }
 impl PartialEq for CanMessageViewerMessage {
