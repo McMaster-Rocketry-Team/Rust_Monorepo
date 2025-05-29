@@ -80,7 +80,7 @@ impl FieldWidget {
     }
 }
 
-pub struct CanMessageViewerMessage {
+pub struct MessageRow {
     pub message: CanBusMessageEnum,
     count: usize,
     last_received_time: Instant,
@@ -89,7 +89,7 @@ pub struct CanMessageViewerMessage {
     bg: Color,
 }
 
-impl CanMessageViewerMessage {
+impl MessageRow {
     pub fn new(message: CanBusMessageEnum, count: usize, bg: Color) -> Self {
         Self {
             message,
@@ -101,12 +101,12 @@ impl CanMessageViewerMessage {
         }
     }
 
-    pub fn update(&mut self, message: DecodedMessage) {
+    pub fn update(&mut self, message: &DecodedMessage) {
         if message.message.get_message_type() != self.message.get_message_type() {
             panic!("message type mismatch")
         }
 
-        self.message = message.message;
+        self.message = message.message.clone();
         self.count += message.count;
         self.last_received_time = Instant::now();
     }
@@ -527,21 +527,21 @@ impl CanMessageViewerMessage {
         printer.print((printer.size.x - time_str.len(), 0), &time_str);
     }
 }
-impl PartialEq for CanMessageViewerMessage {
+impl PartialEq for MessageRow {
     fn eq(&self, other: &Self) -> bool {
         self.message == other.message
     }
 }
 
-impl Eq for CanMessageViewerMessage {}
+impl Eq for MessageRow {}
 
-impl PartialOrd for CanMessageViewerMessage {
+impl PartialOrd for MessageRow {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Ord for CanMessageViewerMessage {
+impl Ord for MessageRow {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.message.cmp(&other.message)
     }

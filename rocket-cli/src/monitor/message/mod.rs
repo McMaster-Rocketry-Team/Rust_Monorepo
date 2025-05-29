@@ -9,12 +9,13 @@ use cursive::{
 use firmware_common_new::can_bus::{
     messages::CanBusMessageEnum, telemetry::message_aggregator::DecodedMessage,
 };
-use message_viewer_node::CanMessageViewerNode;
+use node_view::NodeView;
 use tokio::sync::broadcast;
 
+mod message_row;
 pub mod message_saver;
-mod message_viewer_message;
-mod message_viewer_node;
+mod node_view;
+pub mod status_row;
 
 pub struct CanMessageViewer {
     root: ScrollView<BoxedView>,
@@ -24,8 +25,9 @@ pub struct CanMessageViewer {
 impl CanMessageViewer {
     pub fn new(messages_rx: broadcast::Receiver<DecodedMessage>) -> Self {
         let messages_rx = Arc::new(RwLock::new(messages_rx));
-        let root = BoxedView::boxed(CanMessageViewerChild::new().with_name("can_message_viewer_child"))
-            .scrollable();
+        let root =
+            BoxedView::boxed(CanMessageViewerChild::new().with_name("can_message_viewer_child"))
+                .scrollable();
         Self { root, messages_rx }
     }
 
@@ -37,7 +39,7 @@ impl CanMessageViewer {
 
         let mut messages_rx = self.messages_rx.write().unwrap();
         while let Ok(message) = messages_rx.try_recv() {
-            can_message_viewer.update(message);
+            can_message_viewer.update(&message);
         }
     }
 }
@@ -47,7 +49,7 @@ impl ViewWrapper for CanMessageViewer {
 }
 
 struct CanMessageViewerChild {
-    nodes: Vec<CanMessageViewerNode>,
+    nodes: Vec<NodeView>,
 }
 
 impl CanMessageViewerChild {
@@ -55,7 +57,7 @@ impl CanMessageViewerChild {
         Self { nodes: Vec::new() }
     }
 
-    fn update(&mut self, message: DecodedMessage) {
+    fn update(&mut self, message: &DecodedMessage) {
         if let CanBusMessageEnum::PreUnixTime(_) = message.message {
             return;
         }
@@ -65,10 +67,10 @@ impl CanMessageViewerChild {
             .iter_mut()
             .find(|n| n.node_type_enum() == message.node_type.into())
         {
-            node.update(message);
+            node.update(&message);
         } else {
-            let mut node = CanMessageViewerNode::new(message.node_type, message.node_id);
-            node.update(message);
+            let mut node = NodeView::new(message.node_type, message.node_id);
+            node.update(&message);
             self.nodes.push(node);
             self.nodes.sort_unstable();
         }

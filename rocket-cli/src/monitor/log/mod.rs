@@ -86,7 +86,7 @@ impl LogViewer {
                                 .full_width()
                                 .with_name("module"),
                         )
-                        .child(TextView::new("Search: "))
+                        .child(TextView::new("  Search: "))
                         .child(
                             EditView::new()
                                 .content(&config_c.clone().read().unwrap().search)

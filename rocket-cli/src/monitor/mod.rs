@@ -1,6 +1,7 @@
 mod config;
 mod log;
 mod message;
+mod node;
 mod status_bar;
 
 use chrono::Local;
