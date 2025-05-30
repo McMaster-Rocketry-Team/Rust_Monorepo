@@ -3,7 +3,6 @@ use salty::{PublicKey, Signature};
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Clone, Copy, Debug)]
 pub enum VerifyFirmwareError {
-    SignatureTooShort(usize),
     SaltyError(#[cfg_attr(feature = "defmt", defmt(Debug2Format))] salty::Error),
 }
 
@@ -24,9 +23,6 @@ pub fn verify_firmware(
     signature: &[u8; 64],
     public_key: &[u8; 32],
 ) -> Result<(), VerifyFirmwareError> {
-    if signature.len() != 64 {
-        return Err(VerifyFirmwareError::SignatureTooShort(signature.len()));
-    }
     let signature: &[u8; 64] = signature.as_array().unwrap();
     let signature = Signature::try_from(signature).unwrap();
 
