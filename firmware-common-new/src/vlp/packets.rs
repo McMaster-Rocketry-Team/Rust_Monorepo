@@ -1,6 +1,8 @@
 use core::fmt::Debug;
 
-use crate::utils::FixedLenSerializable;
+use crate::{
+    utils::FixedLenSerializable, vlp::packets::altimeter_telemetry::AltimeterTelemetryPacket,
+};
 use ack::AckPacket;
 use amp_output_overwrite::AMPOutputOverwritePacket;
 use change_mode::ChangeModePacket;
@@ -12,6 +14,7 @@ use self_test_result::SelfTestResultPacket;
 use telemetry::TelemetryPacket;
 
 pub mod ack;
+pub mod altimeter_telemetry;
 pub mod amp_output_overwrite;
 pub mod change_mode;
 pub mod gps_beacon;
@@ -32,6 +35,7 @@ pub enum VLPDownlinkPacket {
     LowPowerTelemetry(LowPowerTelemetryPacket),
     Telemetry(TelemetryPacket),
     SelfTestResult(SelfTestResultPacket),
+    AltimeterTelemetry(AltimeterTelemetryPacket),
 }
 
 impl VLPDownlinkPacket {
@@ -49,6 +53,8 @@ impl VLPDownlinkPacket {
             }
             3 => TelemetryPacket::deserialize(data).map(VLPDownlinkPacket::Telemetry),
             4 => SelfTestResultPacket::deserialize(data).map(VLPDownlinkPacket::SelfTestResult),
+            5 => AltimeterTelemetryPacket::deserialize(data)
+                .map(VLPDownlinkPacket::AltimeterTelemetry),
             _ => None,
         }
     }
@@ -60,6 +66,7 @@ impl VLPDownlinkPacket {
             VLPDownlinkPacket::LowPowerTelemetry(_) => 2,
             VLPDownlinkPacket::Telemetry(_) => 3,
             VLPDownlinkPacket::SelfTestResult(_) => 4,
+            VLPDownlinkPacket::AltimeterTelemetry(_) => 5,
         };
         buffer = &mut buffer[1..];
 
@@ -69,6 +76,7 @@ impl VLPDownlinkPacket {
             VLPDownlinkPacket::LowPowerTelemetry(packet) => packet.serialize(buffer),
             VLPDownlinkPacket::Telemetry(packet) => packet.serialize(buffer),
             VLPDownlinkPacket::SelfTestResult(packet) => packet.serialize(buffer),
+            VLPDownlinkPacket::AltimeterTelemetry(packet) => packet.serialize(buffer),
         }
     }
 }
