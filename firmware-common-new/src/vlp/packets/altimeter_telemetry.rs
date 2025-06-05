@@ -19,7 +19,7 @@ pub struct AltimeterTelemetryPacket {
     #[packed_field(element_size_bits = "11")]
     air_temperature: Integer<TemperatureFacBase, packed_bits::Bits<TEMPERATURE_FAC_BITS>>,
     #[packed_field(element_size_bits = "13")]
-    altitude: Integer<AltitudeFacBase, packed_bits::Bits<ALTITUDE_FAC_BITS>>,
+    altitude_agl: Integer<AltitudeFacBase, packed_bits::Bits<ALTITUDE_FAC_BITS>>,
 }
 
 impl AltimeterTelemetryPacket {
@@ -36,7 +36,7 @@ impl AltimeterTelemetryPacket {
 
             vl_battery_v: BatteryVFac::to_fixed_point_capped(vl_battery_v),
             air_temperature: TemperatureFac::to_fixed_point_capped(air_temperature),
-            altitude: AltitudeFac::to_fixed_point_capped(altitude),
+            altitude_agl: AltitudeFac::to_fixed_point_capped(altitude),
         }
     }
 
@@ -49,7 +49,7 @@ impl AltimeterTelemetryPacket {
     }
 
     pub fn altitude(&self) -> f32 {
-        AltitudeFac::to_float(self.altitude)
+        AltitudeFac::to_float(self.altitude_agl)
     }
 }
 
@@ -58,7 +58,7 @@ impl defmt::Format for AltimeterTelemetryPacket {
     fn format(&self, f: defmt::Formatter) {
         defmt::write!(
             f,
-            "AltimeterTelemetryPacket {{ vl_battery_v: {}, air_temperature: {}, altitude: {} }}",
+            "AltimeterTelemetryPacket {{ vl_battery_v: {}, air_temperature: {}, altitude agl: {} }}",
             self.vl_battery_v(),
             self.air_temperature(),
             self.altitude()

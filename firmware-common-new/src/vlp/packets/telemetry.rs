@@ -56,13 +56,12 @@ pub struct TelemetryPacket {
     pyro_main_continuity: bool,
     pyro_drogue_continuity: bool,
 
-    /// above ground level
     #[packed_field(element_size_bits = "13")]
-    altitude: Integer<AltitudeFacBase, packed_bits::Bits<ALTITUDE_FAC_BITS>>,
+    altitude_agl: Integer<AltitudeFacBase, packed_bits::Bits<ALTITUDE_FAC_BITS>>,
     #[packed_field(element_size_bits = "13")]
-    max_altitude: Integer<AltitudeFacBase, packed_bits::Bits<ALTITUDE_FAC_BITS>>,
+    max_altitude_agl: Integer<AltitudeFacBase, packed_bits::Bits<ALTITUDE_FAC_BITS>>,
     #[packed_field(element_size_bits = "13")]
-    backup_max_altitude: Integer<AltitudeFacBase, packed_bits::Bits<ALTITUDE_FAC_BITS>>,
+    backup_max_altitude_agl: Integer<AltitudeFacBase, packed_bits::Bits<ALTITUDE_FAC_BITS>>,
 
     #[packed_field(element_size_bits = "8")]
     air_speed: Integer<AirSpeedFacBase, packed_bits::Bits<AIR_SPEED_FAC_BITS>>,
@@ -327,9 +326,9 @@ impl TelemetryPacket {
             pyro_main_continuity,
             pyro_drogue_continuity,
 
-            altitude: AltitudeFac::to_fixed_point_capped(altitude),
-            max_altitude: AltitudeFac::to_fixed_point_capped(max_altitude),
-            backup_max_altitude: AltitudeFac::to_fixed_point_capped(backup_max_altitude),
+            altitude_agl: AltitudeFac::to_fixed_point_capped(altitude),
+            max_altitude_agl: AltitudeFac::to_fixed_point_capped(max_altitude),
+            backup_max_altitude_agl: AltitudeFac::to_fixed_point_capped(backup_max_altitude),
 
             air_speed: AirSpeedFac::to_fixed_point_capped(air_speed),
             max_air_speed: AirSpeedFac::to_fixed_point_capped(max_air_speed),
@@ -474,15 +473,15 @@ impl TelemetryPacket {
     }
 
     pub fn altitude(&self) -> f32 {
-        AltitudeFac::to_float(self.altitude)
+        AltitudeFac::to_float(self.altitude_agl)
     }
 
     pub fn max_altitude(&self) -> f32 {
-        AltitudeFac::to_float(self.max_altitude)
+        AltitudeFac::to_float(self.max_altitude_agl)
     }
 
     pub fn backup_max_altitude(&self) -> f32 {
-        AltitudeFac::to_float(self.backup_max_altitude)
+        AltitudeFac::to_float(self.backup_max_altitude_agl)
     }
 
     pub fn air_speed(&self) -> f32 {
@@ -792,9 +791,9 @@ impl defmt::Format for TelemetryPacket {
             vl_stm32_temperature: {}, \
             pyro_main_continuity: {}, \
             pyro_drogue_continuity: {}, \
-            altitude: {}, \
-            max_altitude: {}, \
-            backup_max_altitude: {}, \
+            altitude_agl: {}, \
+            max_altitude_agl: {}, \
+            backup_max_altitude_agl: {}, \
             air_speed: {}, \
             max_air_speed: {}, \
             backup_max_air_speed: {}, \
