@@ -25,7 +25,7 @@ pub enum DeviceToReset {
 }
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
-#[derive(PackedStruct, Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[derive(PackedStruct, Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "1")]
 pub struct ResetPacket {
     #[packed_field(element_size_bits = "8", ty = "enum")]

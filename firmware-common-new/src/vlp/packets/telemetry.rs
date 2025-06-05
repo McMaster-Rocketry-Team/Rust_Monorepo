@@ -33,7 +33,7 @@ fixed_point_factory!(PayloadCurrentFac, f32, 0.0, 2.0, 0.1);
 fixed_point_factory!(PayloadTemperatureFac, f32, 10.0, 85.0, 1.0);
 
 // 48 byte max size to achieve 0.5Hz with 250khz bandwidth + 12sf + 8cr lora
-#[derive(PackedStruct, Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[derive(PackedStruct, Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "45")]
 pub struct TelemetryPacket {
     #[packed_field(bits = "0..4")]

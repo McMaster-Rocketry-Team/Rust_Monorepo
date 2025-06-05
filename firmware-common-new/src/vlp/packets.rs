@@ -28,7 +28,7 @@ pub mod telemetry;
 pub const MAX_VLP_PACKET_SIZE: usize = 100;
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum VLPDownlinkPacket {
     GPSBeacon(GPSBeaconPacket),
     Ack(AckPacket),
@@ -59,7 +59,7 @@ impl VLPDownlinkPacket {
         }
     }
 
-    pub(super) fn serialize(self, mut buffer: &mut [u8]) -> usize {
+    pub(super) fn serialize(&self, mut buffer: &mut [u8]) -> usize {
         buffer[0] = match self {
             VLPDownlinkPacket::GPSBeacon(_) => 0,
             VLPDownlinkPacket::Ack(_) => 1,
@@ -82,7 +82,7 @@ impl VLPDownlinkPacket {
 }
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum VLPUplinkPacket {
     ChangeMode(ChangeModePacket),
     Reset(ResetPacket),

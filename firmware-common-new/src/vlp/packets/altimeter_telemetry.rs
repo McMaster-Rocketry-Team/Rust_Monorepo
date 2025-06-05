@@ -9,12 +9,12 @@ fixed_point_factory!(BatteryVFac, f32, 5.0, 8.5, 0.02);
 fixed_point_factory!(TemperatureFac, f32, -30.0, 85.0, 0.1);
 fixed_point_factory!(AltitudeFac, f32, -100.0, 5000.0, 1.0);
 
-#[derive(PackedStruct, Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[derive(PackedStruct, Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "4")]
 pub struct AltimeterTelemetryPacket {
     #[packed_field(element_size_bits = "8")]
     vl_battery_v: Integer<BatteryVFacBase, packed_bits::Bits<BATTERY_V_FAC_BITS>>,
-    #[packed_field(element_size_bits = "9")]
+    #[packed_field(element_size_bits = "11")]
     air_temperature: Integer<TemperatureFacBase, packed_bits::Bits<TEMPERATURE_FAC_BITS>>,
     #[packed_field(element_size_bits = "13")]
     altitude: Integer<AltitudeFacBase, packed_bits::Bits<ALTITUDE_FAC_BITS>>,
@@ -58,5 +58,23 @@ impl defmt::Format for AltimeterTelemetryPacket {
 impl Into<VLPDownlinkPacket> for AltimeterTelemetryPacket {
     fn into(self) -> VLPDownlinkPacket {
         VLPDownlinkPacket::AltimeterTelemetry(self)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_serialize_deserialize() {
+        let packet = AltimeterTelemetryPacket::new(8.4, 80.2, 4998.0);
+        let packet: VLPDownlinkPacket = packet.into();
+
+        let mut buffer = [0u8; 64];
+        let len = packet.serialize(&mut buffer);
+
+        let deserialized_packet = VLPDownlinkPacket::deserialize(&buffer[..len]).unwrap();
+
+        assert_eq!(deserialized_packet, packet);
     }
 }

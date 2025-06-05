@@ -11,7 +11,7 @@ fixed_point_factory!(LatFac, f64, -90.0, 90.0, 0.00002146);
 fixed_point_factory!(LonFac, f64, -180.0, 180.0, 0.00002146);
 fixed_point_factory!(BatteryVFac, f32, 5.0, 8.5, 0.001);
 
-#[derive(PackedStruct, Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[derive(PackedStruct, Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "8")]
 pub struct GPSBeaconPacket {
     #[packed_field(element_size_bits = "23")]
@@ -54,12 +54,12 @@ impl defmt::Format for GPSBeaconPacket {
     fn format(&self, f: defmt::Formatter) {
         let (lat, lon) = self.lat_lon();
         defmt::write!(
-           f,
-           "GPSBeaconPacket {{ lat: {}, lon: {}, num_of_fix_satellites: {}, battery_v: {} }}",
-           lat,
-           lon,
-           self.num_of_fix_satellites(),
-           self.battery_v(),
+            f,
+            "GPSBeaconPacket {{ lat: {}, lon: {}, num_of_fix_satellites: {}, battery_v: {} }}",
+            lat,
+            lon,
+            self.num_of_fix_satellites(),
+            self.battery_v(),
         )
     }
 }
@@ -67,5 +67,23 @@ impl defmt::Format for GPSBeaconPacket {
 impl Into<VLPDownlinkPacket> for GPSBeaconPacket {
     fn into(self) -> VLPDownlinkPacket {
         VLPDownlinkPacket::GPSBeacon(self)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_serialize_deserialize() {
+        let packet = GPSBeaconPacket::new(Some((89.0, 179.0)), 10, 8.4);
+        let packet: VLPDownlinkPacket = packet.into();
+
+        let mut buffer = [0u8; 64];
+        let len = packet.serialize(&mut buffer);
+
+        let deserialized_packet = VLPDownlinkPacket::deserialize(&buffer[..len]).unwrap();
+
+        assert_eq!(deserialized_packet, packet);
     }
 }

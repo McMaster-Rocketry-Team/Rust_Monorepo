@@ -6,7 +6,7 @@ use crate::can_bus::messages::amp_overwrite::PowerOutputOverwrite;
 use super::VLPUplinkPacket;
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
-#[derive(PackedStruct, Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[derive(PackedStruct, Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "2")]
 pub struct PayloadEPSOutputOverwritePacket {
     #[packed_field(bits = "0..2", ty = "enum")]
