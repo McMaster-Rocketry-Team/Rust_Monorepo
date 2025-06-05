@@ -10,8 +10,10 @@ fixed_point_factory!(TemperatureFac, f32, -30.0, 85.0, 0.1);
 fixed_point_factory!(AltitudeFac, f32, -100.0, 5000.0, 1.0);
 
 #[derive(PackedStruct, Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "4")]
+#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "5")]
 pub struct AltimeterTelemetryPacket {
+    pub pyro_main_continuity: bool,
+    pub pyro_drogue_continuity: bool,
     #[packed_field(element_size_bits = "8")]
     vl_battery_v: Integer<BatteryVFacBase, packed_bits::Bits<BATTERY_V_FAC_BITS>>,
     #[packed_field(element_size_bits = "11")]
@@ -21,8 +23,17 @@ pub struct AltimeterTelemetryPacket {
 }
 
 impl AltimeterTelemetryPacket {
-    pub fn new(vl_battery_v: f32, air_temperature: f32, altitude: f32) -> Self {
+    pub fn new(
+        pyro_main_continuity: bool,
+        pyro_drogue_continuity: bool,
+        vl_battery_v: f32,
+        air_temperature: f32,
+        altitude: f32,
+    ) -> Self {
         Self {
+            pyro_main_continuity,
+            pyro_drogue_continuity,
+
             vl_battery_v: BatteryVFac::to_fixed_point_capped(vl_battery_v),
             air_temperature: TemperatureFac::to_fixed_point_capped(air_temperature),
             altitude: AltitudeFac::to_fixed_point_capped(altitude),
@@ -67,7 +78,7 @@ mod test {
 
     #[test]
     fn test_serialize_deserialize() {
-        let packet = AltimeterTelemetryPacket::new(8.4, 80.2, 4998.0);
+        let packet = AltimeterTelemetryPacket::new(true, false, 8.4, 80.2, 4998.0);
         let packet: VLPDownlinkPacket = packet.into();
 
         let mut buffer = [0u8; 64];
