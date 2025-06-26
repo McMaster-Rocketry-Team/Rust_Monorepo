@@ -19,7 +19,7 @@ use super::VLPDownlinkPacket;
 fixed_point_factory!(LatFac, f64, -90.0, 90.0, 0.00002146);
 fixed_point_factory!(LonFac, f64, -180.0, 180.0, 0.00002146);
 
-fixed_point_factory!(BatteryVFac, f32, 5.0, 8.5, 0.02);
+fixed_point_factory!(BatteryVFac, f32, 2.5, 8.5, 0.01);
 fixed_point_factory!(TemperatureFac, f32, -10.0, 85.0, 0.2);
 fixed_point_factory!(AltitudeFac, f32, -100.0, 5000.0, 1.0);
 fixed_point_factory!(APResidueFac, f32, -1000.0, 1000.0, 1.0);
@@ -34,7 +34,7 @@ fixed_point_factory!(PayloadTemperatureFac, f32, 10.0, 85.0, 1.0);
 
 // 48 byte max size to achieve 0.5Hz with 250khz bandwidth + 12sf + 8cr lora
 #[derive(PackedStruct, Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "45")]
+#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "46")]
 pub struct TelemetryPacket {
     #[packed_field(bits = "0..4")]
     nonce: Integer<u8, packed_bits::Bits<4>>,
@@ -46,7 +46,7 @@ pub struct TelemetryPacket {
     #[packed_field(element_size_bits = "24")]
     lon: Integer<LonFacBase, packed_bits::Bits<LON_FAC_BITS>>,
 
-    #[packed_field(element_size_bits = "8")]
+    #[packed_field(element_size_bits = "10")]
     vl_battery_v: Integer<BatteryVFacBase, packed_bits::Bits<BATTERY_V_FAC_BITS>>,
     #[packed_field(element_size_bits = "9")]
     air_temperature: Integer<TemperatureFacBase, packed_bits::Bits<TEMPERATURE_FAC_BITS>>,
@@ -78,7 +78,7 @@ pub struct TelemetryPacket {
 
     amp_online: bool,
     amp_rebooted_in_last_5s: bool,
-    #[packed_field(element_size_bits = "8")]
+    #[packed_field(element_size_bits = "10")]
     shared_battery_v: Integer<BatteryVFacBase, packed_bits::Bits<BATTERY_V_FAC_BITS>>,
     amp_out1_overwrote: bool,
     #[packed_field(element_size_bits = "2", ty = "enum")]

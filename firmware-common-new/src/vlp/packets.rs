@@ -1,7 +1,7 @@
 use core::fmt::Debug;
 
 use crate::{
-    utils::FixedLenSerializable, vlp::packets::altimeter_telemetry::AltimeterTelemetryPacket,
+    utils::FixedLenSerializable, vlp::packets::{altimeter_telemetry::AltimeterTelemetryPacket, fire_pyro::FirePyroPacket},
 };
 use ack::AckPacket;
 use amp_output_overwrite::AMPOutputOverwritePacket;
@@ -23,6 +23,7 @@ pub mod payload_eps_output_overwrite;
 pub mod reset;
 pub mod self_test_result;
 pub mod telemetry;
+pub mod fire_pyro;
 
 // TODO change
 pub const MAX_VLP_PACKET_SIZE: usize = 100;
@@ -88,6 +89,7 @@ pub enum VLPUplinkPacket {
     Reset(ResetPacket),
     PayloadEPSOutputOverwrite(PayloadEPSOutputOverwritePacket),
     AMPOutputOverwrite(AMPOutputOverwritePacket),
+    FirePyro(FirePyroPacket),
 }
 
 impl VLPUplinkPacket {
@@ -105,16 +107,20 @@ impl VLPUplinkPacket {
             3 => {
                 AMPOutputOverwritePacket::deserialize(data).map(VLPUplinkPacket::AMPOutputOverwrite)
             }
+            4 => {
+                FirePyroPacket::deserialize(data).map(VLPUplinkPacket::FirePyro)
+            }
             _ => None,
         }
     }
 
-    pub(super) fn serialize(self, mut buffer: &mut [u8]) -> usize {
+    pub(super) fn serialize(&self, mut buffer: &mut [u8]) -> usize {
         buffer[0] = match self {
             VLPUplinkPacket::ChangeMode(_) => 0,
             VLPUplinkPacket::Reset(_) => 1,
             VLPUplinkPacket::PayloadEPSOutputOverwrite(_) => 2,
             VLPUplinkPacket::AMPOutputOverwrite(_) => 3,
+            VLPUplinkPacket::FirePyro(_) => 4,
         };
         buffer = &mut buffer[1..];
 
@@ -123,6 +129,7 @@ impl VLPUplinkPacket {
             VLPUplinkPacket::Reset(packet) => packet.serialize(buffer),
             VLPUplinkPacket::PayloadEPSOutputOverwrite(packet) => packet.serialize(buffer),
             VLPUplinkPacket::AMPOutputOverwrite(packet) => packet.serialize(buffer),
+            VLPUplinkPacket::FirePyro(packet) => packet.serialize(buffer),
         }
     }
 }
