@@ -9,7 +9,7 @@ use super::VLPDownlinkPacket;
 // resolution of 2.4m at equator
 fixed_point_factory!(LatFac, f64, -90.0, 90.0, 0.00002146);
 fixed_point_factory!(LonFac, f64, -180.0, 180.0, 0.00002146);
-fixed_point_factory!(BatteryVFac, f32, 5.0, 8.5, 0.001);
+fixed_point_factory!(BatteryVFac, f32, 2.5, 8.5, 0.01);
 
 #[derive(PackedStruct, Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "9")]
@@ -22,7 +22,7 @@ pub struct GPSBeaconPacket {
     #[packed_field(element_size_bits = "5")]
     num_of_fix_satellites: u8,
 
-    #[packed_field(element_size_bits = "12")]
+    #[packed_field(element_size_bits = "10")]
     battery_v: Integer<BatteryVFacBase, packed_bits::Bits<BATTERY_V_FAC_BITS>>,
 
     pyro1_continuity: bool,
