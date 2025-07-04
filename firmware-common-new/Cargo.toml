@@ -31,7 +31,7 @@ heapless = { version = "0.8.0", features = ["serde"], default-features = false }
 postcard = { version = "1.1.1" }
 embassy-futures = "0.1.1"
 crc = "3.2.1"
-embassy-sync = "0.6.2"
+embassy-sync = "0.7.0"
 icao-isa = "1.0.0"
 icao-units = "1.0.0"
 calculate-required-bits = { path = "../calculate-required-bits" }
@@ -52,5 +52,5 @@ heatshrink-lib = "0.4.1"
 approx = "0.5.1"
 env_logger = "0.11.8"
 tokio = { version = "1.44.2", features = ["full"] }
-embassy-sync = { version = "0.6.2", features = ["std"] }
+embassy-sync = { version = "0.7.0", features = ["std"] }
 lipsum = "0.9.1"
