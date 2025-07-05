@@ -5,7 +5,7 @@ use crate::fixed_point_factory;
 
 use super::VLPDownlinkPacket;
 
-fixed_point_factory!(BatteryVFac, f32, 5.0, 8.5, 0.001);
+fixed_point_factory!(BatteryVFac, f32, 2.5, 8.5, 0.01);
 fixed_point_factory!(TemperatureFac, f32, -30.0, 85.0, 0.1);
 
 #[derive(PackedStruct, Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -17,7 +17,7 @@ pub struct LowPowerTelemetryPacket {
 
     amp_online: bool,
 
-    #[packed_field(element_size_bits = "12")]
+    #[packed_field(element_size_bits = "10")]
     battery_v: Integer<BatteryVFacBase, packed_bits::Bits<BATTERY_V_FAC_BITS>>,
 
     #[packed_field(element_size_bits = "11")]

@@ -61,11 +61,18 @@ impl<'a, RK: RadioKind, DL: DelayNs> Radio for LoraPhy<'a, RK, DL> {
             false,
             &modulation_params,
         )?;
+        
 
         let listen_mode = match timeout_ms {
-            Some(timeout) => RxMode::Single(timeout),
+            Some(timeout_ms) => {
+                let timeout_us = timeout_ms as u32 * 1_000;
+                let symbol_time_us = self.lora_config.symbol_time_us();
+                let timeout_symbols = (timeout_us / symbol_time_us) as u16;
+                RxMode::Single(timeout_symbols.min(254))
+            },
             None => RxMode::Continuous,
         };
+        
         self.lora
             .prepare_for_rx(listen_mode, &modulation_params, &rx_pkt_params)
             .await

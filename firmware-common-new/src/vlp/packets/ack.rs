@@ -7,7 +7,7 @@ use super::VLPDownlinkPacket;
 #[derive(PackedStruct, Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "2")]
 pub struct AckPacket {
-    pub sha: u16,
+    pub verification_code: u16,
 }
 
 impl Into<VLPDownlinkPacket> for AckPacket {

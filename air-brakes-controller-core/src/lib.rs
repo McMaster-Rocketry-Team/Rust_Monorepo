@@ -1,4 +1,7 @@
+#![no_std]
+
 mod fmt;
+mod state_propagation;
 
 #[cfg(test)]
 mod tests;

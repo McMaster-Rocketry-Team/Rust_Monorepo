@@ -1,5 +1,5 @@
 use super::{
-    packets::{ack::AckPacket, VLPDownlinkPacket, VLPUplinkPacket, MAX_VLP_PACKET_SIZE},
+    packets::{MAX_VLP_PACKET_SIZE, VLPDownlinkPacket, VLPUplinkPacket, ack::AckPacket},
     radio::Radio,
 };
 use embassy_futures::yield_now;
@@ -8,10 +8,28 @@ use lora_phy::mod_params::{PacketStatus, RadioError};
 use sha2::Digest;
 use sha2::Sha256;
 
+/// @startuml
+/// participant GroundStation
+/// participant Rocket
+/// loop
+///     Rocket->>GroundStation: Downlink telemetry
+///
+///     Note over Rocket: waits up to 300 ms for potential uplink
+///
+///     alt has pending uplink message
+///         GroundStation->>Rocket: Uplink data + SHA-256 signature (key + last downlink + uplink data)
+///         Rocket->>Rocket: Verify signature
+///         Note over GroundStation: waits up to 300 ms for ACK
+///         Rocket-->>GroundStation: ACK, verification code = SHA-256(uplink signature + key)
+///         GroundStation->>GroundStation: Verify ACK
+///     end
+/// end
+/// @enduml
+
 /// buffer contains data without ecc and free space for ecc
 /// data_len is the length of data in the buffer
 /// returns the length of data with ecc in the buffer
-/// 
+///
 /// | data len | ecc len | total len |
 /// | -------- | ------- | --------- |
 /// | 1        | 2       | 3         |
@@ -28,11 +46,7 @@ use sha2::Sha256;
 /// | 12       | 3       | 15        |
 /// | n        | n // 4  | n + n // 4|
 fn encode_ecc(buffer: &mut [u8], data_len: usize) -> usize {
-    let ecc_len = if data_len < 12 {
-        2
-    } else {
-        data_len / 4
-    };
+    let ecc_len = if data_len < 12 { 2 } else { data_len / 4 };
     let encoder = reed_solomon::Encoder::new(ecc_len);
     let encoded = encoder.encode(&buffer[..data_len]);
     buffer[data_len..(data_len + ecc_len)].copy_from_slice(&encoded.ecc());
@@ -159,10 +173,17 @@ impl<'a, 'b, 'c, M: RawMutex, R: Radio> VLPGroundStationDaemon<'a, 'b, 'c, M, R>
 
         // sign with sha256
         hasher.update(&mut self.buffer[..offset]); // hash 3: uplink packet without ecc
-        let hash = hasher.finalize();
-        self.buffer[offset..(offset + 16)].copy_from_slice(&hash[0..16]);
+        let signature = hasher.finalize();
+        self.buffer[offset..(offset + 16)].copy_from_slice(&signature[0..16]);
         offset += 16;
-        let expected_ack_sha = u16::from_be_bytes((&hash[0..2]).try_into().unwrap());
+
+        // calculate expected ack verification code
+        hasher = Sha256::new();
+        hasher.update(&signature);
+        hasher.update(self.key);
+        let full_verification_code = hasher.finalize();
+        let expected_ack_verification_code =
+            u16::from_be_bytes((&full_verification_code[0..2]).try_into().unwrap());
 
         // encode ecc
         offset = encode_ecc(&mut self.buffer, offset);
@@ -181,7 +202,7 @@ impl<'a, 'b, 'c, M: RawMutex, R: Radio> VLPGroundStationDaemon<'a, 'b, 'c, M, R>
 
                 if let Some(VLPDownlinkPacket::Ack(ack_packet)) =
                     VLPDownlinkPacket::deserialize(&self.buffer[..rx_len])
-                    && ack_packet.sha == expected_ack_sha
+                    && ack_packet.verification_code == expected_ack_verification_code
                 {
                     return Ok(packet_status);
                 } else {
@@ -333,15 +354,22 @@ impl<'a, 'b, 'c, M: RawMutex, R: Radio> VLPAvionicsDaemon<'a, 'b, 'c, M, R> {
         self.client.rx_signal.signal((packet, packet_status));
 
         // send ack
-        let sha = u16::from_be_bytes((&expected_signature[0..2]).try_into().unwrap());
-        self.send_ack(sha).await?;
+        self.send_ack(&expected_signature).await?;
 
         Ok(())
     }
 
-    async fn send_ack(&mut self, sha: u16) -> Result<(), VLPDaemonError> {
+    async fn send_ack(&mut self, full_expected_signature: &[u8]) -> Result<(), VLPDaemonError> {
         // construct the ack packet
-        let ack_packet = VLPDownlinkPacket::Ack(AckPacket { sha });
+        let mut hasher = Sha256::new();
+        hasher.update(full_expected_signature);
+        hasher.update(self.key);
+        let full_verification_code = hasher.finalize();
+        let ack_packet = VLPDownlinkPacket::Ack(AckPacket {
+            verification_code: u16::from_be_bytes(
+                (&full_verification_code[0..2]).try_into().unwrap(),
+            ),
+        });
 
         // serialize the packet
         let mut offset = ack_packet.serialize(&mut self.buffer);
@@ -365,14 +393,17 @@ mod tests {
 
     use embassy_futures::{
         join::join,
-        select::{select3, Either3},
+        select::{Either3, select3},
     };
     use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 
-    use crate::{tests::init_logger, vlp::packets::{
-        change_mode::{ChangeModePacket, Mode},
-        low_power_telemetry::LowPowerTelemetryPacket,
-    }};
+    use crate::{
+        tests::init_logger,
+        vlp::packets::{
+            change_mode::{ChangeModePacket, Mode},
+            low_power_telemetry::LowPowerTelemetryPacket,
+        },
+    };
 
     use super::*;
 
@@ -479,7 +510,7 @@ mod tests {
     #[tokio::test]
     async fn test_vlp_client_downlink() {
         init_logger();
-        
+
         let ground_station_client = VLPGroundStation::<NoopRawMutex>::new();
         let avionics_client = VLPAvionics::<NoopRawMutex>::new();
 

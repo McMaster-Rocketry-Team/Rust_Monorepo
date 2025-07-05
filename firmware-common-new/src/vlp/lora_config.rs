@@ -99,14 +99,34 @@ impl LoraConfig {
             _ => panic!("Invalid coding rate"),
         }
     }
+
+    pub fn symbol_time_us(&self) -> u32 {
+        2u32.pow(self.sf as u32) * 1_000_000u32 / self.bw
+    }
 }
 
-impl Into<lora_modulation::BaseBandModulationParams> for &LoraConfig {
-    fn into(self) -> lora_modulation::BaseBandModulationParams {
-        lora_modulation::BaseBandModulationParams::new(
-            self.sf_modulation(),
-            self.bw_modulation(),
-            self.cr_modulation(),
-        )
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_symbol_time_us() {
+        let config = LoraConfig {
+            frequency: 915000000,
+            sf: 12,
+            bw: 125000,
+            cr: 8,
+            power: 14,
+        };
+        assert_eq!(config.symbol_time_us(), 32768);
+
+        let config = LoraConfig {
+            frequency: 915000000,
+            sf: 12,
+            bw: 250000,
+            cr: 8,
+            power: 14,
+        };
+        assert_eq!(config.symbol_time_us(), 16384);
     }
 }
