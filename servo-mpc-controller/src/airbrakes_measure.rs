@@ -7,12 +7,21 @@ use std::{
 
 use csv::Writer;
 use dspower_servo::DSPowerServo;
+use embedded_hal_async::delay::DelayNs;
 use log::{info, LevelFilter};
 use serial::{MockServo, SerialWrapper};
-use tokio::time::{self, Interval};
+use tokio::time::{self, sleep, Interval};
 use tokio_serial::SerialPortBuilderExt as _;
 
 mod serial;
+
+struct Delay;
+
+impl DelayNs for Delay {
+    async fn delay_ns(&mut self, ns: u32) {
+        sleep(Duration::from_nanos(ns as u64)).await;
+    }
+}
 
 #[tokio::main]
 async fn main() {
@@ -41,12 +50,17 @@ async fn main() {
 
     #[cfg(not(feature = "mock_servo"))]
     let (mut servo, angle) = {
-        let serial = tokio_serial::new("/dev/ttyUSB0", 115200)
+        let serial = tokio_serial::new("/dev/ttyACM0", 115200)
             .open_native_async()
             .unwrap();
-        let mut servo = DSPowerServo::new(SerialWrapper(serial));
+        let mut servo = DSPowerServo::new(SerialWrapper(serial), Delay);
+        servo.reset().await.unwrap();
         servo.init(true).await.unwrap();
 
+        // loop {
+        //     servo.move_to(0.1).await.unwrap();
+        // }
+        // return;
         info!("Homing.....");
         servo.reduce_torque().await.unwrap();
         let mut angle = servo.batch_read_measurements().await.unwrap().angle;
@@ -56,7 +70,13 @@ async fn main() {
             interval.tick().await;
             let actual_angle = servo.batch_read_measurements().await.unwrap().angle;
 
-            if angle < actual_angle - 5.0 {
+            if actual_angle < -145.0 {
+                servo.move_to(0.0).await.unwrap();
+                sleep(Duration::from_secs(1)).await;
+                panic!("Homing failed")
+            }
+
+            if angle < actual_angle - 3.0 {
                 angle = actual_angle;
                 servo.move_to(angle).await.unwrap();
                 servo.restore_torque().await.unwrap();
@@ -214,7 +234,7 @@ async fn main() {
 
 async fn step(
     angle: f32,
-    #[cfg(not(feature = "mock_servo"))] servo: &mut DSPowerServo<SerialWrapper>,
+    #[cfg(not(feature = "mock_servo"))] servo: &mut DSPowerServo<SerialWrapper, Delay>,
     #[cfg(feature = "mock_servo")] servo: &mut MockServo,
     interval: &mut Interval,
     i: &mut u32,
@@ -276,7 +296,7 @@ impl SineParams {
 async fn sine(
     params: SineParams,
     period_s: f32,
-    #[cfg(not(feature = "mock_servo"))] servo: &mut DSPowerServo<SerialWrapper>,
+    #[cfg(not(feature = "mock_servo"))] servo: &mut DSPowerServo<SerialWrapper, Delay>,
     #[cfg(feature = "mock_servo")] servo: &mut MockServo,
     interval: &mut Interval,
     i: &mut u32,
@@ -325,7 +345,7 @@ async fn sine(
 async fn sine_amplitude_sweep(
     starting_params: SineParams,
     period_s: f32,
-    #[cfg(not(feature = "mock_servo"))] servo: &mut DSPowerServo<SerialWrapper>,
+    #[cfg(not(feature = "mock_servo"))] servo: &mut DSPowerServo<SerialWrapper, Delay>,
     #[cfg(feature = "mock_servo")] servo: &mut MockServo,
     interval: &mut Interval,
     i: &mut u32,
@@ -347,16 +367,16 @@ async fn sine_amplitude_sweep(
 
         info!("New params: {:?} amplitude: {}", params, params.amplitude());
 
-        if params.min < -120.0 {
-            let diff = -120.0 - params.min;
+        if params.min < -140.0 {
+            let diff = -140.0 - params.min;
             params.min += diff;
             params.max -= diff;
 
             sine(params, period_s, servo, interval, i, writer).await;
             break;
         }
-        if params.max > 120.0 {
-            let diff = params.max - 120.0;
+        if params.max > 140.0 {
+            let diff = params.max - 140.0;
             params.min += diff;
             params.max -= diff;
 

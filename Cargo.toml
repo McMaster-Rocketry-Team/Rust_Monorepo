@@ -9,7 +9,7 @@ members = [
     "dspower-servo",
 
     # commented out because its dependency osqp does not compile on windows
-    # "servo-mpc-controller",
+    "servo-mpc-controller",
 
     "firmware-common-new",
     "firmware-common-ffi",

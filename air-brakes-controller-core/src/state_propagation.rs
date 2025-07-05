@@ -1,16 +1,48 @@
-use nalgebra::{
-    AbstractRotation, Const, Matrix, Quaternion, SVector, SVectorView, Unit, UnitQuaternion,
-    Vector3, ViewStorage,
-};
+use nalgebra::{Const, Matrix, Quaternion, SVector, UnitQuaternion, Vector3, ViewStorageMut};
 
 pub struct RocketState(pub SVector<f32, 15>);
+
+type VectorViewMut<'a, const R: usize> = Matrix<
+    f32,
+    Const<R>,
+    Const<1>,
+    ViewStorageMut<'a, f32, Const<R>, Const<1>, Const<1>, Const<15>>,
+>;
+
+impl RocketState {
+    pub fn new()-> Self{
+        RocketState(SVector::zeros())
+    }
+
+    pub fn delta_orientation(&mut self) -> VectorViewMut<'_, 3> {
+        self.0.fixed_view_mut::<3, 1>(0, 0)
+    }
+
+    pub fn velocity(&mut self) -> VectorViewMut<'_, 3> {
+        self.0.fixed_view_mut::<3, 1>(3, 0)
+    }
+
+    pub fn angular_velocity(&mut self) -> VectorViewMut<'_, 3> {
+        self.0.fixed_view_mut::<3, 1>(6, 0)
+    }
+
+    pub fn altitude(&mut self) -> &mut f32 {
+        &mut self.0[9]
+    }
+
+    pub fn side_ways_moment_coefficient(&mut self) -> &mut f32 {
+        &mut self.0[10]
+    }
+
+    pub fn drag_coefficients(&mut self) -> VectorViewMut<'_, 4> {
+        self.0.fixed_view_mut::<4, 1>(11, 0)
+    }
+}
 
 pub struct StatePropagationConstants {
     pub dt: f32,
     pub launch_site_altitude_asl: f32,
     pub side_cd: f32,
-    pub moment_damping_coefficient: f32,
-    pub moment_damping_coefficient_side: f32,
 }
 
 /// returns air density (kg/m^3) and speed of sound (m/s) at altitude (m)
@@ -52,7 +84,7 @@ pub fn propagate_state(
     let delta_orientation = state.fixed_view::<3, 1>(0, 0);
     // velocity relative to wind
     let velocity = state.fixed_view::<3, 1>(3, 0);
-    let angular_velocity = state.fixed_view::<3, 1>(6, 0);
+    let _angular_velocity = state.fixed_view::<3, 1>(6, 0);
     let altitude = state[9];
     let side_ways_moment_coefficient = state[10];
     let drag_coefficients = state.fixed_view::<4, 1>(11, 0);
@@ -70,6 +102,7 @@ pub fn propagate_state(
 
     // calculate drag coefficient
     let forward_cd = lerp(airbrakes_extention, drag_coefficients.as_slice());
+    // cd is pre-divided by the mass
     let cd = Vector3::new(constants.side_cd, constants.side_cd, forward_cd);
 
     // calculate linear acceleration
@@ -83,6 +116,7 @@ pub fn propagate_state(
 
     // calculate angular acceleration
     let mut angular_acceleration_rocket_frame = Vector3::<f32>::zeros();
+    // side_ways_moment_coefficient is pre-divided by the moment of inertia
     angular_acceleration_rocket_frame.x = 0.5f32
         * air_density
         * signed_square(wind_velocity_rocket_frame.y)
@@ -91,39 +125,28 @@ pub fn propagate_state(
         * air_density
         * signed_square(wind_velocity_rocket_frame.x)
         * side_ways_moment_coefficient;
-
-    let damping_coefficients = Vector3::new(
-        constants.moment_damping_coefficient_side,
-        constants.moment_damping_coefficient_side,
-        constants.moment_damping_coefficient,
-    );
-    angular_acceleration_rocket_frame += -0.5f32
-        * air_density
-        * angular_velocity
-            .map(signed_square)
-            .component_mul(&damping_coefficients);
     let angular_acceleration_world_frame =
         orientation_inv.transform_vector(&angular_acceleration_rocket_frame);
 
     // calculate new state
-    let mut new_state = state.clone();
+    let mut new_state = RocketState(state.clone());
     // update velocity
-    let mut velocity = new_state.fixed_view_mut::<3, 1>(3, 0);
+    let mut velocity = new_state.velocity();
     velocity += acceleration_world_frame * constants.dt;
 
     // update altitude
-    new_state[9] += velocity.z * constants.dt;
+    *new_state.altitude() += velocity.z * constants.dt;
 
     // update angular velocity
-    let mut angular_velocity = new_state.fixed_view_mut::<3, 1>(6, 0);
+    let mut angular_velocity = new_state.angular_velocity();
     angular_velocity += angular_acceleration_world_frame * constants.dt;
 
     // update delta_orientation
     let temp = angular_velocity * constants.dt;
-    let mut delta_orientation = new_state.fixed_view_mut::<3, 1>(0, 0);
+    let mut delta_orientation = new_state.delta_orientation();
     delta_orientation += temp;
 
-    RocketState(new_state)
+    new_state
 }
 
 #[cfg(test)]
@@ -157,5 +180,10 @@ mod test {
             4.0,
             epsilon = 0.0001
         );
+    }
+
+    #[test]
+    fn propagation_test_straight_up() {
+        // let mut state = RocketState()
     }
 }
