@@ -11,7 +11,7 @@ mock_servo = []
 dspower-servo = { version = "*", path = "../dspower-servo", features = [
     "log",
 ] }
-osqp = "0.6.3"
+# osqp = "0.6.3"
 tokio = { version = "1.38.0", features = ["full"] }
 tokio-serial = "5.4.5"
 embedded-io-async = { version = "0.6.1", features = ["std"] }
@@ -24,9 +24,9 @@ anyhow = "1.0.98"
 eframe = "0.31.1"
 egui_plot = "0.32.1"
 
-[[bin]]
-name = "main"
-path = "src/main.rs"
+# [[bin]]
+# name = "main"
+# path = "src/main.rs"
 
 [[bin]]
 name = "airbrakes_measure"

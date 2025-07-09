@@ -1188,15 +1188,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cmake"
-version = "0.1.54"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e7caa3f9de89ddbe2c607f4101924c5abec803763ae9534e4f4d7d8f84aa81f0"
-dependencies = [
- "cc",
-]
-
-[[package]]
 name = "cmsis_dsp"
 version = "0.1.0"
 source = "git+https://github.com/McMaster-Rocketry-Team/cmsis_dsp.rs.git#e446f7726ed82d3fac5d4c7659ab58cb989fd75e"
@@ -2776,12 +2767,6 @@ dependencies = [
  "libc",
  "pkg-config",
 ]
-
-[[package]]
-name = "fs_extra"
-version = "1.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "42703706b716c37f96a77aea830392ad231f44c9e9a67872fa5548707e11b11c"
 
 [[package]]
 name = "function_name"
@@ -4884,26 +4869,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "osqp"
-version = "0.6.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7645d5031372432141d9ca73456c7762993cfc5eed46fb76810f7d356dabb99"
-dependencies = [
- "osqp-sys",
-]
-
-[[package]]
-name = "osqp-sys"
-version = "0.6.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dad4b3e5fcfe866b3f6f966d79e7bf21e2fd9b04980ae15eaf3afac8fb59931f"
-dependencies = [
- "cc",
- "cmake",
- "fs_extra",
-]
-
-[[package]]
 name = "owned_ttf_parser"
 version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6067,7 +6032,6 @@ dependencies = [
  "env_logger",
  "log",
  "nalgebra 0.33.2",
- "osqp",
  "tokio",
  "tokio-serial",
 ]
