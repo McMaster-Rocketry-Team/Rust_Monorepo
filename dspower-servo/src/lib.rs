@@ -55,7 +55,7 @@ pub struct Measurements {
     /// in A
     pub current: f32,
 
-    /// in 0-1
+    /// -1 to 1
     pub pwm_duty_cycle: f32,
 
     /// in C
@@ -423,14 +423,15 @@ where
         serial: &mut S,
         delay: &mut D,
     ) -> Result<(), DSPowerServoError<S>> {
-        let timeout_fut = delay.delay_ms(10);
+        serial.read_exact(buffer).await.map_err(DSPowerServoError::from_read_exact_error)
+        // let timeout_fut = delay.delay_ms(10);
 
-        let read_fut = serial.read_exact(buffer);
+        // let read_fut = serial.read_exact(buffer);
 
-        match select(timeout_fut, read_fut).await {
-            Either::First(_) => Err(DSPowerServoError::ReadTimeout),
-            Either::Second(result) => result.map_err(DSPowerServoError::from_read_exact_error),
-        }
+        // match select(timeout_fut, read_fut).await {
+        //     Either::First(_) => Err(DSPowerServoError::ReadTimeout),
+        //     Either::Second(result) => result.map_err(DSPowerServoError::from_read_exact_error),
+        // }
     }
 }
 
