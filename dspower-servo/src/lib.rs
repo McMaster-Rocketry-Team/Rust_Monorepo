@@ -285,7 +285,10 @@ where
             .map_err(DSPowerServoError::SerialError)?;
 
         let response_buffer = &mut self.buffer[..6];
-        Self::read_exact_with_timeout(response_buffer, &mut self.serial, &mut self.delay).await?;
+        self.serial
+            .read_exact(response_buffer)
+            .await
+            .map_err(DSPowerServoError::from_read_exact_error)?;
         Self::verify_checksum(response_buffer)?;
 
         Ok(ServoStatus::unpack(&[response_buffer[4]]).unwrap())
@@ -308,7 +311,10 @@ where
             .map_err(DSPowerServoError::SerialError)?;
 
         let response_buffer = &mut self.buffer[..19];
-        Self::read_exact_with_timeout(response_buffer, &mut self.serial, &mut self.delay).await?;
+        self.serial
+            .read_exact(response_buffer)
+            .await
+            .map_err(DSPowerServoError::from_read_exact_error)?;
         Self::verify_checksum(response_buffer)?;
 
         let measurements_raw = MeasurementsRaw::unpack_from_slice(&response_buffer[6..18]).unwrap();
@@ -333,7 +339,10 @@ where
             .map_err(DSPowerServoError::SerialError)?;
 
         let response_buffer = &mut self.buffer[..(7 + buf.len())];
-        Self::read_exact_with_timeout(response_buffer, &mut self.serial, &mut self.delay).await?;
+        self.serial
+            .read_exact(response_buffer)
+            .await
+            .map_err(DSPowerServoError::from_read_exact_error)?;
         Self::verify_checksum(response_buffer)?;
 
         buf.copy_from_slice(&response_buffer[6..(6 + buf.len())]);
@@ -382,7 +391,10 @@ where
         log_info!("write done");
 
         let response_buffer = &mut self.buffer[..(7 + value.len())];
-        Self::read_exact_with_timeout(response_buffer, &mut self.serial, &mut self.delay).await?;
+        self.serial
+            .read_exact(response_buffer)
+            .await
+            .map_err(DSPowerServoError::from_read_exact_error)?;
         log_info!("read done");
         Self::verify_checksum(response_buffer)?;
 
@@ -416,22 +428,6 @@ where
         } else {
             Ok(())
         }
-    }
-
-    async fn read_exact_with_timeout(
-        buffer: &mut [u8],
-        serial: &mut S,
-        delay: &mut D,
-    ) -> Result<(), DSPowerServoError<S>> {
-        serial.read_exact(buffer).await.map_err(DSPowerServoError::from_read_exact_error)
-        // let timeout_fut = delay.delay_ms(10);
-
-        // let read_fut = serial.read_exact(buffer);
-
-        // match select(timeout_fut, read_fut).await {
-        //     Either::First(_) => Err(DSPowerServoError::ReadTimeout),
-        //     Either::Second(result) => result.map_err(DSPowerServoError::from_read_exact_error),
-        // }
     }
 }
 

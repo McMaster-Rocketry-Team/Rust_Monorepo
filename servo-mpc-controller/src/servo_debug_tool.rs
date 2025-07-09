@@ -5,7 +5,7 @@ use std::{
 };
 
 use dspower_servo::DSPowerServo;
-use eframe::egui::{self, Vec2, Vec2b, Visuals};
+use eframe::egui::{self, Vec2, Vec2b};
 use egui_plot::{Corner, Legend, Line, Plot, PlotPoints};
 use embedded_hal_async::delay::DelayNs;
 use tokio::{
