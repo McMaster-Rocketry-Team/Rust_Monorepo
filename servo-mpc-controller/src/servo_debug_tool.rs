@@ -1,28 +1,16 @@
 use std::{
     collections::VecDeque,
-    sync::{
-        Arc, Mutex,
-        mpsc::{Receiver, SyncSender, TryRecvError, sync_channel},
-    },
+    sync::mpsc::{Receiver, SyncSender, TryRecvError, sync_channel},
     time::Duration,
 };
 
-use anyhow::Result;
-use cursive::{
-    theme::{Palette, PaletteStyle},
-    view::Nameable,
-    views::{LinearLayout, SliderView, TextView},
-};
 use dspower_servo::DSPowerServo;
-use eframe::egui;
-use egui_plot::{Legend, Line, Plot, PlotPoints};
+use eframe::egui::{self, Vec2, Vec2b, Visuals};
+use egui_plot::{Corner, Legend, Line, Plot, PlotPoints};
 use embedded_hal_async::delay::DelayNs;
 use tokio::{
-    fs::OpenOptions,
-    io::{AsyncWriteExt, BufWriter},
     runtime::Runtime,
-    spawn,
-    time::{self, Instant, interval, sleep},
+    time::{Instant, interval, sleep},
 };
 use tokio_serial::SerialPortBuilderExt as _;
 
@@ -77,15 +65,12 @@ impl DelayNs for Delay {
         sleep(Duration::from_nanos(ns as u64)).await;
     }
 }
-
-const MIN_ANGLE: f32 = -145.0;
-const MAX_ANGLE: f32 = 145.0;
-
 struct GuiApp {
     rx: Receiver<Sample>,    // telemetry
     cmd_tx: SyncSender<f32>, // GUI → servo
     buf: VecDeque<Sample>,   // sliding window
-    slider: f32,             // commanded angle (deg)
+    slider: f32,             // commanded angle
+    paused: bool,            // pause flag
 }
 
 impl GuiApp {
@@ -94,20 +79,25 @@ impl GuiApp {
             rx,
             cmd_tx,
             buf: VecDeque::with_capacity(MAX_POINTS),
-            slider: initial_angle, // start slider at real servo angle
+            slider: initial_angle,
+            paused: false,
         }
     }
 
+    /// Pull everything from the channel; keep or discard depending on pause.
     fn ingest(&mut self) {
         loop {
             match self.rx.try_recv() {
                 Ok(s) => {
-                    if self.buf.len() == MAX_POINTS {
-                        self.buf.pop_front();
+                    if !self.paused {
+                        if self.buf.len() == MAX_POINTS {
+                            self.buf.pop_front();
+                        }
+                        self.buf.push_back(s);
                     }
-                    self.buf.push_back(s);
+                    // if paused: discard sample → channel won’t clog
                 }
-                Err(TryRecvError::Empty) | Err(TryRecvError::Disconnected) => break,
+                Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
             }
         }
     }
@@ -117,35 +107,78 @@ impl eframe::App for GuiApp {
     fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
         self.ingest();
 
-        // ─── slider UI ───
+        // ─── controls panel ───
         egui::TopBottomPanel::top("controls").show(ctx, |ui| {
+            // 1) Pause/Resume button (first row)
+            let lbl = if self.paused { "Resume" } else { "Pause" };
+            if ui.button(lbl).clicked() {
+                self.paused = !self.paused;
+            }
+
+            ui.add_space(4.0); // small gap
+
+            // 2) full-width slider (second row)
             ui.spacing_mut().slider_width = ui.available_width();
             let changed = ui
                 .add(
                     egui::Slider::new(&mut self.slider, -145.0..=145.0)
-                        .step_by(0.1),
+                        .step_by(0.1)
+                        .text("Commanded angle (°)"),
                 )
                 .changed();
             if changed {
-                // non-blocking; drop if worker hasn’t consumed the previous value
                 let _ = self.cmd_tx.try_send(self.slider);
             }
         });
 
-        // ─── plots ───
+        // ─── combined plot ───
+        let current_buf = &self.buf; // move a reference into the closure
+
+        let coord_fmt = egui_plot::CoordinatesFormatter::new(move |point, _| {
+            // find the sample closest in time to the cursor
+            if let Some(s) = current_buf
+                .iter()
+                .min_by(|a, b| (a.t - point.x).abs().partial_cmp(&(b.t - point.x).abs()).unwrap())
+            {
+                // build one multiline string that shows *all* series values
+                format!(
+                    "t = {:>6.2}s\ncommanded = {:>6.1}°\nactual = {:>6.1} °\nduty = {:>5.1}%",
+                    s.t,
+                    s.cmd,
+                    s.act,
+                    s.duty * 100.0
+                )
+            } else {
+                "".to_owned()
+            }
+        });
+
         egui::CentralPanel::default().show(ctx, |ui| {
             Plot::new("angles + duty")
-                .include_y(-145.0)
-                .include_y(145.0)
-                .legend(Legend::default())
+                .allow_zoom(Vec2b::new(false, false))
+                .allow_boxed_zoom(false)
+                .allow_scroll(Vec2b::new(false, false))
+                .allow_drag(Vec2b::new(false, false))
+                .default_y_bounds(-145.0, 145.0)
+                .default_x_bounds(
+                    self.buf.back().map_or(0.0, |s| s.t) - 20.0,
+                    self.buf.back().map_or(0.0, |s| s.t),
+                )
+                .set_margin_fraction(Vec2::new(0.0, 0.0))
+                .legend(Legend::default().position(Corner::LeftTop))
+                .coordinates_formatter(Corner::LeftBottom, coord_fmt)
                 .show(ui, |plot_ui| {
-                    let cmd:  PlotPoints = self.buf.iter().map(|s| [s.t, s.cmd  as f64]).collect();
-                    let act:  PlotPoints = self.buf.iter().map(|s| [s.t, s.act  as f64]).collect();
-                    let duty: PlotPoints = self.buf.iter().map(|s| [s.t, s.duty as f64 * 100.0]).collect();
+                    let cmd: PlotPoints = self.buf.iter().map(|s| [s.t, s.cmd as f64]).collect();
+                    let act: PlotPoints = self.buf.iter().map(|s| [s.t, s.act as f64]).collect();
+                    let duty: PlotPoints = self
+                        .buf
+                        .iter()
+                        .map(|s| [s.t, s.duty as f64 * 100.0]) // scale 0–1 → 0–100
+                        .collect();
 
-                    plot_ui.line(Line::new("commanded", cmd ));
-                    plot_ui.line(Line::new("actual", act ));
-                    plot_ui.line(Line::new("duty cycle", duty)); // values 0‥1
+                    plot_ui.line(Line::new("commanded", cmd));
+                    plot_ui.line(Line::new("actual", act));
+                    plot_ui.line(Line::new("duty %", duty));
                 });
         });
 

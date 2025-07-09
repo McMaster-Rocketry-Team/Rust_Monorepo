@@ -6059,7 +6059,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "csv",
- "cursive",
  "dspower-servo",
  "eframe",
  "egui_plot",
@@ -6069,7 +6068,6 @@ dependencies = [
  "log",
  "nalgebra 0.33.2",
  "osqp",
- "term_size",
  "tokio",
  "tokio-serial",
 ]
@@ -6459,16 +6457,6 @@ dependencies = [
  "once_cell",
  "rustix 1.0.7",
  "windows-sys 0.59.0",
-]
-
-[[package]]
-name = "term_size"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e4129646ca0ed8f45d09b929036bafad5377103edd06e50bf574b353d2b08d9"
-dependencies = [
- "libc",
- "winapi",
 ]
 
 [[package]]
