@@ -20,7 +20,7 @@ pub enum NodeHealth {
     Warning = 1,
     /// The node encountered a major failure.
     Error = 2,
-    ///The node suffered a fatal malfunction.
+    /// The node suffered a fatal malfunction.
     Critical = 3,
 }
 

@@ -21,10 +21,10 @@ fixed_point_factory!(LonFac, f64, -180.0, 180.0, 0.00002146);
 
 fixed_point_factory!(BatteryVFac, f32, 2.5, 8.5, 0.01);
 fixed_point_factory!(TemperatureFac, f32, -10.0, 85.0, 0.2);
-fixed_point_factory!(AltitudeFac, f32, -100.0, 5000.0, 1.0);
+fixed_point_factory!(AltitudeFac, f32, -100.0, 6000.0, 1.0);
 fixed_point_factory!(APResidueFac, f32, -1000.0, 1000.0, 1.0);
 fixed_point_factory!(AirSpeedFac, f32, -100.0, 400.0, 2.0);
-fixed_point_factory!(AirBrakesExtensionInchFac, f32, 0.0, 0.9, 0.04);
+fixed_point_factory!(AirBrakesExtensionPercentFac, f32, 0.0, 1.0, 0.04);
 fixed_point_factory!(TiltDegFac, f32, -90.0, 90.0, 1.0);
 fixed_point_factory!(CdFac, f32, 0.4, 0.85, 0.01);
 
@@ -107,8 +107,8 @@ pub struct TelemetryPacket {
     icarus_rebooted_in_last_5s: bool,
     #[packed_field(element_size_bits = "5")]
     air_brakes_extention_inch: Integer<
-        AirBrakesExtensionInchFacBase,
-        packed_bits::Bits<AIR_BRAKES_EXTENSION_INCH_FAC_BITS>,
+        AirBrakesExtensionPercentFacBase,
+        packed_bits::Bits<AIR_BRAKES_EXTENSION_PERCENT_FAC_BITS>,
     >,
     #[packed_field(element_size_bits = "9")]
     air_brakes_servo_temp: Integer<TemperatureFacBase, packed_bits::Bits<TEMPERATURE_FAC_BITS>>,
@@ -362,7 +362,7 @@ impl TelemetryPacket {
 
             icarus_online,
             icarus_rebooted_in_last_5s,
-            air_brakes_extention_inch: AirBrakesExtensionInchFac::to_fixed_point_capped(
+            air_brakes_extention_inch: AirBrakesExtensionPercentFac::to_fixed_point_capped(
                 air_brakes_extention_inch,
             ),
             air_brakes_servo_temp: TemperatureFac::to_fixed_point_capped(air_brakes_servo_temp),
@@ -585,7 +585,7 @@ impl TelemetryPacket {
     }
 
     pub fn air_brakes_extention_inch(&self) -> f32 {
-        AirBrakesExtensionInchFac::to_float(self.air_brakes_extention_inch)
+        AirBrakesExtensionPercentFac::to_float(self.air_brakes_extention_inch)
     }
 
     pub fn air_brakes_servo_temp(&self) -> f32 {

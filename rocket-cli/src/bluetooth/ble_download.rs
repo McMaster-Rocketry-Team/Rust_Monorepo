@@ -12,6 +12,46 @@ use uuid::Uuid;
 
 use crate::args::NodeTypeEnum;
 
+
+// @startuml
+// scale 2
+
+// participant Laptop
+// participant PayloadActivationPCB
+// participant TargetNode
+
+// note over Laptop,PayloadActivationPCB : Bluetooth
+// note over TargetNode,PayloadActivationPCB : CAN Bus
+
+// Laptop->>PayloadActivationPCB: Handshake start (target node)
+// PayloadActivationPCB->>Laptop: Window size
+
+// PayloadActivationPCB->>TargetNode: ResetMessage into_bootloader=true
+// TargetNode->>TargetNode: enter DFU
+// activate TargetNode
+
+// loop
+//   Laptop->>PayloadActivationPCB: Chunk (length = MTU x window size)
+//   PayloadActivationPCB->>Laptop: Status
+  
+//   loop
+//     PayloadActivationPCB->>TargetNode: DataTransferMessage (max length 32 bytes)
+//     TargetNode->>PayloadActivationPCB: AckMessage
+//   end
+// end
+
+// Laptop->>PayloadActivationPCB: Transfer End
+
+// PayloadActivationPCB->>TargetNode: DataTransferMessage
+// TargetNode->>PayloadActivationPCB: AckMessage
+// TargetNode->>TargetNode: exit DFU
+// deactivate TargetNode
+
+// PayloadActivationPCB->>Laptop: Status
+
+
+// @enduml
+
 const CHUNK_CHAR_UUID: Uuid = Uuid::from_u128(0xfba7_891b_18cb_4055_ba5d_0e57396c2fcf);
 const READY_CHAR_UUID: Uuid = Uuid::from_u128(0x5ff9_e042_eced_4d02_8f82_c99e81df389b);
 const TARGET_ID_CHAR_UUID: Uuid = Uuid::from_u128(0x7090_bb12_25a4_46a2_8a6a_0b78b09bfcb0);

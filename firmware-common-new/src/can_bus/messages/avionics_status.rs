@@ -17,7 +17,7 @@ use super::{CanBusMessage, CanBusMessageEnum};
 pub enum FlightStage {
     LowPower = 0,
     SelfTest = 1,
-    ReadyToLaunch = 2,
+    Armed = 2,
     PoweredAscent = 3,
     Coasting = 4,
     DrogueDeployed = 5,

@@ -11,6 +11,7 @@ fixed_point_factory!(TemperatureFac, f32, -30.0, 85.0, 0.1);
 #[derive(PackedStruct, Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "4")]
 pub struct LowPowerTelemetryPacket {
+    // TODO add nonce
     #[packed_field(element_size_bits = "5")]
     num_of_fix_satellites: u8,
     gps_fixed: bool,
@@ -19,6 +20,7 @@ pub struct LowPowerTelemetryPacket {
 
     #[packed_field(element_size_bits = "10")]
     battery_v: Integer<BatteryVFacBase, packed_bits::Bits<BATTERY_V_FAC_BITS>>,
+    // TODO add shared battery v
 
     #[packed_field(element_size_bits = "11")]
     air_temperature: Integer<TemperatureFacBase, packed_bits::Bits<TEMPERATURE_FAC_BITS>>,

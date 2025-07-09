@@ -8,7 +8,7 @@ use super::VLPUplinkPacket;
 pub enum Mode {
     LowPower = 0,
     SelfTest = 1,
-    ReadyToLaunch = 2,
+    Armed = 2,
     Landed = 3,
 }
 

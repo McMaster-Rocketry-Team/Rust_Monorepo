@@ -20,11 +20,13 @@ pub struct SelfTestResultPacket {
     pub amp_out3_ok: bool,
     pub amp_out4_ok: bool,
 
+    // TODO icarus self test message
     pub icarus_reachable: bool,
     pub icarus_imu_ok: bool,
     pub icarus_baro_ok: bool,
     pub icarus_servo_ok: bool,
 
+    // TODO ozys self test message
     pub ozys1_reachable: bool,
     pub ozys1_sd_ok: bool,
 

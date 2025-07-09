@@ -9,6 +9,8 @@ use sha2::Digest;
 use sha2::Sha256;
 
 /// @startuml
+/// scale 2
+/// 
 /// participant GroundStation
 /// participant Rocket
 /// loop
@@ -20,7 +22,7 @@ use sha2::Sha256;
 ///         GroundStation->>Rocket: Uplink data + SHA-256 signature (key + last downlink + uplink data)
 ///         Rocket->>Rocket: Verify signature
 ///         Note over GroundStation: waits up to 300 ms for ACK
-///         Rocket-->>GroundStation: ACK, verification code = SHA-256(uplink signature + key)
+///         Rocket->>GroundStation: ACK, verification code = SHA-256(uplink signature + key)
 ///         GroundStation->>GroundStation: Verify ACK
 ///     end
 /// end
@@ -571,7 +573,7 @@ mod tests {
             let send_fut = async {
                 let send_result = ground_station_client
                     .send(VLPUplinkPacket::ChangeMode(ChangeModePacket {
-                        mode: Mode::ReadyToLaunch,
+                        mode: Mode::Armed,
                     }))
                     .await;
 
@@ -597,7 +599,7 @@ mod tests {
             assert_matches!(
                 received_packet,
                 VLPUplinkPacket::ChangeMode(ChangeModePacket {
-                    mode: Mode::ReadyToLaunch
+                    mode: Mode::Armed
                 })
             );
         };

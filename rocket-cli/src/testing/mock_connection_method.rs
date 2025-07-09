@@ -145,7 +145,7 @@ impl ConnectionMethod for MockConnectionMethod {
                     node_type: VOID_LAKE_NODE_TYPE,
                     node_id: 0xAB,
                     message: AvionicsStatusMessage {
-                        flight_stage: FlightStage::ReadyToLaunch,
+                        flight_stage: FlightStage::Armed,
                     }
                     .into(),
                     count: 2,

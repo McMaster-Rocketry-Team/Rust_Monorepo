@@ -28,7 +28,7 @@ pub struct DataTransferMessage {
     data: [u8; 32],
     data_len: u8,
     /// Message sequence number used to detect duplicates and ensure ordering.
-    /// Each DataTransferMessage increments message_i by 1 relative to the previous message
+    /// Each DataTransferMessage increments sequence_number by 1 relative to the previous message
     /// in the same transfer sequence. Wraps from 255 back to 0.
     pub sequence_number: u8,
     pub start_of_transfer: bool,
