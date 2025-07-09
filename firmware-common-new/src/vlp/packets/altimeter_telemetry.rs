@@ -58,7 +58,9 @@ impl defmt::Format for AltimeterTelemetryPacket {
     fn format(&self, f: defmt::Formatter) {
         defmt::write!(
             f,
-            "AltimeterTelemetryPacket {{ vl_battery_v: {}, air_temperature: {}, altitude agl: {} }}",
+            "AltimeterTelemetryPacket {{ pyro_main_continuity: {}, pyro_drogue_continuity: {}, vl_battery_v: {}, air_temperature: {}, altitude_agl: {} }}",
+            self.pyro_main_continuity,
+            self.pyro_drogue_continuity,
             self.vl_battery_v(),
             self.air_temperature(),
             self.altitude()
