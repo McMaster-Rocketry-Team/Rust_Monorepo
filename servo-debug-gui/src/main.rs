@@ -4,10 +4,11 @@ use std::{
     time::Duration,
 };
 
-use dspower_servo::DSPowerServo;
+use dspower_servo::{DSPowerServo, ServoSlidingModeController};
 use eframe::egui::{self, Vec2, Vec2b};
 use egui_plot::{Corner, Legend, Line, Plot, PlotPoints};
 use embedded_hal_async::delay::DelayNs;
+use log::LevelFilter;
 use tokio::{
     runtime::Runtime,
     time::{Instant, interval, sleep},
@@ -29,11 +30,12 @@ struct Sample {
 const MAX_POINTS: usize = 20 * 100; // 20 s × 100 Hz
 
 async fn servo_worker(
-    mut servo: DSPowerServo<SerialWrapper, Delay>,
+    mut servo: DSPowerServo<SerialWrapper>,
     cmd_rx: Receiver<f32>,         // GUI → servo (std sync_channel)
     sample_tx: SyncSender<Sample>, // servo → GUI
     mut current_cmd: f32,          // last command seen
 ) {
+    let mut controller = ServoSlidingModeController::new(&mut servo, -145.0..145.0, 3.5, 3.0);
     let start = Instant::now();
     let mut tk = interval(Duration::from_millis(10)); // 100 Hz
 
@@ -44,7 +46,7 @@ async fn servo_worker(
             current_cmd = new_cmd;
         }
 
-        let m = servo.batch_read_measurements().await.unwrap();
+        let m = controller.step(current_cmd).await.unwrap();
         sample_tx
             .try_send(Sample {
                 t: start.elapsed().as_secs_f64(),
@@ -53,8 +55,6 @@ async fn servo_worker(
                 duty: m.pwm_duty_cycle,
             })
             .unwrap();
-
-        servo.move_to(current_cmd).await.unwrap()
     }
 }
 
@@ -136,10 +136,12 @@ impl eframe::App for GuiApp {
 
         let coord_fmt = egui_plot::CoordinatesFormatter::new(move |point, _| {
             // find the sample closest in time to the cursor
-            if let Some(s) = current_buf
-                .iter()
-                .min_by(|a, b| (a.t - point.x).abs().partial_cmp(&(b.t - point.x).abs()).unwrap())
-            {
+            if let Some(s) = current_buf.iter().min_by(|a, b| {
+                (a.t - point.x)
+                    .abs()
+                    .partial_cmp(&(b.t - point.x).abs())
+                    .unwrap()
+            }) {
                 // build one multiline string that shows *all* series values
                 format!(
                     "t = {:>6.2}s\ncommanded = {:>6.1}°\nactual = {:>6.1} °\nduty = {:>5.1}%",
@@ -187,6 +189,11 @@ impl eframe::App for GuiApp {
 }
 
 fn main() -> eframe::Result<()> {
+    env_logger::builder()
+        .filter_level(LevelFilter::Info)
+        .try_init()
+        .unwrap();
+
     // std-lib channels
     let (sample_tx, sample_rx) = sync_channel::<Sample>(MAX_POINTS);
     let (cmd_tx, cmd_rx) = sync_channel::<f32>(1); // cap 1 → latest wins
@@ -200,8 +207,8 @@ fn main() -> eframe::Result<()> {
             .open_native_async()
             .expect("open serial port");
 
-        let mut servo = DSPowerServo::new(SerialWrapper(serial), Delay);
-        servo.reset().await.unwrap();
+        let mut servo = DSPowerServo::new(SerialWrapper(serial));
+        servo.reset(&mut Delay).await.unwrap();
         servo.init(true).await.unwrap();
 
         // first measurement gives us the true starting angle
