@@ -136,6 +136,7 @@ impl MessageRow {
             CanBusMessageEnum::PayloadEPSOutputOverwrite(_) => "EPS Output Overwrite",
             CanBusMessageEnum::PayloadEPSSelfTest(_) => "EPS Self Test",
             CanBusMessageEnum::AvionicsStatus(_) => "Avionics Status",
+            CanBusMessageEnum::RocketState(_) => "Rocket State",
             CanBusMessageEnum::IcarusStatus(_) => "Icarus Status",
             CanBusMessageEnum::DataTransfer(_) => "Data Transfer",
             CanBusMessageEnum::Ack(_) => "Ack",
@@ -474,6 +475,64 @@ impl MessageRow {
                     format!("{:?}", m.flight_stage).to_case(Case::Lower).into(),
                 )],
             ),
+            CanBusMessageEnum::RocketState(m) => {
+                self.draw_fields(
+                    printer,
+                    1,
+                    &[
+                        (
+                            "velocity (m/s)",
+                            false,
+                            format!(
+                                "{:>5.2}, {:>5.2}, {:>5.2}",
+                                m.velocity()[0],
+                                m.velocity()[1],
+                                m.velocity()[2]
+                            )
+                            .into(),
+                        ),
+                        (
+                            "altitude",
+                            false,
+                            format!("{:.1}m", m.altitude())
+                                .pad_to_width_with_alignment(7, Alignment::Left)
+                                .into(),
+                        ),
+                    ],
+                );
+
+                let printer = printer.windowed(Rect::from_corners(Vec2::new(0, 1), printer.size));
+                self.draw_fields(
+                    &printer,
+                    2,
+                    &[
+                        (
+                            "Cd",
+                            false,
+                            format!(
+                                "{:>4.2}, {:>4.2}, {:>4.2}, {:>4.2}",
+                                m.drag_coefficients()[0],
+                                m.drag_coefficients()[1],
+                                m.drag_coefficients()[2],
+                                m.drag_coefficients()[3]
+                            )
+                            .into(),
+                        ),
+                        (
+                            "Orientation",
+                            false,
+                            format!(
+                                "{:>5.2}, {:>5.2}, {:>5.2}, {:>5.2}",
+                                m.orientation()[0],
+                                m.orientation()[1],
+                                m.orientation()[2],
+                                m.orientation()[3]
+                            )
+                            .into(),
+                        ),
+                    ],
+                );
+            }
             CanBusMessageEnum::IcarusStatus(m) => self.draw_fields(
                 printer,
                 1,
