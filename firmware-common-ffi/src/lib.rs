@@ -157,6 +157,8 @@ pub static PAYLOAD_EPS_SELF_TEST_MESSAGE_TYPE: u8 = messages::PAYLOAD_EPS_SELF_T
 #[unsafe(no_mangle)]
 pub static AVIONICS_STATUS_MESSAGE_TYPE: u8 = messages::AVIONICS_STATUS_MESSAGE_TYPE;
 #[unsafe(no_mangle)]
+pub static ROCKET_STATE_MESSAGE_TYPE: u8 = messages::ROCKET_STATE_MESSAGE_TYPE;
+#[unsafe(no_mangle)]
 pub static ICARUS_STATUS_MESSAGE_TYPE: u8 = messages::ICARUS_STATUS_MESSAGE_TYPE;
 #[unsafe(no_mangle)]
 pub static DATA_TRANSFER_MESSAGE_TYPE: u8 = messages::DATA_TRANSFER_MESSAGE_TYPE;

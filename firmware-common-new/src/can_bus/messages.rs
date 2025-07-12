@@ -32,6 +32,8 @@ use payload_eps_self_test::PayloadEPSSelfTestMessage;
 use payload_eps_status::PayloadEPSStatusMessage;
 use reset::ResetMessage;
 #[cfg(not(feature = "bootloader"))]
+use rocket_state::RocketStateMessage;
+#[cfg(not(feature = "bootloader"))]
 use unix_time::UnixTimeMessage;
 
 use super::id::{CanBusExtendedId, CanBusMessageTypeFlag, create_can_bus_message_type};
@@ -62,6 +64,8 @@ pub mod payload_eps_self_test;
 #[cfg(not(feature = "bootloader"))]
 pub mod payload_eps_status;
 pub mod reset;
+#[cfg(not(feature = "bootloader"))]
+pub mod rocket_state;
 #[cfg(not(feature = "bootloader"))]
 pub mod unix_time;
 
@@ -205,6 +209,16 @@ pub const AVIONICS_STATUS_MESSAGE_TYPE: u8 = create_can_bus_message_type(
     },
     4,
 );
+pub const ROCKET_STATE_MESSAGE_TYPE: u8 = create_can_bus_message_type(
+    CanBusMessageTypeFlag {
+        is_measurement: true,
+        is_control: false,
+        is_status: false,
+        is_data: false,
+        is_misc: false,
+    },
+    3,
+);
 pub const ICARUS_STATUS_MESSAGE_TYPE: u8 = create_can_bus_message_type(
     CanBusMessageTypeFlag {
         is_measurement: true,
@@ -284,6 +298,8 @@ pub enum CanBusMessageEnum {
     #[cfg(not(feature = "bootloader"))]
     AvionicsStatus(AvionicsStatusMessage),
     #[cfg(not(feature = "bootloader"))]
+    RocketState(RocketStateMessage),
+    #[cfg(not(feature = "bootloader"))]
     IcarusStatus(IcarusStatusMessage),
 
     DataTransfer(DataTransferMessage),
@@ -319,6 +335,8 @@ impl CanBusMessageEnum {
             CanBusMessageEnum::PayloadEPSSelfTest(m) => m.priority(),
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::AvionicsStatus(m) => m.priority(),
+            #[cfg(not(feature = "bootloader"))]
+            CanBusMessageEnum::RocketState(m) => m.priority(),
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::IcarusStatus(m) => m.priority(),
             CanBusMessageEnum::DataTransfer(m) => m.priority(),
@@ -356,6 +374,8 @@ impl CanBusMessageEnum {
             CanBusMessageEnum::PayloadEPSSelfTest(_) => PAYLOAD_EPS_SELF_TEST_MESSAGE_TYPE,
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::AvionicsStatus(_) => AVIONICS_STATUS_MESSAGE_TYPE,
+            #[cfg(not(feature = "bootloader"))]
+            CanBusMessageEnum::RocketState(_) => ROCKET_STATE_MESSAGE_TYPE,
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::IcarusStatus(_) => ICARUS_STATUS_MESSAGE_TYPE,
             CanBusMessageEnum::DataTransfer(_) => DATA_TRANSFER_MESSAGE_TYPE,
@@ -400,6 +420,8 @@ impl CanBusMessageEnum {
             #[cfg(not(feature = "bootloader"))]
             AVIONICS_STATUS_MESSAGE_TYPE => Some(AvionicsStatusMessage::serialized_len()),
             #[cfg(not(feature = "bootloader"))]
+            ROCKET_STATE_MESSAGE_TYPE => Some(RocketStateMessage::serialized_len()),
+            #[cfg(not(feature = "bootloader"))]
             ICARUS_STATUS_MESSAGE_TYPE => Some(IcarusStatusMessage::serialized_len()),
             DATA_TRANSFER_MESSAGE_TYPE => Some(DataTransferMessage::serialized_len()),
             ACK_MESSAGE_TYPE => Some(AckMessage::serialized_len()),
@@ -435,6 +457,8 @@ impl CanBusMessageEnum {
             CanBusMessageEnum::PayloadEPSSelfTest(m) => m.serialize(buffer),
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::AvionicsStatus(m) => m.serialize(buffer),
+            #[cfg(not(feature = "bootloader"))]
+            CanBusMessageEnum::RocketState(m) => m.serialize(buffer),
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::IcarusStatus(m) => m.serialize(buffer),
             CanBusMessageEnum::DataTransfer(m) => m.serialize(buffer),
