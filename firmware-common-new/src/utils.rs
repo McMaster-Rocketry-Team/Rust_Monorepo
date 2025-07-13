@@ -1,4 +1,6 @@
 use core::fmt::Debug;
+use embassy_futures::select::{Either, select};
+use embedded_hal_async::delay::DelayNs;
 use packed_struct::prelude::*;
 use packed_struct::types::bits::ByteArray;
 
@@ -28,4 +30,28 @@ where
     fn deserialize(data: &[u8]) -> Option<Self> {
         Self::unpack_from_slice(data).ok()
     }
+}
+
+pub async fn run_with_timeout<F: Future>(
+    delay: &mut impl DelayNs,
+    ms: f64,
+    future: F,
+) -> Result<F::Output, f64> {
+    let timeout_fut = delay.delay_us((ms * 1_000.0) as u32);
+    match select(timeout_fut, future).await {
+        Either::First(_) => Err(ms),
+        Either::Second(result) => Ok(result),
+    }
+}
+
+
+pub const fn max(a: usize, b: usize) -> usize {
+    [a, b][(a < b) as usize]
+}
+
+#[macro_export]
+macro_rules! max_const {
+    ($a:expr $(,)?) => { $a };
+    ($a:expr, $b:expr $(,)?) => { $crate::utils::max($a, $b) };
+    ($a:expr $(, $rest:expr)* $(,)?) => { $crate::utils::max($a, $crate::max_const!($($rest),+)) };
 }

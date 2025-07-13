@@ -3,6 +3,7 @@
 #![feature(let_chains)]
 #![feature(assert_matches)]
 #![feature(slice_as_array)]
+#![feature(try_blocks)]
 
 mod fmt;
 pub(crate) mod utils;
@@ -22,3 +23,4 @@ pub mod variance;
 #[cfg(not(feature = "bootloader"))]
 pub mod vlp;
 pub mod heatshrink;
+pub mod rpc;
