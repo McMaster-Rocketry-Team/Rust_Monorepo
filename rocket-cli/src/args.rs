@@ -24,6 +24,9 @@ pub enum ModeSelect {
     #[command(about = "attach to target via probe or ota")]
     Attach(DownloadCli),
 
+    #[command(about = "connect to ground station")]
+    GroundStation,
+
     #[command(about = "generate private and public keys for ota")]
     GenOtaKey(GenOtaKeyCli),
 

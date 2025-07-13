@@ -5762,6 +5762,8 @@ dependencies = [
  "cursive",
  "defmt-decoder",
  "defmt-parser",
+ "embedded-hal-async",
+ "embedded-io-async",
  "env_logger",
  "firmware-common-new",
  "futures",
@@ -5781,6 +5783,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "tokio-serial",
  "toml 0.8.22",
  "uuid",
 ]

@@ -3,10 +3,12 @@ mod bluetooth;
 mod connection_method;
 mod elf_locator;
 mod gen_ota_key;
+mod gs;
 mod monitor;
 mod probe;
 mod testing;
 
+use anyhow::{Ok, bail};
 use anyhow::{Result, anyhow};
 use args::Cli;
 use args::ModeSelect;
@@ -16,10 +18,13 @@ use clap::Parser;
 use connection_method::ConnectionMethod;
 use connection_method::get_connection_method;
 use gen_ota_key::gen_ota_key;
-use log::LevelFilter;
+use log::{LevelFilter, info};
 use monitor::monitor_tui;
 use testing::decode_bluetooth_chunk::test_decode_bluetooth_chunk;
 use testing::mock_connection_method::MockConnectionMethod;
+use tokio_serial::{SerialPortInfo, SerialPortType, UsbPortInfo, available_ports};
+
+use crate::gs::ground_station_tui;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -53,8 +58,7 @@ async fn main() -> Result<()> {
             )
             .await?;
 
-            connection_method.dispose().await?;
-            Ok(())
+            connection_method.dispose().await
         }
         ModeSelect::Attach(args) => {
             let mut connection_method =
@@ -69,8 +73,31 @@ async fn main() -> Result<()> {
             )
             .await?;
 
-            connection_method.dispose().await?;
-            Ok(())
+            connection_method.dispose().await
+        }
+        ModeSelect::GroundStation => {
+            let ground_station_serial_ports = available_ports()
+                .unwrap()
+                .into_iter()
+                .filter(|port| {
+                    matches!(
+                        port.port_type,
+                        SerialPortType::UsbPort(UsbPortInfo {
+                            vid: 0x120a,
+                            pid: 0x0005,
+                            ..
+                        })
+                    )
+                })
+                .collect::<Vec<SerialPortInfo>>();
+
+            if ground_station_serial_ports.len() == 0 {
+                bail!("No ground station connected")
+            } else if ground_station_serial_ports.len() > 1 {
+                bail!("More than one ground stations connected")
+            }
+
+            ground_station_tui(&ground_station_serial_ports[0].port_name).await
         }
         ModeSelect::GenOtaKey(args) => gen_ota_key(args),
         ModeSelect::Testing(TestingModeSelect::DecodeBluetoothChunk(args)) => {
@@ -86,9 +113,7 @@ async fn main() -> Result<()> {
                 &NodeTypeEnum::VoidLake,
                 &"firmware.elf".into(),
             )
-            .await?;
-
-            Ok(())
+            .await
         }
     }
 }

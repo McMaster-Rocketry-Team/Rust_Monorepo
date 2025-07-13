@@ -1,5 +1,5 @@
+use crate::vlp::lora_config::LoraConfig;
 use core::mem::MaybeUninit;
-
 use rkyv::{Archive, Deserialize, Serialize};
 
 use crate::create_rpc;
@@ -13,8 +13,7 @@ pub struct RpcPacketStatus {
 
 create_rpc! {
     lora
-    0 configure | frequency: u32, sf: u8, bw: u32, cr: u8, power: i32| -> ()
-    1 has_new_rx | a: u8 | -> (rx_count: u32)
-    2 get_rx | | -> (data: [u8; 256], status: RpcPacketStatus)
-    3 tx | data: [u8; 256] | -> ()
+    0 configure | config: LoraConfig | -> ()
+    1 rx | timeout_ms: u32 | -> (success: bool, len: u8, data: [u8; 256], status: RpcPacketStatus)
+    2 tx | len: u32, data: [u8; 256] | -> (success: bool)
 }

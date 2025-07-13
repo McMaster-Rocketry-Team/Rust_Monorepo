@@ -1,9 +1,9 @@
 // only use std when feature = "std" is enabled or during testing
 #![cfg_attr(not(any(test, feature = "wasm")), no_std)]
-#![feature(let_chains)]
 #![feature(assert_matches)]
 #![feature(slice_as_array)]
 #![feature(try_blocks)]
+#![feature(associated_type_defaults)]
 
 mod fmt;
 pub(crate) mod utils;

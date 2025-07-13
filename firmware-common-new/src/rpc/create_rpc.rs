@@ -132,7 +132,7 @@ macro_rules! create_rpc {
 
                                         let calculated_crc = crc.checksum(&request_buffer[..request_size]);
                                         if calculated_crc != received_crc {
-                                            log_warn!("Command CRC mismatch, skipping.");
+                                            log_warn!("Command CRC mismatch, skipping. received: {}, calculated: {}", received_crc, calculated_crc);
                                             continue;
                                         }
 
@@ -271,7 +271,7 @@ macro_rules! create_rpc {
 
                         self.request_buffer[14] = $rpc_i;
                         self.request_buffer[15] = self.crc.checksum(&self.request_buffer[16..(request_size + 16)]);
-
+                        
                         self.serial.write_all(&self.request_buffer[14..(request_size + 16)]).await.map_err(RpcClientError::Serial)?;
 
                         match run_with_timeout(&mut self.delay, 5000.0, self.serial.read_exact(&mut self.response_buffer[..(response_size + 1)])).await {
