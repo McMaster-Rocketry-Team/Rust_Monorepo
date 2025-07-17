@@ -1,4 +1,7 @@
-use firmware_common_new::{rpc::lora_rpc::{LoraRpcClient, LoraRpcRxResult, RxResponse}, vlp::radio::Radio};
+use firmware_common_new::{
+    rpc::lora_rpc::{LoraRpcClient, LoraRpcRxResult, RxResponse},
+    vlp::radio::Radio,
+};
 use log::error;
 use lora_phy::mod_params::{PacketStatus, RadioError};
 

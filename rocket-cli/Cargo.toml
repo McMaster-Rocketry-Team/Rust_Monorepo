@@ -43,5 +43,5 @@ tokio-serial = "5.4.5"
 embedded-io-async = { version = "0.6.1", features = ["std"] }
 embedded-hal-async = "1.0.0"
 lora-phy = { git = "https://github.com/lora-rs/lora-rs.git", default-features = false }
-embassy-sync = "0.7.0"
+embassy-sync = {version ="0.7.0", features = ["std"]}
 cursive-aligned-view = "0.7.0"

@@ -1,8 +1,11 @@
 use std::time::Duration;
 
-use embedded_io_async::{ErrorType, Read, Write};
 use embedded_hal_async::delay::DelayNs;
-use tokio::{io::{AsyncReadExt, AsyncWriteExt}, time::sleep};
+use embedded_io_async::{ErrorType, Read, Write};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    time::sleep,
+};
 
 use anyhow::Result;
 

@@ -10,7 +10,7 @@ use sha2::Sha256;
 
 /// @startuml
 /// scale 2
-/// 
+///
 /// participant GroundStation
 /// participant Rocket
 /// loop
@@ -96,6 +96,14 @@ impl<M: RawMutex> VLPGroundStation<M> {
     pub async fn send(&self, packet: VLPUplinkPacket) -> Result<PacketStatus, VLPTXError> {
         self.tx_signal.signal(packet);
         self.tx_result_signal.wait().await
+    }
+
+    pub fn send_nb(&self, packet: VLPUplinkPacket) {
+        self.tx_signal.signal(packet);
+    }
+
+    pub fn try_get_send_result(&self) -> Option<Result<PacketStatus, VLPTXError>> {
+        self.tx_result_signal.try_take()
     }
 
     pub async fn receive(&self) -> (VLPDownlinkPacket, PacketStatus) {
@@ -598,9 +606,7 @@ mod tests {
             let (received_packet, _) = avionics_client.receive().await;
             assert_matches!(
                 received_packet,
-                VLPUplinkPacket::ChangeMode(ChangeModePacket {
-                    mode: Mode::Armed
-                })
+                VLPUplinkPacket::ChangeMode(ChangeModePacket { mode: Mode::Armed })
             );
         };
 
