@@ -1,7 +1,7 @@
 pub use embedded_hal_async::delay::DelayNs;
 use lora_phy::{
     LoRa, RxMode,
-    mod_params::{DutyCycleParams, PacketStatus, RadioError},
+    mod_params::{PacketStatus, RadioError},
     mod_traits::RadioKind,
 };
 

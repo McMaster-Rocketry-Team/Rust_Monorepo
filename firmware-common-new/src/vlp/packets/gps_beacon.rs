@@ -10,10 +10,15 @@ use super::VLPDownlinkPacket;
 fixed_point_factory!(LatFac, f64, -90.0, 90.0, 0.00002146);
 fixed_point_factory!(LonFac, f64, -180.0, 180.0, 0.00002146);
 fixed_point_factory!(BatteryVFac, f32, 2.5, 8.5, 0.01);
+fixed_point_factory!(TemperatureFac, f32, -30.0, 85.0, 0.1);
+fixed_point_factory!(AltitudeFac, f32, -100.0, 5000.0, 1.0);
 
 #[derive(PackedStruct, Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "9")]
+#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "12")]
 pub struct GPSBeaconPacket {
+    #[packed_field(bits = "0..4")]
+    nonce: Integer<u8, packed_bits::Bits<4>>,
+
     #[packed_field(element_size_bits = "23")]
     lat: Integer<LatFacBase, packed_bits::Bits<LAT_FAC_BITS>>,
     #[packed_field(element_size_bits = "24")]
@@ -25,34 +30,46 @@ pub struct GPSBeaconPacket {
     #[packed_field(element_size_bits = "10")]
     battery_v: Integer<BatteryVFacBase, packed_bits::Bits<BATTERY_V_FAC_BITS>>,
 
-    pyro1_continuity: bool,
-    pyro1_fire: bool,
-    pyro2_continuity: bool,
-    pyro2_fire: bool,
-    short_circuit: bool,
+    #[packed_field(element_size_bits = "11")]
+    air_temperature: Integer<TemperatureFacBase, packed_bits::Bits<TEMPERATURE_FAC_BITS>>,
+    #[packed_field(element_size_bits = "13")]
+    altitude_agl: Integer<AltitudeFacBase, packed_bits::Bits<ALTITUDE_FAC_BITS>>,
+
+    pub pyro_main_continuity: bool,
+    pub pyro_main_fire: bool,
+    pub pyro_drogue_continuity: bool,
+    pub pyro_drogue_fire: bool,
+
+    pub pyro_short_circuit: bool,
 }
 
 impl GPSBeaconPacket {
     pub fn new(
+        nonce: u8,
         lat_lon: Option<(f64, f64)>,
         num_of_fix_satellites: u8,
         battery_v: f32,
-        pyro1_continuity: bool,
-        pyro1_fire: bool,
-        pyro2_continuity: bool,
-        pyro2_fire: bool,
-        short_circuit: bool,
+        air_temperature: f32,
+        altitude_agl: f32,
+        pyro_main_continuity: bool,
+        pyro_main_fire: bool,
+        pyro_drogue_continuity: bool,
+        pyro_drogue_fire: bool,
+        pyro_short_circuit: bool,
     ) -> Self {
         Self {
+            nonce: nonce.into(),
             lat: LatFac::to_fixed_point_capped(lat_lon.unwrap_or((0.0, 0.0)).0),
             lon: LonFac::to_fixed_point_capped(lat_lon.unwrap_or((0.0, 0.0)).1),
             num_of_fix_satellites: num_of_fix_satellites,
             battery_v: BatteryVFac::to_fixed_point_capped(battery_v),
-            pyro1_continuity,
-            pyro1_fire,
-            pyro2_continuity,
-            pyro2_fire,
-            short_circuit,
+            air_temperature: TemperatureFac::to_fixed_point_capped(air_temperature),
+            altitude_agl: AltitudeFac::to_fixed_point_capped(altitude_agl),
+            pyro_main_continuity,
+            pyro_main_fire,
+            pyro_drogue_continuity,
+            pyro_drogue_fire,
+            pyro_short_circuit,
         }
     }
 
@@ -67,25 +84,38 @@ impl GPSBeaconPacket {
     pub fn battery_v(&self) -> f32 {
         BatteryVFac::to_float(self.battery_v)
     }
+
+    pub fn air_temperature(&self) -> f32 {
+        TemperatureFac::to_float(self.air_temperature)
+    }
+
+    pub fn altitude_agl(&self) -> f32 {
+        AltitudeFac::to_float(self.altitude_agl)
+    }
+
+    #[cfg(feature = "json")]
+    pub fn to_json(&self) -> json::JsonValue {
+        let (lat, lon) = self.lat_lon();
+        json::object! {
+            lat: lat,
+            lon: lon,
+            num_of_fix_satellites: self.num_of_fix_satellites(),
+            battery_v: self.battery_v(),
+            air_temperature: self.air_temperature(),
+            altitude_agl: self.altitude_agl(),
+            pyro_main_continuity: self.pyro_main_continuity,
+            pyro_main_fire: self.pyro_main_fire,
+            pyro_drogue_continuity: self.pyro_drogue_continuity,
+            pyro_drogue_fire: self.pyro_drogue_fire,
+            pyro_short_circuit: self.pyro_short_circuit,
+        }
+    }
 }
 
 #[cfg(feature = "defmt")]
 impl defmt::Format for GPSBeaconPacket {
     fn format(&self, f: defmt::Formatter) {
-        let (lat, lon) = self.lat_lon();
-        defmt::write!(
-            f,
-            "GPSBeaconPacket {{ lat: {}, lon: {}, num_of_fix_satellites: {}, battery_v: {}, pyro1_continuity: {}, pyro1_fire: {}, pyro2_continuity: {}, pyro2_fire: {}, short_circuit: {} }}",
-            lat,
-            lon,
-            self.num_of_fix_satellites(),
-            self.battery_v(),
-            self.pyro1_continuity,
-            self.pyro1_fire,
-            self.pyro2_continuity,
-            self.pyro2_fire,
-            self.short_circuit,
-        )
+        defmt::write!(f, "GPSBeaconPacket")
     }
 }
 
@@ -101,7 +131,19 @@ mod test {
 
     #[test]
     fn test_serialize_deserialize() {
-        let packet = GPSBeaconPacket::new(Some((89.0, 179.0)), 10, 8.4, true, true, true, true, false);
+        let packet = GPSBeaconPacket::new(
+            10,
+            Some((89.0, 179.0)),
+            10,
+            8.4,
+            27.0,
+            100.0,
+            true,
+            true,
+            true,
+            true,
+            false,
+        );
         let packet: VLPDownlinkPacket = packet.into();
 
         let mut buffer = [0u8; 64];

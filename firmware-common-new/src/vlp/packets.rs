@@ -1,11 +1,10 @@
 use core::fmt::Debug;
 
-use crate::{
-    utils::FixedLenSerializable, vlp::packets::{altimeter_telemetry::AltimeterTelemetryPacket, fire_pyro::FirePyroPacket},
-};
+use crate::utils::FixedLenSerializable;
 use ack::AckPacket;
 use amp_output_overwrite::AMPOutputOverwritePacket;
 use change_mode::ChangeModePacket;
+use fire_pyro::FirePyroPacket;
 use gps_beacon::GPSBeaconPacket;
 use low_power_telemetry::LowPowerTelemetryPacket;
 use payload_eps_output_overwrite::PayloadEPSOutputOverwritePacket;
@@ -14,16 +13,15 @@ use self_test_result::SelfTestResultPacket;
 use telemetry::TelemetryPacket;
 
 pub mod ack;
-pub mod altimeter_telemetry;
 pub mod amp_output_overwrite;
 pub mod change_mode;
+pub mod fire_pyro;
 pub mod gps_beacon;
 pub mod low_power_telemetry;
 pub mod payload_eps_output_overwrite;
 pub mod reset;
 pub mod self_test_result;
 pub mod telemetry;
-pub mod fire_pyro;
 
 // TODO change
 pub const MAX_VLP_PACKET_SIZE: usize = 100;
@@ -36,7 +34,6 @@ pub enum VLPDownlinkPacket {
     LowPowerTelemetry(LowPowerTelemetryPacket),
     Telemetry(TelemetryPacket),
     SelfTestResult(SelfTestResultPacket),
-    AltimeterTelemetry(AltimeterTelemetryPacket),
 }
 
 impl VLPDownlinkPacket {
@@ -54,8 +51,6 @@ impl VLPDownlinkPacket {
             }
             3 => TelemetryPacket::deserialize(data).map(VLPDownlinkPacket::Telemetry),
             4 => SelfTestResultPacket::deserialize(data).map(VLPDownlinkPacket::SelfTestResult),
-            5 => AltimeterTelemetryPacket::deserialize(data)
-                .map(VLPDownlinkPacket::AltimeterTelemetry),
             _ => None,
         }
     }
@@ -67,7 +62,6 @@ impl VLPDownlinkPacket {
             VLPDownlinkPacket::LowPowerTelemetry(_) => 2,
             VLPDownlinkPacket::Telemetry(_) => 3,
             VLPDownlinkPacket::SelfTestResult(_) => 4,
-            VLPDownlinkPacket::AltimeterTelemetry(_) => 5,
         };
         buffer = &mut buffer[1..];
 
@@ -77,7 +71,6 @@ impl VLPDownlinkPacket {
             VLPDownlinkPacket::LowPowerTelemetry(packet) => packet.serialize(buffer),
             VLPDownlinkPacket::Telemetry(packet) => packet.serialize(buffer),
             VLPDownlinkPacket::SelfTestResult(packet) => packet.serialize(buffer),
-            VLPDownlinkPacket::AltimeterTelemetry(packet) => packet.serialize(buffer),
         }
     }
 }
@@ -107,9 +100,7 @@ impl VLPUplinkPacket {
             3 => {
                 AMPOutputOverwritePacket::deserialize(data).map(VLPUplinkPacket::AMPOutputOverwrite)
             }
-            4 => {
-                FirePyroPacket::deserialize(data).map(VLPUplinkPacket::FirePyro)
-            }
+            4 => FirePyroPacket::deserialize(data).map(VLPUplinkPacket::FirePyro),
             _ => None,
         }
     }
