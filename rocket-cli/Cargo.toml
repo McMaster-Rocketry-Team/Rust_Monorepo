@@ -45,3 +45,4 @@ embedded-hal-async = "1.0.0"
 lora-phy = { git = "https://github.com/lora-rs/lora-rs.git", default-features = false }
 embassy-sync = {version ="0.7.0", features = ["std"]}
 cursive-aligned-view = "0.7.0"
+critical-section = { version = "1.0", features = ["std"] }

@@ -5768,6 +5768,7 @@ dependencies = [
  "clap 4.5.38",
  "clap-num",
  "convert_case",
+ "critical-section",
  "cursive",
  "cursive-aligned-view",
  "defmt-decoder",
