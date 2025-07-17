@@ -1,11 +1,14 @@
 pub use embedded_hal_async::delay::DelayNs;
 use lora_phy::{
-    mod_params::{PacketStatus, RadioError},
-    mod_traits::RadioKind,
     LoRa, RxMode,
+    mod_params::{DutyCycleParams, PacketStatus, RadioError},
+    mod_traits::RadioKind,
 };
 
-use super::{lora_config::LoraConfig, radio::Radio};
+use super::{
+    lora_config::LoraConfig,
+    radio::{Radio, RxMode as RadioRxMode},
+};
 
 pub struct LoraPhy<'a, LK: RadioKind, DL: DelayNs> {
     lora: &'a mut LoRa<LK, DL>,
@@ -45,7 +48,7 @@ impl<'a, RK: RadioKind, DL: DelayNs> Radio for LoraPhy<'a, RK, DL> {
     async fn rx(
         &mut self,
         buffer: &mut [u8],
-        timeout_ms: Option<u16>,
+        rx_mode: RadioRxMode,
     ) -> Result<(usize, PacketStatus), RadioError> {
         let modulation_params = self.lora.create_modulation_params(
             self.lora_config.sf_phy(),
@@ -61,18 +64,24 @@ impl<'a, RK: RadioKind, DL: DelayNs> Radio for LoraPhy<'a, RK, DL> {
             false,
             &modulation_params,
         )?;
-        
 
-        let listen_mode = match timeout_ms {
-            Some(timeout_ms) => {
+        let listen_mode = match rx_mode {
+            RadioRxMode::Single { timeout_ms } => {
                 let timeout_us = timeout_ms as u32 * 1_000;
                 let symbol_time_us = self.lora_config.symbol_time_us();
                 let timeout_symbols = (timeout_us / symbol_time_us) as u16;
                 RxMode::Single(timeout_symbols.min(254))
-            },
-            None => RxMode::Continuous,
+            }
+            RadioRxMode::Continuous => RxMode::Continuous,
+            RadioRxMode::DutyCycle {
+                rx_time_ms,
+                sleep_time_ms,
+            } => RxMode::DutyCycle(DutyCycleParams {
+                rx_time: todo!(),
+                sleep_time: todo!(),
+            }),
         };
-        
+
         self.lora
             .prepare_for_rx(listen_mode, &modulation_params, &rx_pkt_params)
             .await

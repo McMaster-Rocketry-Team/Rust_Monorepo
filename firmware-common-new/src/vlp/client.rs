@@ -1,3 +1,5 @@
+use crate::vlp::radio::RxMode;
+
 use super::{
     packets::{MAX_VLP_PACKET_SIZE, VLPDownlinkPacket, VLPUplinkPacket, ack::AckPacket},
     radio::Radio,
@@ -152,7 +154,7 @@ impl<'a, 'b, 'c, M: RawMutex, R: Radio> VLPGroundStationDaemon<'a, 'b, 'c, M, R>
     async fn rx_tx_cycle(&mut self) -> Result<(), VLPDaemonError> {
         let (rx_len, packet_status) = self
             .radio
-            .rx(&mut self.buffer, None)
+            .rx(&mut self.buffer, RxMode::Continuous)
             .await
             .map_err(VLPDaemonError::Radio)?;
 
@@ -202,13 +204,12 @@ impl<'a, 'b, 'c, M: RawMutex, R: Radio> VLPGroundStationDaemon<'a, 'b, 'c, M, R>
         // encode ecc
         offset = encode_ecc(&mut self.buffer, offset);
 
-        // send the packet
-        self.radio
-            .tx(&self.buffer[..offset])
+        // send the packet and receive ack
+        match self
+            .radio
+            .tx_then_rx(&mut self.buffer, offset, RxMode::Single { timeout_ms: 300 })
             .await
-            .map_err(VLPTXError::Radio)?;
-
-        match self.radio.rx(&mut self.buffer, Some(300)).await {
+        {
             Ok((rx_len, packet_status)) => {
                 // decode ecc
                 let rx_len =
@@ -319,12 +320,11 @@ impl<'a, 'b, 'c, M: RawMutex, R: Radio> VLPAvionicsDaemon<'a, 'b, 'c, M, R> {
         // encode ecc
         offset = encode_ecc(&mut self.buffer, offset);
 
-        self.radio
-            .tx(&self.buffer[..offset])
+        match self
+            .radio
+            .tx_then_rx(&mut self.buffer, offset, RxMode::Single { timeout_ms: 300 })
             .await
-            .map_err(VLPDaemonError::Radio)?;
-
-        match self.radio.rx(&mut self.buffer, Some(300)).await {
+        {
             Ok((rx_len, packet_status)) => {
                 return self
                     .process_rx_and_send_ack(rx_len, packet_status, hasher)
@@ -488,7 +488,7 @@ mod tests {
         async fn rx(
             &mut self,
             buffer: &mut [u8],
-            _timeout_ms: Option<u16>,
+            _rx_mode: RxMode,
         ) -> Result<(usize, PacketStatus), RadioError> {
             let data = self.pair.b_to_a_data.wait().await;
             let len = data.len();
@@ -512,7 +512,7 @@ mod tests {
         async fn rx(
             &mut self,
             buffer: &mut [u8],
-            _timeout_ms: Option<u16>,
+            _rx_mode: RxMode,
         ) -> Result<(usize, PacketStatus), RadioError> {
             let data = self.pair.a_to_b_data.wait().await;
             let len = data.len();

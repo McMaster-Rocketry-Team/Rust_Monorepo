@@ -1,6 +1,6 @@
 use firmware_common_new::{
-    rpc::lora_rpc::{LoraRpcClient, LoraRpcRxResult, RxResponse},
-    vlp::radio::Radio,
+    rpc::lora_rpc::{LoraRpcClient, LoraRpcRxResult, RxResponse, TxThenRxResponse},
+    vlp::radio::{Radio, RxMode},
 };
 use log::error;
 use lora_phy::mod_params::{PacketStatus, RadioError};
@@ -36,9 +36,9 @@ impl<'a> Radio for RpcRadio<'a> {
     async fn rx(
         &mut self,
         buffer: &mut [u8],
-        timeout_ms: Option<u16>,
+        mode: RxMode,
     ) -> std::result::Result<(usize, PacketStatus), RadioError> {
-        if let Some(timeout_ms) = timeout_ms {
+        if let RxMode::Single { timeout_ms } = mode {
             match self.client.rx(timeout_ms as u32).await {
                 Ok(RxResponse {
                     result:
@@ -100,6 +100,60 @@ impl<'a> Radio for RpcRadio<'a> {
                     }
                 }
             }
+        }
+    }
+
+    async fn tx_then_rx(
+        &mut self,
+        buffer: &mut [u8],
+        tx_len: usize,
+        rx_mode: RxMode,
+    ) -> Result<(usize, PacketStatus), RadioError> {
+        if let RxMode::Single { timeout_ms } = rx_mode {
+            self.buffer[..tx_len].copy_from_slice(&buffer[..tx_len]);
+            match self
+                .client
+                .tx_then_rx(tx_len as u32, self.buffer, timeout_ms)
+                .await
+            {
+                Ok(TxThenRxResponse {
+                    tx_success: true,
+                    result:
+                        LoraRpcRxResult::Success {
+                            len,
+                            data,
+                            rssi,
+                            snr,
+                        },
+                }) => {
+                    buffer[..(len as usize)].copy_from_slice(&data[..(len as usize)]);
+
+                    Ok((len as usize, PacketStatus { rssi, snr }))
+                }
+                Ok(TxThenRxResponse {
+                    tx_success: true,
+                    result: LoraRpcRxResult::Timeout,
+                }) => Err(RadioError::ReceiveTimeout),
+                Ok(TxThenRxResponse {
+                    tx_success: true,
+                    result: LoraRpcRxResult::Error,
+                }) => {
+                    error!("rx failed, unknown reason");
+                    Err(RadioError::Reset)
+                }
+                Ok(TxThenRxResponse {
+                    tx_success: false, ..
+                }) => {
+                    error!("tx failed, unknown reason");
+                    Err(RadioError::Reset)
+                }
+                Err(e) => {
+                    error!("rx rpc communication failed: {:?}", e);
+                    Err(RadioError::Reset)
+                }
+            }
+        } else {
+            unimplemented!()
         }
     }
 }

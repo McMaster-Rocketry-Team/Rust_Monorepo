@@ -23,4 +23,5 @@ create_rpc! {
     0 configure | config: LoraConfig | -> ()
     1 rx | timeout_ms: u32 | -> (result: LoraRpcRxResult)
     2 tx | len: u32, data: [u8; 256] | -> (success: bool)
+    3 tx_then_rx | len: u32, data: [u8; 256], rx_timeout_ms: u32 | -> (tx_success: bool, result: LoraRpcRxResult)
 }
