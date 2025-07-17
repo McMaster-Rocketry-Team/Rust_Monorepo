@@ -2,13 +2,13 @@ mod args;
 mod bluetooth;
 mod connection_method;
 mod elf_locator;
-mod gen_ota_key;
+mod gen_key;
 mod gs;
 mod monitor;
 mod probe;
 mod testing;
 
-use anyhow::{Ok, bail};
+use anyhow::bail;
 use anyhow::{Result, anyhow};
 use args::Cli;
 use args::ModeSelect;
@@ -17,13 +17,14 @@ use args::TestingModeSelect;
 use clap::Parser;
 use connection_method::ConnectionMethod;
 use connection_method::get_connection_method;
-use gen_ota_key::gen_ota_key;
-use log::{LevelFilter, info};
+use gen_key::gen_ota_key;
+use log::LevelFilter;
 use monitor::monitor_tui;
+use serialport::{SerialPortInfo, SerialPortType, UsbPortInfo, available_ports};
 use testing::decode_bluetooth_chunk::test_decode_bluetooth_chunk;
 use testing::mock_connection_method::MockConnectionMethod;
-use serialport::{SerialPortInfo, SerialPortType, UsbPortInfo, available_ports};
 
+use crate::gen_key::gen_vlp_key;
 use crate::gs::ground_station_tui;
 
 #[tokio::main]
@@ -99,6 +100,7 @@ async fn main() -> Result<()> {
 
             ground_station_tui(&ground_station_serial_ports[0].port_name).await
         }
+        ModeSelect::GenVlpKey => gen_vlp_key(),
         ModeSelect::GenOtaKey(args) => gen_ota_key(args),
         ModeSelect::Testing(TestingModeSelect::DecodeBluetoothChunk(args)) => {
             test_decode_bluetooth_chunk(args).map_err(|e| anyhow!("{:?}", e))

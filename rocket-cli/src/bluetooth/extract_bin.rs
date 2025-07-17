@@ -1,4 +1,5 @@
 use std::{path::PathBuf, process::Output};
+use base64::prelude::*;
 
 use anyhow::{Ok, Result, anyhow, bail};
 use firmware_common_new::bootloader::sign_firmware;
@@ -11,6 +12,7 @@ pub async fn extract_bin_and_sign(
     firmware_elf_path: &PathBuf,
 ) -> Result<Vec<u8>> {
     let secret = std::fs::read(secret_path)?;
+    let secret = BASE64_STANDARD.decode(&secret)?;
     if secret.len() != 32 {
         bail!("Secret must be 32 bytes long.");
     }

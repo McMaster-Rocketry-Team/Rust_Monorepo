@@ -46,3 +46,4 @@ embassy-sync = {version ="0.7.0", features = ["std"]}
 cursive-aligned-view = "0.7.0"
 critical-section = { version = "1.0", features = ["std"] }
 serialport = "4.7.2"
+directories = "6.0.0"

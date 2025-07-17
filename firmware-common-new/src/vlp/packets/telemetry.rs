@@ -1,5 +1,5 @@
 use core::cell::{RefCell, RefMut};
-use embassy_sync::blocking_mutex::{raw::RawMutex, Mutex as BlockingMutex};
+use embassy_sync::blocking_mutex::{Mutex as BlockingMutex, raw::RawMutex};
 use packed_struct::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -34,7 +34,7 @@ fixed_point_factory!(PayloadTemperatureFac, f32, 10.0, 85.0, 1.0);
 
 // 48 byte max size to achieve 0.5Hz with 250khz bandwidth + 12sf + 8cr lora
 #[derive(PackedStruct, Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "46")]
+#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "45")]
 pub struct TelemetryPacket {
     #[packed_field(bits = "0..4")]
     nonce: Integer<u8, packed_bits::Bits<4>>,
@@ -96,7 +96,7 @@ pub struct TelemetryPacket {
     main_bulkhead_online: bool,
     main_bulkhead_rebooted_in_last_5s: bool,
     #[packed_field(element_size_bits = "4")]
-    main_bulkhead_brightness: u8,
+    main_bulkhead_brightness: u8, // TODO unit
 
     drogue_bulkhead_online: bool,
     drogue_bulkhead_rebooted_in_last_5s: bool,
@@ -123,14 +123,10 @@ pub struct TelemetryPacket {
     ozys2_online: bool,
     ozys2_rebooted_in_last_5s: bool,
 
+    aero_rust_online: bool,
     aero_rust_rebooted_in_last_5s: bool,
-
     #[packed_field(element_size_bits = "2", ty = "enum")]
     aero_rust_health: NodeHealth,
-    #[packed_field(element_size_bits = "2", ty = "enum")]
-    aero_rust_mode: NodeMode,
-    #[packed_field(element_size_bits = "12")]
-    aero_rust_status: u16,
 
     payload_activation_pcb_online: bool,
     payload_activation_pcb_rebooted_in_last_5s: bool,
@@ -268,10 +264,9 @@ impl TelemetryPacket {
         ozys2_online: bool,
         ozys2_rebooted_in_last_5s: bool,
 
+        aero_rust_online: bool,
         aero_rust_rebooted_in_last_5s: bool,
         aero_rust_health: NodeHealth,
-        aero_rust_mode: NodeMode,
-        aero_rust_status: u16,
 
         payload_activation_pcb_online: bool,
         payload_activation_pcb_rebooted_in_last_5s: bool,
@@ -375,10 +370,9 @@ impl TelemetryPacket {
             ozys2_online,
             ozys2_rebooted_in_last_5s,
 
+            aero_rust_online,
             aero_rust_rebooted_in_last_5s,
             aero_rust_health,
-            aero_rust_mode,
-            aero_rust_status,
 
             payload_activation_pcb_online,
             payload_activation_pcb_rebooted_in_last_5s,
@@ -617,7 +611,7 @@ impl TelemetryPacket {
     }
 
     pub fn aero_rust_online(&self) -> bool {
-        self.aero_rust_mode != NodeMode::Offline
+        self.aero_rust_online
     }
 
     pub fn aero_rust_rebooted_in_last_5s(&self) -> bool {
@@ -626,14 +620,6 @@ impl TelemetryPacket {
 
     pub fn aero_rust_health(&self) -> NodeHealth {
         self.aero_rust_health
-    }
-
-    pub fn aero_rust_mode(&self) -> NodeMode {
-        self.aero_rust_mode
-    }
-
-    pub fn aero_rust_status(&self) -> u16 {
-        self.aero_rust_status
     }
 
     pub fn payload_activation_pcb_online(&self) -> bool {
@@ -770,6 +756,105 @@ impl TelemetryPacket {
 
     pub fn eps2_output_9v_status(&self) -> PowerOutputStatus {
         self.eps2_output_9v_status
+    }
+
+    #[cfg(feature = "json")]
+    pub fn to_json(&self) -> json::JsonValue {
+        json::object! {
+            unix_clock_ready: self.unix_clock_ready(),
+            num_of_fix_satellites: self.num_of_fix_satellites(),
+            lat: self.lat_lon().0,
+            lon: self.lat_lon().1,
+            vl_battery_v: self.vl_battery_v(),
+            air_temperature: self.air_temperature(),
+            vl_stm32_temperature: self.vl_stm32_temperature(),
+            pyro_main_continuity: self.pyro_main_continuity(),
+            pyro_drogue_continuity: self.pyro_drogue_continuity(),
+            altitude_agl: self.altitude(),
+            max_altitude_agl: self.max_altitude(),
+            backup_max_altitude_agl: self.backup_max_altitude(),
+            air_speed: self.air_speed(),
+            max_air_speed: self.max_air_speed(),
+            backup_max_air_speed: self.backup_max_air_speed(),
+            tilt_deg: self.tilt_deg(),
+            flight_core_state: self.flight_core_state(),
+            backup_flight_core_state: self.backup_flight_core_state(),
+
+            amp_online: self.amp_online(),
+            amp_rebooted_in_last_5s: self.amp_rebooted_in_last_5s(),
+            shared_battery_v: self.shared_battery_v(),
+            amp_out1_overwrote: self.amp_out1_overwrote(),
+            amp_out1: format!("{:?}", self.amp_out1()),
+            amp_out2_overwrote: self.amp_out2_overwrote(),
+            amp_out2: format!("{:?}", self.amp_out2()),
+            amp_out3_overwrote: self.amp_out3_overwrote(),
+            amp_out3: format!("{:?}", self.amp_out3()),
+            amp_out4_overwrote: self.amp_out4_overwrote(),
+            amp_out4: format!("{:?}", self.amp_out4()),
+
+            main_bulkhead_online: self.main_bulkhead_online(),
+            main_bulkhead_rebooted_in_last_5s: self.main_bulkhead_rebooted_in_last_5s(),
+            main_bulkhead_brightness: self.main_bulkhead_brightness(),
+
+            drogue_bulkhead_online: self.drogue_bulkhead_online(),
+            drogue_bulkhead_rebooted_in_last_5s: self.drogue_bulkhead_rebooted_in_last_5s(),
+            drogue_bulkhead_brightness: self.drogue_bulkhead_brightness(),
+
+            icarus_online: self.icarus_online(),
+            icarus_rebooted_in_last_5s: self.icarus_rebooted_in_last_5s(),
+
+            air_brakes_extention_inch: self.air_brakes_extention_inch(),
+            air_brakes_servo_temp: self.air_brakes_servo_temp(),
+            ap_residue: self.ap_residue(),
+            cd: self.cd(),
+
+            ozys1_online: self.ozys1_online(),
+            ozys1_rebooted_in_last_5s: self.ozys1_rebooted_in_last_5s(),
+            ozys2_online: self.ozys2_online(),
+            ozys2_rebooted_in_last_5s: self.ozys2_rebooted_in_last_5s(),
+
+            aero_rust_online: self.aero_rust_online(),
+            aero_rust_rebooted_in_last_5s: self.aero_rust_rebooted_in_last_5s(),
+            aero_rust_health: format!("{:?}", self.aero_rust_health()),
+
+            payload_activation_pcb_online: self.payload_activation_pcb_online(),
+            payload_activation_pcb_rebooted_in_last_5s: self.payload_activation_pcb_rebooted_in_last_5s(),
+
+            rocket_wifi_online: self.rocket_wifi_online(),
+            rocket_wifi_rebooted_in_last_5s: self.rocket_wifi_rebooted_in_last_5s(),
+
+            eps1_online: self.eps1_online(),
+            eps1_rebooted_in_last_5s: self.eps1_rebooted_in_last_5s(),
+            eps1_battery1_v: self.eps1_battery1_v(),
+            eps1_battery1_temperature: self.eps1_battery1_temperature(),
+            eps1_battery2_v: self.eps1_battery2_v(),
+            eps1_battery2_temperature: self.eps1_battery2_temperature(),
+            eps1_output_3v3_current: self.eps1_output_3v3_current(),
+            eps1_output_3v3_overwrote: self.eps1_output_3v3_overwrote(),
+            eps1_output_3v3_status: format!("{:?}", self.eps1_output_3v3_status()),
+            eps1_output_5v_current: self.eps1_output_5v_current(),
+            eps1_output_5v_overwrote: self.eps1_output_5v_overwrote(),
+            eps1_output_5v_status: format!("{:?}", self.eps1_output_5v_status()),
+            eps1_output_9v_current: self.eps1_output_9v_current(),
+            eps1_output_9v_overwrote: self.eps1_output_9v_overwrote(),
+            eps1_output_9v_status: format!("{:?}", self.eps1_output_9v_status()),
+
+            eps2_online: self.eps2_online(),
+            eps2_rebooted_in_last_5s: self.eps2_rebooted_in_last_5s(),
+            eps2_battery1_v: self.eps2_battery1_v(),
+            eps2_battery1_temperature: self.eps2_battery1_temperature(),
+            eps2_battery2_v: self.eps2_battery2_v(),
+            eps2_battery2_temperature: self.eps2_battery2_temperature(),
+            eps2_output_3v3_current: self.eps2_output_3v3_current(),
+            eps2_output_3v3_overwrote: self.eps2_output_3v3_overwrote(),
+            eps2_output_3v3_status: format!("{:?}", self.eps2_output_3v3_status()),
+            eps2_output_5v_current: self.eps2_output_5v_current(),
+            eps2_output_5v_overwrote: self.eps2_output_5v_overwrote(),
+            eps2_output_5v_status: format!("{:?}", self.eps2_output_5v_status()),
+            eps2_output_9v_current: self.eps2_output_9v_current(),
+            eps2_output_9v_overwrote: self.eps2_output_9v_overwrote(),
+            eps2_output_9v_status: format!("{:?}", self.eps2_output_9v_status()),
+        }
     }
 }
 
@@ -1239,10 +1324,9 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 state.ozys1_uptime_s < 5,
                 state.ozys2_online,
                 state.ozys2_uptime_s < 5,
+                true,
                 state.aero_rust_uptime_s < 5,
                 state.aero_rust_health,
-                state.aero_rust_mode,
-                state.aero_rust_status,
                 state.payload_activation_pcb_online,
                 state.payload_activation_pcb_uptime_s < 5,
                 state.rocket_wifi_online,

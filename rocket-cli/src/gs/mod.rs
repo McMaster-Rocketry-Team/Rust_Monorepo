@@ -1,13 +1,19 @@
 mod rpc_radio;
 
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{Arc, RwLock},
+    time::Duration,
+};
 
 use anyhow::Result;
 use cursive::{
     Cursive,
     theme::{Palette, PaletteStyle},
     view::{Nameable, Resizable},
-    views::{Button, Dialog, HideableView, LinearLayout, PaddedView, Panel, RadioGroup, TextView},
+    views::{
+        Button, Dialog, EditView, HideableView, LinearLayout, PaddedView, Panel, RadioGroup,
+        TextView,
+    },
 };
 use cursive_aligned_view::Alignable;
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
@@ -29,11 +35,10 @@ use firmware_common_new::{
 };
 use tokio::time;
 
-use crate::gs::{rpc_radio::RpcRadio, serial_wrapper::SerialWrapper};
+use crate::gs::{config::GroundStationConfig, rpc_radio::RpcRadio, serial_wrapper::SerialWrapper};
 
+pub mod config;
 mod serial_wrapper;
-
-const VLP_KEY: [u8; 32] = [42u8; 32];
 
 pub async fn ground_station_tui(serial_path: &str) -> Result<()> {
     let serial = serialport::new(serial_path, 115200)
@@ -42,31 +47,36 @@ pub async fn ground_station_tui(serial_path: &str) -> Result<()> {
         .unwrap();
     let mut serial = SerialWrapper::new(serial);
 
+    let config = Arc::new(RwLock::new(GroundStationConfig::load()?));
     let mut client = LoraRpcClient::new(&mut serial);
     client.reset().await.unwrap();
     client
         .configure(LoraConfig {
-            frequency: 915_100_000,
+            frequency: config.read().unwrap().frequency,
             sf: 12,
             bw: 250000,
             cr: 8,
-            power: 22,
+            power: config.read().unwrap().power,
         })
         .await
         .unwrap();
     let mut rpc_radio = RpcRadio::new(client);
     let vlp_gcm_client = Arc::new(VLPGroundStation::<ThreadModeRawMutex>::new());
-    let mut daemon = vlp_gcm_client.daemon(&mut rpc_radio, &VLP_KEY);
+    let vlp_key = config.read().unwrap().vlp_key.clone();
+    let mut daemon = vlp_gcm_client.daemon(&mut rpc_radio, &vlp_key);
 
     tokio::select! {
         _ = daemon.run() => {}
-        _ = tui_task(vlp_gcm_client.clone()) => {}
+        _ = tui_task(vlp_gcm_client.clone(), config.clone()) => {}
     }
 
     Ok(())
 }
 
-async fn tui_task(client: Arc<VLPGroundStation<ThreadModeRawMutex>>) -> Result<()> {
+async fn tui_task(
+    client: Arc<VLPGroundStation<ThreadModeRawMutex>>,
+    config: Arc<RwLock<GroundStationConfig>>,
+) -> Result<()> {
     let mut siv = cursive::default();
     let mut theme = siv.current_theme().clone();
     theme.palette = Palette::terminal_default();
@@ -473,6 +483,68 @@ async fn tui_task(client: Arc<VLPGroundStation<ThreadModeRawMutex>>) -> Result<(
         .align_center_left()
     };
 
+    let create_config_button = || {
+        let config = config.clone();
+        Button::new("Config", move |s| {
+            s.add_layer(
+                Dialog::new()
+                    .title("Config")
+                    .content(
+                        LinearLayout::horizontal()
+                            .child(TextView::new("Frequency: \nPower: "))
+                            .child(
+                                LinearLayout::vertical()
+                                    .child(
+                                        EditView::new()
+                                            .content(config.read().unwrap().frequency.to_string())
+                                            .with_name("frequency"),
+                                    )
+                                    .child(
+                                        EditView::new()
+                                            .content(config.read().unwrap().power.to_string())
+                                            .with_name("power"),
+                                    )
+                                    .fixed_width(10),
+                            ),
+                    )
+                    .dismiss_button("Cancel")
+                    .button("Confirm", {
+                        let config = config.clone();
+                        move |s| {
+                            let frequency =
+                                s.find_name::<EditView>("frequency").unwrap().get_content();
+                            let power = s.find_name::<EditView>("power").unwrap().get_content();
+                            let frequency = match frequency.parse::<u32>() {
+                                Ok(f) => f,
+                                Err(_) => {
+                                    s.add_layer(Dialog::info("Invalid frequency value"));
+                                    return;
+                                }
+                            };
+
+                            let power = match power.parse::<i32>() {
+                                Ok(p) => p,
+                                Err(_) => {
+                                    s.add_layer(Dialog::info("Invalid power value"));
+                                    return;
+                                }
+                            };
+
+                            let mut config = config.write().unwrap();
+                            config.frequency = frequency;
+                            config.power = power;
+                            config.save().unwrap();
+                            s.pop_layer().unwrap();
+                            s.add_layer(Dialog::info(
+                                "Config will take effect after rocket-cli restart",
+                            ));
+                        }
+                    }),
+            );
+        })
+        .align_center_left()
+    };
+
     siv.add_fullscreen_layer(
         LinearLayout::horizontal()
             .child(
@@ -485,6 +557,7 @@ async fn tui_task(client: Arc<VLPGroundStation<ThreadModeRawMutex>>) -> Result<(
                         .child(
                             HideableView::new(
                                 LinearLayout::vertical()
+                                    .child(create_config_button())
                                     .child(create_simple_packet_button(
                                         "Low Power Mode",
                                         "Change rocket to low power mode?",

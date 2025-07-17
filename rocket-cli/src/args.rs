@@ -27,6 +27,9 @@ pub enum ModeSelect {
     #[command(about = "connect to ground station")]
     GroundStation,
 
+    #[command(about = "generate vlp key")]
+    GenVlpKey,
+
     #[command(about = "generate private and public keys for ota")]
     GenOtaKey(GenOtaKeyCli),
 
@@ -59,7 +62,19 @@ pub enum TestingModeSelect {
     MockConnection,
 }
 
-#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, PartialOrd, Ord)]
+#[derive(
+    clap::ValueEnum,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    PartialOrd,
+    Ord,
+)]
 pub enum NodeTypeEnum {
     VoidLake,
     AMP,
@@ -80,7 +95,7 @@ impl Display for NodeTypeEnum {
         match self {
             NodeTypeEnum::VoidLake => write!(f, "Void Lake"),
             NodeTypeEnum::AMP => write!(f, "AMP"),
-            NodeTypeEnum::AMPSpeedBridge => write!(f, "AMP Speed Bridge"), 
+            NodeTypeEnum::AMPSpeedBridge => write!(f, "AMP Speed Bridge"),
             NodeTypeEnum::ICARUS => write!(f, "ICARUS"),
             NodeTypeEnum::PayloadActivation => write!(f, "Payload Activation"),
             NodeTypeEnum::RocketWifi => write!(f, "Rocket WiFi"),
