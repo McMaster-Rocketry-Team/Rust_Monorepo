@@ -1,20 +1,16 @@
 mod rpc_radio;
 
-use std::{
-    sync::{Arc, Mutex},
-    time::Duration,
-};
+use std::{sync::Arc, time::Duration};
 
 use anyhow::Result;
 use cursive::{
     Cursive,
-    align::HAlign,
     theme::{Palette, PaletteStyle},
     view::{Nameable, Resizable},
     views::{Button, Dialog, HideableView, LinearLayout, PaddedView, Panel, RadioGroup, TextView},
 };
 use cursive_aligned_view::Alignable;
-use embassy_sync::blocking_mutex::raw::{NoopRawMutex, ThreadModeRawMutex};
+use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use firmware_common_new::{
     can_bus::messages::amp_overwrite::PowerOutputOverwrite,
     rpc::lora_rpc::LoraRpcClient,
@@ -31,7 +27,6 @@ use firmware_common_new::{
         },
     },
 };
-use log::{error, info, warn};
 use tokio::time;
 use tokio_serial::SerialPortBuilderExt as _;
 
@@ -51,9 +46,7 @@ pub async fn ground_station_tui(serial_port: &str) -> Result<()> {
     let mut serial = SerialWrapper(serial);
 
     let mut client = LoraRpcClient::new(&mut serial, Delay);
-
     client.reset().await.unwrap();
-
     client
         .configure(LoraConfig {
             frequency: 915_100_000,
@@ -64,18 +57,14 @@ pub async fn ground_station_tui(serial_port: &str) -> Result<()> {
         })
         .await
         .unwrap();
-
     let mut rpc_radio = RpcRadio::new(client);
-
     let vlp_gcm_client = Arc::new(VLPGroundStation::<ThreadModeRawMutex>::new());
-
     let mut daemon = vlp_gcm_client.daemon(&mut rpc_radio, &VLP_KEY);
 
-    let daemon_fut = daemon.run();
-
-    let tui_fut = tui_task(vlp_gcm_client.clone());
-
-    tokio::join!(daemon_fut, tui_fut);
+    tokio::select! {
+        _ = daemon.run() => {}
+        _ = tui_task(vlp_gcm_client.clone()) => {}
+    }
 
     Ok(())
 }
@@ -490,12 +479,6 @@ async fn tui_task(client: Arc<VLPGroundStation<ThreadModeRawMutex>>) -> Result<(
     siv.add_fullscreen_layer(
         LinearLayout::horizontal()
             .child(
-                Panel::new(TextView::new("abc"))
-                    .title("Ground Station Downlink")
-                    .title_position(HAlign::Left)
-                    .full_screen(),
-            )
-            .child(
                 Panel::new(PaddedView::lrtb(
                     1,
                     1,
@@ -563,6 +546,11 @@ async fn tui_task(client: Arc<VLPGroundStation<ThreadModeRawMutex>>) -> Result<(
                 .title("Send Uplink")
                 .fixed_width(22)
                 .full_height(),
+            )
+            .child(
+                Panel::new(TextView::new("").with_name("downlink_packet"))
+                    .title("Ground Station Downlink")
+                    .full_screen(),
             ),
     );
 
@@ -604,8 +592,20 @@ async fn tui_task(client: Arc<VLPGroundStation<ThreadModeRawMutex>>) -> Result<(
             }
         }
 
+        if let Some((packet, status)) = client.try_receive() {
+            let mut downlink_packet = runner.find_name::<TextView>("downlink_packet").unwrap();
+            downlink_packet.set_content(format!(
+                "received time: {}\nrssi={} snr={}\n{:?}",
+                chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+                status.rssi,
+                status.snr,
+                packet
+            ));
+        }
+
         runner.step();
         interval.tick().await;
     }
+
     Ok(())
 }

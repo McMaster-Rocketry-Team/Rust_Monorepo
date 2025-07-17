@@ -110,6 +110,10 @@ impl<M: RawMutex> VLPGroundStation<M> {
         self.rx_signal.wait().await
     }
 
+    pub fn try_receive(&self) -> Option<(VLPDownlinkPacket, PacketStatus)> {
+        self.rx_signal.try_take()
+    }
+
     pub fn daemon<'a, 'b, 'c>(
         &'a self,
         radio: &'b mut impl Radio,
