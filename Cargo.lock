@@ -1540,6 +1540,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "cursive-aligned-view"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "376f1c24af1ac14ffbd180caabc4022707265622d2280263e4fff8dd5ba0dc86"
+dependencies = [
+ "cursive_core",
+]
+
+[[package]]
 name = "cursive-macros"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5760,6 +5769,7 @@ dependencies = [
  "clap-num",
  "convert_case",
  "cursive",
+ "cursive-aligned-view",
  "defmt-decoder",
  "defmt-parser",
  "embassy-sync 0.7.0",
