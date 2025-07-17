@@ -3,7 +3,7 @@ use std::io::Write;
 use anyhow::Result;
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use firmware_common_new::{
-    rpc::lora_rpc::LoraRpcClient,
+    rpc::lora_rpc::{LoraRpcClient, LoraRpcRxResult, RxResponse},
     vlp::{
         client::VLPGroundStation,
         lora_config::LoraConfig,
@@ -37,11 +37,11 @@ pub async fn ground_station_tui(serial_port: &str) -> Result<()> {
 
     client
         .configure(LoraConfig {
-            frequency: 916_000_000,
-            sf: 11,
-            bw: 250_000,
+            frequency: 915_100_000,
+            sf: 12,
+            bw: 250000,
             cr: 8,
-            power: 0,
+            power: 22,
         })
         .await
         .unwrap();
@@ -54,60 +54,67 @@ pub async fn ground_station_tui(serial_port: &str) -> Result<()> {
 
     let daemon_fut = daemon.run();
 
-    let (mut rl, mut writer) =
-        Readline::new("Select pyro to fire (main, drogue): ".to_owned()).unwrap();
+    // let (mut rl, mut writer) =
+    //     Readline::new("Select pyro to fire (main, drogue): ".to_owned()).unwrap();
 
     let print_telemetry_fut = async {
         loop {
             let (packet, status) = vlp_gcm_client.receive().await;
-            writer
-                .write_all(
-                    format!("{:?} rssi={} snr={}\n", packet, status.rssi, status.snr).as_bytes(),
-                )
-                .unwrap();
+            info!("{:?} rssi={} snr={}\n", packet, status.rssi, status.snr);
         }
     };
 
-    let fire_pyro_fut = async {
-        loop {
-            match rl.readline().fuse().await {
-                Ok(ReadlineEvent::Line(line)) => match line.trim() {
-                    "main" => {
-                        info!("sending.....");
-                        let result = vlp_gcm_client
-                            .send(
-                                FirePyroPacket {
-                                    pyro: PyroSelect::Pyro1,
-                                }
-                                .into(),
-                            )
-                            .await;
-                        info!("{:?}", result.err());
-                    }
-                    "drogue" => {
-                        info!("sending.....");
-                        let result = vlp_gcm_client
-                            .send(
-                                FirePyroPacket {
-                                    pyro: PyroSelect::Pyro2,
-                                }
-                                .into(),
-                            )
-                            .await;
-                        info!("{:?}", result.err());
-                    }
-                    _ => {
-                        warn!("invalid selection")
-                    }
-                },
-                e => {
-                    warn!("{:?}", e);
-                }
-            }
+    let test_fut = async {
+        vlp_gcm_client
+    .send(
+        FirePyroPacket {
+            pyro: PyroSelect::Pyro1,
         }
+        .into(),
+    )
+    .await.unwrap();
     };
 
-    tokio::join!(daemon_fut, print_telemetry_fut, fire_pyro_fut,);
+    // let fire_pyro_fut = async {
+    //     loop {
+    //         match rl.readline().fuse().await {
+    //             Ok(ReadlineEvent::Line(line)) => match line.trim() {
+    //                 "main" => {
+    //                     info!("sending.....");
+    //                     let result = vlp_gcm_client
+    //                         .send(
+    //                             FirePyroPacket {
+    //                                 pyro: PyroSelect::Pyro1,
+    //                             }
+    //                             .into(),
+    //                         )
+    //                         .await;
+    //                     info!("{:?}", result.err());
+    //                 }
+    //                 "drogue" => {
+    //                     info!("sending.....");
+    //                     let result = vlp_gcm_client
+    //                         .send(
+    //                             FirePyroPacket {
+    //                                 pyro: PyroSelect::Pyro2,
+    //                             }
+    //                             .into(),
+    //                         )
+    //                         .await;
+    //                     info!("{:?}", result.err());
+    //                 }
+    //                 _ => {
+    //                     warn!("invalid selection")
+    //                 }
+    //             },
+    //             e => {
+    //                 warn!("{:?}", e);
+    //             }
+    //         }
+    //     }
+    // };
+
+    tokio::join!(daemon_fut, print_telemetry_fut, test_fut);
 
     Ok(())
 }
@@ -145,40 +152,63 @@ impl<'a> Radio for RpcRadio<'a> {
     ) -> std::result::Result<(usize, PacketStatus), RadioError> {
         if let Some(timeout_ms) = timeout_ms {
             match self.client.rx(timeout_ms as u32).await {
-                Ok(response) => {
-                    buffer[..(response.len as usize)]
-                        .copy_from_slice(&response.data[..(response.len as usize)]);
-
-                    Ok((
-                        response.len as usize,
-                        PacketStatus {
-                            rssi: response.status.rssi,
-                            snr: response.status.snr,
+                Ok(RxResponse {
+                    result:
+                        LoraRpcRxResult::Success {
+                            len,
+                            data,
+                            rssi,
+                            snr,
                         },
-                    ))
+                }) => {
+                    buffer[..(len as usize)].copy_from_slice(&data[..(len as usize)]);
+
+                    Ok((len as usize, PacketStatus { rssi, snr }))
+                }
+                Ok(RxResponse {
+                    result: LoraRpcRxResult::Timeout,
+                }) => Err(RadioError::ReceiveTimeout),
+                Ok(RxResponse {
+                    result: LoraRpcRxResult::Error,
+                }) => {
+                    error!("rx failed, unknown reason");
+                    Err(RadioError::Reset)
                 }
                 Err(e) => {
-                    error!("{:?}", e);
-                    Err(RadioError::ReceiveTimeout)
+                    error!("rx rpc communication failed: {:?}", e);
+                    Err(RadioError::Reset)
                 }
             }
         } else {
             loop {
                 match self.client.rx(4000).await {
-                    Ok(response) => {
-                        buffer[..(response.len as usize)]
-                            .copy_from_slice(&response.data[..(response.len as usize)]);
-
-                        return Ok((
-                            response.len as usize,
-                            PacketStatus {
-                                rssi: response.status.rssi,
-                                snr: response.status.snr,
+                    Ok(RxResponse {
+                        result:
+                            LoraRpcRxResult::Success {
+                                len,
+                                data,
+                                rssi,
+                                snr,
                             },
-                        ));
+                    }) => {
+                        buffer[..(len as usize)].copy_from_slice(&data[..(len as usize)]);
+
+                        return Ok((len as usize, PacketStatus { rssi, snr }));
+                    }
+                    Ok(RxResponse {
+                        result: LoraRpcRxResult::Timeout,
+                    }) => {
+                        continue;
+                    }
+                    Ok(RxResponse {
+                        result: LoraRpcRxResult::Error,
+                    }) => {
+                        error!("rx failed, unknown reason");
+                        return Err(RadioError::Reset);
                     }
                     Err(e) => {
-                        error!("{:?}", e);
+                        error!("rx rpc communication failed: {:?}", e);
+                        return Err(RadioError::Reset);
                     }
                 }
             }
