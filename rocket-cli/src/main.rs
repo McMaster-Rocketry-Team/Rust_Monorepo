@@ -22,7 +22,7 @@ use log::{LevelFilter, info};
 use monitor::monitor_tui;
 use testing::decode_bluetooth_chunk::test_decode_bluetooth_chunk;
 use testing::mock_connection_method::MockConnectionMethod;
-use tokio_serial::{SerialPortInfo, SerialPortType, UsbPortInfo, available_ports};
+use serialport::{SerialPortInfo, SerialPortType, UsbPortInfo, available_ports};
 
 use crate::gs::ground_station_tui;
 

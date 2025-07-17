@@ -28,24 +28,21 @@ use firmware_common_new::{
     },
 };
 use tokio::time;
-use tokio_serial::SerialPortBuilderExt as _;
 
-use crate::gs::{
-    rpc_radio::RpcRadio,
-    serial_wrapper::{Delay, SerialWrapper},
-};
+use crate::gs::{rpc_radio::RpcRadio, serial_wrapper::SerialWrapper};
 
 mod serial_wrapper;
 
 const VLP_KEY: [u8; 32] = [42u8; 32];
 
-pub async fn ground_station_tui(serial_port: &str) -> Result<()> {
-    let serial = tokio_serial::new(serial_port, 115200)
-        .open_native_async()
-        .expect("open serial port");
-    let mut serial = SerialWrapper(serial);
+pub async fn ground_station_tui(serial_path: &str) -> Result<()> {
+    let serial = serialport::new(serial_path, 115200)
+        .timeout(Duration::from_secs(5))
+        .open()
+        .unwrap();
+    let mut serial = SerialWrapper::new(serial);
 
-    let mut client = LoraRpcClient::new(&mut serial, Delay);
+    let mut client = LoraRpcClient::new(&mut serial);
     client.reset().await.unwrap();
     client
         .configure(LoraConfig {

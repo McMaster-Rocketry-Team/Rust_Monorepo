@@ -2,25 +2,24 @@
 
 use embedded_io_async::ReadExactError;
 
+use crate::rpc::half_duplex_serial::HalfDuplexSerial;
+
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug)]
-pub enum RpcClientError<E: embedded_io_async::Error> {
-    Timeout,
+pub enum RpcClientError<S: HalfDuplexSerial> {
     ECCMismatch,
     UnexpectedEof,
-    Serial(E),
+    Serial(S::Error),
 }
 
-impl<E: embedded_io_async::Error> From<ReadExactError<E>> for RpcClientError<E> {
-    fn from(e: ReadExactError<E>) -> Self {
+impl<S: HalfDuplexSerial> From<ReadExactError<S::Error>> for RpcClientError<S> {
+    fn from(e: ReadExactError<S::Error>) -> Self {
         match e {
             ReadExactError::UnexpectedEof => RpcClientError::UnexpectedEof,
             ReadExactError::Other(e) => RpcClientError::Serial(e),
         }
     }
 }
-
-fn some<S: embedded_io_async::Write + embedded_io_async::Read>(a: S) {}
 
 #[macro_export]
 macro_rules! create_rpc {
@@ -71,7 +70,7 @@ macro_rules! create_rpc {
                     fn [< $name:snake >](&mut self, $($req_var_name: $req_var_type, )*) -> impl core::future::Future<Output=[< $name:camel Response >]>;
                 )*
 
-                fn run_server<S: embedded_io_async::Write + embedded_io_async::Read>(&mut self, serial: &mut S) -> impl core::future::Future<Output=Result<(), S::Error>> {
+                fn run_server<S: crate::rpc::half_duplex_serial::HalfDuplexSerial>(&mut self, serial: &mut S) -> impl core::future::Future<Output=Result<(), S::Error>> {
                     use core::mem::size_of;
                     use crc::{Crc, CRC_8_SMBUS};
                     use embedded_io_async::ReadExactError;
@@ -166,9 +165,8 @@ macro_rules! create_rpc {
                 }
             }
 
-            pub struct [< $rpc_name:camel RpcClient >]<'a, S: embedded_io_async::Write + embedded_io_async::Read, D: embedded_hal_async::delay::DelayNs> {
+            pub struct [< $rpc_name:camel RpcClient >]<'a, S: crate::rpc::half_duplex_serial::HalfDuplexSerial> {
                 serial: &'a mut S,
-                delay: D,
                 crc: crc::Crc::<u8>,
                 request_buffer: aligned::Aligned<aligned::A2, [u8; crate::max_const!(
                     $(
@@ -182,11 +180,10 @@ macro_rules! create_rpc {
                 ) + 1]>
             }
 
-            impl<'a, S: embedded_io_async::Write + embedded_io_async::Read, D: embedded_hal_async::delay::DelayNs> [< $rpc_name:camel RpcClient >]<'a, S, D> {
-                pub fn new(serial: &'a mut S, delay: D) -> Self {
+            impl<'a, S: crate::rpc::half_duplex_serial::HalfDuplexSerial> [< $rpc_name:camel RpcClient >]<'a, S> {
+                pub fn new(serial: &'a mut S) -> Self {
                     Self {
                         serial,
-                        delay,
                         crc: crc::Crc::<u8>::new(&crc::CRC_8_SMBUS),
                         request_buffer: aligned::Aligned([0u8; crate::max_const!(
                             $(
@@ -201,21 +198,7 @@ macro_rules! create_rpc {
                     }
                 }
 
-                async fn clear_read_buffer(&mut self) {
-                    use crate::utils::run_with_timeout;
-                    let read_fut = async {
-                        let mut buffer = [0u8; 64];
-                        loop {
-                            let result = self.serial.read(&mut buffer).await;
-                            if let Ok(0) = result {
-                                break;
-                            }
-                        }
-                    };
-                    run_with_timeout(&mut self.delay, 100.0, read_fut).await.ok();
-                }
-
-                pub async fn reset(&mut self) ->  Result<bool, crate::rpc::create_rpc::RpcClientError<S::Error>> {
+                pub async fn reset(&mut self) -> Result<bool, crate::rpc::create_rpc::RpcClientError<S>> {
                     use crate::rpc::create_rpc::RpcClientError;
                     use core::mem::size_of;
 
@@ -227,7 +210,7 @@ macro_rules! create_rpc {
 
                     // flush the serial buffer
                     self.serial.write_all(&[255; REQUEST_STRUCT_MAX_SIZE]).await.map_err(RpcClientError::Serial)?;
-                    self.clear_read_buffer().await;
+                    self.serial.clear_read_buffer().await;
 
                     // send reset command
                     self.serial.write_all(&[255, 0x42]).await.map_err(RpcClientError::Serial)?;
@@ -242,9 +225,8 @@ macro_rules! create_rpc {
                 }
 
                 $(
-                    pub async fn [< $name:snake >](&mut self, $($req_var_name: $req_var_type, )*) -> Result<[< $name:camel Response >], crate::rpc::create_rpc::RpcClientError<S::Error>> {
+                    pub async fn [< $name:snake >](&mut self, $($req_var_name: $req_var_type, )*) -> Result<[< $name:camel Response >], crate::rpc::create_rpc::RpcClientError<S>> {
                         use core::mem::size_of;
-                        use crate::utils::run_with_timeout;
                         use crate::rpc::create_rpc::RpcClientError;
                         use rkyv::{
                             Archive,
@@ -273,16 +255,7 @@ macro_rules! create_rpc {
                         self.request_buffer[15] = self.crc.checksum(&self.request_buffer[16..(request_size + 16)]);
                         
                         self.serial.write_all(&self.request_buffer[14..(request_size + 16)]).await.map_err(RpcClientError::Serial)?;
-
-                        match run_with_timeout(&mut self.delay, 5000.0, self.serial.read_exact(&mut self.response_buffer[..(response_size + 1)])).await {
-                            Ok(Ok(_))=>{}
-                            Ok(Err(e))=>{
-                                Err(RpcClientError::from(e))?;
-                            }
-                            Err(_)=>{
-                                Err(RpcClientError::Timeout)?;
-                            }
-                        }
+                        self.serial.read_exact(&mut self.response_buffer[..(response_size + 1)]).await?;
 
                         let received_crc = self.response_buffer[response_size];
                         let calculated_crc = self.crc.checksum(&self.response_buffer[..response_size]);

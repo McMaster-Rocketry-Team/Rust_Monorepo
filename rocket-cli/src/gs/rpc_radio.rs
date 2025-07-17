@@ -5,15 +5,15 @@ use firmware_common_new::{
 use log::error;
 use lora_phy::mod_params::{PacketStatus, RadioError};
 
-use crate::gs::serial_wrapper::{Delay, SerialWrapper};
+use crate::gs::serial_wrapper::SerialWrapper;
 
 pub struct RpcRadio<'a> {
-    client: LoraRpcClient<'a, SerialWrapper, Delay>,
+    client: LoraRpcClient<'a, SerialWrapper>,
     buffer: [u8; 256],
 }
 
 impl<'a> RpcRadio<'a> {
-    pub fn new(client: LoraRpcClient<'a, SerialWrapper, Delay>) -> Self {
+    pub fn new(client: LoraRpcClient<'a, SerialWrapper>) -> Self {
         Self {
             client,
             buffer: [0u8; 256],

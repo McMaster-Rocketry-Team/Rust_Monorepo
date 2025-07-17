@@ -31,4 +31,18 @@ pub trait HalfDuplexSerial {
             }
         }
     }
+
+    fn write_all(&mut self, buf: &[u8]) -> impl Future<Output = Result<(), Self::Error>> {
+        async move {
+            let mut buf = buf;
+            while !buf.is_empty() {
+                match self.write(buf).await {
+                    Ok(0) => panic!("write() returned Ok(0)"),
+                    Ok(n) => buf = &buf[n..],
+                    Err(e) => return Err(e),
+                }
+            }
+            Ok(())
+        }
+    }
 }
