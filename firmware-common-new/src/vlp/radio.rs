@@ -7,7 +7,6 @@ use lora_phy::mod_params::{PacketStatus, RadioError};
 pub enum RxMode {
     Single { timeout_ms: u32 },
     Continuous,
-    DutyCycle { rx_time_ms: u32, sleep_time_ms: u32 },
 }
 
 pub trait Radio {

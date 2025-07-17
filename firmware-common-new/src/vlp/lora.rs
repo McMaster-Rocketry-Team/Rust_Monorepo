@@ -73,13 +73,6 @@ impl<'a, RK: RadioKind, DL: DelayNs> Radio for LoraPhy<'a, RK, DL> {
                 RxMode::Single(timeout_symbols.min(254))
             }
             RadioRxMode::Continuous => RxMode::Continuous,
-            RadioRxMode::DutyCycle {
-                rx_time_ms,
-                sleep_time_ms,
-            } => RxMode::DutyCycle(DutyCycleParams {
-                rx_time: todo!(),
-                sleep_time: todo!(),
-            }),
         };
 
         self.lora
