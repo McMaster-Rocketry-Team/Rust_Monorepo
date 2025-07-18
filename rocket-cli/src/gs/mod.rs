@@ -24,10 +24,11 @@ use firmware_common_new::{
         client::VLPGroundStation,
         lora_config::LoraConfig,
         packets::{
-            VLPUplinkPacket,
+            VLPDownlinkPacket, VLPUplinkPacket,
             amp_output_overwrite::AMPOutputOverwritePacket,
             change_mode::{ChangeModePacket, Mode},
             fire_pyro::{FirePyroPacket, PyroSelect},
+            gps_beacon::GPSBeaconPacket,
             payload_eps_output_overwrite::PayloadEPSOutputOverwritePacket,
             reset::{DeviceToReset, ResetPacket},
         },
@@ -664,12 +665,33 @@ async fn tui_task(
 
         if let Some((packet, status)) = client.try_receive() {
             let mut downlink_packet = runner.find_name::<TextView>("downlink_packet").unwrap();
+            let formatted_packet = match packet {
+                VLPDownlinkPacket::GPSBeacon(packet) => {
+                    format!(
+                        "satelites: {}
+battery: {:.2}V
+main pyro: continuity={} fire={}
+drogue pyro: continuity={} fire={}
+",
+                        packet.num_of_fix_satellites(),
+                        packet.battery_v(),
+                        packet.pyro_main_continuity,
+                        packet.pyro_main_fire,
+                        packet.pyro_drogue_continuity,
+                        packet.pyro_drogue_fire,
+                    )
+                }
+                packet => format!("{:?}", packet),
+            };
+
             downlink_packet.set_content(format!(
-                "received time: {}\nrssi={} snr={}\n{:?}",
+                "received time: {}
+rssi={} snr={}
+{}",
                 chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
                 status.rssi,
                 status.snr,
-                packet
+                formatted_packet
             ));
         }
 
