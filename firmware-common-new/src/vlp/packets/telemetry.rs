@@ -434,7 +434,7 @@ impl TelemetryPacket {
     }
 
     fn encode_brightness_lux(brightness_lux: f32) -> u8 {
-        F32Ext::log(brightness_lux, 1.04f32) as u8
+        F32Ext::round(F32Ext::log(brightness_lux, 1.04f32)) as u8
     }
 
     fn decode_brightness_lux(brightness_lux: u8) -> f32 {
