@@ -1,5 +1,6 @@
 use core::cell::{RefCell, RefMut};
 use embassy_sync::blocking_mutex::{Mutex as BlockingMutex, raw::RawMutex};
+use micromath::F32Ext;
 use packed_struct::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -95,12 +96,10 @@ pub struct TelemetryPacket {
 
     main_bulkhead_online: bool,
     main_bulkhead_rebooted_in_last_5s: bool,
-    #[packed_field(element_size_bits = "4")]
-    main_bulkhead_brightness: u8, // TODO unit
+    main_bulkhead_brightness: u8,
 
     drogue_bulkhead_online: bool,
     drogue_bulkhead_rebooted_in_last_5s: bool,
-    #[packed_field(element_size_bits = "4")]
     drogue_bulkhead_brightness: u8,
 
     icarus_online: bool,
@@ -434,6 +433,14 @@ impl TelemetryPacket {
         }
     }
 
+    fn encode_brightness_lux(brightness_lux: f32) -> u8 {
+        F32Ext::log(brightness_lux, 1.04f32) as u8
+    }
+
+    fn decode_brightness_lux(brightness_lux: u8) -> f32 {
+        F32Ext::powf(1.04, brightness_lux as f32)
+    }
+
     pub fn unix_clock_ready(&self) -> bool {
         self.unix_clock_ready
     }
@@ -554,8 +561,8 @@ impl TelemetryPacket {
         self.main_bulkhead_rebooted_in_last_5s
     }
 
-    pub fn main_bulkhead_brightness(&self) -> u8 {
-        self.main_bulkhead_brightness
+    pub fn main_bulkhead_brightness(&self) -> f32 {
+        Self::decode_brightness_lux(self.main_bulkhead_brightness)
     }
 
     pub fn drogue_bulkhead_online(&self) -> bool {
@@ -566,8 +573,8 @@ impl TelemetryPacket {
         self.drogue_bulkhead_rebooted_in_last_5s
     }
 
-    pub fn drogue_bulkhead_brightness(&self) -> u8 {
-        self.drogue_bulkhead_brightness
+    pub fn drogue_bulkhead_brightness(&self) -> f32 {
+        Self::decode_brightness_lux(self.drogue_bulkhead_brightness)
     }
 
     pub fn icarus_online(&self) -> bool {
@@ -1084,11 +1091,11 @@ pub struct TelemetryPacketBuilderState {
 
     pub main_bulkhead_online: bool,
     pub main_bulkhead_uptime_s: u32,
-    pub main_bulkhead_brightness: u8,
+    pub main_bulkhead_brightness: f32,
 
     pub drogue_bulkhead_online: bool,
     pub drogue_bulkhead_uptime_s: u32,
-    pub drogue_bulkhead_brightness: u8,
+    pub drogue_bulkhead_brightness: f32,
 
     pub icarus_online: bool,
     pub icarus_uptime_s: u32,
@@ -1195,11 +1202,11 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
 
                 main_bulkhead_online: false,
                 main_bulkhead_uptime_s: 0,
-                main_bulkhead_brightness: 0,
+                main_bulkhead_brightness: 0f32,
 
                 drogue_bulkhead_online: false,
                 drogue_bulkhead_uptime_s: 0,
-                drogue_bulkhead_brightness: 0,
+                drogue_bulkhead_brightness: 0f32,
 
                 icarus_online: false,
                 icarus_uptime_s: 0,
@@ -1308,10 +1315,10 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 state.amp_out4,
                 state.main_bulkhead_online,
                 state.main_bulkhead_uptime_s < 5,
-                state.main_bulkhead_brightness,
+                TelemetryPacket::encode_brightness_lux(state.main_bulkhead_brightness),
                 state.drogue_bulkhead_online,
                 state.drogue_bulkhead_uptime_s < 5,
-                state.drogue_bulkhead_brightness,
+                TelemetryPacket::encode_brightness_lux(state.drogue_bulkhead_brightness),
                 state.icarus_online,
                 state.icarus_uptime_s < 5,
                 state.air_brakes_extention_inch,
@@ -1375,5 +1382,25 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
             state.backup_max_altitude = state.backup_altitude.max(state.backup_max_altitude);
             state.backup_max_air_speed = state.backup_air_speed.max(state.backup_max_air_speed);
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::tests::init_logger;
+
+    use super::*;
+
+    #[test]
+    fn test_encode_brightness_lux() {
+        init_logger();
+
+        let brightness_lux = 1000.0;
+        let encoded = TelemetryPacket::encode_brightness_lux(brightness_lux);
+
+        let decoded = TelemetryPacket::decode_brightness_lux(encoded);
+
+        log_info!("original: {}", brightness_lux);
+        log_info!("decoded: {}", decoded);
     }
 }
