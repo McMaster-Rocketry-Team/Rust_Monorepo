@@ -33,7 +33,7 @@ pub struct GPSBeaconPacket {
     #[packed_field(element_size_bits = "11")]
     air_temperature: Integer<TemperatureFacBase, packed_bits::Bits<TEMPERATURE_FAC_BITS>>,
     #[packed_field(element_size_bits = "13")]
-    altitude_agl: Integer<AltitudeFacBase, packed_bits::Bits<ALTITUDE_FAC_BITS>>,
+    altitude_asl: Integer<AltitudeFacBase, packed_bits::Bits<ALTITUDE_FAC_BITS>>,
 
     pub pyro_main_continuity: bool,
     pub pyro_main_fire: bool,
@@ -50,7 +50,7 @@ impl GPSBeaconPacket {
         num_of_fix_satellites: u8,
         battery_v: f32,
         air_temperature: f32,
-        altitude_agl: f32,
+        altitude_asl: f32,
         pyro_main_continuity: bool,
         pyro_main_fire: bool,
         pyro_drogue_continuity: bool,
@@ -64,7 +64,7 @@ impl GPSBeaconPacket {
             num_of_fix_satellites: num_of_fix_satellites,
             battery_v: BatteryVFac::to_fixed_point_capped(battery_v),
             air_temperature: TemperatureFac::to_fixed_point_capped(air_temperature),
-            altitude_agl: AltitudeFac::to_fixed_point_capped(altitude_agl),
+            altitude_asl: AltitudeFac::to_fixed_point_capped(altitude_asl),
             pyro_main_continuity,
             pyro_main_fire,
             pyro_drogue_continuity,
@@ -89,8 +89,8 @@ impl GPSBeaconPacket {
         TemperatureFac::to_float(self.air_temperature)
     }
 
-    pub fn altitude_agl(&self) -> f32 {
-        AltitudeFac::to_float(self.altitude_agl)
+    pub fn altitude_asl(&self) -> f32 {
+        AltitudeFac::to_float(self.altitude_asl)
     }
 
     #[cfg(feature = "json")]
@@ -102,7 +102,7 @@ impl GPSBeaconPacket {
             num_of_fix_satellites: self.num_of_fix_satellites(),
             battery_v: self.battery_v(),
             air_temperature: self.air_temperature(),
-            altitude_agl: self.altitude_agl(),
+            altitude_asl: self.altitude_asl(),
             pyro_main_continuity: self.pyro_main_continuity,
             pyro_main_fire: self.pyro_main_fire,
             pyro_drogue_continuity: self.pyro_drogue_continuity,

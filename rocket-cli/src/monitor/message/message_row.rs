@@ -539,7 +539,7 @@ impl MessageRow {
                     (
                         "air brakes extension",
                         false,
-                        format!("{:.2}in", m.extended_inches()).into(),
+                        format!("{:>4.1}%", m.extension_percentage()).into(),
                     ),
                     (
                         "servo current",
