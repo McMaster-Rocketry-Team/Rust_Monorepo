@@ -105,7 +105,7 @@ pub struct TelemetryPacket {
     icarus_online: bool,
     icarus_rebooted_in_last_5s: bool,
     #[packed_field(element_size_bits = "5")]
-    air_brakes_extention_inch: Integer<
+    air_brakes_extension_percentage: Integer<
         AirBrakesExtensionPercentFacBase,
         packed_bits::Bits<AIR_BRAKES_EXTENSION_PERCENT_FAC_BITS>,
     >,
@@ -252,7 +252,7 @@ impl TelemetryPacket {
 
         icarus_online: bool,
         icarus_rebooted_in_last_5s: bool,
-        air_brakes_extention_inch: f32,
+        air_brakes_extension_percentage: f32,
         air_brakes_servo_temp: f32,
         ap_residue: f32,
         cd: f32,
@@ -356,8 +356,8 @@ impl TelemetryPacket {
 
             icarus_online,
             icarus_rebooted_in_last_5s,
-            air_brakes_extention_inch: AirBrakesExtensionPercentFac::to_fixed_point_capped(
-                air_brakes_extention_inch,
+            air_brakes_extension_percentage: AirBrakesExtensionPercentFac::to_fixed_point_capped(
+                air_brakes_extension_percentage,
             ),
             air_brakes_servo_temp: TemperatureFac::to_fixed_point_capped(air_brakes_servo_temp),
             ap_residue: APResidueFac::to_fixed_point_capped(ap_residue),
@@ -585,8 +585,8 @@ impl TelemetryPacket {
         self.icarus_rebooted_in_last_5s
     }
 
-    pub fn air_brakes_extention_inch(&self) -> f32 {
-        AirBrakesExtensionPercentFac::to_float(self.air_brakes_extention_inch)
+    pub fn air_brakes_extension_percentage(&self) -> f32 {
+        AirBrakesExtensionPercentFac::to_float(self.air_brakes_extension_percentage)
     }
 
     pub fn air_brakes_servo_temp(&self) -> f32 {
@@ -810,7 +810,7 @@ impl TelemetryPacket {
             icarus_online: self.icarus_online(),
             icarus_rebooted_in_last_5s: self.icarus_rebooted_in_last_5s(),
 
-            air_brakes_extention_inch: self.air_brakes_extention_inch(),
+            air_brakes_extension_percentage: self.air_brakes_extension_percentage(),
             air_brakes_servo_temp: self.air_brakes_servo_temp(),
             ap_residue: self.ap_residue(),
             cd: self.cd(),
@@ -911,7 +911,7 @@ impl defmt::Format for TelemetryPacket {
             drogue_bulkhead_brightness: {}, \
             icarus_online: {}, \
             icarus_rebooted_in_last_5s: {}, \
-            air_brakes_extention_inch: {}, \
+            air_brakes_extension_percentage: {}, \
             air_brakes_servo_temp: {}, \
             ap_residue: {}, \
             cd: {}, \
@@ -995,7 +995,7 @@ impl defmt::Format for TelemetryPacket {
             self.drogue_bulkhead_brightness(),
             self.icarus_online(),
             self.icarus_rebooted_in_last_5s(),
-            self.air_brakes_extention_inch(),
+            self.air_brakes_extension_percentage(),
             self.air_brakes_servo_temp(),
             self.ap_residue(),
             self.cd(),
@@ -1099,7 +1099,7 @@ pub struct TelemetryPacketBuilderState {
 
     pub icarus_online: bool,
     pub icarus_uptime_s: u32,
-    pub air_brakes_extention_inch: f32,
+    pub air_brakes_extension_percentage: f32,
     pub air_brakes_servo_temp: f32,
     pub ap_residue: f32,
     pub cd: f32,
@@ -1210,7 +1210,7 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
 
                 icarus_online: false,
                 icarus_uptime_s: 0,
-                air_brakes_extention_inch: 0.0,
+                air_brakes_extension_percentage: 0.0,
                 air_brakes_servo_temp: 0.0,
                 ap_residue: 0.0,
                 cd: 0.0,
@@ -1321,7 +1321,7 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 TelemetryPacket::encode_brightness_lux(state.drogue_bulkhead_brightness),
                 state.icarus_online,
                 state.icarus_uptime_s < 5,
-                state.air_brakes_extention_inch,
+                state.air_brakes_extension_percentage,
                 state.air_brakes_servo_temp,
                 state.ap_residue,
                 state.cd,
