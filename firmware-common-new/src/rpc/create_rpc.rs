@@ -210,7 +210,7 @@ macro_rules! create_rpc {
 
                     // flush the serial buffer
                     self.serial.write_all(&[255; REQUEST_STRUCT_MAX_SIZE]).await.map_err(RpcClientError::Serial)?;
-                    self.serial.clear_read_buffer().await;
+                    self.serial.clear_read_buffer().await.map_err(RpcClientError::Serial)?;
 
                     // send reset command
                     self.serial.write_all(&[255, 0x42]).await.map_err(RpcClientError::Serial)?;

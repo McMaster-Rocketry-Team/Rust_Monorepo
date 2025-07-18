@@ -912,10 +912,9 @@ impl defmt::Format for TelemetryPacket {
             ozys1_rebooted_in_last_5s: {}, \
             ozys2_online: {}, \
             ozys2_rebooted_in_last_5s: {}, \
+            aero_rust_online: {}, \
             aero_rust_rebooted_in_last_5s: {}, \
             aero_rust_health: {}, \
-            aero_rust_mode: {}, \
-            aero_rust_status: {}, \
             payload_activation_pcb_online: {}, \
             payload_activation_pcb_rebooted_in_last_5s: {}, \
             rocket_wifi_online: {}, \
@@ -997,10 +996,9 @@ impl defmt::Format for TelemetryPacket {
             self.ozys1_rebooted_in_last_5s(),
             self.ozys2_online(),
             self.ozys2_rebooted_in_last_5s(),
+            self.aero_rust_online(),
             self.aero_rust_rebooted_in_last_5s(),
             self.aero_rust_health(),
-            self.aero_rust_mode(),
-            self.aero_rust_status(),
             self.payload_activation_pcb_online(),
             self.payload_activation_pcb_rebooted_in_last_5s(),
             self.rocket_wifi_online(),
