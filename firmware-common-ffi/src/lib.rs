@@ -606,7 +606,7 @@ pub extern "C" fn new_brightness_measurement_message(
 pub extern "C" fn brightness_measurement_message_get_brightness(
     message: &BrightnessMeasurementMessage,
 ) -> f32 {
-    message.brightness()
+    message.brightness_lux()
 }
 
 #[cfg_attr(not(feature = "wasm"), unsafe(no_mangle))]

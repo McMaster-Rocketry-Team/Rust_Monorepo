@@ -258,8 +258,8 @@ impl<M: RawMutex, const N: usize, const SUBS: usize> CanReceiver<M, N, SUBS> {
     }
 
     pub fn subscriber(
-        &self,
-    ) -> Option<Subscriber<M, SensorReading<BootTimestamp, ReceivedCanBusMessage>, N, SUBS, 1>>
+        &'_ self,
+    ) -> Option<Subscriber<'_, M, SensorReading<BootTimestamp, ReceivedCanBusMessage>, N, SUBS, 1>>
     {
         self.channel.subscriber().ok()
     }

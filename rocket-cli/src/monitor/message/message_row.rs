@@ -317,11 +317,10 @@ impl MessageRow {
                 printer,
                 1,
                 &[
-                    // TOOD: brightness unit?
                     (
-                        "brightness",
+                        "brightness (lux)",
                         false,
-                        format!("{:>6.2}", m.brightness()).into(),
+                        format!("{:>10.2}", m.brightness_lux()).into(),
                     ),
                 ],
             ),

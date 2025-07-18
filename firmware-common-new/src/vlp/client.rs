@@ -464,11 +464,11 @@ mod tests {
             }
         }
 
-        fn radio_a(&self) -> RadioA<M> {
+        fn radio_a(&'_ self) -> RadioA<'_, M> {
             RadioA { pair: self }
         }
 
-        fn radio_b(&self) -> RadioB<M> {
+        fn radio_b(&'_ self) -> RadioB<'_, M> {
             RadioB { pair: self }
         }
     }
