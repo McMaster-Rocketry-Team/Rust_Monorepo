@@ -7,6 +7,7 @@ mod gs;
 mod monitor;
 mod probe;
 mod testing;
+mod usb;
 
 use anyhow::bail;
 use anyhow::{Result, anyhow};
@@ -26,6 +27,7 @@ use testing::mock_connection_method::MockConnectionMethod;
 
 use crate::gen_key::gen_vlp_key;
 use crate::gs::ground_station_tui;
+use crate::probe::ProbeConnectionMethod;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -62,19 +64,21 @@ async fn main() -> Result<()> {
             connection_method.dispose().await
         }
         ModeSelect::Attach(args) => {
-            let mut connection_method =
-                get_connection_method(args.force_ota, args.force_probe).await?;
+            todo!()
+            // ProbeConnectionMethod::list_options(None).await
+            // let mut connection_method =
+            //     get_connection_method(args.force_ota, args.force_probe).await?;
 
-            monitor_tui(
-                &mut connection_method,
-                &args.chip,
-                &args.secret_path,
-                &args.node_type,
-                &args.firmware_elf_path,
-            )
-            .await?;
+            // monitor_tui(
+            //     &mut connection_method,
+            //     &args.chip,
+            //     &args.secret_path,
+            //     &args.node_type,
+            //     &args.firmware_elf_path,
+            // )
+            // .await?;
 
-            connection_method.dispose().await
+            // connection_method.dispose().await
         }
         ModeSelect::GroundStation => {
             let ground_station_serial_ports = available_ports()

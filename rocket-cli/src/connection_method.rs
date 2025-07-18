@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{any::Any, path::PathBuf};
 
 use crate::{
     args::NodeTypeEnum,
@@ -33,6 +33,11 @@ pub async fn get_connection_method(
     };
 
     Ok(connection_method)
+}
+
+pub struct ConnectionOption {
+    pub name: String,
+    pub additional_options: Box<dyn Any>,
 }
 
 #[async_trait(?Send)]

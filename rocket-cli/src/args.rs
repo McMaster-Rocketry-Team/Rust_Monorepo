@@ -22,7 +22,7 @@ pub enum ModeSelect {
     Download(DownloadCli),
 
     #[command(about = "attach to target via probe or ota")]
-    Attach(DownloadCli),
+    Attach(AttachCli),
 
     #[command(about = "connect to ground station")]
     GroundStation,
@@ -48,6 +48,12 @@ pub struct DownloadCli {
     pub secret_path: std::path::PathBuf,
     pub node_type: NodeTypeEnum,
     pub firmware_elf_path: std::path::PathBuf,
+}
+
+#[derive(Parser, Debug)]
+pub struct AttachCli {
+    pub chip: Option<String>,
+    pub firmware_elf_path: Option<std::path::PathBuf>,
 }
 
 #[derive(Parser, Debug)]

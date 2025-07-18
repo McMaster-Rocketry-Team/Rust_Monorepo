@@ -1,11 +1,17 @@
-use std::{path::PathBuf, process::Stdio};
+use std::{any::Any, fs, path::PathBuf, process::Stdio};
 
 use crate::{
-    args::NodeTypeEnum, connection_method::ConnectionMethod, monitor::{target_log::{parse_log_level, DefmtLocationInfo, DefmtLogInfo, TargetLog}, MonitorStatus}
+    args::NodeTypeEnum,
+    connection_method::{ConnectionMethod, ConnectionOption},
+    monitor::{
+        MonitorStatus,
+        target_log::{DefmtLocationInfo, DefmtLogInfo, TargetLog, parse_log_level},
+    },
 };
-use anyhow::{Result, bail};
+use anyhow::{Result, anyhow, bail};
 use async_trait::async_trait;
 use firmware_common_new::can_bus::telemetry::message_aggregator::DecodedMessage;
+use log::{info, warn};
 use probe_rs::probe::list::Lister;
 use prompted::input;
 use regex::Regex;
@@ -20,17 +26,61 @@ pub struct ProbeConnectionMethod {
 }
 
 impl ProbeConnectionMethod {
-    pub async fn initialize() -> Result<Self> {
+    fn try_read_chip_from_embed_toml() -> Result<String> {
+        // let options = ProbeConnectionMethodOptions {a:1};
+        // let options: Box<dyn Any> = Box::new(options);
+        // info!("{}", options.as_ref().is::<ProbeConnectionMethodOptions>());
+        let path = PathBuf::from("./Embed.toml");
+        if !path.exists() {
+            bail!("./Embed.toml does not exist")
+        }
+
+        let config_str = fs::read_to_string(path)?;
+        let config = config_str.parse::<toml::Table>()?;
+        info!("{:?}", config);
+        let chip = config["default"]["general"]["chip"].as_str();
+
+        chip.map(String::from)
+            .ok_or(anyhow!("default.general.chip key not found"))
+    }
+
+    pub async fn list_options(chip: Option<String>) -> Result<Vec<ConnectionOption>> {
         let output = std::process::Command::new("probe-rs")
             .arg("--version")
             .output();
 
         if output.is_err() {
-            bail!(
+            warn!(
                 "probe-rs not found. Please install it by running 'cargo install probe-rs-tools --locked'"
             );
+            return Ok(vec![]);
         }
 
+        let lister = Lister::new();
+        let probes = lister.list_all();
+        if probes.len() == 0 {
+            info!("no probe connected")
+        } else {
+            let chip = if let Some(chip) = chip {
+                chip
+            } else {
+                match Self::try_read_chip_from_embed_toml() {
+                    Ok(chip) => chip,
+                    Err(e) => {
+                        info!(
+                            "probe options skipped because --chip is not specified and can not read chip from Embed.toml: {:?}",
+                            e
+                        );
+                        return Ok(vec![]);
+                    }
+                }
+            };
+        }
+
+        Ok(vec![])
+    }
+
+    pub async fn initialize() -> Result<Self> {
         let lister = Lister::new();
         let probes = lister.list_all();
         let probe = if probes.len() == 0 {

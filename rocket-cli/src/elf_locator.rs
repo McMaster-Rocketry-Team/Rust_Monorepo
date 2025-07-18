@@ -111,13 +111,13 @@ pub fn locate_elf_files(firmware_elf_path: Option<&PathBuf>) -> Result<ELFInfoMa
 }
 
 #[derive(Debug, Clone)]
-struct ElfInfo {
-    path: PathBuf,
-    profile: String,
-    created_time: SystemTime,
+pub struct ElfInfo {
+    pub path: PathBuf,
+    pub profile: String,
+    pub created_time: SystemTime,
 }
 
-fn find_newest_elf<P: AsRef<Path>>(project_path: &P) -> Result<Option<ElfInfo>> {
+pub fn find_newest_elf<P: AsRef<Path>>(project_path: &P) -> Result<Option<ElfInfo>> {
     let pattern = format!(
         "{}/target/**/{{debug,release}}/*",
         project_path.as_ref().to_str().unwrap()
