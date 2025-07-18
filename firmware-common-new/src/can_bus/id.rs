@@ -1,6 +1,3 @@
-#[cfg(feature = "wasm")]
-use wasm_bindgen::prelude::*;
-
 use super::{
     messages::{LOG_MESSAGE_TYPE, RESET_MESSAGE_TYPE, UNIX_TIME_MESSAGE_TYPE},
     sender::CAN_CRC,
@@ -65,7 +62,6 @@ pub fn create_can_bus_message_type_filter_mask(accept_message_types: &[u8]) -> u
 }
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
-#[cfg_attr(feature = "wasm", wasm_bindgen)]
 #[derive(PackedStruct, Default, Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[packed_struct(endian = "msb", size_bytes = "4")]
 #[repr(C)]
@@ -85,9 +81,7 @@ pub struct CanBusExtendedId {
     pub node_id: u16,
 }
 
-#[cfg_attr(feature = "wasm", wasm_bindgen)]
 impl CanBusExtendedId {
-    #[cfg_attr(feature = "wasm", wasm_bindgen(constructor))]
     pub fn new(priority: u8, message_type: u8, node_type: u8, node_id: u16) -> Self {
         Self {
             _reserved: Default::default(),

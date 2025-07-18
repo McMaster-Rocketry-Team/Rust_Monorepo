@@ -50,7 +50,7 @@ impl From<NodeStatusMessage> for NodeStatus {
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PackedStruct, Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "23")]
+#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "24")]
 pub struct SelfTestResultPacket {
     #[packed_field(element_size_bytes = "2")]
     pub amp: NodeStatus,
@@ -91,6 +91,11 @@ pub struct SelfTestResultPacket {
     pub gps_ok: bool,
     pub sd_ok: bool,
     pub can_bus_ok: bool,
+
+    pub amp_out1_ok: bool,
+    pub amp_out2_ok: bool,
+    pub amp_out3_ok: bool,
+    pub amp_out4_ok: bool,
 }
 
 impl SelfTestResultPacket {
@@ -115,6 +120,11 @@ impl SelfTestResultPacket {
             payload_eps2: self.payload_eps2.to_json(),
             main_bulkhead_pcb: self.main_bulkhead_pcb.to_json(),
             drogue_bulkhead_pcb: self.drogue_bulkhead_pcb.to_json(),
+
+            amp_out1_ok: self.amp_out1_ok,
+            amp_out2_ok: self.amp_out2_ok,
+            amp_out3_ok: self.amp_out3_ok,
+            amp_out4_ok: self.amp_out4_ok,
         }
     }
 }

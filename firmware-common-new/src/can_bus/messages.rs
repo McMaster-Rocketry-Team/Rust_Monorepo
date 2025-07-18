@@ -1,8 +1,3 @@
-#[cfg(feature = "wasm")]
-use tsify::Tsify;
-#[cfg(feature = "wasm")]
-use wasm_bindgen::prelude::*;
-
 use crate::utils::FixedLenSerializable;
 use ack::AckMessage;
 #[cfg(not(feature = "bootloader"))]
@@ -261,8 +256,6 @@ pub const LOG_MESSAGE_TYPE: u8 = create_can_bus_message_type(
 );
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
-#[cfg_attr(feature = "wasm", derive(Tsify))]
-#[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
 #[derive(Clone, Debug, PartialEq, Eq, Ord, PartialOrd, serde::Serialize, serde::Deserialize)]
 #[repr(C)]
 pub enum CanBusMessageEnum {
