@@ -34,12 +34,6 @@ mkdir -p ./out/thumbv7em-none-eabihf/
 cp ../target/thumbv7em-none-eabihf/release/libfirmware_common_ffi.a ./out/thumbv7em-none-eabihf/libfirmware_common_ffi.a
 cp ./out/firmware_common_ffi.h ./out/thumbv7em-none-eabihf/firmware_common_ffi.h
 
-# ========== Compile for wasm ==========
-
-RUSTFLAGS="-Zwasm-c-abi=spec" wasm-pack build --release --target web --features wasm
-cp -r ./pkg ./out/wasm
-rm ./pkg/.gitignore
-
 # ========== Clean up and compress ==========
 
 rm out/firmware_common_ffi.h
@@ -48,7 +42,5 @@ tar -czf riscv32imc-esp-espidf.tar.gz -C out/riscv32imc-esp-espidf .
 mv riscv32imc-esp-espidf.tar.gz ./out/
 tar -czf thumbv7em-none-eabihf.tar.gz -C out/thumbv7em-none-eabihf .
 mv thumbv7em-none-eabihf.tar.gz ./out/
-tar -czf wasm.tar.gz -C out/wasm .
-mv wasm.tar.gz ./out/
 
 echo "Build complete. Output files are in the 'out' directory."

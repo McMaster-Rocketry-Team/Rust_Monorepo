@@ -11,7 +11,7 @@ members = [
     "servo-debug-gui",
 
     "firmware-common-new",
-    # "firmware-common-ffi",
+    "firmware-common-ffi",
     "air-brakes-controller-core",
     "air-brakes-controller-matlab-server",
 
