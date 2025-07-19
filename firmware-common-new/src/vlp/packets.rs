@@ -37,7 +37,7 @@ pub enum VLPDownlinkPacket {
 }
 
 impl VLPDownlinkPacket {
-    pub(super) fn deserialize(data: &[u8]) -> Option<Self> {
+    pub fn deserialize(data: &[u8]) -> Option<Self> {
         if data.is_empty() {
             return None;
         }
@@ -55,7 +55,7 @@ impl VLPDownlinkPacket {
         }
     }
 
-    pub(super) fn serialize(&self, mut buffer: &mut [u8]) -> usize {
+    pub fn serialize(&self, mut buffer: &mut [u8]) -> usize {
         buffer[0] = match self {
             VLPDownlinkPacket::GPSBeacon(_) => 0,
             VLPDownlinkPacket::Ack(_) => 1,

@@ -14,6 +14,7 @@ use firmware_common_new::can_bus::messages::CanBusMessageEnum;
 use firmware_common_new::can_bus::node_types;
 use firmware_common_new::can_bus::receiver::CanBusMultiFrameDecoder;
 use firmware_common_new::can_bus::sender::CanBusMultiFrameEncoder;
+use firmware_common_new::vlp::packets::VLPDownlinkPacket;
 
 #[unsafe(no_mangle)]
 pub static VOID_LAKE_NODE_TYPE: u8 = node_types::VOID_LAKE_NODE_TYPE;
@@ -276,26 +277,6 @@ pub extern "C" fn process_can_bus_frame(
     }
 }
 
-/// Handles the processing of a CAN bus frame to extract a message.
-///
-/// # Parameters
-/// - `timestamp`: The timestamp indicating when the frame was received.
-/// - `id`: The ID of the received CAN bus frame.
-/// - `data`: buffer containing the frame's data payload.
-///
-/// # Returns
-/// - `ProcessCanBusFrameResult`
-///     - `Message` if the frame was successfully processed and a complete message was extracted.
-///     - `Empty` if the frame is invalid or the message is incomplete (e.g., in the case of multi-frame messages).
-///
-/// # Safety
-///
-/// The caller is responsible for ensuring `log_multiplexer_create_chunk`, `message_aggregator_create_chunk` and
-/// `process_can_bus_frame` is not invoked concurrently
-pub fn process_can_bus_frame_js(timestamp: u64, id: u32, data: &[u8]) -> ProcessCanBusFrameResult {
-    process_can_bus_frame(timestamp, id, data.as_ptr(), data.len())
-}
-
 #[unsafe(no_mangle)]
 pub extern "C" fn parse_can_bus_id(id: u32) -> CanBusExtendedId {
     CanBusExtendedId::from_raw(id)
@@ -393,6 +374,62 @@ pub extern "C" fn new_payload_eps_self_test_message(
         out_9v_ok,
     }
 }
+
+#[repr(C)]
+pub enum DecodeLoraTelemetryResult {
+    Success {
+        latitude: f64,
+        lontitude: f64,
+        altitude_agl: f32,
+    },
+    // the usize does nothing here, it just makes firmware-common-ffi not complain about unsafe zero size type
+    Invalid(usize),
+}
+
+/// Handles the processing of a CAN bus frame to extract a message.
+///
+/// # Parameters
+/// - `timestamp`: The timestamp indicating when the frame was received.
+/// - `id`: The ID of the received CAN bus frame.
+/// - `data`: A pointer to the buffer containing the frame's data payload.
+/// - `data_length`: The size of the data buffer in bytes.
+///
+/// # Returns
+/// - `ProcessCanBusFrameResult`
+///     - `Message` if the frame was successfully processed and a complete message was extracted.
+///     - `Empty` if the frame is invalid or the message is incomplete (e.g., in the case of multi-frame messages).
+///
+/// # Safety
+///
+/// The caller is responsible for ensuring `log_multiplexer_create_chunk`, `message_aggregator_create_chunk` and
+/// `process_can_bus_frame` is not invoked concurrently
+#[unsafe(no_mangle)]
+pub extern "C" fn decode_lora_telemetry(
+    data: *const u8,
+    data_length: usize,
+) -> DecodeLoraTelemetryResult {
+    let data = unsafe { core::slice::from_raw_parts(data, data_length) };
+    match VLPDownlinkPacket::deserialize(data) {
+        Some(VLPDownlinkPacket::GPSBeacon(packet)) => {
+            let (latitude, lontitude) = packet.lat_lon();
+            DecodeLoraTelemetryResult::Success {
+                latitude,
+                lontitude,
+                altitude_agl: 0.0,
+            }
+        }
+        Some(VLPDownlinkPacket::Telemetry(packet))=> {
+            let (latitude, lontitude) = packet.lat_lon();
+            DecodeLoraTelemetryResult::Success {
+                latitude,
+                lontitude,
+                altitude_agl: packet.altitude_agl(),
+            }
+        }
+        _ => DecodeLoraTelemetryResult::Invalid(0),
+    }
+}
+
 #[cfg(any(target_os = "none", target_os = "espidf"))]
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {

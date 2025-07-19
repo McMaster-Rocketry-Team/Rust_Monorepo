@@ -473,15 +473,15 @@ impl TelemetryPacket {
         self.pyro_drogue_continuity
     }
 
-    pub fn altitude(&self) -> f32 {
+    pub fn altitude_agl(&self) -> f32 {
         AltitudeFac::to_float(self.altitude_agl)
     }
 
-    pub fn max_altitude(&self) -> f32 {
+    pub fn max_altitude_agl(&self) -> f32 {
         AltitudeFac::to_float(self.max_altitude_agl)
     }
 
-    pub fn backup_max_altitude(&self) -> f32 {
+    pub fn backup_max_altitude_agl(&self) -> f32 {
         AltitudeFac::to_float(self.backup_max_altitude_agl)
     }
 
@@ -777,9 +777,9 @@ impl TelemetryPacket {
             vl_stm32_temperature: self.vl_stm32_temperature(),
             pyro_main_continuity: self.pyro_main_continuity(),
             pyro_drogue_continuity: self.pyro_drogue_continuity(),
-            altitude_agl: self.altitude(),
-            max_altitude_agl: self.max_altitude(),
-            backup_max_altitude_agl: self.backup_max_altitude(),
+            altitude_agl: self.altitude_agl(),
+            max_altitude_agl: self.max_altitude_agl(),
+            backup_max_altitude_agl: self.backup_max_altitude_agl(),
             air_speed: self.air_speed(),
             max_air_speed: self.max_air_speed(),
             backup_max_air_speed: self.backup_max_air_speed(),
