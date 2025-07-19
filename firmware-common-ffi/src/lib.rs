@@ -380,7 +380,7 @@ pub extern "C" fn new_payload_eps_self_test_message(
 pub enum DecodeLoraTelemetryResult {
     Success {
         latitude: f64,
-        lontitude: f64,
+        longitude: f64,
         altitude_agl: f32,
     },
     // the usize does nothing here, it just makes firmware-common-ffi not complain about unsafe zero size type
@@ -402,18 +402,18 @@ pub extern "C" fn decode_lora_telemetry(
 
     match VLPDownlinkPacket::deserialize(&data[..rx_len]) {
         Some(VLPDownlinkPacket::GPSBeacon(packet)) => {
-            let (latitude, lontitude) = packet.lat_lon();
+            let (latitude, longitude) = packet.lat_lon();
             DecodeLoraTelemetryResult::Success {
                 latitude,
-                lontitude,
+                longitude,
                 altitude_agl: 0.0,
             }
         }
         Some(VLPDownlinkPacket::Telemetry(packet)) => {
-            let (latitude, lontitude) = packet.lat_lon();
+            let (latitude, longitude) = packet.lat_lon();
             DecodeLoraTelemetryResult::Success {
                 latitude,
-                lontitude,
+                longitude,
                 altitude_agl: packet.altitude_agl(),
             }
         }
