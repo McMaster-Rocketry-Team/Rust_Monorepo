@@ -16,4 +16,4 @@ disable-blocking-mode = []
 [dependencies]
 defmt = "1"
 critical-section = "1.2"
-embassy-sync = "0.6.2"
+embassy-sync = "0.7.0"

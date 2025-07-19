@@ -1,11 +1,18 @@
 use crc::Crc;
-use embassy_futures::yield_now;
-use embassy_sync::{blocking_mutex::raw::RawMutex, channel::Channel, watch::Watch};
+use embassy_futures::{
+    select::{Either, select},
+    yield_now,
+};
+use embassy_sync::{
+    blocking_mutex::raw::{CriticalSectionRawMutex, RawMutex},
+    channel::Channel,
+    pipe::Pipe,
+};
 use heapless::Vec;
 
-use crate::can_bus::messages::CanBusMessageEnum;
+use crate::can_bus::messages::{CanBusMessageEnum, LOG_MESSAGE_TYPE};
 
-use super::{id::CanBusExtendedId, CanBusTX};
+use super::{CanBusTX, id::CanBusExtendedId};
 use packed_struct::prelude::*;
 
 pub const MAX_CAN_MESSAGE_SIZE: usize = 64;
@@ -34,13 +41,6 @@ impl Into<u8> for TailByte {
     fn into(self) -> u8 {
         self.pack().unwrap()[0]
     }
-}
-
-pub struct CanSender<M: RawMutex, const N: usize> {
-    channel: Channel<M, (CanBusExtendedId, Vec<u8, 8>), N>,
-    node_type: u8,
-    node_id: u16,
-    flushed_watch: Watch<M, bool, 2>,
 }
 
 pub(super) const CAN_CRC: Crc<u16> = Crc::<u16>::new(&crc::CRC_16_IBM_3740);
@@ -116,30 +116,51 @@ impl Iterator for CanBusMultiFrameEncoder {
     }
 }
 
+pub struct CanSender<M: RawMutex, const N: usize> {
+    channel: Channel<M, (CanBusExtendedId, Vec<u8, 8>), N>,
+    node_type: u8,
+    node_id: u16,
+    log_pipe: Option<&'static Pipe<CriticalSectionRawMutex, 1024>>,
+}
+
 impl<M: RawMutex, const N: usize> CanSender<M, N> {
-    pub fn new(node_type: u8, node_id: u16) -> Self {
+    pub fn new(
+        node_type: u8,
+        node_id: u16,
+        log_pipe: Option<&'static Pipe<CriticalSectionRawMutex, 1024>>,
+    ) -> Self {
         Self {
             channel: Channel::new(),
             node_type,
             node_id,
-            flushed_watch: Watch::new(),
+            log_pipe,
         }
     }
 
     pub async fn run_daemon(&self, tx: &mut impl CanBusTX) {
-        let flushed_sender = self.flushed_watch.sender();
-        loop {
-            let (id, data) = self.channel.receive().await;
-            flushed_sender.send(false);
-            let result = tx.send(id.into(), &data).await;
-
-            if self.channel.is_empty() {
-                flushed_sender.send(true);
-            }
+        let mut send_tx_frame = async |id: u32, data: &[u8]| {
+            let result = tx.send(id, &data).await;
 
             if let Err(e) = result {
                 log_error!("Failed to send CAN frame: {:?}", e);
                 yield_now().await;
+            }
+        };
+
+        if let Some(log_pipe) = &self.log_pipe {
+            let mut buffer = [0u8; 8];
+            let log_frame_id: u32 =
+                CanBusExtendedId::new(7, LOG_MESSAGE_TYPE, self.node_type, self.node_id).into();
+            loop {
+                match select(self.channel.receive(), log_pipe.read(&mut buffer)).await {
+                    Either::First((id, data)) => send_tx_frame(id.into(), &data).await,
+                    Either::Second(len) => send_tx_frame(log_frame_id, &buffer[..len]).await,
+                }
+            }
+        } else {
+            loop {
+                let (id, data) = self.channel.receive().await;
+                send_tx_frame(id.into(), &data).await;
             }
         }
     }
@@ -153,12 +174,5 @@ impl<M: RawMutex, const N: usize> CanSender<M, N> {
             self.channel.send((id, data)).await;
         }
         crc
-    }
-
-    pub async fn flush(&self) {
-        let mut flushed_receiver = self.flushed_watch.receiver().unwrap();
-        if flushed_receiver.try_get() != Some(true) {
-            flushed_receiver.get_and(|w| *w).await;
-        }
     }
 }
