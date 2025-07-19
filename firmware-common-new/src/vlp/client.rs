@@ -49,7 +49,7 @@ use sha2::Sha256;
 /// | 11       | 2       | 13        |
 /// | 12       | 3       | 15        |
 /// | n        | n // 4  | n + n // 4|
-fn encode_ecc(buffer: &mut [u8], data_len: usize) -> usize {
+pub fn vlp_encode_ecc(buffer: &mut [u8], data_len: usize) -> usize {
     let ecc_len = if data_len < 12 { 2 } else { data_len / 4 };
     let encoder = reed_solomon::Encoder::new(ecc_len);
     let encoded = encoder.encode(&buffer[..data_len]);
@@ -61,7 +61,7 @@ fn encode_ecc(buffer: &mut [u8], data_len: usize) -> usize {
 /// returns the length of data in the buffer if ecc is correct
 /// returns None if ecc is incorrect
 /// TODO: also return the number of corrected errors
-fn decode_ecc(buffer: &mut [u8]) -> Option<usize> {
+pub fn vlp_decode_ecc(buffer: &mut [u8]) -> Option<usize> {
     let ecc_len = if buffer.len() < 15 {
         2
     } else {
@@ -159,7 +159,7 @@ impl<'a, 'b, 'c, M: RawMutex, R: Radio> VLPGroundStationDaemon<'a, 'b, 'c, M, R>
             .map_err(VLPDaemonError::Radio)?;
 
         // decode ecc
-        let rx_len = decode_ecc(&mut self.buffer[..rx_len]).ok_or(VLPDaemonError::ECCError)?;
+        let rx_len = vlp_decode_ecc(&mut self.buffer[..rx_len]).ok_or(VLPDaemonError::ECCError)?;
 
         // deserialize the packet
         let rx_packet = VLPDownlinkPacket::deserialize(&self.buffer[..rx_len])
@@ -202,7 +202,7 @@ impl<'a, 'b, 'c, M: RawMutex, R: Radio> VLPGroundStationDaemon<'a, 'b, 'c, M, R>
             u16::from_be_bytes((&full_verification_code[0..2]).try_into().unwrap());
 
         // encode ecc
-        offset = encode_ecc(&mut self.buffer, offset);
+        offset = vlp_encode_ecc(&mut self.buffer, offset);
 
         // send the packet and receive ack
         match self
@@ -213,7 +213,7 @@ impl<'a, 'b, 'c, M: RawMutex, R: Radio> VLPGroundStationDaemon<'a, 'b, 'c, M, R>
             Ok((rx_len, packet_status)) => {
                 // decode ecc
                 let rx_len =
-                    decode_ecc(&mut self.buffer[..rx_len]).ok_or(VLPTXError::InvalidAck)?;
+                    vlp_decode_ecc(&mut self.buffer[..rx_len]).ok_or(VLPTXError::InvalidAck)?;
 
                 if let Some(VLPDownlinkPacket::Ack(ack_packet)) =
                     VLPDownlinkPacket::deserialize(&self.buffer[..rx_len])
@@ -318,7 +318,7 @@ impl<'a, 'b, 'c, M: RawMutex, R: Radio> VLPAvionicsDaemon<'a, 'b, 'c, M, R> {
         hasher.update(&self.buffer[..offset]); // hash 2: downlink packet without ecc
 
         // encode ecc
-        offset = encode_ecc(&mut self.buffer, offset);
+        offset = vlp_encode_ecc(&mut self.buffer, offset);
 
         match self
             .radio
@@ -346,7 +346,7 @@ impl<'a, 'b, 'c, M: RawMutex, R: Radio> VLPAvionicsDaemon<'a, 'b, 'c, M, R> {
         mut hasher: impl Digest,
     ) -> Result<(), VLPDaemonError> {
         // decode ecc
-        let rx_len = decode_ecc(&mut self.buffer[..rx_len]).ok_or(VLPDaemonError::ECCError)?;
+        let rx_len = vlp_decode_ecc(&mut self.buffer[..rx_len]).ok_or(VLPDaemonError::ECCError)?;
 
         if rx_len < 16 {
             return Err(VLPDaemonError::DeserializeError);
@@ -389,7 +389,7 @@ impl<'a, 'b, 'c, M: RawMutex, R: Radio> VLPAvionicsDaemon<'a, 'b, 'c, M, R> {
         let mut offset = ack_packet.serialize(&mut self.buffer);
 
         // encode ecc
-        offset = encode_ecc(&mut self.buffer, offset);
+        offset = vlp_encode_ecc(&mut self.buffer, offset);
 
         // send the packet
         self.radio
@@ -430,13 +430,13 @@ mod tests {
         let len = 8;
 
         // ecc encode
-        let len = encode_ecc(&mut buffer, len);
+        let len = vlp_encode_ecc(&mut buffer, len);
         assert_eq!(len, 10);
 
         // should be able to decode if data is unchanged
         {
             let mut after_buffer = buffer.clone();
-            let len = decode_ecc(&mut after_buffer).unwrap();
+            let len = vlp_decode_ecc(&mut after_buffer).unwrap();
             assert_eq!(len, 8);
             assert_eq!(&after_buffer[..len], &buffer[..len]);
         }
@@ -445,7 +445,7 @@ mod tests {
         for i in 0..10 {
             let mut after_buffer = buffer.clone();
             after_buffer[i] ^= 0xFF;
-            let len = decode_ecc(&mut after_buffer).unwrap();
+            let len = vlp_decode_ecc(&mut after_buffer).unwrap();
             assert_eq!(len, 8);
             assert_eq!(&after_buffer[..len], &buffer[..len]);
         }

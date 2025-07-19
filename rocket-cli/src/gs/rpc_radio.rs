@@ -10,13 +10,18 @@ use crate::gs::serial_wrapper::SerialWrapper;
 pub struct RpcRadio<'a> {
     client: LoraRpcClient<'a, SerialWrapper>,
     buffer: [u8; 256],
+    after_tx: Option<Box<dyn FnOnce(bool)>>,
 }
 
 impl<'a> RpcRadio<'a> {
-    pub fn new(client: LoraRpcClient<'a, SerialWrapper>) -> Self {
+    pub fn new(
+        client: LoraRpcClient<'a, SerialWrapper>,
+        after_tx: Option<Box<dyn FnOnce(bool)>>,
+    ) -> Self {
         Self {
             client,
             buffer: [0u8; 256],
+            after_tx,
         }
     }
 }
@@ -24,13 +29,19 @@ impl<'a> RpcRadio<'a> {
 impl<'a> Radio for RpcRadio<'a> {
     async fn tx(&mut self, buffer: &[u8]) -> std::result::Result<(), RadioError> {
         self.buffer[..buffer.len()].copy_from_slice(buffer);
-        match self.client.tx(buffer.len() as u32, self.buffer).await {
+        let result = match self.client.tx(buffer.len() as u32, self.buffer).await {
             Ok(_) => Ok(()),
             Err(e) => {
                 error!("{:?}", e);
                 Err(RadioError::TransmitTimeout)
             }
+        };
+
+        if let Some(after_tx) = self.after_tx.take() {
+            after_tx(result.is_ok());
         }
+
+        result
     }
 
     async fn rx(
@@ -109,7 +120,8 @@ impl<'a> Radio for RpcRadio<'a> {
         tx_len: usize,
         rx_mode: RxMode,
     ) -> Result<(usize, PacketStatus), RadioError> {
-        if let RxMode::Single { timeout_ms } = rx_mode {
+        let mut tx_success = false;
+        let result = if let RxMode::Single { timeout_ms } = rx_mode {
             self.buffer[..tx_len].copy_from_slice(&buffer[..tx_len]);
             match self
                 .client
@@ -126,6 +138,7 @@ impl<'a> Radio for RpcRadio<'a> {
                             snr,
                         },
                 }) => {
+                    tx_success = true;
                     buffer[..(len as usize)].copy_from_slice(&data[..(len as usize)]);
 
                     Ok((len as usize, PacketStatus { rssi, snr }))
@@ -133,11 +146,15 @@ impl<'a> Radio for RpcRadio<'a> {
                 Ok(TxThenRxResponse {
                     tx_success: true,
                     result: LoraRpcRxResult::Timeout,
-                }) => Err(RadioError::ReceiveTimeout),
+                }) => {
+                    tx_success = true;
+                    Err(RadioError::ReceiveTimeout)
+                }
                 Ok(TxThenRxResponse {
                     tx_success: true,
                     result: LoraRpcRxResult::Error,
                 }) => {
+                    tx_success = true;
                     error!("rx failed, unknown reason");
                     Err(RadioError::Reset)
                 }
@@ -148,12 +165,18 @@ impl<'a> Radio for RpcRadio<'a> {
                     Err(RadioError::Reset)
                 }
                 Err(e) => {
-                    error!("rx rpc communication failed: {:?}", e);
+                    error!("tx_then_rx rpc communication failed: {:?}", e);
                     Err(RadioError::Reset)
                 }
             }
         } else {
             unimplemented!()
+        };
+
+        if let Some(after_tx) = self.after_tx.take() {
+            after_tx(tx_success);
         }
+
+        result
     }
 }

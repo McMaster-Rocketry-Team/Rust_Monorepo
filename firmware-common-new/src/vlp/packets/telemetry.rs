@@ -217,9 +217,9 @@ impl TelemetryPacket {
         pyro_main_continuity: bool,
         pyro_drogue_continuity: bool,
 
-        altitude: f32,
-        max_altitude: f32,
-        backup_max_altitude: f32,
+        altitude_agl: f32,
+        max_altitude_agl: f32,
+        backup_max_altitude_agl: f32,
 
         air_speed: f32,
         max_air_speed: f32,
@@ -244,11 +244,11 @@ impl TelemetryPacket {
 
         main_bulkhead_online: bool,
         main_bulkhead_rebooted_in_last_5s: bool,
-        main_bulkhead_brightness: u8,
+        main_bulkhead_brightness: f32,
 
         drogue_bulkhead_online: bool,
         drogue_bulkhead_rebooted_in_last_5s: bool,
-        drogue_bulkhead_brightness: u8,
+        drogue_bulkhead_brightness: f32,
 
         icarus_online: bool,
         icarus_rebooted_in_last_5s: bool,
@@ -320,9 +320,9 @@ impl TelemetryPacket {
             pyro_main_continuity,
             pyro_drogue_continuity,
 
-            altitude_agl: AltitudeFac::to_fixed_point_capped(altitude),
-            max_altitude_agl: AltitudeFac::to_fixed_point_capped(max_altitude),
-            backup_max_altitude_agl: AltitudeFac::to_fixed_point_capped(backup_max_altitude),
+            altitude_agl: AltitudeFac::to_fixed_point_capped(altitude_agl),
+            max_altitude_agl: AltitudeFac::to_fixed_point_capped(max_altitude_agl),
+            backup_max_altitude_agl: AltitudeFac::to_fixed_point_capped(backup_max_altitude_agl),
 
             air_speed: AirSpeedFac::to_fixed_point_capped(air_speed),
             max_air_speed: AirSpeedFac::to_fixed_point_capped(max_air_speed),
@@ -348,11 +348,15 @@ impl TelemetryPacket {
 
             main_bulkhead_online,
             main_bulkhead_rebooted_in_last_5s,
-            main_bulkhead_brightness,
+            main_bulkhead_brightness: TelemetryPacket::encode_brightness_lux(
+                main_bulkhead_brightness,
+            ),
 
             drogue_bulkhead_online,
             drogue_bulkhead_rebooted_in_last_5s,
-            drogue_bulkhead_brightness,
+            drogue_bulkhead_brightness: TelemetryPacket::encode_brightness_lux(
+                drogue_bulkhead_brightness,
+            ),
 
             icarus_online,
             icarus_rebooted_in_last_5s,
@@ -1315,10 +1319,10 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 state.amp_out4,
                 state.main_bulkhead_online,
                 state.main_bulkhead_uptime_s < 5,
-                TelemetryPacket::encode_brightness_lux(state.main_bulkhead_brightness),
+                state.main_bulkhead_brightness,
                 state.drogue_bulkhead_online,
                 state.drogue_bulkhead_uptime_s < 5,
-                TelemetryPacket::encode_brightness_lux(state.drogue_bulkhead_brightness),
+                state.drogue_bulkhead_brightness,
                 state.icarus_online,
                 state.icarus_uptime_s < 5,
                 state.air_brakes_extension_percentage,
