@@ -2,7 +2,6 @@ use std::{hint::black_box, path::PathBuf, time::Duration};
 
 use crate::args::NodeTypeEnum;
 use crate::connection_method::{ConnectionMethodFactory, ConnectionOption};
-use crate::elf_locator::ELFInfoMap;
 use crate::monitor::MonitorStatus;
 use crate::monitor::target_log::TargetLog;
 use crate::{connection_method::ConnectionMethod, elf_locator::locate_elf_files};

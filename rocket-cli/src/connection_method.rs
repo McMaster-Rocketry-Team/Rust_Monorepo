@@ -6,6 +6,7 @@ use crate::{
     elf_locator::{ElfInfo, find_newest_elf},
     monitor::{MonitorStatus, target_log::TargetLog},
     probe::ProbeConnectionMethod,
+    usb::USBConnectionMethod,
 };
 use anyhow::{Result, anyhow, bail};
 use async_trait::async_trait;
@@ -107,8 +108,15 @@ pub async fn get_connection_method(
     // list all options
     let mut options: Vec<ConnectionOption> = vec![];
 
-    options.append(&mut ProbeConnectionMethod::list_options(chip, firmware_elf_path.clone(), node_type).await?);
-    options.append(&mut BluetoothConnectionMethod::list_options(secret_path, firmware_elf_path, node_type).await?);
+    options.append(
+        &mut ProbeConnectionMethod::list_options(chip, firmware_elf_path.clone(), node_type)
+            .await?,
+    );
+    options.append(&mut USBConnectionMethod::list_options().await?);
+    options.append(
+        &mut BluetoothConnectionMethod::list_options(secret_path, firmware_elf_path, node_type)
+            .await?,
+    );
 
     if options.len() == 0 {
         bail!("No connection methods found");
@@ -116,7 +124,10 @@ pub async fn get_connection_method(
 
     if options.len() == 1 {
         let mut option = options.remove(0);
-        info!("using the only avaliable connection method: {}", option.name);
+        info!(
+            "using the only avaliable connection method: {}",
+            option.name
+        );
         let connection_method = option.factory.initialize().await?;
         return Ok(connection_method);
     }

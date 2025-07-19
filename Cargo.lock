@@ -5830,6 +5830,7 @@ dependencies = [
  "log",
  "lora-phy",
  "nanoid",
+ "nusb",
  "pad",
  "probe-rs",
  "prompted",
