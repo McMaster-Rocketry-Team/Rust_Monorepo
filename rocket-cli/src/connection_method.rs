@@ -35,6 +35,7 @@ fn try_find_newest_elf() -> Result<ElfInfo> {
 }
 
 pub async fn get_connection_method(
+    download: bool,
     chip: Option<String>,
     firmware_elf_path: Option<PathBuf>,
     node_type: Option<NodeTypeEnum>,
@@ -118,6 +119,22 @@ pub async fn get_connection_method(
             .await?,
     );
 
+    if download {
+        let all_options_len = options.len();
+        options = options
+            .into_iter()
+            .filter(|option| !option.attach_only)
+            .collect();
+        let avaliable_options_len = options.len();
+        let filtered_out_options = all_options_len - avaliable_options_len;
+        if filtered_out_options > 0 {
+            info!(
+                "{} connection methods are filtered out because they are attach only",
+                filtered_out_options
+            );
+        }
+    }
+
     if options.len() == 0 {
         bail!("No connection methods found");
     }
@@ -152,6 +169,7 @@ pub async fn get_connection_method(
 pub struct ConnectionOption {
     pub name: String,
     pub factory: Box<dyn ConnectionMethodFactory>,
+    pub attach_only: bool,
 }
 
 #[async_trait(?Send)]

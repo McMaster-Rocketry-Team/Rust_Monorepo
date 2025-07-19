@@ -42,6 +42,7 @@ async fn main() -> Result<()> {
     match args.mode {
         ModeSelect::Download(args) => {
             let mut connection_method = get_connection_method(
+                true,
                 Some(args.chip),
                 Some(args.firmware_elf_path.clone()),
                 Some(args.node_type),
@@ -56,7 +57,7 @@ async fn main() -> Result<()> {
         }
         ModeSelect::Attach(args) => {
             let mut connection_method =
-                get_connection_method(args.chip, args.elf, None, None).await?;
+                get_connection_method(false, args.chip, args.elf, None, None).await?;
 
             monitor_tui(&mut connection_method, None).await?;
 

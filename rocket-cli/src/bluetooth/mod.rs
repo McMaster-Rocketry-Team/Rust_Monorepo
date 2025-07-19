@@ -98,21 +98,14 @@ impl BluetoothConnectionMethod {
         for adapter in adapters {
             let name = adapter.adapter_info().await?;
             options.push(ConnectionOption {
-                name: format!(
-                    "Bluetooth {}{}",
-                    name,
-                    if secret_path.is_none() || firmware_elf_path.is_none() {
-                        " (attach only, no download)"
-                    } else {
-                        ""
-                    }
-                ),
+                name: format!("Bluetooth {}", name),
                 factory: Box::new(BluetoothConnectionMethodFactory {
                     adapter,
                     secret_path: secret_path.clone(),
                     firmware_elf_path: firmware_elf_path.clone(),
                     node_type: node_type.clone(),
                 }),
+                attach_only: secret_path.is_none() || firmware_elf_path.is_none(),
             });
         }
 

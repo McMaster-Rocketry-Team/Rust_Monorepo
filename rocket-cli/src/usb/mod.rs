@@ -15,7 +15,7 @@ use firmware_common_new::can_bus::{
     telemetry::{log_multiplexer::DecodedLogFrame, message_aggregator::DecodedMessage},
     usb_can_bus_frame::UsbCanBusFrame,
 };
-use log::{info, warn};
+use log::warn;
 use nusb::{DeviceInfo, Interface, transfer::RequestBuffer};
 use packed_struct::prelude::*;
 use tokio::{
@@ -61,13 +61,14 @@ impl USBConnectionMethod {
         {
             options.push(ConnectionOption {
                 name: format!(
-                    "The ENDGAME CAN Bus bridge, SN {} (attach only, no download)",
+                    "The ENDGAME CAN Bus bridge, SN {}",
                     endgame.serial_number().unwrap_or("N/A")
                 ),
                 factory: Box::new(USBConnectionMethodFactory {
                     device_info: endgame,
                     name: "The ENDGAME".to_string(),
                 }),
+                attach_only: true,
             });
         }
 
@@ -83,6 +84,7 @@ impl USBConnectionMethod {
                     device_info: icarus,
                     name: "ICARUS".to_string(),
                 }),
+                attach_only: true,
             });
         }
 

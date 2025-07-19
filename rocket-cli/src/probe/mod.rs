@@ -58,7 +58,7 @@ impl ProbeConnectionMethod {
 
         if output.is_err() {
             warn!(
-                "probe-rs not found. Please install it by running 'cargo install probe-rs-tools --locked'"
+                "probe-rs not found. Please install it by running 'cargo install probe-rs-tools --locked --force'"
             );
             return Ok(vec![]);
         }
@@ -112,6 +112,7 @@ impl ProbeConnectionMethod {
                     node_type: node_type.clone(),
                     probe_string: probe_string.clone(),
                 }),
+                attach_only: false,
             });
         }
 
