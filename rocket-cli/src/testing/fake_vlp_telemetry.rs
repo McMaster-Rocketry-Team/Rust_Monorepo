@@ -41,13 +41,21 @@ pub async fn send_fake_vlp_telemetry(args: SendVLPTelemetryArgs) -> Result<()> {
         })
         .await
         .unwrap();
-    let mut rpc_radio = RpcRadio::new(client, Some(Box::new(|| {
-        info!("successfully transmitted a VLP package");
-        std::process::exit(0);
-    })));
+    let mut rpc_radio = RpcRadio::new(
+        client,
+        Some(Box::new(|success| {
+            if success {
+                info!("successfully transmitted a VLP package");
+                std::process::exit(0);
+            } else {
+                info!("failed to transmit a VLP package");
+                std::process::exit(1);
+            }
+        })),
+    );
 
     let vlp_avionics_client = VLPAvionics::<ThreadModeRawMutex>::new();
-    let vlp_key = [0u8;32];
+    let vlp_key = [0u8; 32];
     let mut daemon = vlp_avionics_client.daemon(&mut rpc_radio, &vlp_key);
 
     let packet: VLPDownlinkPacket = if let Some(altitude_agl) = args.altitude_agl {
