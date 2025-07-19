@@ -10,13 +10,18 @@ use crate::gs::serial_wrapper::SerialWrapper;
 pub struct RpcRadio<'a> {
     client: LoraRpcClient<'a, SerialWrapper>,
     buffer: [u8; 256],
+    after_tx: Option<Box<dyn FnOnce()>>,
 }
 
 impl<'a> RpcRadio<'a> {
-    pub fn new(client: LoraRpcClient<'a, SerialWrapper>) -> Self {
+    pub fn new(
+        client: LoraRpcClient<'a, SerialWrapper>,
+        after_tx: Option<Box<dyn FnOnce()>>,
+    ) -> Self {
         Self {
             client,
             buffer: [0u8; 256],
+            after_tx,
         }
     }
 }
@@ -24,13 +29,19 @@ impl<'a> RpcRadio<'a> {
 impl<'a> Radio for RpcRadio<'a> {
     async fn tx(&mut self, buffer: &[u8]) -> std::result::Result<(), RadioError> {
         self.buffer[..buffer.len()].copy_from_slice(buffer);
-        match self.client.tx(buffer.len() as u32, self.buffer).await {
+        let result = match self.client.tx(buffer.len() as u32, self.buffer).await {
             Ok(_) => Ok(()),
             Err(e) => {
                 error!("{:?}", e);
                 Err(RadioError::TransmitTimeout)
             }
+        };
+
+        if let Some(after_tx) = self.after_tx.take() {
+            after_tx();
         }
+
+        result
     }
 
     async fn rx(
@@ -109,7 +120,7 @@ impl<'a> Radio for RpcRadio<'a> {
         tx_len: usize,
         rx_mode: RxMode,
     ) -> Result<(usize, PacketStatus), RadioError> {
-        if let RxMode::Single { timeout_ms } = rx_mode {
+        let result = if let RxMode::Single { timeout_ms } = rx_mode {
             self.buffer[..tx_len].copy_from_slice(&buffer[..tx_len]);
             match self
                 .client
@@ -154,6 +165,12 @@ impl<'a> Radio for RpcRadio<'a> {
             }
         } else {
             unimplemented!()
+        };
+
+        if let Some(after_tx) = self.after_tx.take() {
+            after_tx();
         }
+
+        result
     }
 }

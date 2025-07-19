@@ -25,7 +25,9 @@ use testing::decode_bluetooth_chunk::test_decode_bluetooth_chunk;
 use testing::mock_connection_method::MockConnectionMethod;
 
 use crate::gen_key::gen_vlp_key;
+use crate::gs::find_ground_station::find_ground_station;
 use crate::gs::ground_station_tui;
+use crate::testing::fake_vlp_telemetry::send_fake_vlp_telemetry;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -61,28 +63,8 @@ async fn main() -> Result<()> {
             connection_method.dispose().await
         }
         ModeSelect::GroundStation => {
-            let ground_station_serial_ports = available_ports()
-                .unwrap()
-                .into_iter()
-                .filter(|port| {
-                    matches!(
-                        port.port_type,
-                        SerialPortType::UsbPort(UsbPortInfo {
-                            vid: 0x120a,
-                            pid: 0x0005,
-                            ..
-                        })
-                    )
-                })
-                .collect::<Vec<SerialPortInfo>>();
-
-            if ground_station_serial_ports.len() == 0 {
-                bail!("No ground station connected")
-            } else if ground_station_serial_ports.len() > 1 {
-                bail!("More than one ground stations connected")
-            }
-
-            ground_station_tui(&ground_station_serial_ports[0].port_name).await
+            let serial_path = find_ground_station().await?;
+            ground_station_tui(&serial_path).await
         }
         ModeSelect::GenVlpKey => gen_vlp_key(),
         ModeSelect::GenOtaKey(args) => gen_ota_key(args),
@@ -93,6 +75,9 @@ async fn main() -> Result<()> {
             let mut connection_method: Box<dyn ConnectionMethod> = Box::new(MockConnectionMethod);
 
             monitor_tui(&mut connection_method, None).await
+        }
+        ModeSelect::Testing(TestingModeSelect::SendVLPTelemetry(args)) => {
+            send_fake_vlp_telemetry(args).await
         }
     }
 }

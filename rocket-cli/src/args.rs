@@ -64,6 +64,15 @@ pub struct GenOtaKeyCli {
 pub enum TestingModeSelect {
     DecodeBluetoothChunk(DecodeBluetoothChunkArgs),
     MockConnection,
+    SendVLPTelemetry(SendVLPTelemetryArgs),
+}
+
+#[derive(Parser, Debug)]
+pub struct SendVLPTelemetryArgs {
+    pub frequency: u32,
+    pub longitude: f64,
+    pub latitude: f64,
+    pub altitude_agl: Option<f32>,
 }
 
 #[derive(

@@ -1,5 +1,3 @@
-mod rpc_radio;
-
 use std::{
     sync::{Arc, RwLock},
     time::Duration,
@@ -38,7 +36,9 @@ use tokio::time;
 use crate::gs::{config::GroundStationConfig, rpc_radio::RpcRadio, serial_wrapper::SerialWrapper};
 
 pub mod config;
-mod serial_wrapper;
+pub mod find_ground_station;
+pub mod rpc_radio;
+pub mod serial_wrapper;
 
 pub async fn ground_station_tui(serial_path: &str) -> Result<()> {
     let serial = serialport::new(serial_path, 115200)
@@ -60,7 +60,7 @@ pub async fn ground_station_tui(serial_path: &str) -> Result<()> {
         })
         .await
         .unwrap();
-    let mut rpc_radio = RpcRadio::new(client);
+    let mut rpc_radio = RpcRadio::new(client, None);
     let vlp_gcm_client = Arc::new(VLPGroundStation::<ThreadModeRawMutex>::new());
     let vlp_key = config.read().unwrap().vlp_key.clone();
     let mut daemon = vlp_gcm_client.daemon(&mut rpc_radio, &vlp_key);
