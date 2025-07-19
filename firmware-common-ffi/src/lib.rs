@@ -14,6 +14,7 @@ use firmware_common_new::can_bus::messages::CanBusMessageEnum;
 use firmware_common_new::can_bus::node_types;
 use firmware_common_new::can_bus::receiver::CanBusMultiFrameDecoder;
 use firmware_common_new::can_bus::sender::CanBusMultiFrameEncoder;
+use firmware_common_new::vlp::client::vlp_decode_ecc;
 use firmware_common_new::vlp::packets::VLPDownlinkPacket;
 
 #[unsafe(no_mangle)]
@@ -386,30 +387,20 @@ pub enum DecodeLoraTelemetryResult {
     Invalid(usize),
 }
 
-/// Handles the processing of a CAN bus frame to extract a message.
-///
-/// # Parameters
-/// - `timestamp`: The timestamp indicating when the frame was received.
-/// - `id`: The ID of the received CAN bus frame.
-/// - `data`: A pointer to the buffer containing the frame's data payload.
-/// - `data_length`: The size of the data buffer in bytes.
-///
-/// # Returns
-/// - `ProcessCanBusFrameResult`
-///     - `Message` if the frame was successfully processed and a complete message was extracted.
-///     - `Empty` if the frame is invalid or the message is incomplete (e.g., in the case of multi-frame messages).
-///
-/// # Safety
-///
-/// The caller is responsible for ensuring `log_multiplexer_create_chunk`, `message_aggregator_create_chunk` and
-/// `process_can_bus_frame` is not invoked concurrently
 #[unsafe(no_mangle)]
 pub extern "C" fn decode_lora_telemetry(
-    data: *const u8,
+    data: *mut u8,
     data_length: usize,
 ) -> DecodeLoraTelemetryResult {
-    let data = unsafe { core::slice::from_raw_parts(data, data_length) };
-    match VLPDownlinkPacket::deserialize(data) {
+    let data = unsafe { core::slice::from_raw_parts_mut(data, data_length) };
+
+    let rx_len = if let Some(rx_len) = vlp_decode_ecc(data) {
+        rx_len
+    } else {
+        return DecodeLoraTelemetryResult::Invalid(0);
+    };
+
+    match VLPDownlinkPacket::deserialize(&data[..rx_len]) {
         Some(VLPDownlinkPacket::GPSBeacon(packet)) => {
             let (latitude, lontitude) = packet.lat_lon();
             DecodeLoraTelemetryResult::Success {
@@ -418,7 +409,7 @@ pub extern "C" fn decode_lora_telemetry(
                 altitude_agl: 0.0,
             }
         }
-        Some(VLPDownlinkPacket::Telemetry(packet))=> {
+        Some(VLPDownlinkPacket::Telemetry(packet)) => {
             let (latitude, lontitude) = packet.lat_lon();
             DecodeLoraTelemetryResult::Success {
                 latitude,
