@@ -1,20 +1,26 @@
 use std::time::Duration;
 
-use anyhow::Result;
-use async_trait::async_trait;
-use firmware_common_new::can_bus::telemetry::message_aggregator::DecodedMessage;
-use log::warn;
-use nusb::{Device, DeviceInfo};
-use tokio::{
-    sync::{broadcast, oneshot, watch},
-    time::sleep,
-};
-
 use crate::{
     bluetooth::demultiplex_log::LogDemultiplexer,
     connection_method::{ConnectionMethod, ConnectionMethodFactory, ConnectionOption},
     elf_locator::locate_elf_files,
     monitor::{MonitorStatus, target_log::TargetLog},
+};
+use anyhow::Result;
+use async_trait::async_trait;
+use firmware_common_new::can_bus::{
+    id::CanBusExtendedId,
+    messages::LOG_MESSAGE_TYPE,
+    receiver::CanBusMultiFrameDecoder,
+    telemetry::{log_multiplexer::DecodedLogFrame, message_aggregator::DecodedMessage},
+    usb_can_bus_frame::UsbCanBusFrame,
+};
+use log::{info, warn};
+use nusb::{DeviceInfo, Interface, transfer::RequestBuffer};
+use packed_struct::prelude::*;
+use tokio::{
+    sync::{broadcast, oneshot, watch},
+    time::sleep,
 };
 
 struct USBConnectionMethodFactory {
@@ -31,8 +37,9 @@ impl ConnectionMethodFactory for USBConnectionMethodFactory {
         let log_demultiplexer = LogDemultiplexer::new(elf_info_map);
 
         let device = self.device_info.open()?;
+
         Ok(Box::new(USBConnectionMethod {
-            device,
+            interface: device.claim_interface(1)?,
             log_demultiplexer,
             name: self.name.clone(),
         }))
@@ -40,7 +47,7 @@ impl ConnectionMethodFactory for USBConnectionMethodFactory {
 }
 
 pub struct USBConnectionMethod {
-    device: Device,
+    interface: Interface,
     log_demultiplexer: LogDemultiplexer,
     name: String,
 }
@@ -86,7 +93,7 @@ impl USBConnectionMethod {
 #[async_trait(?Send)]
 impl ConnectionMethod for USBConnectionMethod {
     fn name(&self) -> String {
-        String::from("RocketOTA")
+        self.name.clone()
     }
 
     async fn download(&mut self) -> Result<()> {
@@ -102,6 +109,73 @@ impl ConnectionMethod for USBConnectionMethod {
         messages_tx: broadcast::Sender<DecodedMessage>,
         stop_rx: oneshot::Receiver<()>,
     ) -> Result<()> {
-        todo!()
+        status_tx.send(MonitorStatus::Normal).unwrap();
+
+        let mut can_decoder = CanBusMultiFrameDecoder::<16>::new();
+
+        let usb_receive_fut = async {
+            loop {
+                let data = self
+                    .interface
+                    .interrupt_in(0x82, RequestBuffer::new(64))
+                    .await
+                    .into_result();
+                let data = match data {
+                    Ok(data) => data,
+                    Err(e) => {
+                        warn!("usb transfer error: {:?}", e);
+                        break;
+                    }
+                };
+                let frame_count = data[0] as usize;
+                for i in 0..frame_count {
+                    let start = 1 + (i * UsbCanBusFrame::SERIALIZED_SIZE);
+                    let frame = &data[start..(start + UsbCanBusFrame::SERIALIZED_SIZE)];
+
+                    let frame = UsbCanBusFrame::unpack_from_slice(frame).unwrap();
+                    if frame.data_length > 8 {
+                        warn!("Received a CAN frame with more than 8 bytes of data, skipping");
+                        continue;
+                    }
+
+                    let parsed_id = CanBusExtendedId::from_raw(frame.id);
+                    if parsed_id.message_type == LOG_MESSAGE_TYPE {
+                        let mut data = heapless::Vec::<u8, 8>::new();
+                        data.extend_from_slice(frame.data()).unwrap();
+                        self.log_demultiplexer.process_frame(
+                            DecodedLogFrame {
+                                node_type: parsed_id.node_type,
+                                node_id: parsed_id.node_id,
+                                data,
+                            },
+                            &logs_tx,
+                        );
+                    } else {
+                        let timestamp = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_millis() as u64;
+                        let frame = (timestamp, frame.id, frame.data());
+                        if let Some(m) = can_decoder.process_frame(&frame) {
+                            messages_tx
+                                .send(DecodedMessage {
+                                    node_type: m.data.id.node_type,
+                                    node_id: m.data.id.node_id,
+                                    message: m.data.message,
+                                    count: 1,
+                                })
+                                .ok();
+                        }
+                    }
+                }
+            }
+        };
+
+        tokio::select! {
+            _ = usb_receive_fut => {}
+            _ = stop_rx => {}
+        }
+
+        Ok(())
     }
 }

@@ -137,7 +137,7 @@ pub async fn get_connection_method(
         println!("[{}]: {}", i + 1, option.name);
     }
 
-    let choice = input!("Select one connection method: (1-{})", options.len());
+    let choice = input!("Select a connection method (1-{}): ", options.len());
     let choice = choice.parse::<usize>()?;
     if choice < 1 || choice > options.len() {
         bail!("Invalid choice");

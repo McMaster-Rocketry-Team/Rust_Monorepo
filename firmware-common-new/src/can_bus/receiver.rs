@@ -269,13 +269,58 @@ impl<M: RawMutex, const N: usize, const SUBS: usize> CanReceiver<M, N, SUBS> {
 mod tests {
     use crate::{
         can_bus::{
-            messages::{amp_status::PowerOutputStatus, payload_eps_status::*},
+            messages::{
+                amp_status::PowerOutputStatus,
+                node_status::{NodeHealth, NodeMode, NodeStatusMessage},
+                payload_eps_status::*,
+            },
             sender::CanBusMultiFrameEncoder,
         },
         tests::init_logger,
     };
 
     use super::*;
+
+    #[test]
+    fn single_frame_encode_and_decode() {
+        init_logger();
+
+        let message = CanBusMessageEnum::NodeStatus(NodeStatusMessage {
+            uptime_s: 10,
+            health: NodeHealth::Healthy,
+            mode: NodeMode::Operational,
+            custom_status: 123,
+        });
+
+        let id = message.get_id(0, 1);
+        let id: u32 = id.into();
+        let mut encoder = CanBusMultiFrameEncoder::new(message);
+        let encoder_crc = encoder.crc;
+
+        let mut decoder = CanBusMultiFrameDecoder::<1>::new();
+        let mut decoded_message: Option<SensorReading<BootTimestamp, ReceivedCanBusMessage>> = None;
+        let data = encoder.next().unwrap();
+        let frame = (0u64, id, data.as_slice());
+        log_info!("{:?}", frame);
+        decoded_message = decoder.process_frame(&frame);
+
+        let decoded_message = decoded_message.unwrap();
+        assert_eq!(decoded_message.data.crc, encoder_crc);
+        log_info!("Decoded message: {:?}", decoded_message);
+    }
+
+    #[test]
+    fn single_frame_decode() {
+        init_logger();
+
+        let mut decoder = CanBusMultiFrameDecoder::<1>::new();
+        let mut decoded_message: Option<SensorReading<BootTimestamp, ReceivedCanBusMessage>> = None;
+        let frame = (1752907341445, 343996207, &[0, 1, 186, 0, 0, 192, 0, 0]);
+        decoded_message = decoder.process_frame(&frame);
+
+        let decoded_message = decoded_message.unwrap();
+        log_info!("Decoded message: {:?}", decoded_message);
+    }
 
     #[test]
     fn multi_frame_encode_and_decode() {

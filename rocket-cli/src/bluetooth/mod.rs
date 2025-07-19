@@ -13,6 +13,7 @@ use btleplug::platform::Peripheral;
 use btleplug::platform::{Adapter, Manager};
 use demultiplex_log::LogDemultiplexer;
 use extract_bin::extract_bin_and_sign;
+use firmware_common_new::can_bus::telemetry::log_multiplexer::decode_multiplexed_log_chunk;
 use firmware_common_new::can_bus::telemetry::message_aggregator::{
     DecodedMessage, decode_aggregated_can_bus_messages,
 };
@@ -132,7 +133,10 @@ impl BluetoothConnectionMethod {
         let is_overrun = match chunk_type {
             0b00 => {
                 debug!("received log multiplexer chunk");
-                log_demultiplexer.process_chunk(chunk, logs_tx)?
+                decode_multiplexed_log_chunk(chunk, |frame| {
+                    log_demultiplexer.process_frame(frame, logs_tx);
+                })
+                .map_err(|e| anyhow!("{:?}", e))?
             }
             0b01 => {
                 debug!("received aggregated message chunk");

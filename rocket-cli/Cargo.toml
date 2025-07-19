@@ -48,3 +48,5 @@ critical-section = { version = "1.0", features = ["std"] }
 serialport = "4.7.2"
 directories = "6.0.0"
 nusb = "0.1.14"
+packed_struct = { version = "0.10.1", default-features = false }
+heapless = "0.8.0"
