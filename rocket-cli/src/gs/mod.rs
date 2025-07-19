@@ -28,7 +28,6 @@ use firmware_common_new::{
             amp_output_overwrite::AMPOutputOverwritePacket,
             change_mode::{ChangeModePacket, Mode},
             fire_pyro::{FirePyroPacket, PyroSelect},
-            gps_beacon::GPSBeaconPacket,
             payload_eps_output_overwrite::PayloadEPSOutputOverwritePacket,
             reset::{DeviceToReset, ResetPacket},
         },

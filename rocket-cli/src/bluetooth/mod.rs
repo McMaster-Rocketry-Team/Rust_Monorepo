@@ -1,6 +1,8 @@
 use std::{hint::black_box, path::PathBuf, time::Duration};
 
 use crate::args::NodeTypeEnum;
+use crate::connection_method::{ConnectionMethodFactory, ConnectionOption};
+use crate::elf_locator::ELFInfoMap;
 use crate::monitor::MonitorStatus;
 use crate::monitor::target_log::TargetLog;
 use crate::{connection_method::ConnectionMethod, elf_locator::locate_elf_files};
@@ -8,8 +10,8 @@ use anyhow::{Result, anyhow, bail};
 use async_trait::async_trait;
 use ble_download::ble_download;
 use btleplug::api::{Central as _, Manager as _, Peripheral as _, ScanFilter};
-use btleplug::platform::Manager;
 use btleplug::platform::Peripheral;
+use btleplug::platform::{Adapter, Manager};
 use demultiplex_log::LogDemultiplexer;
 use extract_bin::extract_bin_and_sign;
 use firmware_common_new::can_bus::telemetry::message_aggregator::{
@@ -25,33 +27,27 @@ mod ble_download;
 pub mod demultiplex_log;
 mod extract_bin;
 
-pub struct BluetoothConnectionMethod {
-    peripheral: Peripheral,
+struct BluetoothConnectionMethodFactory {
+    adapter: Adapter,
+    secret_path: Option<PathBuf>,
+    firmware_elf_path: Option<PathBuf>,
+    node_type: NodeTypeEnum,
 }
 
-impl BluetoothConnectionMethod {
-    pub async fn initialize() -> Result<Self> {
-        let manager = Manager::new().await?;
-        let adapters = manager.adapters().await?;
-        let adapter = if adapters.len() == 0 {
-            bail!("No bluetooth adapter found")
-        } else if adapters.len() == 1 {
-            info!("Found 1 bluetooth adapter");
-            adapters[0].clone()
-        } else {
-            info!(
-                "Found {} bluetooth adapters, using the first one",
-                adapters.len()
-            );
-            adapters[0].clone()
-        };
+#[async_trait(?Send)]
+impl ConnectionMethodFactory for BluetoothConnectionMethodFactory {
+    async fn initialize(&mut self) -> Result<Box<dyn ConnectionMethod>> {
+        let elf_info_map = locate_elf_files(self.firmware_elf_path.as_ref())
+            .map_err(|e| warn!("{:?}", e))
+            .unwrap_or_default();
+        let log_demultiplexer = LogDemultiplexer::new(elf_info_map);
 
-        adapter.start_scan(ScanFilter::default()).await?;
+        self.adapter.start_scan(ScanFilter::default()).await?;
         info!("Searching for RocketOTA.....");
 
         let mut count = 0;
         loop {
-            let peripherals = adapter.peripherals().await?;
+            let peripherals = self.adapter.peripherals().await?;
             for peripheral in peripherals {
                 let properties = peripheral.properties().await;
                 // info!("{:?} {:?}", peripheral, properties);
@@ -59,7 +55,14 @@ impl BluetoothConnectionMethod {
                     if properties.local_name == Some("RocketOTA".into()) {
                         peripheral.connect().await?;
                         peripheral.discover_services().await?;
-                        return Ok(Self { peripheral });
+
+                        return Ok(Box::new(BluetoothConnectionMethod {
+                            peripheral,
+                            secret_path: self.secret_path.clone(),
+                            firmware_elf_path: self.firmware_elf_path.clone(),
+                            node_type: self.node_type,
+                            log_demultiplexer,
+                        }));
                     }
                 }
             }
@@ -70,6 +73,50 @@ impl BluetoothConnectionMethod {
             }
             sleep(Duration::from_secs(1)).await;
         }
+    }
+}
+
+pub struct BluetoothConnectionMethod {
+    peripheral: Peripheral,
+    secret_path: Option<PathBuf>,
+    firmware_elf_path: Option<PathBuf>,
+    node_type: NodeTypeEnum,
+    log_demultiplexer: LogDemultiplexer,
+}
+
+impl BluetoothConnectionMethod {
+    pub async fn list_options(
+        secret_path: Option<PathBuf>,
+        firmware_elf_path: Option<PathBuf>,
+        node_type: NodeTypeEnum,
+    ) -> Result<Vec<ConnectionOption>> {
+        let manager = Manager::new().await?;
+        let adapters = manager.adapters().await?;
+
+        let mut options = vec![];
+
+        for adapter in adapters {
+            let name = adapter.adapter_info().await?;
+            options.push(ConnectionOption {
+                name: format!(
+                    "Bluetooth {}{}",
+                    name,
+                    if secret_path.is_none() || firmware_elf_path.is_none() {
+                        " (attach only, no download)"
+                    } else {
+                        ""
+                    }
+                ),
+                factory: Box::new(BluetoothConnectionMethodFactory {
+                    adapter,
+                    secret_path: secret_path.clone(),
+                    firmware_elf_path: firmware_elf_path.clone(),
+                    node_type: node_type.clone(),
+                }),
+            });
+        }
+
+        Ok(options)
     }
 
     pub fn process_chunk(
@@ -108,34 +155,26 @@ impl ConnectionMethod for BluetoothConnectionMethod {
         String::from("RocketOTA")
     }
 
-    async fn download(
-        &mut self,
-        _chip: &String,
-        secret_path: &PathBuf,
-        node_type: &NodeTypeEnum,
-        firmware_elf_path: &PathBuf,
-    ) -> Result<()> {
-        let firmware_bytes = extract_bin_and_sign(secret_path, firmware_elf_path).await?;
-        ble_download(&firmware_bytes, *node_type, &self.peripheral).await?;
+    async fn download(&mut self) -> Result<()> {
+        if let Some(secret_path) = self.secret_path.clone()
+            && let Some(firmware_elf_path) = self.firmware_elf_path.clone()
+        {
+            let firmware_bytes = extract_bin_and_sign(&secret_path, &firmware_elf_path).await?;
+            ble_download(&firmware_bytes, self.node_type, &self.peripheral).await?;
+        } else {
+            warn!("Bluetooth connection method is not configured for download, skipping");
+            sleep(Duration::from_secs(1)).await;
+        }
         Ok(())
     }
 
     async fn attach(
         &mut self,
-        _chip: &String,
-        _secret_path: &PathBuf,
-        _node_type: &NodeTypeEnum,
-        firmware_elf_path: &PathBuf,
         status_tx: watch::Sender<MonitorStatus>,
         logs_tx: broadcast::Sender<TargetLog>,
         messages_tx: broadcast::Sender<DecodedMessage>,
         stop_rx: oneshot::Receiver<()>,
     ) -> Result<()> {
-        let elf_info_map = locate_elf_files(Some(firmware_elf_path))
-            .map_err(|e| warn!("{:?}", e))
-            .unwrap_or_default();
-        let mut log_demultiplexer = LogDemultiplexer::new(elf_info_map);
-
         // sleep for 1 sec so we have time to see the logs before monitor takes over
         sleep(Duration::from_secs(1)).await;
 
@@ -145,7 +184,7 @@ impl ConnectionMethod for BluetoothConnectionMethod {
 
                 let status = match Self::process_chunk(
                     chunk,
-                    &mut log_demultiplexer,
+                    &mut self.log_demultiplexer,
                     &logs_tx,
                     &messages_tx,
                 ) {

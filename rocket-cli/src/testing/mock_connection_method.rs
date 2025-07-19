@@ -1,4 +1,4 @@
-use std::{path::PathBuf, time::Duration};
+use std::time::Duration;
 
 use crate::{
     args::NodeTypeEnum,
@@ -35,10 +35,6 @@ impl ConnectionMethod for MockConnectionMethod {
 
     async fn download(
         &mut self,
-        _chip: &String,
-        _secret_path: &PathBuf,
-        _node_type: &NodeTypeEnum,
-        _firmware_elf_path: &PathBuf,
     ) -> Result<()> {
         info!("Downloading.....");
         sleep(Duration::from_secs(1)).await;
@@ -48,10 +44,6 @@ impl ConnectionMethod for MockConnectionMethod {
 
     async fn attach(
         &mut self,
-        _chip: &String,
-        _secret_path: &PathBuf,
-        _node_type: &NodeTypeEnum,
-        _firmware_elf_path: &PathBuf,
         status_tx: watch::Sender<MonitorStatus>,
         logs_tx: broadcast::Sender<TargetLog>,
         messages_tx: broadcast::Sender<DecodedMessage>,

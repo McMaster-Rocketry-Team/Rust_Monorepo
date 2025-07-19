@@ -1,15 +1,14 @@
-use std::{fs, path::PathBuf, process::Stdio};
+use std::{path::PathBuf, process::Stdio};
 
 use crate::{
     args::NodeTypeEnum,
-    connection_method::{ConnectionMethod, ConnectionOption},
-    elf_locator::{ElfInfo, find_newest_elf},
+    connection_method::{ConnectionMethod, ConnectionMethodFactory, ConnectionOption},
     monitor::{
         MonitorStatus,
         target_log::{DefmtLocationInfo, DefmtLogInfo, TargetLog, parse_log_level},
     },
 };
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Result, bail};
 use async_trait::async_trait;
 use firmware_common_new::can_bus::telemetry::message_aggregator::DecodedMessage;
 use log::{info, warn};
@@ -21,6 +20,25 @@ use tokio::{
     sync::{broadcast, oneshot, watch},
 };
 
+struct ProbeConnectionMethodFactory {
+    chip: String,
+    firmware_elf_path: PathBuf,
+    node_type: NodeTypeEnum,
+    probe_string: String,
+}
+
+#[async_trait(?Send)]
+impl ConnectionMethodFactory for ProbeConnectionMethodFactory {
+    async fn initialize(&mut self) -> Result<Box<dyn ConnectionMethod>> {
+        Ok(Box::new(ProbeConnectionMethod {
+            chip: self.chip.clone(),
+            firmware_elf_path: self.firmware_elf_path.clone(),
+            node_type: self.node_type.clone(),
+            probe_string: self.probe_string.clone(),
+        }))
+    }
+}
+
 pub struct ProbeConnectionMethod {
     chip: String,
     firmware_elf_path: PathBuf,
@@ -29,29 +47,10 @@ pub struct ProbeConnectionMethod {
 }
 
 impl ProbeConnectionMethod {
-    fn try_read_chip_from_embed_toml() -> Result<String> {
-        let path = PathBuf::from("./Embed.toml");
-        if !path.exists() {
-            bail!("./Embed.toml does not exist")
-        }
-
-        let config_str = fs::read_to_string(path)?;
-        let config = config_str.parse::<toml::Table>()?;
-        info!("{:?}", config);
-        let chip = config["default"]["general"]["chip"].as_str();
-
-        chip.map(String::from)
-            .ok_or(anyhow!("default.general.chip key not found"))
-    }
-
-    fn try_find_newest_elf() -> Result<ElfInfo> {
-        let newest_elf = find_newest_elf(&".")?;
-        newest_elf.ok_or(anyhow!("can not find an elf file"))
-    }
-
     pub async fn list_options(
         chip: Option<String>,
         firmware_elf_path: Option<std::path::PathBuf>,
+        node_type: NodeTypeEnum,
     ) -> Result<Vec<ConnectionOption>> {
         let output = std::process::Command::new("probe-rs")
             .arg("--version")
@@ -71,80 +70,25 @@ impl ProbeConnectionMethod {
             return Ok(vec![]);
         }
 
-        // find chip part number
         let chip = if let Some(chip) = chip {
-            info!("using chip from args: {}", chip);
             chip
         } else {
-            match Self::try_read_chip_from_embed_toml() {
-                Ok(chip) => {
-                    info!("auto detected chip: {}", chip);
-                    chip
-                }
-                Err(e) => {
-                    info!(
-                        "probe options skipped because --chip is not specified and can not read chip from Embed.toml: {:?}",
-                        e
-                    );
-                    return Ok(vec![]);
-                }
-            }
+            info!("probe options skipped because chip is unknown");
+            return Ok(vec![]);
         };
 
-        // find elf file
         let firmware_elf_path = if let Some(firmware_elf_path) = firmware_elf_path {
-            info!("using ELF from args: {}", firmware_elf_path.display());
             firmware_elf_path
         } else {
-            match Self::try_find_newest_elf() {
-                Ok(elf) => {
-                    info!(
-                        "found ELF: {:<20} built at {}",
-                        format!(
-                            "{} ({})",
-                            elf.path.file_name().unwrap().to_str().unwrap(),
-                            elf.profile,
-                        ),
-                        chrono::DateTime::<chrono::Local>::from(elf.created_time)
-                            .format("%Y-%m-%d %H:%M:%S")
-                            .to_string()
-                    );
-                    elf.path
-                }
-                Err(e) => {
-                    info!(
-                        "probe options skipped because --elf is not specified and can not find elf in current project: {:?}",
-                        e
-                    );
-                    return Ok(vec![]);
-                }
-            }
+            info!("probe options skipped because ELF is unknown");
+            return Ok(vec![]);
         };
-
-        // find node type
-        let current_dir = std::env::current_dir()?;
-        let folder_name = current_dir.file_name().unwrap().to_str().unwrap();
-
-        // Try to infer node type from folder name
-        let node_type = match folder_name {
-            "VLF5" => NodeTypeEnum::VoidLake,
-            "Titan_AMP" => NodeTypeEnum::AMP,
-            "ICARUS" => NodeTypeEnum::ICARUS,
-            "OZYS_V3" => NodeTypeEnum::OZYS,
-            "Titan_Bulkhead_PCB" => NodeTypeEnum::Bulkhead,
-            _ => NodeTypeEnum::Other,
-        };
-        info!("auto detected node type: {:?}", node_type);
 
         // list probes
         let mut options = vec![];
 
         for i in 0..probes.len() {
             let probe = &probes[i];
-
-            let chip = chip.clone();
-            let firmware_elf_path = firmware_elf_path.clone();
-            let node_type = node_type.clone();
 
             let probe_string = format!(
                 "{:x}:{:x}{}",
@@ -162,14 +106,11 @@ impl ProbeConnectionMethod {
                     probe.identifier,
                     probe.serial_number.clone().unwrap_or("N/A".into())
                 ),
-                initializer: Box::new(move || {
-                    let probe_connection = Self {
-                        chip,
-                        firmware_elf_path,
-                        node_type,
-                        probe_string,
-                    };
-                    Ok(Box::new(probe_connection))
+                factory: Box::new(ProbeConnectionMethodFactory {
+                    chip: chip.clone(),
+                    firmware_elf_path: firmware_elf_path.clone(),
+                    node_type: node_type.clone(),
+                    probe_string: probe_string.clone(),
                 }),
             });
         }
@@ -186,10 +127,6 @@ impl ConnectionMethod for ProbeConnectionMethod {
 
     async fn download(
         &mut self,
-        _chip: &String,
-        _secret_path: &PathBuf,
-        _node_type: &NodeTypeEnum,
-        _firmware_elf_path: &PathBuf,
     ) -> Result<()> {
         let probe_rs_args = [
             "download",
@@ -214,10 +151,6 @@ impl ConnectionMethod for ProbeConnectionMethod {
 
     async fn attach(
         &mut self,
-        _chip: &String,
-        _secret_path: &PathBuf,
-        _node_type: &NodeTypeEnum,
-        _firmware_elf_path: &PathBuf,
         status_tx: watch::Sender<MonitorStatus>,
         logs_tx: broadcast::Sender<TargetLog>,
         _messages_tx: broadcast::Sender<DecodedMessage>,

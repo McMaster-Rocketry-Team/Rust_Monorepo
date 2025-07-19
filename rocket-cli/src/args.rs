@@ -40,10 +40,6 @@ pub enum ModeSelect {
 
 #[derive(Parser, Debug)]
 pub struct DownloadCli {
-    #[arg(long, help = "force using ota")]
-    pub force_ota: bool,
-    #[arg(long, help = "force using probe")]
-    pub force_probe: bool,
     pub chip: String,
     pub secret_path: std::path::PathBuf,
     pub node_type: NodeTypeEnum,

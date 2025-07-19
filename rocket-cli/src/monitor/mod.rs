@@ -22,7 +22,7 @@ use tokio::{
     time,
 };
 
-use crate::{args::NodeTypeEnum, connection_method::ConnectionMethod};
+use crate::connection_method::ConnectionMethod;
 use anyhow::Result;
 use std::{
     path::PathBuf,
@@ -42,17 +42,18 @@ pub enum MonitorStatus {
 
 pub async fn monitor_tui(
     connection_method: &mut Box<dyn ConnectionMethod>,
-    chip: &String,
-    secret_path: &PathBuf,
-    node_type: &NodeTypeEnum,
-    firmware_elf_path: &PathBuf,
+    firmware_elf_path: Option<&PathBuf>,
 ) -> Result<()> {
     let start_time = (Local::now(), Instant::now());
-    let bin_name = firmware_elf_path
-        .file_name()
-        .unwrap()
-        .to_string_lossy()
-        .to_string();
+    let bin_name = if let Some(firmware_elf_path) = firmware_elf_path {
+        firmware_elf_path
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string()
+    } else {
+        "unknown".to_string()
+    };
     let log_saver = LogSaver::new(start_time, &bin_name, connection_method).await?;
     let message_saver = CanMessageSaver::new(start_time, &bin_name, connection_method).await?;
 
@@ -71,16 +72,7 @@ pub async fn monitor_tui(
         stop_tx,
     );
 
-    let attach_future = connection_method.attach(
-        chip,
-        secret_path,
-        node_type,
-        firmware_elf_path,
-        status_tx,
-        logs_tx,
-        messages_tx,
-        stop_rx,
-    );
+    let attach_future = connection_method.attach(status_tx, logs_tx, messages_tx, stop_rx);
 
     let log_saver_future = log_saver_task(log_saver, logs_rx2);
     let message_saver_future = message_saver_task(message_saver, messages_rx2);

@@ -13,7 +13,6 @@ use anyhow::bail;
 use anyhow::{Result, anyhow};
 use args::Cli;
 use args::ModeSelect;
-use args::NodeTypeEnum;
 use args::TestingModeSelect;
 use clap::Parser;
 use connection_method::ConnectionMethod;
@@ -27,7 +26,6 @@ use testing::mock_connection_method::MockConnectionMethod;
 
 use crate::gen_key::gen_vlp_key;
 use crate::gs::ground_station_tui;
-use crate::probe::ProbeConnectionMethod;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -41,45 +39,26 @@ async fn main() -> Result<()> {
 
     match args.mode {
         ModeSelect::Download(args) => {
-            todo!()
-            // let mut connection_method =
-            //     get_connection_method(args.force_ota, args.force_probe).await?;
+            let mut connection_method = get_connection_method(
+                Some(args.chip),
+                Some(args.firmware_elf_path.clone()),
+                Some(args.node_type),
+                Some(args.secret_path),
+            )
+            .await?;
 
-            // connection_method
-            //     .download(
-            //         &args.chip,
-            //         &args.secret_path,
-            //         &args.node_type,
-            //         &args.firmware_elf_path,
-            //     )
-            //     .await?;
-            // monitor_tui(
-            //     &mut connection_method,
-            //     &args.chip,
-            //     &args.secret_path,
-            //     &args.node_type,
-            //     &args.firmware_elf_path,
-            // )
-            // .await?;
+            connection_method.download().await?;
+            monitor_tui(&mut connection_method, Some(&args.firmware_elf_path)).await?;
 
-            // connection_method.dispose().await
+            connection_method.dispose().await
         }
         ModeSelect::Attach(args) => {
-            todo!()
-            // ProbeConnectionMethod::list_options(None).await
-            // let mut connection_method =
-            //     get_connection_method(args.force_ota, args.force_probe).await?;
+            let mut connection_method =
+                get_connection_method(args.chip, args.elf, None, None).await?;
 
-            // monitor_tui(
-            //     &mut connection_method,
-            //     &args.chip,
-            //     &args.secret_path,
-            //     &args.node_type,
-            //     &args.firmware_elf_path,
-            // )
-            // .await?;
+            monitor_tui(&mut connection_method, None).await?;
 
-            // connection_method.dispose().await
+            connection_method.dispose().await
         }
         ModeSelect::GroundStation => {
             let ground_station_serial_ports = available_ports()
@@ -113,14 +92,7 @@ async fn main() -> Result<()> {
         ModeSelect::Testing(TestingModeSelect::MockConnection) => {
             let mut connection_method: Box<dyn ConnectionMethod> = Box::new(MockConnectionMethod);
 
-            monitor_tui(
-                &mut connection_method,
-                &"mock chip".into(),
-                &"secret.key".into(),
-                &NodeTypeEnum::VoidLake,
-                &"firmware.elf".into(),
-            )
-            .await
+            monitor_tui(&mut connection_method, None).await
         }
     }
 }
