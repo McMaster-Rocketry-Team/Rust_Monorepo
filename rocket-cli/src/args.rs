@@ -52,8 +52,10 @@ pub struct DownloadCli {
 
 #[derive(Parser, Debug)]
 pub struct AttachCli {
+    #[arg(long)]
     pub chip: Option<String>,
-    pub firmware_elf_path: Option<std::path::PathBuf>,
+    #[arg(long, help = "firmware elf path")]
+    pub elf: Option<std::path::PathBuf>,
 }
 
 #[derive(Parser, Debug)]

@@ -1,8 +1,9 @@
-use std::{any::Any, fs, path::PathBuf, process::Stdio};
+use std::{fs, path::PathBuf, process::Stdio};
 
 use crate::{
     args::NodeTypeEnum,
     connection_method::{ConnectionMethod, ConnectionOption},
+    elf_locator::{ElfInfo, find_newest_elf},
     monitor::{
         MonitorStatus,
         target_log::{DefmtLocationInfo, DefmtLogInfo, TargetLog, parse_log_level},
@@ -13,7 +14,6 @@ use async_trait::async_trait;
 use firmware_common_new::can_bus::telemetry::message_aggregator::DecodedMessage;
 use log::{info, warn};
 use probe_rs::probe::list::Lister;
-use prompted::input;
 use regex::Regex;
 use tokio::{
     io::{AsyncBufReadExt as _, BufReader},
@@ -22,14 +22,14 @@ use tokio::{
 };
 
 pub struct ProbeConnectionMethod {
+    chip: String,
+    firmware_elf_path: PathBuf,
+    node_type: NodeTypeEnum,
     probe_string: String,
 }
 
 impl ProbeConnectionMethod {
     fn try_read_chip_from_embed_toml() -> Result<String> {
-        // let options = ProbeConnectionMethodOptions {a:1};
-        // let options: Box<dyn Any> = Box::new(options);
-        // info!("{}", options.as_ref().is::<ProbeConnectionMethodOptions>());
         let path = PathBuf::from("./Embed.toml");
         if !path.exists() {
             bail!("./Embed.toml does not exist")
@@ -44,7 +44,15 @@ impl ProbeConnectionMethod {
             .ok_or(anyhow!("default.general.chip key not found"))
     }
 
-    pub async fn list_options(chip: Option<String>) -> Result<Vec<ConnectionOption>> {
+    fn try_find_newest_elf() -> Result<ElfInfo> {
+        let newest_elf = find_newest_elf(&".")?;
+        newest_elf.ok_or(anyhow!("can not find an elf file"))
+    }
+
+    pub async fn list_options(
+        chip: Option<String>,
+        firmware_elf_path: Option<std::path::PathBuf>,
+    ) -> Result<Vec<ConnectionOption>> {
         let output = std::process::Command::new("probe-rs")
             .arg("--version")
             .output();
@@ -59,73 +67,114 @@ impl ProbeConnectionMethod {
         let lister = Lister::new();
         let probes = lister.list_all();
         if probes.len() == 0 {
-            info!("no probe connected")
-        } else {
-            let chip = if let Some(chip) = chip {
-                chip
-            } else {
-                match Self::try_read_chip_from_embed_toml() {
-                    Ok(chip) => chip,
-                    Err(e) => {
-                        info!(
-                            "probe options skipped because --chip is not specified and can not read chip from Embed.toml: {:?}",
-                            e
-                        );
-                        return Ok(vec![]);
-                    }
-                }
-            };
+            info!("no probe connected");
+            return Ok(vec![]);
         }
 
-        Ok(vec![])
-    }
-
-    pub async fn initialize() -> Result<Self> {
-        let lister = Lister::new();
-        let probes = lister.list_all();
-        let probe = if probes.len() == 0 {
-            bail!("No probe connected")
-        } else if probes.len() == 1 {
-            probes[0].clone()
+        // find chip part number
+        let chip = if let Some(chip) = chip {
+            info!("using chip from args: {}", chip);
+            chip
         } else {
-            for i in 0..probes.len() {
-                let probe = &probes[i];
-
-                println!(
-                    "[{}]: {}, SN {}",
-                    i + 1,
-                    probe.identifier,
-                    probe.serial_number.clone().unwrap_or("N/A".into())
-                );
+            match Self::try_read_chip_from_embed_toml() {
+                Ok(chip) => {
+                    info!("auto detected chip: {}", chip);
+                    chip
+                }
+                Err(e) => {
+                    info!(
+                        "probe options skipped because --chip is not specified and can not read chip from Embed.toml: {:?}",
+                        e
+                    );
+                    return Ok(vec![]);
+                }
             }
-
-            let selection = input!("Select one probe (1-{}): ", probes.len());
-
-            let selection: usize = match selection.trim().parse() {
-                Err(_) => bail!("Invalid selection"),
-                Ok(num) if num > probes.len() => bail!("Invalid selection"),
-                Ok(num) => num,
-            };
-
-            probes[selection].clone()
         };
 
-        let probe_string = format!(
-            "{:x}:{:x}{}",
-            probe.vendor_id,
-            probe.product_id,
-            probe
-                .serial_number
-                .map_or(String::new(), |sn| format!(":{}", sn))
-        );
+        // find elf file
+        let firmware_elf_path = if let Some(firmware_elf_path) = firmware_elf_path {
+            info!("using ELF from args: {}", firmware_elf_path.display());
+            firmware_elf_path
+        } else {
+            match Self::try_find_newest_elf() {
+                Ok(elf) => {
+                    info!(
+                        "found ELF: {:<20} built at {}",
+                        format!(
+                            "{} ({})",
+                            elf.path.file_name().unwrap().to_str().unwrap(),
+                            elf.profile,
+                        ),
+                        chrono::DateTime::<chrono::Local>::from(elf.created_time)
+                            .format("%Y-%m-%d %H:%M:%S")
+                            .to_string()
+                    );
+                    elf.path
+                }
+                Err(e) => {
+                    info!(
+                        "probe options skipped because --elf is not specified and can not find elf in current project: {:?}",
+                        e
+                    );
+                    return Ok(vec![]);
+                }
+            }
+        };
 
-        Ok(Self { probe_string })
-    }
+        // find node type
+        let current_dir = std::env::current_dir()?;
+        let folder_name = current_dir.file_name().unwrap().to_str().unwrap();
 
-    pub async fn has_probe_connected() -> bool {
-        let lister = Lister::new();
-        let probes = lister.list_all();
-        !probes.is_empty()
+        // Try to infer node type from folder name
+        let node_type = match folder_name {
+            "VLF5" => NodeTypeEnum::VoidLake,
+            "Titan_AMP" => NodeTypeEnum::AMP,
+            "ICARUS" => NodeTypeEnum::ICARUS,
+            "OZYS_V3" => NodeTypeEnum::OZYS,
+            "Titan_Bulkhead_PCB" => NodeTypeEnum::Bulkhead,
+            _ => NodeTypeEnum::Other,
+        };
+        info!("auto detected node type: {:?}", node_type);
+
+        // list probes
+        let mut options = vec![];
+
+        for i in 0..probes.len() {
+            let probe = &probes[i];
+
+            let chip = chip.clone();
+            let firmware_elf_path = firmware_elf_path.clone();
+            let node_type = node_type.clone();
+
+            let probe_string = format!(
+                "{:x}:{:x}{}",
+                probe.vendor_id,
+                probe.product_id,
+                probe
+                    .serial_number
+                    .clone()
+                    .map_or(String::new(), |sn| format!(":{}", sn))
+            );
+
+            options.push(ConnectionOption {
+                name: format!(
+                    "Probe {}, SN {}",
+                    probe.identifier,
+                    probe.serial_number.clone().unwrap_or("N/A".into())
+                ),
+                initializer: Box::new(move || {
+                    let probe_connection = Self {
+                        chip,
+                        firmware_elf_path,
+                        node_type,
+                        probe_string,
+                    };
+                    Ok(Box::new(probe_connection))
+                }),
+            });
+        }
+
+        Ok(options)
     }
 }
 
@@ -137,10 +186,10 @@ impl ConnectionMethod for ProbeConnectionMethod {
 
     async fn download(
         &mut self,
-        chip: &String,
+        _chip: &String,
         _secret_path: &PathBuf,
         _node_type: &NodeTypeEnum,
-        firmware_elf_path: &PathBuf,
+        _firmware_elf_path: &PathBuf,
     ) -> Result<()> {
         let probe_rs_args = [
             "download",
@@ -148,9 +197,9 @@ impl ConnectionMethod for ProbeConnectionMethod {
             "--probe",
             &self.probe_string,
             "--chip",
-            chip,
+            &self.chip,
             "--connect-under-reset",
-            firmware_elf_path.to_str().unwrap(),
+            &self.firmware_elf_path.to_str().unwrap(),
         ];
         let output = std::process::Command::new("probe-rs")
             .args(&probe_rs_args)
@@ -165,10 +214,10 @@ impl ConnectionMethod for ProbeConnectionMethod {
 
     async fn attach(
         &mut self,
-        chip: &String,
+        _chip: &String,
         _secret_path: &PathBuf,
-        node_type: &NodeTypeEnum,
-        firmware_elf_path: &PathBuf,
+        _node_type: &NodeTypeEnum,
+        _firmware_elf_path: &PathBuf,
         status_tx: watch::Sender<MonitorStatus>,
         logs_tx: broadcast::Sender<TargetLog>,
         _messages_tx: broadcast::Sender<DecodedMessage>,
@@ -180,11 +229,11 @@ impl ConnectionMethod for ProbeConnectionMethod {
             "--probe",
             &self.probe_string,
             "--chip",
-            chip,
+            &self.chip,
             "--connect-under-reset",
             "--log-format",
             ">>>>>{s}|||||{F}|||||{l}|||||{L}|||||{m}|||||{t}<<<<<",
-            firmware_elf_path.to_str().unwrap(),
+            &self.firmware_elf_path.to_str().unwrap(),
         ];
 
         let mut child = Command::new("probe-rs")
@@ -203,7 +252,7 @@ impl ConnectionMethod for ProbeConnectionMethod {
             while let Some(line) = lines.next_line().await.unwrap() {
                 if let Some(cap) = re.captures(&line) {
                     let log = TargetLog {
-                        node_type: *node_type,
+                        node_type: self.node_type,
                         node_id: None,
                         log_content: cap.get(1).unwrap().as_str().to_string(),
                         defmt: Some(DefmtLogInfo {

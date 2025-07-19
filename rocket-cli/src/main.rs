@@ -41,27 +41,28 @@ async fn main() -> Result<()> {
 
     match args.mode {
         ModeSelect::Download(args) => {
-            let mut connection_method =
-                get_connection_method(args.force_ota, args.force_probe).await?;
+            todo!()
+            // let mut connection_method =
+            //     get_connection_method(args.force_ota, args.force_probe).await?;
 
-            connection_method
-                .download(
-                    &args.chip,
-                    &args.secret_path,
-                    &args.node_type,
-                    &args.firmware_elf_path,
-                )
-                .await?;
-            monitor_tui(
-                &mut connection_method,
-                &args.chip,
-                &args.secret_path,
-                &args.node_type,
-                &args.firmware_elf_path,
-            )
-            .await?;
+            // connection_method
+            //     .download(
+            //         &args.chip,
+            //         &args.secret_path,
+            //         &args.node_type,
+            //         &args.firmware_elf_path,
+            //     )
+            //     .await?;
+            // monitor_tui(
+            //     &mut connection_method,
+            //     &args.chip,
+            //     &args.secret_path,
+            //     &args.node_type,
+            //     &args.firmware_elf_path,
+            // )
+            // .await?;
 
-            connection_method.dispose().await
+            // connection_method.dispose().await
         }
         ModeSelect::Attach(args) => {
             todo!()

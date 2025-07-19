@@ -9,35 +9,48 @@ use crate::{
 use anyhow::{Result, bail};
 use async_trait::async_trait;
 use firmware_common_new::can_bus::telemetry::message_aggregator::DecodedMessage;
+use prompted::input;
 use tokio::sync::{broadcast, oneshot, watch};
 
 pub async fn get_connection_method(
-    force_bluetooth: bool,
-    force_probe: bool,
+    chip: Option<String>,
+    firmware_elf_path: Option<PathBuf>,
 ) -> Result<Box<dyn ConnectionMethod>> {
-    let connection_method: Box<dyn ConnectionMethod> = match (force_bluetooth, force_probe) {
-        (false, false) => {
-            let probe_connected = ProbeConnectionMethod::has_probe_connected().await;
+    let mut options: Vec<ConnectionOption> = vec![];
 
-            if probe_connected {
-                Box::new(ProbeConnectionMethod::initialize().await?)
-            } else {
-                Box::new(BluetoothConnectionMethod::initialize().await?)
-            }
-        }
-        (false, true) => Box::new(ProbeConnectionMethod::initialize().await?),
-        (true, false) => Box::new(BluetoothConnectionMethod::initialize().await?),
-        _ => {
-            bail!("--force-bluetooth and --force-probe can not be selected at the same time")
-        }
-    };
+    options.append(&mut ProbeConnectionMethod::list_options(chip, firmware_elf_path).await?);
+
+
+    if options.len() == 0 {
+        bail!("No connection methods found");
+    }
+
+    if options.len() == 1 {
+        let option = options.remove(0);
+        let connection_method = (option.initializer)()?;
+        return Ok(connection_method);
+    }
+
+    for i in 0..options.len() {
+        let option = &options[i];
+        println!("[{}]: {}", i + 1, option.name);
+    }
+
+    let choice = input!("Select one connection method: (1-{})", options.len());
+    let choice = choice.parse::<usize>()?;
+    if choice < 1 || choice > options.len() {
+        bail!("Invalid choice");
+    }
+
+    let option = options.remove(choice - 1);
+    let connection_method = (option.initializer)()?;
 
     Ok(connection_method)
 }
 
 pub struct ConnectionOption {
     pub name: String,
-    pub additional_options: Box<dyn Any>,
+    pub initializer: Box<dyn FnOnce() -> Result<Box<dyn ConnectionMethod>>>,
 }
 
 #[async_trait(?Send)]
