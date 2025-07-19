@@ -126,9 +126,7 @@ impl ConnectionMethod for ProbeConnectionMethod {
         self.probe_string.clone()
     }
 
-    async fn download(
-        &mut self,
-    ) -> Result<()> {
+    async fn download(&mut self) -> Result<()> {
         let probe_rs_args = [
             "download",
             "--non-interactive",
@@ -173,43 +171,62 @@ impl ConnectionMethod for ProbeConnectionMethod {
         let mut child = Command::new("probe-rs")
             .args(&probe_rs_args)
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
+            .stderr(Stdio::piped())
             .spawn()?;
 
         let stdout = child.stdout.take().unwrap();
+        let stderr = child.stderr.take().unwrap();
         let reader = BufReader::new(stdout);
+        let stderr_reader = BufReader::new(stderr);
         let mut lines = reader.lines();
+        let mut stderr_lines = stderr_reader.lines();
+        let mut stderr = String::new();
         let re = Regex::new(r">>>>>(.*?)\|\|\|\|\|(.*?)\|\|\|\|\|(.*?)\|\|\|\|\|(.*?)\|\|\|\|\|(.*?)\|\|\|\|\|(.*?)<<<<<").unwrap();
         status_tx.send(MonitorStatus::Normal).ok();
 
-        let read_logs_future = async move {
-            while let Some(line) = lines.next_line().await.unwrap() {
-                if let Some(cap) = re.captures(&line) {
-                    let log = TargetLog {
-                        node_type: self.node_type,
-                        node_id: None,
-                        log_content: cap.get(1).unwrap().as_str().to_string(),
-                        defmt: Some(DefmtLogInfo {
-                            location: Some(DefmtLocationInfo {
-                                file_path: cap.get(2).unwrap().as_str().to_string(),
-                                line_number: cap.get(3).unwrap().as_str().to_string(),
-                                module_path: cap.get(5).unwrap().as_str().to_string(),
+        let stdout_fut = async {
+            let read_logs_future = async move {
+                while let Some(line) = lines.next_line().await.unwrap() {
+                    if let Some(cap) = re.captures(&line) {
+                        let log = TargetLog {
+                            node_type: self.node_type,
+                            node_id: None,
+                            log_content: cap.get(1).unwrap().as_str().to_string(),
+                            defmt: Some(DefmtLogInfo {
+                                location: Some(DefmtLocationInfo {
+                                    file_path: cap.get(2).unwrap().as_str().to_string(),
+                                    line_number: cap.get(3).unwrap().as_str().to_string(),
+                                    module_path: cap.get(5).unwrap().as_str().to_string(),
+                                }),
+                                log_level: parse_log_level(cap.get(4).unwrap().as_str()),
+                                timestamp: cap.get(6).unwrap().as_str().parse::<f64>().ok(),
                             }),
-                            log_level: parse_log_level(cap.get(4).unwrap().as_str()),
-                            timestamp: cap.get(6).unwrap().as_str().parse::<f64>().ok(),
-                        }),
-                    };
-                    logs_tx.send(log).ok();
+                        };
+                        logs_tx.send(log).ok();
+                    }
                 }
+            };
+
+            tokio::select! {
+                _ = read_logs_future => {},
+                _ = stop_rx => {},
+            }
+
+            child.kill().await.ok();
+        };
+
+        let stderr_fut = async {
+            while let Some(line) = stderr_lines.next_line().await.unwrap() {
+                stderr.push_str(&line);
+                stderr.push('\n');
             }
         };
 
-        tokio::select! {
-            _ = read_logs_future => {},
-            _ = stop_rx => {},
-        }
+        tokio::join!(stdout_fut, stderr_fut);
 
-        child.kill().await?;
+        if !stderr.is_empty() {
+            warn!("stderr output from probe-run:\n{}", stderr);
+        }
 
         Ok(())
     }
