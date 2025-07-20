@@ -5,5 +5,10 @@
     "ostream": "cpp",
     "cstdlib": "cpp",
     "cstddef": "cpp"
+  },
+  "rust-analyzer.procMacro.ignored": {
+    "java-bindgen-macro": [
+      "java_bindgen"
+    ]
   }
 }

@@ -13,11 +13,6 @@ members = [
     "firmware-common-new",
     "firmware-common-ffi",
     "air-brakes-controller-core",
-    "air-brakes-controller-matlab-server",
-
-    # commmented out because rust-analyzer dont like it on windows,
-    # pre-compiled binaries are provided for win64 and linux x64.
-    # "air-brakes-controller-matlab-client",
     
     "rocket-cli",
     "defmt-rtt-pipe",

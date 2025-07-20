@@ -4,9 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-default = ["log"]
+default = ["log", "std"]
 log = ["dep:log"]
 defmt = ["dep:defmt", "heapless/defmt-03"]
+std = []
 
 [dependencies]
 defmt = { version = "1.0.1", optional = true }
@@ -15,7 +16,14 @@ heapless = { version = "0.8.0", features = ["serde"], default-features = false }
 serde = { version = "1.0.219", default-features = false, features = ["derive"] }
 libm = "0.2.7"
 nalgebra = { version = "0.33.2", default-features = false, features = ["libm"] }
+java-bindgen = "0.1.0-alpha.4"
 
 [dev-dependencies]
 approx = "0.5.1"
 env_logger = "0.11.8"
+
+[lib]
+crate-type = ["lib", "cdylib"]
+
+[package.metadata.java-bindgen]
+package = "ca.macrocketry.airbrakes.or.interop"
