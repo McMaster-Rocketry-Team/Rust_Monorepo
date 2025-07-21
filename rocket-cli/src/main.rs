@@ -7,9 +7,8 @@ mod gs;
 mod monitor;
 mod probe;
 mod testing;
-mod usb;
+mod serial_can;
 
-use anyhow::bail;
 use anyhow::{Result, anyhow};
 use args::Cli;
 use args::ModeSelect;
@@ -20,7 +19,6 @@ use connection_method::get_connection_method;
 use gen_key::gen_ota_key;
 use log::LevelFilter;
 use monitor::monitor_tui;
-use serialport::{SerialPortInfo, SerialPortType, UsbPortInfo, available_ports};
 use testing::decode_bluetooth_chunk::test_decode_bluetooth_chunk;
 use testing::mock_connection_method::MockConnectionMethod;
 

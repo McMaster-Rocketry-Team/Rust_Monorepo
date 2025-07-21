@@ -60,3 +60,10 @@ impl HalfDuplexSerial for SerialWrapper {
         .unwrap()
     }
 }
+
+impl SerialWrapper {
+    pub fn set_dtr(&mut self, dtr: bool) -> Result<(), serialport::Error> {
+        let mut serial =self.0.lock().unwrap();
+        serial.write_data_terminal_ready(dtr)
+    }
+}

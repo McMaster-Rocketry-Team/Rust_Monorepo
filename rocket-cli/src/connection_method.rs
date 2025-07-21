@@ -6,7 +6,7 @@ use crate::{
     elf_locator::{ElfInfo, find_newest_elf},
     monitor::{MonitorStatus, target_log::TargetLog},
     probe::ProbeConnectionMethod,
-    usb::USBConnectionMethod,
+    serial_can::SerialConnectionMethod,
 };
 use anyhow::{Result, anyhow, bail};
 use async_trait::async_trait;
@@ -113,7 +113,7 @@ pub async fn get_connection_method(
         &mut ProbeConnectionMethod::list_options(chip, firmware_elf_path.clone(), node_type)
             .await?,
     );
-    options.append(&mut USBConnectionMethod::list_options().await?);
+    options.append(&mut SerialConnectionMethod::list_options().await?);
     options.append(
         &mut BluetoothConnectionMethod::list_options(secret_path, firmware_elf_path, node_type)
             .await?,

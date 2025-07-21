@@ -1,87 +1,102 @@
-use std::time::Duration;
+use std::{io::ErrorKind, time::Duration};
 
 use crate::{
     bluetooth::demultiplex_log::LogDemultiplexer,
     connection_method::{ConnectionMethod, ConnectionMethodFactory, ConnectionOption},
     elf_locator::locate_elf_files,
+    gs::serial_wrapper::SerialWrapper,
     monitor::{MonitorStatus, target_log::TargetLog},
 };
 use anyhow::Result;
 use async_trait::async_trait;
-use firmware_common_new::can_bus::{
-    id::CanBusExtendedId,
-    messages::LOG_MESSAGE_TYPE,
-    receiver::CanBusMultiFrameDecoder,
-    telemetry::{log_multiplexer::DecodedLogFrame, message_aggregator::DecodedMessage},
-    usb_can_bus_frame::UsbCanBusFrame,
+use firmware_common_new::{
+    can_bus::{
+        id::CanBusExtendedId,
+        messages::LOG_MESSAGE_TYPE,
+        receiver::CanBusMultiFrameDecoder,
+        telemetry::{log_multiplexer::DecodedLogFrame, message_aggregator::DecodedMessage},
+        usb_can_bus_frame::UsbCanBusFrame,
+    },
+    rpc::half_duplex_serial::HalfDuplexSerial,
 };
 use log::warn;
-use nusb::{DeviceInfo, Interface, transfer::RequestBuffer};
 use packed_struct::prelude::*;
+use serialport::{SerialPortType, UsbPortInfo, available_ports};
 use tokio::{
     sync::{broadcast, oneshot, watch},
     time::sleep,
 };
 
-struct USBConnectionMethodFactory {
-    device_info: DeviceInfo,
+struct SerialConnectionMethodFactory {
+    port_name: String,
     name: String,
 }
 
 #[async_trait(?Send)]
-impl ConnectionMethodFactory for USBConnectionMethodFactory {
+impl ConnectionMethodFactory for SerialConnectionMethodFactory {
     async fn initialize(&mut self) -> Result<Box<dyn ConnectionMethod>> {
         let elf_info_map = locate_elf_files(None)
             .map_err(|e| warn!("{:?}", e))
             .unwrap_or_default();
         let log_demultiplexer = LogDemultiplexer::new(elf_info_map);
 
-        let device = self.device_info.open()?;
+        let serial = serialport::new(self.port_name.clone(), 115200)
+            .timeout(Duration::from_secs(5))
+            .open()
+            .unwrap();
 
-        Ok(Box::new(USBConnectionMethod {
-            interface: device.claim_interface(1)?,
+        Ok(Box::new(SerialConnectionMethod {
+            serial: SerialWrapper::new(serial),
             log_demultiplexer,
             name: self.name.clone(),
         }))
     }
 }
 
-pub struct USBConnectionMethod {
-    interface: Interface,
+pub struct SerialConnectionMethod {
+    serial: SerialWrapper,
     log_demultiplexer: LogDemultiplexer,
     name: String,
 }
 
-impl USBConnectionMethod {
+impl SerialConnectionMethod {
     pub async fn list_options() -> Result<Vec<ConnectionOption>> {
         let mut options = vec![];
 
-        for endgame in nusb::list_devices()?
-            .filter(|device| device.vendor_id() == 0x120a && device.product_id() == 0x0006)
-        {
+        for endgame in available_ports().unwrap().into_iter().filter(|port| {
+            matches!(
+                port.port_type,
+                SerialPortType::UsbPort(UsbPortInfo {
+                    vid: 0x120a,
+                    pid: 0x0006,
+                    ..
+                })
+            )
+        }) {
             options.push(ConnectionOption {
-                name: format!(
-                    "The ENDGAME CAN Bus bridge, SN {}",
-                    endgame.serial_number().unwrap_or("N/A")
-                ),
-                factory: Box::new(USBConnectionMethodFactory {
-                    device_info: endgame,
+                name: format!("The ENDGAME CAN Bus bridge, {}", endgame.port_name),
+                factory: Box::new(SerialConnectionMethodFactory {
+                    port_name: endgame.port_name,
                     name: "The ENDGAME".to_string(),
                 }),
                 attach_only: true,
             });
         }
 
-        for icarus in nusb::list_devices()?
-            .filter(|device| device.vendor_id() == 0x120a && device.product_id() == 0x0004)
-        {
+        for icarus in available_ports().unwrap().into_iter().filter(|port| {
+            matches!(
+                port.port_type,
+                SerialPortType::UsbPort(UsbPortInfo {
+                    vid: 0x120a,
+                    pid: 0x0004,
+                    ..
+                })
+            )
+        }) {
             options.push(ConnectionOption {
-                name: format!(
-                    "ICARUS CAN Bus bridge, SN {} (attach only, no download)",
-                    icarus.serial_number().unwrap_or("N/A")
-                ),
-                factory: Box::new(USBConnectionMethodFactory {
-                    device_info: icarus,
+                name: format!("ICARUS CAN Bus bridge, {}", icarus.port_name),
+                factory: Box::new(SerialConnectionMethodFactory {
+                    port_name: icarus.port_name,
                     name: "ICARUS".to_string(),
                 }),
                 attach_only: true,
@@ -93,7 +108,7 @@ impl USBConnectionMethod {
 }
 
 #[async_trait(?Send)]
-impl ConnectionMethod for USBConnectionMethod {
+impl ConnectionMethod for SerialConnectionMethod {
     fn name(&self) -> String {
         self.name.clone()
     }
@@ -111,29 +126,29 @@ impl ConnectionMethod for USBConnectionMethod {
         messages_tx: broadcast::Sender<DecodedMessage>,
         stop_rx: oneshot::Receiver<()>,
     ) -> Result<()> {
+        self.serial.set_dtr(true)?;
         status_tx.send(MonitorStatus::Normal).unwrap();
 
         let mut can_decoder = CanBusMultiFrameDecoder::<16>::new();
 
         let usb_receive_fut = async {
+            let mut buffer = [0u8; 64];
             loop {
-                let data = self
-                    .interface
-                    .interrupt_in(0x82, RequestBuffer::new(64))
-                    .await
-                    .into_result();
-                let data = match data {
+                let len = match self.serial.read(&mut buffer).await {
                     Ok(data) => data,
+                    Err(serialport::Error {
+                        kind: serialport::ErrorKind::Io(ErrorKind::TimedOut),
+                        ..
+                    }) => {
+                        break;
+                    }
                     Err(e) => {
-                        warn!("usb transfer error: {:?}", e);
+                        warn!("serial error: {:?}", e);
                         break;
                     }
                 };
-                let frame_count = data[0] as usize;
-                for i in 0..frame_count {
-                    let start = 1 + (i * UsbCanBusFrame::SERIALIZED_SIZE);
-                    let frame = &data[start..(start + UsbCanBusFrame::SERIALIZED_SIZE)];
-
+                let data = &buffer[..len];
+                for frame in data.chunks_exact(UsbCanBusFrame::SERIALIZED_SIZE) {
                     let frame = UsbCanBusFrame::unpack_from_slice(frame).unwrap();
                     if frame.data_length > 8 {
                         warn!("Received a CAN frame with more than 8 bytes of data, skipping");

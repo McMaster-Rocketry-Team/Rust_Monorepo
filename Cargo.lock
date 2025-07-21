@@ -5816,7 +5816,6 @@ dependencies = [
  "log",
  "lora-phy",
  "nanoid",
- "nusb",
  "packed_struct",
  "pad",
  "probe-rs",
