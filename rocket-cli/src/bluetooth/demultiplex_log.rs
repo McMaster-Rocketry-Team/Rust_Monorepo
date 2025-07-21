@@ -2,7 +2,7 @@ use std::{collections::HashMap, env, mem::transmute, path::PathBuf};
 
 use defmt_decoder::{DecodeError, StreamDecoder};
 use firmware_common_new::can_bus::telemetry::log_multiplexer::DecodedLogFrame;
-use log::{Level, info};
+use log::Level;
 use tokio::sync::broadcast;
 
 use crate::{

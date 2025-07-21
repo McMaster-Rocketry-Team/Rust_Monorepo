@@ -668,11 +668,15 @@ async fn tui_task(
                 VLPDownlinkPacket::GPSBeacon(packet) => {
                     format!(
                         "satelites: {}
+lat: {},
+lon: {},
 battery: {:.2}V
 main pyro: continuity={} fire={}
 drogue pyro: continuity={} fire={}
 ",
                         packet.num_of_fix_satellites(),
+                        packet.lat_lon().0,
+                        packet.lat_lon().1,
                         packet.battery_v(),
                         packet.pyro_main_continuity,
                         packet.pyro_main_fire,
