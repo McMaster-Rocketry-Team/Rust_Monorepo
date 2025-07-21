@@ -164,6 +164,7 @@ impl RttEncoder {
             let encoder: &mut defmt::Encoder = &mut *self.encoder.get();
             encoder.start_frame(|b| {
                 _SEGGER_RTT.up_channel.write_all(b);
+                PIPE.try_write(b).ok();
             });
         }
     }
@@ -214,6 +215,7 @@ impl RttEncoder {
             let encoder: &mut defmt::Encoder = &mut *self.encoder.get();
             encoder.end_frame(|b| {
                 _SEGGER_RTT.up_channel.write_all(b);
+                PIPE.try_write(b).ok();
             });
             let restore = self.cs_restore.get().read();
             self.taken.store(false, Ordering::Relaxed);

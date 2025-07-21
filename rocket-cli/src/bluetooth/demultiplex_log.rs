@@ -2,7 +2,7 @@ use std::{collections::HashMap, env, mem::transmute, path::PathBuf};
 
 use defmt_decoder::{DecodeError, StreamDecoder};
 use firmware_common_new::can_bus::telemetry::log_multiplexer::DecodedLogFrame;
-use log::Level;
+use log::{Level, info};
 use tokio::sync::broadcast;
 
 use crate::{
@@ -31,7 +31,11 @@ impl LogDemultiplexer {
         }
     }
 
-    pub fn process_frame(&mut self, frame: DecodedLogFrame, logs_tx: &broadcast::Sender<TargetLog>,) {
+    pub fn process_frame(
+        &mut self,
+        frame: DecodedLogFrame,
+        logs_tx: &broadcast::Sender<TargetLog>,
+    ) {
         let node_type: NodeTypeEnum = frame.node_type.into();
         if let Some(elf_info) = self.elf_info_map.get(&node_type) {
             // treat bytes as defmt log
