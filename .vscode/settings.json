@@ -8,7 +8,8 @@
   },
   "rust-analyzer.procMacro.ignored": {
     "java-bindgen-macro": [
-      "java_bindgen"
+      "java_bindgen",
+      "java_bindgen_java_class"
     ]
   }
 }

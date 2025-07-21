@@ -1,5 +1,6 @@
 #! /bin/sh
 
+rm -rf target
 rm -rf out
 mkdir out
 mkdir out/lib
