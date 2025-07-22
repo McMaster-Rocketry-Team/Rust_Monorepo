@@ -61,22 +61,25 @@ pub async fn ground_station_tui(serial_path: &str) -> Result<()> {
         .await
         .unwrap();
     let mut rpc_radio = RpcRadio::new(client, None);
-    let vlp_gcm_client = Arc::new(VLPGroundStation::<ThreadModeRawMutex>::new());
+    let vlp_gcm_client = Box::leak(Box::new(VLPGroundStation::<ThreadModeRawMutex>::new()));
     let vlp_key = config.read().unwrap().vlp_key.clone();
     let mut daemon = vlp_gcm_client.daemon(&mut rpc_radio, &vlp_key);
 
     tokio::select! {
         _ = daemon.run() => {}
-        _ = tui_task(vlp_gcm_client.clone(), config.clone()) => {}
+        _ = tui_task(vlp_gcm_client, config.clone()) => {}
     }
 
     Ok(())
 }
 
 async fn tui_task(
-    client: Arc<VLPGroundStation<ThreadModeRawMutex>>,
+    client: &'static VLPGroundStation<ThreadModeRawMutex>,
     config: Arc<RwLock<GroundStationConfig>>,
 ) -> Result<()> {
+    let last_uplink_packet: &RwLock<Option<VLPUplinkPacket>> =
+        Box::leak(Box::new(RwLock::new(None)));
+
     let mut siv = cursive::default();
     let mut theme = siv.current_theme().clone();
     theme.palette = Palette::terminal_default();
@@ -85,7 +88,11 @@ async fn tui_task(
     siv.set_theme(theme);
     siv.set_autorefresh(true);
 
-    let enter_uplink_loading_state = |s: &mut Cursive| {
+    let send_packet = |s: &mut Cursive, packet: VLPUplinkPacket| {
+        client.send_nb(packet.clone());
+        let mut last_uplink_packet = last_uplink_packet.write().unwrap();
+        *last_uplink_packet = Some(packet.clone());
+
         s.find_name::<HideableView<LinearLayout>>("uplink_buttons_hideable")
             .unwrap()
             .set_visible(false);
@@ -96,7 +103,6 @@ async fn tui_task(
 
     let create_simple_packet_button =
         |button_text: &str, dialog_message: &str, packet: VLPUplinkPacket| {
-            let client = client.clone();
             let button_text = button_text.to_string();
             let dialog_message = dialog_message.to_string();
             Button::new(button_text, move |s| {
@@ -104,11 +110,9 @@ async fn tui_task(
                     Dialog::around(TextView::new(dialog_message.clone()))
                         .dismiss_button("Cancel")
                         .button("Confirm", {
-                            let client = client.clone();
                             let packet = packet.clone();
                             move |s| {
-                                client.send_nb(packet.clone());
-                                enter_uplink_loading_state(s);
+                                send_packet(s, packet.clone());
                                 s.pop_layer().unwrap();
                             }
                         }),
@@ -118,7 +122,6 @@ async fn tui_task(
         };
 
     let create_reset_device_button = || {
-        let client = client.clone();
         Button::new("Reset Device", move |s| {
             let mut reset_device_selection_group: RadioGroup<DeviceToReset> = RadioGroup::new();
 
@@ -187,19 +190,16 @@ async fn tui_task(
                             ),
                     )
                     .dismiss_button("Cancel")
-                    .button("Confirm", {
-                        let client = client.clone();
-                        move |s| {
-                            let device_to_reset = reset_device_selection_group.selection();
-                            client.send_nb(
-                                ResetPacket {
-                                    device: *device_to_reset,
-                                }
-                                .into(),
-                            );
-                            enter_uplink_loading_state(s);
-                            s.pop_layer().unwrap();
-                        }
+                    .button("Confirm", move |s| {
+                        let device_to_reset = reset_device_selection_group.selection();
+                        send_packet(
+                            s,
+                            ResetPacket {
+                                device: *device_to_reset,
+                            }
+                            .into(),
+                        );
+                        s.pop_layer().unwrap();
                     }),
             );
         })
@@ -207,7 +207,6 @@ async fn tui_task(
     };
 
     let create_overwrite_amp_button = || {
-        let client = client.clone();
         Button::new("Overwrite AMP", move |s| {
             let mut out1_selection_group: RadioGroup<PowerOutputOverwrite> = RadioGroup::new();
             let mut out2_selection_group: RadioGroup<PowerOutputOverwrite> = RadioGroup::new();
@@ -301,21 +300,18 @@ async fn tui_task(
                             ),
                     )
                     .dismiss_button("Cancel")
-                    .button("Confirm", {
-                        let client = client.clone();
-                        move |s| {
-                            client.send_nb(
-                                AMPOutputOverwritePacket {
-                                    out1: *out1_selection_group.selection(),
-                                    out2: *out2_selection_group.selection(),
-                                    out3: *out3_selection_group.selection(),
-                                    out4: *out4_selection_group.selection(),
-                                }
-                                .into(),
-                            );
-                            enter_uplink_loading_state(s);
-                            s.pop_layer().unwrap();
-                        }
+                    .button("Confirm", move |s| {
+                        send_packet(
+                            s,
+                            AMPOutputOverwritePacket {
+                                out1: *out1_selection_group.selection(),
+                                out2: *out2_selection_group.selection(),
+                                out3: *out3_selection_group.selection(),
+                                out4: *out4_selection_group.selection(),
+                            }
+                            .into(),
+                        );
+                        s.pop_layer().unwrap();
                     }),
             );
         })
@@ -323,7 +319,6 @@ async fn tui_task(
     };
 
     let create_overwrite_eps_button = || {
-        let client = client.clone();
         Button::new("Overwrite EPS", move |s| {
             let mut eps1_3v3_selection_group: RadioGroup<PowerOutputOverwrite> = RadioGroup::new();
             let mut eps1_5v_selection_group: RadioGroup<PowerOutputOverwrite> = RadioGroup::new();
@@ -460,23 +455,20 @@ async fn tui_task(
                             ),
                     )
                     .dismiss_button("Cancel")
-                    .button("Confirm", {
-                        let client = client.clone();
-                        move |s| {
-                            client.send_nb(
-                                PayloadEPSOutputOverwritePacket {
-                                    eps1_3v3: *eps1_3v3_selection_group.selection(),
-                                    eps1_5v: *eps1_5v_selection_group.selection(),
-                                    eps1_9v: *eps1_9v_selection_group.selection(),
-                                    eps2_3v3: *eps2_3v3_selection_group.selection(),
-                                    eps2_5v: *eps2_5v_selection_group.selection(),
-                                    eps2_9v: *eps2_9v_selection_group.selection(),
-                                }
-                                .into(),
-                            );
-                            enter_uplink_loading_state(s);
-                            s.pop_layer().unwrap();
-                        }
+                    .button("Confirm", move |s| {
+                        send_packet(
+                            s,
+                            PayloadEPSOutputOverwritePacket {
+                                eps1_3v3: *eps1_3v3_selection_group.selection(),
+                                eps1_5v: *eps1_5v_selection_group.selection(),
+                                eps1_9v: *eps1_9v_selection_group.selection(),
+                                eps2_3v3: *eps2_3v3_selection_group.selection(),
+                                eps2_5v: *eps2_5v_selection_group.selection(),
+                                eps2_9v: *eps2_9v_selection_group.selection(),
+                            }
+                            .into(),
+                        );
+                        s.pop_layer().unwrap();
                     }),
             );
         })
@@ -656,6 +648,9 @@ async fn tui_task(
                         Dialog::new()
                             .title("Uplink Error")
                             .content(TextView::new(format!("{:?}", e)))
+                            .button("retry", move |s| {
+                                send_packet(s, last_uplink_packet.read().unwrap().clone().unwrap())
+                            })
                             .dismiss_button("OK"),
                     );
                 }
