@@ -1,3 +1,6 @@
+use core::cell::{RefCell, RefMut};
+
+use embassy_sync::blocking_mutex::{Mutex as BlockingMutex, raw::RawMutex};
 use packed_struct::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -89,5 +92,64 @@ impl defmt::Format for LowPowerTelemetryPacket {
 impl Into<VLPDownlinkPacket> for LowPowerTelemetryPacket {
     fn into(self) -> VLPDownlinkPacket {
         VLPDownlinkPacket::LowPowerTelemetry(self)
+    }
+}
+
+pub struct LowPowerTelemetryPacketBuilderState {
+    nonce: u8,
+    pub num_of_fix_satellites: u8,
+    pub gps_fixed: bool,
+    pub vl_battery_v: f32,
+    pub amp_online: bool,
+    pub shared_battery_v: f32,
+    pub air_temperature: f32,
+}
+
+pub struct LowPowerTelemetryPacketBuilder<M: RawMutex> {
+    state: BlockingMutex<M, RefCell<LowPowerTelemetryPacketBuilderState>>,
+}
+
+impl<M: RawMutex> LowPowerTelemetryPacketBuilder<M> {
+    pub fn new() -> Self {
+        Self {
+            state: BlockingMutex::new(RefCell::new(LowPowerTelemetryPacketBuilderState {
+                nonce: 0,
+                num_of_fix_satellites: 0,
+                gps_fixed: false,
+                vl_battery_v: 0.0,
+                amp_online: false,
+                shared_battery_v: 0.0,
+                air_temperature: 0.0,
+            })),
+        }
+    }
+
+    pub fn create_packet(&self) -> LowPowerTelemetryPacket {
+        self.state.lock(|state| {
+            let mut state = state.borrow_mut();
+            state.nonce += 1;
+            if state.nonce > 15 {
+                state.nonce = 0;
+            }
+            LowPowerTelemetryPacket::new(
+                state.nonce,
+                state.num_of_fix_satellites,
+                state.gps_fixed,
+                state.vl_battery_v,
+                state.amp_online,
+                state.shared_battery_v,
+                state.air_temperature,
+            )
+        })
+    }
+
+    pub fn update<U>(&self, update_fn: U)
+    where
+        U: FnOnce(&mut RefMut<LowPowerTelemetryPacketBuilderState>) -> (),
+    {
+        self.state.lock(|state| {
+            let mut state = state.borrow_mut();
+            update_fn(&mut state);
+        })
     }
 }

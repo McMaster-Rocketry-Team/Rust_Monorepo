@@ -28,7 +28,7 @@ pub enum ModeSelect {
     GroundStation,
 
     #[command(about = "generate vlp key")]
-    GenVlpKey,
+    GenVlpKey(GenVlpKeyCli),
 
     #[command(about = "generate private and public keys for ota")]
     GenOtaKey(GenOtaKeyCli),
@@ -52,6 +52,11 @@ pub struct AttachCli {
     pub chip: Option<String>,
     #[arg(long, help = "firmware elf path")]
     pub elf: Option<std::path::PathBuf>,
+}
+
+#[derive(Parser, Debug)]
+pub struct GenVlpKeyCli {
+    pub key_path: std::path::PathBuf,
 }
 
 #[derive(Parser, Debug)]

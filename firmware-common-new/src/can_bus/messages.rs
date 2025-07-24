@@ -3,6 +3,8 @@ use ack::AckMessage;
 #[cfg(not(feature = "bootloader"))]
 use amp_control::AmpControlMessage;
 #[cfg(not(feature = "bootloader"))]
+use amp_reset_output::AmpResetOutputMessage;
+#[cfg(not(feature = "bootloader"))]
 use amp_overwrite::AmpOverwriteMessage;
 #[cfg(not(feature = "bootloader"))]
 use amp_status::AmpStatusMessage;
@@ -36,6 +38,8 @@ use super::id::{CanBusExtendedId, CanBusMessageTypeFlag, create_can_bus_message_
 pub mod ack;
 #[cfg(not(feature = "bootloader"))]
 pub mod amp_control;
+#[cfg(not(feature = "bootloader"))]
+pub mod amp_reset_output;
 #[cfg(not(feature = "bootloader"))]
 pub mod amp_overwrite;
 #[cfg(not(feature = "bootloader"))]
@@ -164,6 +168,16 @@ pub const AMP_CONTROL_MESSAGE_TYPE: u8 = create_can_bus_message_type(
     },
     0,
 );
+pub const AMP_RESET_OUTPUT_MESSAGE_TYPE: u8 = create_can_bus_message_type(
+    CanBusMessageTypeFlag {
+        is_measurement: false,
+        is_control: true,
+        is_status: false,
+        is_data: false,
+        is_misc: false,
+    },
+    4,
+);
 pub const PAYLOAD_EPS_STATUS_MESSAGE_TYPE: u8 = create_can_bus_message_type(
     CanBusMessageTypeFlag {
         is_measurement: false,
@@ -280,6 +294,8 @@ pub enum CanBusMessageEnum {
     AmpOverwrite(AmpOverwriteMessage),
     #[cfg(not(feature = "bootloader"))]
     AmpControl(AmpControlMessage),
+    #[cfg(not(feature = "bootloader"))]
+    AmpResetOutput(AmpResetOutputMessage),
 
     #[cfg(not(feature = "bootloader"))]
     PayloadEPSStatus(PayloadEPSStatusMessage),
@@ -321,6 +337,8 @@ impl CanBusMessageEnum {
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::AmpControl(m) => m.priority(),
             #[cfg(not(feature = "bootloader"))]
+            CanBusMessageEnum::AmpResetOutput(m) => m.priority(),
+            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::PayloadEPSStatus(m) => m.priority(),
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::PayloadEPSOutputOverwrite(m) => m.priority(),
@@ -357,6 +375,8 @@ impl CanBusMessageEnum {
             CanBusMessageEnum::AmpOverwrite(_) => AMP_OVERWRITE_MESSAGE_TYPE,
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::AmpControl(_) => AMP_CONTROL_MESSAGE_TYPE,
+            #[cfg(not(feature = "bootloader"))]
+            CanBusMessageEnum::AmpResetOutput(_) => AMP_RESET_OUTPUT_MESSAGE_TYPE,
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::PayloadEPSStatus(_) => PAYLOAD_EPS_STATUS_MESSAGE_TYPE,
             #[cfg(not(feature = "bootloader"))]
@@ -403,6 +423,8 @@ impl CanBusMessageEnum {
             #[cfg(not(feature = "bootloader"))]
             AMP_CONTROL_MESSAGE_TYPE => Some(AmpControlMessage::serialized_len()),
             #[cfg(not(feature = "bootloader"))]
+            AMP_RESET_OUTPUT_MESSAGE_TYPE => Some(AmpResetOutputMessage::serialized_len()),
+            #[cfg(not(feature = "bootloader"))]
             PAYLOAD_EPS_STATUS_MESSAGE_TYPE => Some(PayloadEPSStatusMessage::serialized_len()),
             #[cfg(not(feature = "bootloader"))]
             PAYLOAD_EPS_OUTPUT_OVERWRITE_MESSAGE_TYPE => {
@@ -442,6 +464,8 @@ impl CanBusMessageEnum {
             CanBusMessageEnum::AmpOverwrite(m) => m.serialize(buffer),
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::AmpControl(m) => m.serialize(buffer),
+            #[cfg(not(feature = "bootloader"))]
+            CanBusMessageEnum::AmpResetOutput(m) => m.serialize(buffer),
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::PayloadEPSStatus(m) => m.serialize(buffer),
             #[cfg(not(feature = "bootloader"))]
@@ -495,6 +519,10 @@ impl CanBusMessageEnum {
             #[cfg(not(feature = "bootloader"))]
             AMP_CONTROL_MESSAGE_TYPE => {
                 AmpControlMessage::deserialize(data).map(CanBusMessageEnum::AmpControl)
+            }
+            #[cfg(not(feature = "bootloader"))]
+            AMP_RESET_OUTPUT_MESSAGE_TYPE => {
+                AmpResetOutputMessage::deserialize(data).map(CanBusMessageEnum::AmpResetOutput)
             }
 
             #[cfg(not(feature = "bootloader"))]

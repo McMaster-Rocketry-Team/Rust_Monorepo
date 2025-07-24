@@ -65,7 +65,7 @@ async fn main() -> Result<()> {
             let serial_path = find_ground_station().await?;
             ground_station_tui(&serial_path).await
         }
-        ModeSelect::GenVlpKey => gen_vlp_key(),
+        ModeSelect::GenVlpKey(args) => gen_vlp_key(args),
         ModeSelect::GenOtaKey(args) => gen_ota_key(args),
         ModeSelect::Testing(TestingModeSelect::DecodeBluetoothChunk(args)) => {
             test_decode_bluetooth_chunk(args).map_err(|e| anyhow!("{:?}", e))

@@ -4,7 +4,7 @@ use firmware_common_new::bootloader::generate_public_key;
 use log::info;
 use rand::Rng as _;
 
-use crate::{args::GenOtaKeyCli, gs::config::GroundStationConfig};
+use crate::{args::{GenOtaKeyCli, GenVlpKeyCli}, gs::config::GroundStationConfig};
 
 pub fn gen_ota_key(args: GenOtaKeyCli) -> Result<()> {
     let secret_key = rand::rng().random::<[u8; 32]>();
@@ -15,15 +15,18 @@ pub fn gen_ota_key(args: GenOtaKeyCli) -> Result<()> {
     Ok(())
 }
 
-pub fn gen_vlp_key() -> Result<()> {
+pub fn gen_vlp_key(args: GenVlpKeyCli) -> Result<()> {
     let key = rand::rng().random::<[u8; 32]>();
+    info!("VLP key generated");
 
     let mut gs_config = GroundStationConfig::load()?;
     gs_config.vlp_key = key;
     gs_config.save()?;
 
-    info!("VLP key generated and saved to config: {:?}", &key);
-    info!("Config path: {}", GroundStationConfig::get_config_path().display());
+    info!("Saved as toml for rocket-cli: {:?}", &GroundStationConfig::get_config_path().display());
+
+    std::fs::write(&args.key_path, BASE64_STANDARD.encode(&key))?;
+    info!("Saved as base64 for firmware: {:?}", &args.key_path.display());
 
     Ok(())
 }
