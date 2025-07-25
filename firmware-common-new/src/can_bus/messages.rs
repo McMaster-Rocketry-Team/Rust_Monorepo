@@ -24,8 +24,6 @@ use node_status::NodeStatusMessage;
 #[cfg(not(feature = "bootloader"))]
 use payload_eps_output_overwrite::PayloadEPSOutputOverwriteMessage;
 #[cfg(not(feature = "bootloader"))]
-use payload_eps_self_test::PayloadEPSSelfTestMessage;
-#[cfg(not(feature = "bootloader"))]
 use payload_eps_status::PayloadEPSStatusMessage;
 use reset::ResetMessage;
 #[cfg(not(feature = "bootloader"))]
@@ -58,8 +56,6 @@ pub mod imu_measurement;
 pub mod node_status;
 #[cfg(not(feature = "bootloader"))]
 pub mod payload_eps_output_overwrite;
-#[cfg(not(feature = "bootloader"))]
-pub mod payload_eps_self_test;
 #[cfg(not(feature = "bootloader"))]
 pub mod payload_eps_status;
 pub mod reset;
@@ -198,16 +194,6 @@ pub const PAYLOAD_EPS_OUTPUT_OVERWRITE_MESSAGE_TYPE: u8 = create_can_bus_message
     },
     1,
 );
-pub const PAYLOAD_EPS_SELF_TEST_MESSAGE_TYPE: u8 = create_can_bus_message_type(
-    CanBusMessageTypeFlag {
-        is_measurement: false,
-        is_control: false,
-        is_status: true,
-        is_data: false,
-        is_misc: false,
-    },
-    3,
-);
 pub const AVIONICS_STATUS_MESSAGE_TYPE: u8 = create_can_bus_message_type(
     CanBusMessageTypeFlag {
         is_measurement: false,
@@ -301,8 +287,6 @@ pub enum CanBusMessageEnum {
     PayloadEPSStatus(PayloadEPSStatusMessage),
     #[cfg(not(feature = "bootloader"))]
     PayloadEPSOutputOverwrite(PayloadEPSOutputOverwriteMessage),
-    #[cfg(not(feature = "bootloader"))]
-    PayloadEPSSelfTest(PayloadEPSSelfTestMessage),
 
     #[cfg(not(feature = "bootloader"))]
     AvionicsStatus(AvionicsStatusMessage),
@@ -343,8 +327,6 @@ impl CanBusMessageEnum {
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::PayloadEPSOutputOverwrite(m) => m.priority(),
             #[cfg(not(feature = "bootloader"))]
-            CanBusMessageEnum::PayloadEPSSelfTest(m) => m.priority(),
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::AvionicsStatus(m) => m.priority(),
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::RocketState(m) => m.priority(),
@@ -383,8 +365,6 @@ impl CanBusMessageEnum {
             CanBusMessageEnum::PayloadEPSOutputOverwrite(_) => {
                 PAYLOAD_EPS_OUTPUT_OVERWRITE_MESSAGE_TYPE
             }
-            #[cfg(not(feature = "bootloader"))]
-            CanBusMessageEnum::PayloadEPSSelfTest(_) => PAYLOAD_EPS_SELF_TEST_MESSAGE_TYPE,
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::AvionicsStatus(_) => AVIONICS_STATUS_MESSAGE_TYPE,
             #[cfg(not(feature = "bootloader"))]
@@ -431,8 +411,6 @@ impl CanBusMessageEnum {
                 Some(PayloadEPSOutputOverwriteMessage::serialized_len())
             }
             #[cfg(not(feature = "bootloader"))]
-            PAYLOAD_EPS_SELF_TEST_MESSAGE_TYPE => Some(PayloadEPSSelfTestMessage::serialized_len()),
-            #[cfg(not(feature = "bootloader"))]
             AVIONICS_STATUS_MESSAGE_TYPE => Some(AvionicsStatusMessage::serialized_len()),
             #[cfg(not(feature = "bootloader"))]
             ROCKET_STATE_MESSAGE_TYPE => Some(RocketStateMessage::serialized_len()),
@@ -470,8 +448,6 @@ impl CanBusMessageEnum {
             CanBusMessageEnum::PayloadEPSStatus(m) => m.serialize(buffer),
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::PayloadEPSOutputOverwrite(m) => m.serialize(buffer),
-            #[cfg(not(feature = "bootloader"))]
-            CanBusMessageEnum::PayloadEPSSelfTest(m) => m.serialize(buffer),
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::AvionicsStatus(m) => m.serialize(buffer),
             #[cfg(not(feature = "bootloader"))]
@@ -534,9 +510,6 @@ impl CanBusMessageEnum {
                 PayloadEPSOutputOverwriteMessage::deserialize(data)
                     .map(CanBusMessageEnum::PayloadEPSOutputOverwrite)
             }
-            #[cfg(not(feature = "bootloader"))]
-            PAYLOAD_EPS_SELF_TEST_MESSAGE_TYPE => PayloadEPSSelfTestMessage::deserialize(data)
-                .map(CanBusMessageEnum::PayloadEPSSelfTest),
 
             #[cfg(not(feature = "bootloader"))]
             AVIONICS_STATUS_MESSAGE_TYPE => {

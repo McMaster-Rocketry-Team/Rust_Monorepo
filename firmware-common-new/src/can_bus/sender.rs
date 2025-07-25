@@ -1,16 +1,23 @@
 use crc::Crc;
 use embassy_futures::{
-    select::{Either, select},
+    select::{Either, Either3, select, select3},
     yield_now,
 };
 use embassy_sync::{
     blocking_mutex::raw::{CriticalSectionRawMutex, RawMutex},
     channel::Channel,
     pipe::Pipe,
+    signal::Signal,
 };
 use heapless::Vec;
 
-use crate::can_bus::messages::{CanBusMessageEnum, LOG_MESSAGE_TYPE};
+use crate::{
+    can_bus::messages::{
+        CanBusMessageEnum, LOG_MESSAGE_TYPE, PRE_UNIX_TIME_MESSAGE_TYPE, UNIX_TIME_MESSAGE_TYPE,
+        unix_time::UnixTimeMessage,
+    },
+    time::Clock,
+};
 
 use super::{CanBusTX, id::CanBusExtendedId};
 use packed_struct::prelude::*;
@@ -46,7 +53,7 @@ impl Into<u8> for TailByte {
 pub(super) const CAN_CRC: Crc<u16> = Crc::<u16>::new(&crc::CRC_16_IBM_3740);
 
 pub struct CanBusMultiFrameEncoder {
-    deserialized_message: [u8; MAX_CAN_MESSAGE_SIZE],
+    serialized_message: [u8; MAX_CAN_MESSAGE_SIZE],
     offset: usize,
     message_len: usize,
     toggle: bool,
@@ -55,12 +62,12 @@ pub struct CanBusMultiFrameEncoder {
 
 impl CanBusMultiFrameEncoder {
     pub fn new(message: CanBusMessageEnum) -> Self {
-        let mut deserialized_message = [0u8; MAX_CAN_MESSAGE_SIZE];
-        let len = message.serialize(&mut deserialized_message);
+        let mut serialized_message = [0u8; MAX_CAN_MESSAGE_SIZE];
+        let len = message.serialize(&mut serialized_message);
 
         Self {
-            crc: CAN_CRC.checksum(&deserialized_message[..len]),
-            deserialized_message,
+            crc: CAN_CRC.checksum(&serialized_message[..len]),
+            serialized_message,
             offset: 0,
             message_len: len,
             toggle: false,
@@ -79,7 +86,7 @@ impl Iterator for CanBusMultiFrameEncoder {
         let mut data = Vec::new();
         if self.offset == 0 && self.message_len <= 7 {
             // Single frame message
-            data.extend_from_slice(&self.deserialized_message[..self.message_len])
+            data.extend_from_slice(&self.serialized_message[..self.message_len])
                 .unwrap();
             data.push(TailByte::new(true, true, false).into()).unwrap();
             self.offset += self.message_len;
@@ -88,21 +95,21 @@ impl Iterator for CanBusMultiFrameEncoder {
             if self.offset == 0 {
                 // First frame
                 data.extend_from_slice(&self.crc.to_le_bytes()).unwrap();
-                data.extend_from_slice(&self.deserialized_message[..5])
+                data.extend_from_slice(&self.serialized_message[..5])
                     .unwrap();
                 data.push(TailByte::new(true, false, self.toggle).into())
                     .unwrap();
                 self.offset += 5;
             } else if self.offset + 7 >= self.message_len {
                 // Last frame
-                data.extend_from_slice(&self.deserialized_message[self.offset..self.message_len])
+                data.extend_from_slice(&self.serialized_message[self.offset..self.message_len])
                     .unwrap();
                 data.push(TailByte::new(false, true, self.toggle).into())
                     .unwrap();
                 self.offset = self.message_len;
             } else {
                 // Middle frame
-                data.extend_from_slice(&self.deserialized_message[self.offset..self.offset + 7])
+                data.extend_from_slice(&self.serialized_message[self.offset..self.offset + 7])
                     .unwrap();
                 data.push(TailByte::new(false, false, self.toggle).into())
                     .unwrap();
@@ -116,25 +123,55 @@ impl Iterator for CanBusMultiFrameEncoder {
     }
 }
 
-pub struct CanSender<M: RawMutex, const N: usize> {
+pub struct CanSender<M: RawMutex, C: Clock, const N: usize> {
     channel: Channel<M, (CanBusExtendedId, Vec<u8, 8>), N>,
     node_type: u8,
     node_id: u16,
+    log_frame_id: u32,
+    pre_unix_frame_id: u32,
+    unix_frame_id: u32,
     log_pipe: Option<&'static Pipe<CriticalSectionRawMutex, 1024>>,
+    clock: C,
+    send_unix_time_signal: Signal<M, ()>,
 }
 
-impl<M: RawMutex, const N: usize> CanSender<M, N> {
+impl<M: RawMutex, C: Clock, const N: usize> CanSender<M, C, N> {
     pub fn new(
         node_type: u8,
         node_id: u16,
+        clock: C,
         log_pipe: Option<&'static Pipe<CriticalSectionRawMutex, 1024>>,
     ) -> Self {
         Self {
             channel: Channel::new(),
             node_type,
             node_id,
+            log_frame_id: CanBusExtendedId::new(7, LOG_MESSAGE_TYPE, node_type, node_id).into(),
+            pre_unix_frame_id: CanBusExtendedId::new(
+                1,
+                PRE_UNIX_TIME_MESSAGE_TYPE,
+                node_type,
+                node_id,
+            )
+            .into(),
+            unix_frame_id: CanBusExtendedId::new(1, UNIX_TIME_MESSAGE_TYPE, node_type, node_id)
+                .into(),
+            clock,
             log_pipe,
+            send_unix_time_signal: Signal::new(),
         }
+    }
+
+    fn create_unix_time_frame_data(&self) -> [u8; 8] {
+        let message: CanBusMessageEnum = UnixTimeMessage {
+            timestamp_us: self.clock.now_us(),
+        }
+        .into();
+        let mut data = [0u8; 8];
+        message.serialize(&mut data);
+        data[7] = TailByte::new(true, true, false).into();
+
+        data
     }
 
     pub async fn run_daemon(&self, tx: &mut impl CanBusTX) {
@@ -149,18 +186,33 @@ impl<M: RawMutex, const N: usize> CanSender<M, N> {
 
         if let Some(log_pipe) = &self.log_pipe {
             let mut buffer = [0u8; 8];
-            let log_frame_id: u32 =
-                CanBusExtendedId::new(7, LOG_MESSAGE_TYPE, self.node_type, self.node_id).into();
             loop {
-                match select(self.channel.receive(), log_pipe.read(&mut buffer)).await {
-                    Either::First((id, data)) => send_tx_frame(id.into(), &data).await,
-                    Either::Second(len) => send_tx_frame(log_frame_id, &buffer[..len]).await,
+                match select3(
+                    self.send_unix_time_signal.wait(),
+                    self.channel.receive(),
+                    log_pipe.read(&mut buffer),
+                )
+                .await
+                {
+                    Either3::First(_) => {
+                        send_tx_frame(self.pre_unix_frame_id, &[]).await;
+                        send_tx_frame(self.unix_frame_id, &self.create_unix_time_frame_data())
+                            .await;
+                    }
+                    Either3::Second((id, data)) => send_tx_frame(id.into(), &data).await,
+                    Either3::Third(len) => send_tx_frame(self.log_frame_id, &buffer[..len]).await,
                 }
             }
         } else {
             loop {
-                let (id, data) = self.channel.receive().await;
-                send_tx_frame(id.into(), &data).await;
+                match select(self.send_unix_time_signal.wait(), self.channel.receive()).await {
+                    Either::First(_) => {
+                        send_tx_frame(self.pre_unix_frame_id, &[]).await;
+                        send_tx_frame(self.unix_frame_id, &self.create_unix_time_frame_data())
+                            .await;
+                    }
+                    Either::Second((id, data)) => send_tx_frame(id.into(), &data).await,
+                }
             }
         }
     }
@@ -174,5 +226,9 @@ impl<M: RawMutex, const N: usize> CanSender<M, N> {
             self.channel.send((id, data)).await;
         }
         crc
+    }
+
+    pub fn send_unix_time(&self) {
+        self.send_unix_time_signal.signal(());
     }
 }

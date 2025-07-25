@@ -1,7 +1,6 @@
 #![no_std]
 #![allow(static_mut_refs)]
 
-use firmware_common_new::can_bus::messages::payload_eps_self_test::PayloadEPSSelfTestMessage;
 use firmware_common_new::can_bus::messages::payload_eps_status::{
     PayloadEPSOutputStatus, PayloadEPSStatusMessage,
 };
@@ -63,8 +62,6 @@ pub static PAYLOAD_EPS_STATUS_MESSAGE_TYPE: u8 = messages::PAYLOAD_EPS_STATUS_ME
 #[unsafe(no_mangle)]
 pub static PAYLOAD_EPS_OUTPUT_OVERWRITE_MESSAGE_TYPE: u8 =
     messages::PAYLOAD_EPS_OUTPUT_OVERWRITE_MESSAGE_TYPE;
-#[unsafe(no_mangle)]
-pub static PAYLOAD_EPS_SELF_TEST_MESSAGE_TYPE: u8 = messages::PAYLOAD_EPS_SELF_TEST_MESSAGE_TYPE;
 #[unsafe(no_mangle)]
 pub static AVIONICS_STATUS_MESSAGE_TYPE: u8 = messages::AVIONICS_STATUS_MESSAGE_TYPE;
 #[unsafe(no_mangle)]
@@ -357,23 +354,6 @@ pub extern "C" fn new_payload_eps_status_message(
         output_5v,
         output_9v,
     )
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn new_payload_eps_self_test_message(
-    battery1_ok: bool,
-    battery2_ok: bool,
-    out_3v3_ok: bool,
-    out_5v_ok: bool,
-    out_9v_ok: bool,
-) -> PayloadEPSSelfTestMessage {
-    PayloadEPSSelfTestMessage {
-        battery1_ok,
-        battery2_ok,
-        out_3v3_ok,
-        out_5v_ok,
-        out_9v_ok,
-    }
 }
 
 #[repr(C)]
