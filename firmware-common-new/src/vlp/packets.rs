@@ -1,6 +1,6 @@
 use core::fmt::Debug;
 
-use crate::utils::FixedLenSerializable;
+use crate::{utils::FixedLenSerializable};
 use ack::AckPacket;
 use amp_output_overwrite::AMPOutputOverwritePacket;
 use change_mode::ChangeModePacket;
@@ -11,12 +11,14 @@ use payload_eps_output_overwrite::PayloadEPSOutputOverwritePacket;
 use reset::ResetPacket;
 use self_test_result::SelfTestResultPacket;
 use telemetry::TelemetryPacket;
+use landed_telemetry::LandedTelemetryPacket;
 
 pub mod ack;
 pub mod amp_output_overwrite;
 pub mod change_mode;
 pub mod fire_pyro;
 pub mod gps_beacon;
+pub mod landed_telemetry;
 pub mod low_power_telemetry;
 pub mod payload_eps_output_overwrite;
 pub mod reset;
@@ -34,6 +36,7 @@ pub enum VLPDownlinkPacket {
     LowPowerTelemetry(LowPowerTelemetryPacket),
     Telemetry(TelemetryPacket),
     SelfTestResult(SelfTestResultPacket),
+    LandedTelemetry(LandedTelemetryPacket),
 }
 
 impl VLPDownlinkPacket {
@@ -51,6 +54,7 @@ impl VLPDownlinkPacket {
             }
             3 => TelemetryPacket::deserialize(data).map(VLPDownlinkPacket::Telemetry),
             4 => SelfTestResultPacket::deserialize(data).map(VLPDownlinkPacket::SelfTestResult),
+            5 => LandedTelemetryPacket::deserialize(data).map(VLPDownlinkPacket::LandedTelemetry),
             _ => None,
         }
     }
@@ -62,6 +66,7 @@ impl VLPDownlinkPacket {
             VLPDownlinkPacket::LowPowerTelemetry(_) => 2,
             VLPDownlinkPacket::Telemetry(_) => 3,
             VLPDownlinkPacket::SelfTestResult(_) => 4,
+            VLPDownlinkPacket::LandedTelemetry(_) => 5,
         };
         buffer = &mut buffer[1..];
 
@@ -71,6 +76,7 @@ impl VLPDownlinkPacket {
             VLPDownlinkPacket::LowPowerTelemetry(packet) => packet.serialize(buffer),
             VLPDownlinkPacket::Telemetry(packet) => packet.serialize(buffer),
             VLPDownlinkPacket::SelfTestResult(packet) => packet.serialize(buffer),
+            VLPDownlinkPacket::LandedTelemetry(packet) => packet.serialize(buffer),
         }
     }
 }
