@@ -48,8 +48,8 @@ pub struct NodeStatusMessage {
     #[packed_field(bits = "26..28", ty = "enum")]
     pub mode: NodeMode,
     
-    /// Node specific status, only the lower 12 bits are used.
-    #[packed_field(bits = "28..40")]
+    /// Node specific status, only the lower 11 bits are used.
+    #[packed_field(bits = "28..39")]
     pub custom_status: u16,
 }
 

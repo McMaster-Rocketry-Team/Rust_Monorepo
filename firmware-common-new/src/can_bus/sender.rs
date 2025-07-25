@@ -1,22 +1,16 @@
 use crc::Crc;
 use embassy_futures::{
-    select::{Either, Either3, select, select3},
+    select::{Either, select},
     yield_now,
 };
 use embassy_sync::{
     blocking_mutex::raw::{CriticalSectionRawMutex, RawMutex},
     channel::Channel,
     pipe::Pipe,
-    signal::Signal,
 };
 use heapless::Vec;
 
-use crate::{
-    can_bus::messages::{
-        CanBusMessageEnum, LOG_MESSAGE_TYPE, PRE_UNIX_TIME_MESSAGE_TYPE, UNIX_TIME_MESSAGE_TYPE,
-    },
-    time::Clock,
-};
+use crate::can_bus::messages::{CanBusMessageEnum, LOG_MESSAGE_TYPE};
 
 use super::{CanBusTX, id::CanBusExtendedId};
 use packed_struct::prelude::*;
@@ -127,18 +121,13 @@ pub struct CanSender<M: RawMutex, const N: usize> {
     node_type: u8,
     node_id: u16,
     log_frame_id: u32,
-    pre_unix_frame_id: u32,
-    unix_frame_id: u32,
     log_pipe: Option<&'static Pipe<CriticalSectionRawMutex, 1024>>,
-    clock: Option<&'static dyn Clock>,
-    send_unix_time_signal: Signal<M, ()>,
 }
 
 impl<M: RawMutex, const N: usize> CanSender<M, N> {
     pub fn new(
         node_type: u8,
         node_id: u16,
-        clock: Option<&'static dyn Clock>,
         log_pipe: Option<&'static Pipe<CriticalSectionRawMutex, 1024>>,
     ) -> Self {
         Self {
@@ -146,32 +135,8 @@ impl<M: RawMutex, const N: usize> CanSender<M, N> {
             node_type,
             node_id,
             log_frame_id: CanBusExtendedId::new(7, LOG_MESSAGE_TYPE, node_type, node_id).into(),
-            pre_unix_frame_id: CanBusExtendedId::new(
-                1,
-                PRE_UNIX_TIME_MESSAGE_TYPE,
-                node_type,
-                node_id,
-            )
-            .into(),
-            unix_frame_id: CanBusExtendedId::new(1, UNIX_TIME_MESSAGE_TYPE, node_type, node_id)
-                .into(),
-            clock,
             log_pipe,
-            send_unix_time_signal: Signal::new(),
         }
-    }
-
-    #[cfg(not(feature = "bootloader"))]
-    fn create_unix_time_frame_data(&self) -> [u8; 8] {
-        let message: CanBusMessageEnum = super::messages::unix_time::UnixTimeMessage {
-            timestamp_us: self.clock.unwrap().now_us(),
-        }
-        .into();
-        let mut data = [0u8; 8];
-        message.serialize(&mut data);
-        data[7] = TailByte::new(true, true, false).into();
-
-        data
     }
 
     pub async fn run_daemon(&self, tx: &mut impl CanBusTX) {
@@ -187,36 +152,15 @@ impl<M: RawMutex, const N: usize> CanSender<M, N> {
         if let Some(log_pipe) = &self.log_pipe {
             let mut buffer = [0u8; 8];
             loop {
-                match select3(
-                    self.send_unix_time_signal.wait(),
-                    self.channel.receive(),
-                    log_pipe.read(&mut buffer),
-                )
-                .await
-                {
-                    Either3::First(_) => {
-                        #[cfg(not(feature = "bootloader"))]
-                        send_tx_frame(self.pre_unix_frame_id, &[]).await;
-                        #[cfg(not(feature = "bootloader"))]
-                        send_tx_frame(self.unix_frame_id, &self.create_unix_time_frame_data())
-                            .await;
-                    }
-                    Either3::Second((id, data)) => send_tx_frame(id.into(), &data).await,
-                    Either3::Third(len) => send_tx_frame(self.log_frame_id, &buffer[..len]).await,
+                match select(self.channel.receive(), log_pipe.read(&mut buffer)).await {
+                    Either::First((id, data)) => send_tx_frame(id.into(), &data).await,
+                    Either::Second(len) => send_tx_frame(self.log_frame_id, &buffer[..len]).await,
                 }
             }
         } else {
             loop {
-                match select(self.send_unix_time_signal.wait(), self.channel.receive()).await {
-                    Either::First(_) => {
-                        #[cfg(not(feature = "bootloader"))]
-                        send_tx_frame(self.pre_unix_frame_id, &[]).await;
-                        #[cfg(not(feature = "bootloader"))]
-                        send_tx_frame(self.unix_frame_id, &self.create_unix_time_frame_data())
-                            .await;
-                    }
-                    Either::Second((id, data)) => send_tx_frame(id.into(), &data).await,
-                }
+                let (id, data) = self.channel.receive().await;
+                send_tx_frame(id.into(), &data).await;
             }
         }
     }
@@ -231,11 +175,15 @@ impl<M: RawMutex, const N: usize> CanSender<M, N> {
         }
         crc
     }
+}
 
-    #[cfg(not(feature = "bootloader"))]
-    pub fn send_unix_time(&self) {
-        if self.clock.is_some() {
-            self.send_unix_time_signal.signal(());
-        }
-    }
+#[cfg(not(feature = "bootloader"))]
+pub fn create_unix_time_frame_data(timestamp_us: u64) -> [u8; 8] {
+    let message: CanBusMessageEnum =
+        super::messages::unix_time::UnixTimeMessage { timestamp_us }.into();
+    let mut data = [0u8; 8];
+    message.serialize(&mut data);
+    data[7] = TailByte::new(true, true, false).into();
+
+    data
 }
