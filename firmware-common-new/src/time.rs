@@ -1,6 +1,6 @@
 use serde::{Serialize, Deserialize};
 
-pub trait Clock: Clone {
+pub trait Clock {
     fn now_us(&self) -> u64;
 }
 

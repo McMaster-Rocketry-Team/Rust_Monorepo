@@ -132,9 +132,9 @@ impl MessageRow {
             CanBusMessageEnum::AmpStatus(_) => "AMP Status",
             CanBusMessageEnum::AmpOverwrite(_) => "AMP Overwrite",
             CanBusMessageEnum::AmpControl(_) => "AMP Control",
+            CanBusMessageEnum::AmpResetOutput(_) => "AMP Reset Output",
             CanBusMessageEnum::PayloadEPSStatus(_) => "EPS Status",
             CanBusMessageEnum::PayloadEPSOutputOverwrite(_) => "EPS Output Overwrite",
-            CanBusMessageEnum::PayloadEPSSelfTest(_) => "EPS Self Test",
             CanBusMessageEnum::AvionicsStatus(_) => "Avionics Status",
             CanBusMessageEnum::RocketState(_) => "Rocket State",
             CanBusMessageEnum::IcarusStatus(_) => "Icarus Status",
@@ -316,13 +316,11 @@ impl MessageRow {
             CanBusMessageEnum::BrightnessMeasurement(m) => self.draw_fields(
                 printer,
                 1,
-                &[
-                    (
-                        "brightness (lux)",
-                        false,
-                        format!("{:>10.2}", m.brightness_lux()).into(),
-                    ),
-                ],
+                &[(
+                    "brightness (lux)",
+                    false,
+                    format!("{:>10.2}", m.brightness_lux()).into(),
+                )],
             ),
             CanBusMessageEnum::AmpStatus(m) => self.draw_fields(
                 printer,
@@ -358,6 +356,11 @@ impl MessageRow {
                     ("out 3 enable", true, Self::format_bool(m.out3_enable)),
                     ("out 4 enable", true, Self::format_bool(m.out4_enable)),
                 ],
+            ),
+            CanBusMessageEnum::AmpResetOutput(m) => self.draw_fields(
+                printer,
+                1,
+                &[("output to reset", true, format!("{}", m.output).into())],
             ),
             CanBusMessageEnum::PayloadEPSStatus(m) => {
                 self.draw_fields(
@@ -452,17 +455,6 @@ impl MessageRow {
                         true,
                         Self::format_power_output_overwrite(m.out_9v),
                     ),
-                ],
-            ),
-            CanBusMessageEnum::PayloadEPSSelfTest(m) => self.draw_fields(
-                printer,
-                1,
-                &[
-                    ("bat 1 ok", true, Self::format_bool(m.battery1_ok)),
-                    ("bat 2 ok", true, Self::format_bool(m.battery2_ok)),
-                    ("3v3 out ok", true, Self::format_bool(m.out_3v3_ok)),
-                    ("5v out ok", true, Self::format_bool(m.out_5v_ok)),
-                    ("9v out ok", true, Self::format_bool(m.out_9v_ok)),
                 ],
             ),
             CanBusMessageEnum::AvionicsStatus(m) => self.draw_fields(

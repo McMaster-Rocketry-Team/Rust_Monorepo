@@ -14,7 +14,6 @@ use heapless::Vec;
 use crate::{
     can_bus::messages::{
         CanBusMessageEnum, LOG_MESSAGE_TYPE, PRE_UNIX_TIME_MESSAGE_TYPE, UNIX_TIME_MESSAGE_TYPE,
-        unix_time::UnixTimeMessage,
     },
     time::Clock,
 };
@@ -123,7 +122,7 @@ impl Iterator for CanBusMultiFrameEncoder {
     }
 }
 
-pub struct CanSender<M: RawMutex, C: Clock, const N: usize> {
+pub struct CanSender<M: RawMutex, const N: usize> {
     channel: Channel<M, (CanBusExtendedId, Vec<u8, 8>), N>,
     node_type: u8,
     node_id: u16,
@@ -131,15 +130,15 @@ pub struct CanSender<M: RawMutex, C: Clock, const N: usize> {
     pre_unix_frame_id: u32,
     unix_frame_id: u32,
     log_pipe: Option<&'static Pipe<CriticalSectionRawMutex, 1024>>,
-    clock: C,
+    clock: Option<&'static dyn Clock>,
     send_unix_time_signal: Signal<M, ()>,
 }
 
-impl<M: RawMutex, C: Clock, const N: usize> CanSender<M, C, N> {
+impl<M: RawMutex, const N: usize> CanSender<M, N> {
     pub fn new(
         node_type: u8,
         node_id: u16,
-        clock: C,
+        clock: Option<&'static dyn Clock>,
         log_pipe: Option<&'static Pipe<CriticalSectionRawMutex, 1024>>,
     ) -> Self {
         Self {
@@ -162,9 +161,10 @@ impl<M: RawMutex, C: Clock, const N: usize> CanSender<M, C, N> {
         }
     }
 
+    #[cfg(not(feature = "bootloader"))]
     fn create_unix_time_frame_data(&self) -> [u8; 8] {
-        let message: CanBusMessageEnum = UnixTimeMessage {
-            timestamp_us: self.clock.now_us(),
+        let message: CanBusMessageEnum = super::messages::unix_time::UnixTimeMessage {
+            timestamp_us: self.clock.unwrap().now_us(),
         }
         .into();
         let mut data = [0u8; 8];
@@ -195,7 +195,9 @@ impl<M: RawMutex, C: Clock, const N: usize> CanSender<M, C, N> {
                 .await
                 {
                     Either3::First(_) => {
+                        #[cfg(not(feature = "bootloader"))]
                         send_tx_frame(self.pre_unix_frame_id, &[]).await;
+                        #[cfg(not(feature = "bootloader"))]
                         send_tx_frame(self.unix_frame_id, &self.create_unix_time_frame_data())
                             .await;
                     }
@@ -207,7 +209,9 @@ impl<M: RawMutex, C: Clock, const N: usize> CanSender<M, C, N> {
             loop {
                 match select(self.send_unix_time_signal.wait(), self.channel.receive()).await {
                     Either::First(_) => {
+                        #[cfg(not(feature = "bootloader"))]
                         send_tx_frame(self.pre_unix_frame_id, &[]).await;
+                        #[cfg(not(feature = "bootloader"))]
                         send_tx_frame(self.unix_frame_id, &self.create_unix_time_frame_data())
                             .await;
                     }
@@ -228,7 +232,10 @@ impl<M: RawMutex, C: Clock, const N: usize> CanSender<M, C, N> {
         crc
     }
 
+    #[cfg(not(feature = "bootloader"))]
     pub fn send_unix_time(&self) {
-        self.send_unix_time_signal.signal(());
+        if self.clock.is_some() {
+            self.send_unix_time_signal.signal(());
+        }
     }
 }
