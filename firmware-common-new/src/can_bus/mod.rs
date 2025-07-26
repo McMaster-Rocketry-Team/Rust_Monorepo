@@ -7,6 +7,7 @@ pub mod receiver;
 pub mod sender;
 pub mod telemetry;
 pub mod usb_can_bus_frame;
+pub mod custom_status;
 
 pub trait CanBusFrame {
     fn timestamp_us(&self) -> u64;

@@ -373,7 +373,7 @@ mod test {
                 CanBusMessageEnum::NodeStatus(NodeStatusMessage {
                     uptime_s: 10,
                     health: NodeHealth::Healthy,
-                    mode: NodeMode::Maintainance,
+                    mode: NodeMode::Maintenance,
                     custom_status: 0,
                 }),
             ),

@@ -26,7 +26,7 @@ pub enum NodeMode {
     /// Initialization is in progress; this mode is entered immediately after startup.
     Initialization = 1,
     /// E.g. calibration, the bootloader is running, etc.
-    Maintainance = 2,
+    Maintenance = 2,
     /// Mode Offline can be reported by the node to explicitly inform other nodes in
     /// the network that it is shutting down.
     /// Additionally, this value is used for telemetry to tell the ground station that
