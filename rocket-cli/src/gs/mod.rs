@@ -19,7 +19,7 @@ use firmware_common_new::{
     can_bus::messages::amp_overwrite::PowerOutputOverwrite,
     rpc::lora_rpc::LoraRpcClient,
     vlp::{
-        client::VLPGroundStation,
+        client::{VLPGroundStation, VLPTXError},
         lora_config::LoraConfig,
         packets::{
             VLPDownlinkPacket, VLPUplinkPacket,
@@ -31,15 +31,20 @@ use firmware_common_new::{
         },
     },
 };
+use lora_phy::mod_params::PacketStatus;
 use tokio::time;
 
-use crate::gs::{config::GroundStationConfig, downlink_packet_display::DownlinkPacketDisplay, rpc_radio::RpcRadio, serial_wrapper::SerialWrapper};
+use crate::gs::{
+    config::GroundStationConfig, downlink_packet_display::DownlinkPacketDisplay,
+    rpc_radio::RpcRadio, serial_wrapper::SerialWrapper, vlp_client::VLPClientTrait,
+};
 
 pub mod config;
 mod downlink_packet_display;
 pub mod find_ground_station;
 pub mod rpc_radio;
 pub mod serial_wrapper;
+pub mod vlp_client;
 
 pub async fn ground_station_tui(serial_path: &str) -> Result<()> {
     let serial = serialport::new(serial_path, 115200)
@@ -66,16 +71,32 @@ pub async fn ground_station_tui(serial_path: &str) -> Result<()> {
     let vlp_key = config.read().unwrap().vlp_key.clone();
     let mut daemon = vlp_gcm_client.daemon(&mut rpc_radio, &vlp_key);
 
+    struct VLPClientWrapper(&'static VLPGroundStation<ThreadModeRawMutex>);
+
+    impl VLPClientTrait for VLPClientWrapper {
+        fn send_nb(&self, packet: VLPUplinkPacket) {
+            self.0.send_nb(packet);
+        }
+
+        fn try_get_send_result(&self) -> Option<std::result::Result<PacketStatus, VLPTXError>> {
+            self.0.try_get_send_result()
+        }
+
+        fn try_receive(&self) -> Option<(VLPDownlinkPacket, PacketStatus)> {
+            self.0.try_receive()
+        }
+    }
+
     tokio::select! {
         _ = daemon.run() => {}
-        _ = tui_task(vlp_gcm_client, config.clone()) => {}
+        _ = tui_task(Box::leak(Box::new(VLPClientWrapper(vlp_gcm_client))), config.clone()) => {}
     }
 
     Ok(())
 }
 
-async fn tui_task(
-    client: &'static VLPGroundStation<ThreadModeRawMutex>,
+pub async fn tui_task(
+    client: &'static impl VLPClientTrait,
     config: Arc<RwLock<GroundStationConfig>>,
 ) -> Result<()> {
     let last_uplink_packet: &RwLock<Option<VLPUplinkPacket>> =
@@ -659,7 +680,9 @@ async fn tui_task(
         }
 
         if let Some((packet, status)) = client.try_receive() {
-            let mut downlink_packet_display = runner.find_name::<DownlinkPacketDisplay>("downlink_packet").unwrap();
+            let mut downlink_packet_display = runner
+                .find_name::<DownlinkPacketDisplay>("downlink_packet")
+                .unwrap();
             downlink_packet_display.update(packet, status);
         }
 

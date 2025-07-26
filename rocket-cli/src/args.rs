@@ -69,6 +69,7 @@ pub struct GenOtaKeyCli {
 pub enum TestingModeSelect {
     DecodeBluetoothChunk(DecodeBluetoothChunkArgs),
     MockConnection,
+    MockGroundStation,
     SendVLPTelemetry(SendVLPTelemetryArgs),
 }
 

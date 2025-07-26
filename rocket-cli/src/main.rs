@@ -6,8 +6,8 @@ mod gen_key;
 mod gs;
 mod monitor;
 mod probe;
-mod testing;
 mod serial_can;
+mod testing;
 
 use anyhow::{Result, anyhow};
 use args::Cli;
@@ -25,7 +25,8 @@ use testing::mock_connection_method::MockConnectionMethod;
 use crate::gen_key::gen_vlp_key;
 use crate::gs::find_ground_station::find_ground_station;
 use crate::gs::ground_station_tui;
-use crate::testing::fake_vlp_telemetry::send_fake_vlp_telemetry;
+use crate::testing::mock_ground_station::mock_ground_station_tui;
+use crate::testing::send_fake_vlp_telemetry::send_fake_vlp_telemetry;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -74,6 +75,9 @@ async fn main() -> Result<()> {
             let mut connection_method: Box<dyn ConnectionMethod> = Box::new(MockConnectionMethod);
 
             monitor_tui(&mut connection_method, None).await
+        }
+        ModeSelect::Testing(TestingModeSelect::MockGroundStation) => {
+            mock_ground_station_tui().await
         }
         ModeSelect::Testing(TestingModeSelect::SendVLPTelemetry(args)) => {
             send_fake_vlp_telemetry(args).await
