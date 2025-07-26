@@ -63,7 +63,7 @@ pub static PAYLOAD_EPS_STATUS_MESSAGE_TYPE: u8 = messages::PAYLOAD_EPS_STATUS_ME
 pub static PAYLOAD_EPS_OUTPUT_OVERWRITE_MESSAGE_TYPE: u8 =
     messages::PAYLOAD_EPS_OUTPUT_OVERWRITE_MESSAGE_TYPE;
 #[unsafe(no_mangle)]
-pub static AVIONICS_STATUS_MESSAGE_TYPE: u8 = messages::AVIONICS_STATUS_MESSAGE_TYPE;
+pub static AVIONICS_STATUS_MESSAGE_TYPE: u8 = messages::VL_STATUS_MESSAGE_TYPE;
 #[unsafe(no_mangle)]
 pub static ROCKET_STATE_MESSAGE_TYPE: u8 = messages::ROCKET_STATE_MESSAGE_TYPE;
 #[unsafe(no_mangle)]

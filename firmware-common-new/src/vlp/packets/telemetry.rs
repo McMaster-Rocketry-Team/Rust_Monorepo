@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     can_bus::messages::{
         amp_status::PowerOutputStatus,
-        avionics_status::FlightStage,
+        vl_status::FlightStage,
         node_status::{NodeHealth, NodeMode},
     },
     fixed_point_factory,

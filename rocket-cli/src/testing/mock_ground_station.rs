@@ -4,7 +4,7 @@ use crate::gs::{config::GroundStationConfig, tui_task, vlp_client::VLPClientTrai
 use anyhow::Result;
 use firmware_common_new::{
     can_bus::messages::{
-        amp_status::PowerOutputStatus, avionics_status::FlightStage, node_status::NodeHealth,
+        amp_status::PowerOutputStatus, vl_status::FlightStage, node_status::NodeHealth,
     },
     vlp::{
         client::VLPTXError,

@@ -128,6 +128,7 @@ impl MessageRow {
             CanBusMessageEnum::UnixTime(_) => "Unix Time",
             CanBusMessageEnum::BaroMeasurement(_) => "Baro Measurement",
             CanBusMessageEnum::IMUMeasurement(_) => "IMU Measurement",
+            CanBusMessageEnum::MagMeasurement(_) => "Mag Measurement",
             CanBusMessageEnum::BrightnessMeasurement(_) => "Brightness Measurement",
             CanBusMessageEnum::AmpStatus(_) => "AMP Status",
             CanBusMessageEnum::AmpOverwrite(_) => "AMP Overwrite",
@@ -135,7 +136,7 @@ impl MessageRow {
             CanBusMessageEnum::AmpResetOutput(_) => "AMP Reset Output",
             CanBusMessageEnum::PayloadEPSStatus(_) => "EPS Status",
             CanBusMessageEnum::PayloadEPSOutputOverwrite(_) => "EPS Output Overwrite",
-            CanBusMessageEnum::AvionicsStatus(_) => "Avionics Status",
+            CanBusMessageEnum::VLStatus(_) => "VL Status",
             CanBusMessageEnum::RocketState(_) => "Rocket State",
             CanBusMessageEnum::IcarusStatus(_) => "Icarus Status",
             CanBusMessageEnum::DataTransfer(_) => "Data Transfer",
@@ -313,6 +314,21 @@ impl MessageRow {
                     ),
                 ],
             ),
+            CanBusMessageEnum::MagMeasurement(m) => self.draw_fields(
+                printer,
+                1,
+                &[(
+                    "mag (T)",
+                    false,
+                    format!(
+                        "{:>5.2}, {:>5.2}, {:>5.2}",
+                        m.mag()[0],
+                        m.mag()[1],
+                        m.mag()[2]
+                    )
+                    .into(),
+                )],
+            ),
             CanBusMessageEnum::BrightnessMeasurement(m) => self.draw_fields(
                 printer,
                 1,
@@ -457,14 +473,21 @@ impl MessageRow {
                     ),
                 ],
             ),
-            CanBusMessageEnum::AvionicsStatus(m) => self.draw_fields(
+            CanBusMessageEnum::VLStatus(m) => self.draw_fields(
                 printer,
                 1,
-                &[(
-                    "flight stage",
-                    true,
-                    format!("{:?}", m.flight_stage).to_case(Case::Lower).into(),
-                )],
+                &[
+                    (
+                        "flight stage",
+                        true,
+                        format!("{:?}", m.flight_stage).to_case(Case::Lower).into(),
+                    ),
+                    (
+                        "battery",
+                        false,
+                        format!("{:.2}V", m.battery_mv as f32 / 1000.0,).into(),
+                    ),
+                ],
             ),
             CanBusMessageEnum::RocketState(m) => {
                 self.draw_fields(

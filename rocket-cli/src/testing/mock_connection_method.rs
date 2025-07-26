@@ -12,7 +12,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use firmware_common_new::can_bus::{
     messages::{
-        avionics_status::{AvionicsStatusMessage, FlightStage},
+        vl_status::{VLStatusMessage, FlightStage},
         baro_measurement::BaroMeasurementMessage,
         node_status::{NodeHealth, NodeMode, NodeStatusMessage},
     },
@@ -136,8 +136,9 @@ impl ConnectionMethod for MockConnectionMethod {
                 .send(DecodedMessage {
                     node_type: VOID_LAKE_NODE_TYPE,
                     node_id: 0xAB,
-                    message: AvionicsStatusMessage {
+                    message: VLStatusMessage {
                         flight_stage: FlightStage::Armed,
+                        battery_mv: 7420,
                     }
                     .into(),
                     count: 2,

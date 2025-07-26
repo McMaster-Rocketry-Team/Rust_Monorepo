@@ -11,7 +11,7 @@ use anyhow::Result;
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use firmware_common_new::{
     can_bus::messages::{
-        amp_status::PowerOutputStatus, avionics_status::FlightStage, node_status::NodeHealth,
+        amp_status::PowerOutputStatus, vl_status::FlightStage, node_status::NodeHealth,
     },
     rpc::lora_rpc::LoraRpcClient,
     vlp::{

@@ -9,9 +9,11 @@ use amp_overwrite::AmpOverwriteMessage;
 #[cfg(not(feature = "bootloader"))]
 use amp_status::AmpStatusMessage;
 #[cfg(not(feature = "bootloader"))]
-use avionics_status::AvionicsStatusMessage;
+use vl_status::VLStatusMessage;
 #[cfg(not(feature = "bootloader"))]
 use baro_measurement::BaroMeasurementMessage;
+#[cfg(not(feature = "bootloader"))]
+use mag_measurement::MagMeasurementMessage;
 #[cfg(not(feature = "bootloader"))]
 use brightness_measurement::BrightnessMeasurementMessage;
 use core::fmt::Debug;
@@ -43,9 +45,11 @@ pub mod amp_overwrite;
 #[cfg(not(feature = "bootloader"))]
 pub mod amp_status;
 #[cfg(not(feature = "bootloader"))]
-pub mod avionics_status;
+pub mod vl_status;
 #[cfg(not(feature = "bootloader"))]
 pub mod baro_measurement;
+#[cfg(not(feature = "bootloader"))]
+pub mod mag_measurement;
 #[cfg(not(feature = "bootloader"))]
 pub mod brightness_measurement;
 pub mod data_transfer;
@@ -124,6 +128,16 @@ pub const IMU_MEASUREMENT_MESSAGE_TYPE: u8 = create_can_bus_message_type(
     },
     1,
 );
+pub const MAG_MEASUREMENT_MESSAGE_TYPE: u8 = create_can_bus_message_type(
+    CanBusMessageTypeFlag {
+        is_measurement: true,
+        is_control: false,
+        is_status: false,
+        is_data: false,
+        is_misc: false,
+    },
+    4,
+);
 pub const BRIGHTNESS_MEASUREMENT_MESSAGE_TYPE: u8 = create_can_bus_message_type(
     CanBusMessageTypeFlag {
         is_measurement: true,
@@ -194,7 +208,7 @@ pub const PAYLOAD_EPS_OUTPUT_OVERWRITE_MESSAGE_TYPE: u8 = create_can_bus_message
     },
     1,
 );
-pub const AVIONICS_STATUS_MESSAGE_TYPE: u8 = create_can_bus_message_type(
+pub const VL_STATUS_MESSAGE_TYPE: u8 = create_can_bus_message_type(
     CanBusMessageTypeFlag {
         is_measurement: false,
         is_control: false,
@@ -272,6 +286,8 @@ pub enum CanBusMessageEnum {
     #[cfg(not(feature = "bootloader"))]
     IMUMeasurement(IMUMeasurementMessage),
     #[cfg(not(feature = "bootloader"))]
+    MagMeasurement(MagMeasurementMessage),
+    #[cfg(not(feature = "bootloader"))]
     BrightnessMeasurement(BrightnessMeasurementMessage),
 
     #[cfg(not(feature = "bootloader"))]
@@ -289,7 +305,7 @@ pub enum CanBusMessageEnum {
     PayloadEPSOutputOverwrite(PayloadEPSOutputOverwriteMessage),
 
     #[cfg(not(feature = "bootloader"))]
-    AvionicsStatus(AvionicsStatusMessage),
+    VLStatus(VLStatusMessage),
     #[cfg(not(feature = "bootloader"))]
     RocketState(RocketStateMessage),
     #[cfg(not(feature = "bootloader"))]
@@ -313,6 +329,8 @@ impl CanBusMessageEnum {
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::IMUMeasurement(m) => m.priority(),
             #[cfg(not(feature = "bootloader"))]
+            CanBusMessageEnum::MagMeasurement(m) => m.priority(),
+            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::BrightnessMeasurement(m) => m.priority(),
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::AmpStatus(m) => m.priority(),
@@ -327,7 +345,7 @@ impl CanBusMessageEnum {
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::PayloadEPSOutputOverwrite(m) => m.priority(),
             #[cfg(not(feature = "bootloader"))]
-            CanBusMessageEnum::AvionicsStatus(m) => m.priority(),
+            CanBusMessageEnum::VLStatus(m) => m.priority(),
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::RocketState(m) => m.priority(),
             #[cfg(not(feature = "bootloader"))]
@@ -350,6 +368,8 @@ impl CanBusMessageEnum {
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::IMUMeasurement(_) => IMU_MEASUREMENT_MESSAGE_TYPE,
             #[cfg(not(feature = "bootloader"))]
+            CanBusMessageEnum::MagMeasurement(_) => MAG_MEASUREMENT_MESSAGE_TYPE,
+            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::BrightnessMeasurement(_) => BRIGHTNESS_MEASUREMENT_MESSAGE_TYPE,
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::AmpStatus(_) => AMP_STATUS_MESSAGE_TYPE,
@@ -366,7 +386,7 @@ impl CanBusMessageEnum {
                 PAYLOAD_EPS_OUTPUT_OVERWRITE_MESSAGE_TYPE
             }
             #[cfg(not(feature = "bootloader"))]
-            CanBusMessageEnum::AvionicsStatus(_) => AVIONICS_STATUS_MESSAGE_TYPE,
+            CanBusMessageEnum::VLStatus(_) => VL_STATUS_MESSAGE_TYPE,
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::RocketState(_) => ROCKET_STATE_MESSAGE_TYPE,
             #[cfg(not(feature = "bootloader"))]
@@ -393,6 +413,8 @@ impl CanBusMessageEnum {
             #[cfg(not(feature = "bootloader"))]
             IMU_MEASUREMENT_MESSAGE_TYPE => Some(IMUMeasurementMessage::serialized_len()),
             #[cfg(not(feature = "bootloader"))]
+            MAG_MEASUREMENT_MESSAGE_TYPE => Some(MagMeasurementMessage::serialized_len()),
+            #[cfg(not(feature = "bootloader"))]
             BRIGHTNESS_MEASUREMENT_MESSAGE_TYPE => {
                 Some(BrightnessMeasurementMessage::serialized_len())
             }
@@ -411,7 +433,7 @@ impl CanBusMessageEnum {
                 Some(PayloadEPSOutputOverwriteMessage::serialized_len())
             }
             #[cfg(not(feature = "bootloader"))]
-            AVIONICS_STATUS_MESSAGE_TYPE => Some(AvionicsStatusMessage::serialized_len()),
+            VL_STATUS_MESSAGE_TYPE => Some(VLStatusMessage::serialized_len()),
             #[cfg(not(feature = "bootloader"))]
             ROCKET_STATE_MESSAGE_TYPE => Some(RocketStateMessage::serialized_len()),
             #[cfg(not(feature = "bootloader"))]
@@ -435,6 +457,8 @@ impl CanBusMessageEnum {
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::IMUMeasurement(m) => m.serialize(buffer),
             #[cfg(not(feature = "bootloader"))]
+            CanBusMessageEnum::MagMeasurement(m) => m.serialize(buffer),
+            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::BrightnessMeasurement(m) => m.serialize(buffer),
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::AmpStatus(m) => m.serialize(buffer),
@@ -449,7 +473,7 @@ impl CanBusMessageEnum {
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::PayloadEPSOutputOverwrite(m) => m.serialize(buffer),
             #[cfg(not(feature = "bootloader"))]
-            CanBusMessageEnum::AvionicsStatus(m) => m.serialize(buffer),
+            CanBusMessageEnum::VLStatus(m) => m.serialize(buffer),
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::RocketState(m) => m.serialize(buffer),
             #[cfg(not(feature = "bootloader"))]
@@ -479,6 +503,10 @@ impl CanBusMessageEnum {
             #[cfg(not(feature = "bootloader"))]
             IMU_MEASUREMENT_MESSAGE_TYPE => {
                 IMUMeasurementMessage::deserialize(data).map(CanBusMessageEnum::IMUMeasurement)
+            }
+            #[cfg(not(feature = "bootloader"))]
+            MAG_MEASUREMENT_MESSAGE_TYPE => {
+                MagMeasurementMessage::deserialize(data).map(CanBusMessageEnum::MagMeasurement)
             }
             #[cfg(not(feature = "bootloader"))]
             BRIGHTNESS_MEASUREMENT_MESSAGE_TYPE => BrightnessMeasurementMessage::deserialize(data)
@@ -512,8 +540,8 @@ impl CanBusMessageEnum {
             }
 
             #[cfg(not(feature = "bootloader"))]
-            AVIONICS_STATUS_MESSAGE_TYPE => {
-                AvionicsStatusMessage::deserialize(data).map(CanBusMessageEnum::AvionicsStatus)
+            VL_STATUS_MESSAGE_TYPE => {
+                VLStatusMessage::deserialize(data).map(CanBusMessageEnum::VLStatus)
             }
             #[cfg(not(feature = "bootloader"))]
             ICARUS_STATUS_MESSAGE_TYPE => {
