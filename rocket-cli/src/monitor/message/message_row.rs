@@ -397,7 +397,7 @@ impl MessageRow {
                         (
                             "3v3 out current",
                             false,
-                            format!("{:>4}mA", m.output_3v3.current_ma as f32 / 1000.0).into(),
+                            format!("{:>4}mA", m.output_3v3.current_ma).into(),
                         ),
                         (
                             "status",
@@ -410,7 +410,7 @@ impl MessageRow {
                         (
                             "5v out current",
                             false,
-                            format!("{:>4}mA", m.output_5v.current_ma as f32 / 1000.0).into(),
+                            format!("{:>4}mA", m.output_5v.current_ma).into(),
                         ),
                         (
                             "status",
@@ -423,7 +423,7 @@ impl MessageRow {
                         (
                             "9v out current",
                             false,
-                            format!("{:>4}mA", m.output_9v.current_ma as f32 / 1000.0).into(),
+                            format!("{:>4}mA", m.output_9v.current_ma).into(),
                         ),
                         (
                             "status",
@@ -529,9 +529,14 @@ impl MessageRow {
                 1,
                 &[
                     (
-                        "air brakes extension",
+                        "commanded extension",
                         false,
-                        format!("{:>4.1}%", m.extension_percentage()).into(),
+                        format!("{:>4.1}%", m.commanded_extension_percentage() * 100.0).into(),
+                    ),
+                    (
+                        "actual extension",
+                        false,
+                        format!("{:>4.1}%", m.actual_extension_percentage() * 100.0).into(),
                     ),
                     (
                         "servo current",

@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     can_bus::messages::{
         amp_status::PowerOutputStatus,
+        avionics_status::FlightStage,
         node_status::{NodeHealth, NodeMode},
     },
     fixed_point_factory,
@@ -35,7 +36,7 @@ fixed_point_factory!(PayloadTemperatureFac, f32, 10.0, 85.0, 1.0);
 
 // 48 byte max size to achieve 0.5Hz with 250khz bandwidth + 12sf + 8cr lora
 #[derive(PackedStruct, Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "45")]
+#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "46")]
 pub struct TelemetryPacket {
     #[packed_field(bits = "0..4")]
     nonce: Integer<u8, packed_bits::Bits<4>>,
@@ -74,8 +75,10 @@ pub struct TelemetryPacket {
     #[packed_field(element_size_bits = "8")]
     tilt_deg: Integer<TiltDegFacBase, packed_bits::Bits<TILT_DEG_FAC_BITS>>,
 
-    flight_core_state: Integer<u8, packed_bits::Bits<3>>,
-    backup_flight_core_state: Integer<u8, packed_bits::Bits<3>>,
+    #[packed_field(element_size_bits = "3", ty = "enum")]
+    flight_stage: FlightStage,
+    #[packed_field(element_size_bits = "3", ty = "enum")]
+    backup_flight_stage: FlightStage,
 
     amp_online: bool,
     amp_rebooted_in_last_5s: bool,
@@ -105,7 +108,12 @@ pub struct TelemetryPacket {
     icarus_online: bool,
     icarus_rebooted_in_last_5s: bool,
     #[packed_field(element_size_bits = "5")]
-    air_brakes_extension_percentage: Integer<
+    air_brakes_commanded_extension_percentage: Integer<
+        AirBrakesExtensionPercentFacBase,
+        packed_bits::Bits<AIR_BRAKES_EXTENSION_PERCENT_FAC_BITS>,
+    >,
+    #[packed_field(element_size_bits = "5")]
+    air_brakes_actual_extension_percentage: Integer<
         AirBrakesExtensionPercentFacBase,
         packed_bits::Bits<AIR_BRAKES_EXTENSION_PERCENT_FAC_BITS>,
     >,
@@ -227,8 +235,8 @@ impl TelemetryPacket {
 
         tilt_deg: f32,
 
-        flight_core_state: u8,
-        backup_flight_core_state: u8,
+        flight_stage: FlightStage,
+        backup_flight_stage: FlightStage,
 
         amp_online: bool,
         amp_rebooted_in_last_5s: bool,
@@ -252,7 +260,8 @@ impl TelemetryPacket {
 
         icarus_online: bool,
         icarus_rebooted_in_last_5s: bool,
-        air_brakes_extension_percentage: f32,
+        air_brakes_commanded_extension_percentage: f32,
+        air_brakes_actual_extension_percentage: f32,
         air_brakes_servo_temp: f32,
         ap_residue: f32,
         cd: f32,
@@ -330,8 +339,8 @@ impl TelemetryPacket {
 
             tilt_deg: TiltDegFac::to_fixed_point_capped(tilt_deg),
 
-            flight_core_state: flight_core_state.into(),
-            backup_flight_core_state: backup_flight_core_state.into(),
+            flight_stage: flight_stage.into(),
+            backup_flight_stage: backup_flight_stage.into(),
 
             amp_online,
             amp_rebooted_in_last_5s,
@@ -360,9 +369,14 @@ impl TelemetryPacket {
 
             icarus_online,
             icarus_rebooted_in_last_5s,
-            air_brakes_extension_percentage: AirBrakesExtensionPercentFac::to_fixed_point_capped(
-                air_brakes_extension_percentage,
-            ),
+            air_brakes_commanded_extension_percentage:
+                AirBrakesExtensionPercentFac::to_fixed_point_capped(
+                    air_brakes_commanded_extension_percentage,
+                ),
+            air_brakes_actual_extension_percentage:
+                AirBrakesExtensionPercentFac::to_fixed_point_capped(
+                    air_brakes_actual_extension_percentage,
+                ),
             air_brakes_servo_temp: TemperatureFac::to_fixed_point_capped(air_brakes_servo_temp),
             ap_residue: APResidueFac::to_fixed_point_capped(ap_residue),
             cd: CdFac::to_fixed_point_capped(cd),
@@ -509,12 +523,12 @@ impl TelemetryPacket {
         TiltDegFac::to_float(self.tilt_deg)
     }
 
-    pub fn flight_core_state(&self) -> u8 {
-        self.flight_core_state.into()
+    pub fn flight_stage(&self) -> FlightStage {
+        self.flight_stage
     }
 
-    pub fn backup_flight_core_state(&self) -> u8 {
-        self.backup_flight_core_state.into()
+    pub fn backup_flight_stage(&self) -> FlightStage {
+        self.backup_flight_stage
     }
 
     pub fn amp_online(&self) -> bool {
@@ -569,7 +583,7 @@ impl TelemetryPacket {
         self.main_bulkhead_rebooted_in_last_5s
     }
 
-    pub fn main_bulkhead_brightness(&self) -> f32 {
+    pub fn main_bulkhead_brightness_lux(&self) -> f32 {
         Self::decode_brightness_lux(self.main_bulkhead_brightness)
     }
 
@@ -581,7 +595,7 @@ impl TelemetryPacket {
         self.drogue_bulkhead_rebooted_in_last_5s
     }
 
-    pub fn drogue_bulkhead_brightness(&self) -> f32 {
+    pub fn drogue_bulkhead_brightness_lux(&self) -> f32 {
         Self::decode_brightness_lux(self.drogue_bulkhead_brightness)
     }
 
@@ -593,8 +607,12 @@ impl TelemetryPacket {
         self.icarus_rebooted_in_last_5s
     }
 
-    pub fn air_brakes_extension_percentage(&self) -> f32 {
-        AirBrakesExtensionPercentFac::to_float(self.air_brakes_extension_percentage)
+    pub fn air_brakes_commanded_extension_percentage(&self) -> f32 {
+        AirBrakesExtensionPercentFac::to_float(self.air_brakes_commanded_extension_percentage)
+    }
+
+    pub fn air_brakes_actual_extension_percentage(&self) -> f32 {
+        AirBrakesExtensionPercentFac::to_float(self.air_brakes_actual_extension_percentage)
     }
 
     pub fn air_brakes_servo_temp(&self) -> f32 {
@@ -792,8 +810,8 @@ impl TelemetryPacket {
             max_air_speed: self.max_air_speed(),
             backup_max_air_speed: self.backup_max_air_speed(),
             tilt_deg: self.tilt_deg(),
-            flight_core_state: self.flight_core_state(),
-            backup_flight_core_state: self.backup_flight_core_state(),
+            flight_stage: format!("{:?}", self.flight_stage()),
+            backup_flight_stage: format!("{:?}", self.backup_flight_stage()),
 
             amp_online: self.amp_online(),
             amp_rebooted_in_last_5s: self.amp_rebooted_in_last_5s(),
@@ -809,16 +827,17 @@ impl TelemetryPacket {
 
             main_bulkhead_online: self.main_bulkhead_online(),
             main_bulkhead_rebooted_in_last_5s: self.main_bulkhead_rebooted_in_last_5s(),
-            main_bulkhead_brightness: self.main_bulkhead_brightness(),
+            main_bulkhead_brightness: self.main_bulkhead_brightness_lux(),
 
             drogue_bulkhead_online: self.drogue_bulkhead_online(),
             drogue_bulkhead_rebooted_in_last_5s: self.drogue_bulkhead_rebooted_in_last_5s(),
-            drogue_bulkhead_brightness: self.drogue_bulkhead_brightness(),
+            drogue_bulkhead_brightness: self.drogue_bulkhead_brightness_lux(),
 
             icarus_online: self.icarus_online(),
             icarus_rebooted_in_last_5s: self.icarus_rebooted_in_last_5s(),
 
-            air_brakes_extension_percentage: self.air_brakes_extension_percentage(),
+            air_brakes_commanded_extension_percentage: self.air_brakes_commanded_extension_percentage(),
+            air_brakes_actual_extension_percentage: self.air_brakes_actual_extension_percentage(),
             air_brakes_servo_temp: self.air_brakes_servo_temp(),
             ap_residue: self.ap_residue(),
             cd: self.cd(),
@@ -878,177 +897,7 @@ impl defmt::Format for TelemetryPacket {
     fn format(&self, f: defmt::Formatter) {
         let nonce: u8 = self.nonce.into();
         let (lat, lon) = self.lat_lon();
-        defmt::write!(
-            f,
-            "TelemetryPacket {{ \
-            nonce: {}, \
-            unix_clock_ready: {}, \
-            num_of_fix_satellites: {}, \
-            lat: {}, \
-            lon: {}, \
-            vl_battery_v: {}, \
-            air_temperature: {}, \
-            vl_stm32_temperature: {}, \
-            pyro_main_continuity: {}, \
-            pyro_drogue_continuity: {}, \
-            altitude_agl: {}, \
-            max_altitude_agl: {}, \
-            backup_max_altitude_agl: {}, \
-            air_speed: {}, \
-            max_air_speed: {}, \
-            backup_max_air_speed: {}, \
-            tilt_deg: {}, \
-            flight_core_state: {}, \
-            backup_flight_core_state: {}, \
-            amp_online: {}, \
-            amp_rebooted_in_last_5s: {}, \
-            shared_battery_v: {}, \
-            amp_out1_overwrote: {}, \
-            amp_out1: {}, \
-            amp_out2_overwrote: {}, \
-            amp_out2: {}, \
-            amp_out3_overwrote: {}, \
-            amp_out3: {}, \
-            amp_out4_overwrote: {}, \
-            amp_out4: {}, \
-            main_bulkhead_online: {}, \
-            main_bulkhead_rebooted_in_last_5s: {}, \
-            main_bulkhead_brightness: {}, \
-            drogue_bulkhead_online: {}, \
-            drogue_bulkhead_rebooted_in_last_5s: {}, \
-            drogue_bulkhead_brightness: {}, \
-            icarus_online: {}, \
-            icarus_rebooted_in_last_5s: {}, \
-            air_brakes_extension_percentage: {}, \
-            air_brakes_servo_temp: {}, \
-            ap_residue: {}, \
-            cd: {}, \
-            ozys1_online: {}, \
-            ozys1_rebooted_in_last_5s: {}, \
-            ozys2_online: {}, \
-            ozys2_rebooted_in_last_5s: {}, \
-            aero_rust_online: {}, \
-            aero_rust_rebooted_in_last_5s: {}, \
-            aero_rust_health: {}, \
-            payload_activation_pcb_online: {}, \
-            payload_activation_pcb_rebooted_in_last_5s: {}, \
-            rocket_wifi_online: {}, \
-            rocket_wifi_rebooted_in_last_5s: {}, \
-            eps1_online: {}, \
-            eps1_rebooted_in_last_5s: {}, \
-            eps1_battery1_v: {}, \
-            eps1_battery1_temperature: {}, \
-            eps1_battery2_v: {}, \
-            eps1_battery2_temperature: {}, \
-            eps1_output_3v3_current: {}, \
-            eps1_output_3v3_overwrote: {}, \
-            eps1_output_3v3_status: {}, \
-            eps1_output_5v_current: {}, \
-            eps1_output_5v_overwrote: {}, \
-            eps1_output_5v_status: {}, \
-            eps1_output_9v_current: {}, \
-            eps1_output_9v_overwrote: {}, \
-            eps1_output_9v_status: {}, \
-            eps2_online: {}, \
-            eps2_rebooted_in_last_5s: {}, \
-            eps2_battery1_v: {}, \
-            eps2_battery1_temperature: {}, \
-            eps2_battery2_v: {}, \
-            eps2_battery2_temperature: {}, \
-            eps2_output_3v3_current: {}, \
-            eps2_output_3v3_overwrote: {}, \
-            eps2_output_3v3_status: {}, \
-            eps2_output_5v_current: {}, \
-            eps2_output_5v_overwrote: {}, \
-            eps2_output_5v_status: {}, \
-            eps2_output_9v_current: {}, \
-            eps2_output_9v_overwrote: {}, \
-            eps2_output_9v_status: {}, \
-            }}",
-            nonce,
-            self.unix_clock_ready(),
-            self.num_of_fix_satellites(),
-            lat,
-            lon,
-            self.vl_battery_v(),
-            self.air_temperature(),
-            self.vl_stm32_temperature(),
-            self.pyro_main_continuity(),
-            self.pyro_drogue_continuity(),
-            self.altitude_agl(),
-            self.max_altitude_agl(),
-            self.backup_max_altitude_agl(),
-            self.air_speed(),
-            self.max_air_speed(),
-            self.backup_max_air_speed(),
-            self.tilt_deg(),
-            self.flight_core_state(),
-            self.backup_flight_core_state(),
-            self.amp_online(),
-            self.amp_rebooted_in_last_5s(),
-            self.shared_battery_v(),
-            self.amp_out1_overwrote(),
-            self.amp_out1(),
-            self.amp_out2_overwrote(),
-            self.amp_out2(),
-            self.amp_out3_overwrote(),
-            self.amp_out3(),
-            self.amp_out4_overwrote(),
-            self.amp_out4(),
-            self.main_bulkhead_online(),
-            self.main_bulkhead_rebooted_in_last_5s(),
-            self.main_bulkhead_brightness(),
-            self.drogue_bulkhead_online(),
-            self.drogue_bulkhead_rebooted_in_last_5s(),
-            self.drogue_bulkhead_brightness(),
-            self.icarus_online(),
-            self.icarus_rebooted_in_last_5s(),
-            self.air_brakes_extension_percentage(),
-            self.air_brakes_servo_temp(),
-            self.ap_residue(),
-            self.cd(),
-            self.ozys1_online(),
-            self.ozys1_rebooted_in_last_5s(),
-            self.ozys2_online(),
-            self.ozys2_rebooted_in_last_5s(),
-            self.aero_rust_online(),
-            self.aero_rust_rebooted_in_last_5s(),
-            self.aero_rust_health(),
-            self.payload_activation_pcb_online(),
-            self.payload_activation_pcb_rebooted_in_last_5s(),
-            self.rocket_wifi_online(),
-            self.rocket_wifi_rebooted_in_last_5s(),
-            self.eps1_online(),
-            self.eps1_rebooted_in_last_5s(),
-            self.eps1_battery1_v(),
-            self.eps1_battery1_temperature(),
-            self.eps1_battery2_v(),
-            self.eps1_battery2_temperature(),
-            self.eps1_output_3v3_current(),
-            self.eps1_output_3v3_overwrote(),
-            self.eps1_output_3v3_status(),
-            self.eps1_output_5v_current(),
-            self.eps1_output_5v_overwrote(),
-            self.eps1_output_5v_status(),
-            self.eps1_output_9v_current(),
-            self.eps1_output_9v_overwrote(),
-            self.eps1_output_9v_status(),
-            self.eps2_online(),
-            self.eps2_rebooted_in_last_5s(),
-            self.eps2_battery1_v(),
-            self.eps2_battery1_temperature(),
-            self.eps2_battery2_v(),
-            self.eps2_battery2_temperature(),
-            self.eps2_output_3v3_current(),
-            self.eps2_output_3v3_overwrote(),
-            self.eps2_output_3v3_status(),
-            self.eps2_output_5v_current(),
-            self.eps2_output_5v_overwrote(),
-            self.eps2_output_5v_status(),
-            self.eps2_output_9v_current(),
-            self.eps2_output_9v_overwrote(),
-            self.eps2_output_9v_status(),
-        )
+        defmt::write!(f, "TelemetryPacket")
     }
 }
 
@@ -1082,8 +931,8 @@ pub struct TelemetryPacketBuilderState {
 
     pub tilt_deg: f32,
 
-    pub flight_core_state: u8,
-    pub backup_flight_core_state: u8,
+    pub flight_stage: FlightStage,
+    pub backup_flight_stage: FlightStage,
 
     pub amp_online: bool,
     pub amp_uptime_s: u32,
@@ -1107,7 +956,8 @@ pub struct TelemetryPacketBuilderState {
 
     pub icarus_online: bool,
     pub icarus_uptime_s: u32,
-    pub air_brakes_extension_percentage: f32,
+    pub air_brakes_commanded_extension_percentage: f32,
+    pub air_brakes_actual_extension_percentage: f32,
     pub air_brakes_servo_temp: f32,
     pub ap_residue: f32,
     pub cd: f32,
@@ -1193,8 +1043,8 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
 
                 tilt_deg: 0.0,
 
-                flight_core_state: 0,
-                backup_flight_core_state: 0,
+                flight_stage: FlightStage::Armed,
+                backup_flight_stage: FlightStage::Armed,
 
                 amp_online: false,
                 amp_uptime_s: 0,
@@ -1218,7 +1068,8 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
 
                 icarus_online: false,
                 icarus_uptime_s: 0,
-                air_brakes_extension_percentage: 0.0,
+                air_brakes_commanded_extension_percentage: 0.0,
+                air_brakes_actual_extension_percentage: 0.0,
                 air_brakes_servo_temp: 0.0,
                 ap_residue: 0.0,
                 cd: 0.0,
@@ -1308,8 +1159,8 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 state.max_air_speed,
                 state.backup_max_air_speed,
                 state.tilt_deg,
-                state.flight_core_state,
-                state.backup_flight_core_state,
+                state.flight_stage,
+                state.backup_flight_stage,
                 state.amp_online,
                 state.amp_uptime_s < 5,
                 state.shared_battery_v,
@@ -1329,7 +1180,8 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 state.drogue_bulkhead_brightness,
                 state.icarus_online,
                 state.icarus_uptime_s < 5,
-                state.air_brakes_extension_percentage,
+                state.air_brakes_commanded_extension_percentage,
+                state.air_brakes_actual_extension_percentage,
                 state.air_brakes_servo_temp,
                 state.ap_residue,
                 state.cd,

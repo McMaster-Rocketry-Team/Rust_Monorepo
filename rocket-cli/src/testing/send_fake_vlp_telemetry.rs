@@ -10,7 +10,9 @@ use crate::{
 use anyhow::Result;
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use firmware_common_new::{
-    can_bus::messages::{amp_status::PowerOutputStatus, node_status::NodeHealth},
+    can_bus::messages::{
+        amp_status::PowerOutputStatus, avionics_status::FlightStage, node_status::NodeHealth,
+    },
     rpc::lora_rpc::LoraRpcClient,
     vlp::{
         client::VLPAvionics,
@@ -76,8 +78,8 @@ pub async fn send_fake_vlp_telemetry(args: SendVLPTelemetryArgs) -> Result<()> {
             0.0,
             0.0,
             0.0,
-            0,
-            0,
+            FlightStage::Armed,
+            FlightStage::Armed,
             false,
             false,
             8.4,
@@ -97,6 +99,7 @@ pub async fn send_fake_vlp_telemetry(args: SendVLPTelemetryArgs) -> Result<()> {
             100.0,
             false,
             false,
+            0.0,
             0.0,
             50.0,
             0.0,

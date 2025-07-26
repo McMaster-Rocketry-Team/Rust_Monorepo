@@ -6,7 +6,7 @@ use std::{
 use anyhow::Result;
 use cursive::{
     Cursive,
-    theme::{Palette, PaletteStyle},
+    theme::{Color, ColorStyle, Palette, PaletteStyle, Style},
     view::{Nameable, Resizable},
     views::{
         Button, Dialog, EditView, HideableView, LinearLayout, PaddedView, Panel, RadioGroup,
@@ -105,6 +105,8 @@ pub async fn tui_task(
     let mut siv = cursive::default();
     let mut theme = siv.current_theme().clone();
     theme.palette = Palette::terminal_default();
+    theme.palette[PaletteStyle::View] =
+        Style::from_color_style(ColorStyle::back(Color::Rgb(248, 248, 248)));
     theme.palette[PaletteStyle::EditableTextCursor] = theme.palette[PaletteStyle::EditableText];
     theme.palette[PaletteStyle::EditableText] = theme.palette[PaletteStyle::Primary];
     siv.set_theme(theme);

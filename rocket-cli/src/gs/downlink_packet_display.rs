@@ -1,8 +1,15 @@
 use std::{sync::RwLock, time::Instant};
 
-use cursive::{Printer, Rect, Vec2, View, theme::Color, utils::markup::StyledString};
-use firmware_common_new::vlp::packets::VLPDownlinkPacket;
+use cursive::{
+    Printer, Rect, Vec2, View,
+    theme::{BaseColor, Color, ColorStyle, Style},
+    utils::markup::StyledString,
+};
+use firmware_common_new::{
+    can_bus::messages::amp_status::PowerOutputStatus, vlp::packets::VLPDownlinkPacket,
+};
 use lora_phy::mod_params::PacketStatus;
+use pad::PadStr as _;
 
 use crate::monitor::FieldWidget;
 
@@ -62,6 +69,35 @@ impl DownlinkPacketDisplay {
         String::from(s).into()
     }
 
+    fn format_amp_output_status(overwrote: bool, status: PowerOutputStatus) -> StyledString {
+        let mut s = StyledString::new();
+
+        if overwrote {
+            s.append_plain("overwrote, ");
+        } else {
+            s.append_plain("auto, ");
+        }
+
+        match status {
+            PowerOutputStatus::Disabled => s.append_styled(
+                "disabled",
+                Style::from_color_style(ColorStyle::front(Color::Rgb(127, 127, 127))),
+            ),
+            PowerOutputStatus::PowerGood => s.append_styled(
+                "power good",
+                Style::from_color_style(ColorStyle::front(BaseColor::Green.dark())),
+            ),
+            PowerOutputStatus::PowerBad => s.append_styled(
+                "power bad",
+                Style::from_color_style(ColorStyle::front(BaseColor::Red.dark())),
+            ),
+        }
+
+        s.append_plain("".pad_to_width(21 - s.width()));
+
+        s
+    }
+
     fn draw_fields(&self, printer: &Printer, fields: &[&[(&str, bool, StyledString)]]) {
         let mut self_fields = self.fields.write().unwrap();
 
@@ -75,7 +111,7 @@ impl DownlinkPacketDisplay {
                                 field.0.into(),
                                 field.2.clone(),
                                 field.1,
-                                Color::Rgb(255, 255, 255),
+                                Color::Rgb(248, 248, 248),
                             )
                         })
                         .collect()
@@ -178,10 +214,517 @@ impl View for DownlinkPacketDisplay {
                         ],
                     ],
                 ),
-                VLPDownlinkPacket::LowPowerTelemetry(p) => todo!(),
-                VLPDownlinkPacket::Telemetry(p) => todo!(),
+                VLPDownlinkPacket::LowPowerTelemetry(p) => self.draw_fields(
+                    &printer,
+                    &[
+                        &[
+                            ("gps fixed", true, Self::format_bool(p.gps_fixed)),
+                            (
+                                "satellites",
+                                false,
+                                p.num_of_fix_satellites().to_string().into(),
+                            ),
+                        ],
+                        &[(
+                            "air temperature",
+                            false,
+                            format!("{:.1}C", p.air_temperature()).into(),
+                        )],
+                        &[
+                            (
+                                "vl battery",
+                                false,
+                                format!("{:.2}V", p.vl_battery_v()).into(),
+                            ),
+                            (
+                                "shared battery",
+                                false,
+                                format!("{:.2}V", p.shared_battery_v()).into(),
+                            ),
+                        ],
+                        &[("amp online", true, Self::format_bool(p.amp_online))],
+                    ],
+                ),
+                VLPDownlinkPacket::LandedTelemetry(p) => self.draw_fields(
+                    &printer,
+                    &[
+                        &[
+                            (
+                                "satellites",
+                                false,
+                                p.num_of_fix_satellites().to_string().into(),
+                            ),
+                            ("lat", false, p.lat().to_string().into()),
+                            ("lon", false, p.lon().to_string().into()),
+                        ],
+                        &[
+                            ("vl battery", false, format!("{:.2}V", p.battery_v()).into()),
+                            (
+                                "shared battery",
+                                false,
+                                format!("{:.2}V", p.shared_battery_v()).into(),
+                            ),
+                        ],
+                        &[
+                            ("amp online", true, Self::format_bool(p.amp_online())),
+                            (
+                                "amp rebooted",
+                                true,
+                                Self::format_bool(p.amp_rebooted_in_last_5s()),
+                            ),
+                        ],
+                        &[
+                            (
+                                "amp out 1",
+                                true,
+                                Self::format_amp_output_status(
+                                    p.amp_out1_overwrote(),
+                                    p.amp_out1(),
+                                ),
+                            ),
+                            (
+                                "amp out 2",
+                                true,
+                                Self::format_amp_output_status(
+                                    p.amp_out2_overwrote(),
+                                    p.amp_out2(),
+                                ),
+                            ),
+                            (
+                                "amp out 3",
+                                true,
+                                Self::format_amp_output_status(
+                                    p.amp_out3_overwrote(),
+                                    p.amp_out3(),
+                                ),
+                            ),
+                            (
+                                "amp out 4",
+                                true,
+                                Self::format_amp_output_status(
+                                    p.amp_out4_overwrote(),
+                                    p.amp_out4(),
+                                ),
+                            ),
+                        ],
+                    ],
+                ),
+                VLPDownlinkPacket::Telemetry(p) => self.draw_fields(
+                    &printer,
+                    &[
+                        &[
+                            (
+                                "satellites",
+                                false,
+                                p.num_of_fix_satellites().to_string().into(),
+                            ),
+                            ("unix clock", true, Self::format_bool(p.unix_clock_ready())),
+                            ("lat", false, p.lat().to_string().into()),
+                            ("lon", false, p.lon().to_string().into()),
+                        ],
+                        &[
+                            (
+                                "vl battery",
+                                false,
+                                format!("{:.2}V", p.vl_battery_v()).into(),
+                            ),
+                            (
+                                "shared battery",
+                                false,
+                                format!("{:.2}V", p.shared_battery_v()).into(),
+                            ),
+                            (
+                                "main continuity",
+                                true,
+                                Self::format_bool(p.pyro_main_continuity()),
+                            ),
+                            (
+                                "drogue continuity",
+                                true,
+                                Self::format_bool(p.pyro_drogue_continuity()),
+                            ),
+                        ],
+                        &[
+                            (
+                                "air temperature",
+                                false,
+                                format!("{:.1}C", p.air_temperature()).into(),
+                            ),
+                            (
+                                "stm32 temperature",
+                                false,
+                                format!("{:.1}C", p.vl_stm32_temperature()).into(),
+                            ),
+                            (
+                                "servo temp",
+                                false,
+                                format!("{:.1}C", p.air_brakes_servo_temp()).into(),
+                            ),
+                        ],
+                        &[
+                            ("state", true, format!("{:?}", p.flight_stage()).into()),
+                            (
+                                "altitude agl",
+                                false,
+                                format!("{:.1}m", p.altitude_agl()).into(),
+                            ),
+                            (
+                                "max altitude agl",
+                                false,
+                                format!("{:.1}C", p.max_altitude_agl()).into(),
+                            ),
+                            (
+                                "air speed",
+                                false,
+                                format!("{:.1}m/s", p.air_speed()).into(),
+                            ),
+                            (
+                                "max air speed",
+                                false,
+                                format!("{:.1}m/s", p.max_air_speed()).into(),
+                            ),
+                            ("tilt", false, format!("{:.1}deg", p.tilt_deg()).into()),
+                        ],
+                        &[
+                            (
+                                "ap residue",
+                                false,
+                                format!("{:.1}m", p.ap_residue()).into(),
+                            ),
+                            (
+                                "cd",
+                                false,
+                                format!("{:.2}", p.cd()).into(),
+                            ),
+                        ],
+                        &[
+                            (
+                                "backup state",
+                                true,
+                                format!("{:?}", p.backup_flight_stage()).into(),
+                            ),
+                            (
+                                "backup max altitude agl",
+                                false,
+                                format!("{:.1}C", p.backup_max_air_speed()).into(),
+                            ),
+                            (
+                                "backup max air speed",
+                                false,
+                                format!("{:.1}m/s", p.backup_max_air_speed()).into(),
+                            ),
+                        ],
+                        &[
+                            ("icarus online", true, Self::format_bool(p.icarus_online())),
+                            (
+                                "rebooted",
+                                true,
+                                Self::format_bool(p.icarus_rebooted_in_last_5s()),
+                            ),
+                            (
+                                "commanded extension",
+                                false,
+                                format!(
+                                    "{}%",
+                                    (p.air_brakes_commanded_extension_percentage() * 100.0).round()
+                                )
+                                .into(),
+                            ),
+                            (
+                                "actual extension",
+                                false,
+                                format!(
+                                    "{}%",
+                                    (p.air_brakes_actual_extension_percentage() * 100.0).round()
+                                )
+                                .into(),
+                            ),
+                            
+                        ],
+                        &[
+                            ("amp online", true, Self::format_bool(p.amp_online())),
+                            (
+                                "amp rebooted",
+                                true,
+                                Self::format_bool(p.amp_rebooted_in_last_5s()),
+                            ),
+                        ],
+                        &[
+                            (
+                                "amp out 1",
+                                true,
+                                Self::format_amp_output_status(
+                                    p.amp_out1_overwrote(),
+                                    p.amp_out1(),
+                                ),
+                            ),
+                            (
+                                "amp out 2",
+                                true,
+                                Self::format_amp_output_status(
+                                    p.amp_out2_overwrote(),
+                                    p.amp_out2(),
+                                ),
+                            ),
+                            (
+                                "amp out 3",
+                                true,
+                                Self::format_amp_output_status(
+                                    p.amp_out3_overwrote(),
+                                    p.amp_out3(),
+                                ),
+                            ),
+                            (
+                                "amp out 4",
+                                true,
+                                Self::format_amp_output_status(
+                                    p.amp_out4_overwrote(),
+                                    p.amp_out4(),
+                                ),
+                            ),
+                        ],
+                        &[
+                            (
+                                "main bulkhead online",
+                                true,
+                                Self::format_bool(p.main_bulkhead_online()),
+                            ),
+                            (
+                                "rebooted",
+                                true,
+                                Self::format_bool(p.main_bulkhead_rebooted_in_last_5s()),
+                            ),
+                            (
+                                "brightness",
+                                true,
+                                format!("{:.2}lux", p.main_bulkhead_brightness_lux()).into(),
+                            ),
+                            (
+                                "drogue bulkhead online",
+                                true,
+                                Self::format_bool(p.drogue_bulkhead_online()),
+                            ),
+                            (
+                                "rebooted",
+                                true,
+                                Self::format_bool(p.drogue_bulkhead_rebooted_in_last_5s()),
+                            ),
+                            (
+                                "brightness",
+                                true,
+                                format!("{:.2}lux", p.drogue_bulkhead_brightness_lux()).into(),
+                            ),
+                        ],
+                        &[
+                            (
+                                "ozys 1 online",
+                                true,
+                                Self::format_bool(p.ozys1_online()),
+                            ),
+                            (
+                                "rebooted",
+                                true,
+                                Self::format_bool(p.ozys1_rebooted_in_last_5s()),
+                            ),
+                            (
+                                "ozys 2 online",
+                                true,
+                                Self::format_bool(p.ozys2_online()),
+                            ),
+                            (
+                                "rebooted",
+                                true,
+                                Self::format_bool(p.ozys2_rebooted_in_last_5s()),
+                            ),
+                        ],
+                        &[
+                            (
+                                "aero rust online",
+                                true,
+                                Self::format_bool(p.aero_rust_online()),
+                            ),
+                            (
+                                "rebooted",
+                                true,
+                                Self::format_bool(p.aero_rust_rebooted_in_last_5s()),
+                            ),
+                            (
+                                "health",
+                                true,
+                                format!("{:?}", p.aero_rust_health()).into(),
+                            ),
+                        ],
+                        &[
+                            (
+                                "payload activation pcb online",
+                                true,
+                                Self::format_bool(p.payload_activation_pcb_online()),
+                            ),
+                            (
+                                "rebooted",
+                                true,
+                                Self::format_bool(p.payload_activation_pcb_rebooted_in_last_5s()),
+                            ),
+                            (
+                                "rocket wifi online",
+                                true,
+                                Self::format_bool(p.rocket_wifi_online()),
+                            ),
+                            (
+                                "rebooted",
+                                true,
+                                Self::format_bool(p.rocket_wifi_rebooted_in_last_5s()),
+                            ),
+                        ],
+                        &[
+                            (
+                                "eps 1 online",
+                                true,
+                                Self::format_bool(p.eps1_online()),
+                            ),
+                            (
+                                "rebooted",
+                                true,
+                                Self::format_bool(p.eps1_rebooted_in_last_5s()),
+                            ),
+                            (
+                                "batt 1 v",
+                                false,
+                                format!("{:.2}V", p.eps1_battery1_v()).into(),
+                            ),
+                            (
+                                "batt 1 temp",
+                                false,
+                                format!("{:.1}C", p.eps1_battery1_temperature()).into(),
+                            ),
+                            (
+                                "batt 2 v",
+                                false,
+                                format!("{:.2}V", p.eps1_battery2_v()).into(),
+                            ),
+                            (
+                                "batt 2 temp",
+                                false,
+                                format!("{:.1}C", p.eps1_battery2_temperature()).into(),
+                            ),
+                        ],
+                        &[
+                            (
+                                "3v3 out current",
+                                false,
+                                format!("{}mA",( p.eps1_output_3v3_current() * 1000.0).round()).into(),
+                            ),
+                            (
+                                "status",
+                                true,
+                                Self::format_amp_output_status(
+                                    p.eps1_output_3v3_overwrote(),
+                                    p.eps1_output_3v3_status()
+                                ),
+                            ),
+                            (
+                                "5v out current",
+                                false,
+                                format!("{}mA", (p.eps1_output_5v_current() * 1000.0).round()).into(),
+                            ),
+                            (
+                                "status",
+                                true,
+                                Self::format_amp_output_status(
+                                    p.eps1_output_5v_overwrote(),
+                                    p.eps1_output_5v_status()
+                                ),
+                            ),
+                            (
+                                "9v out current",
+                                false,
+                                format!("{}mA", (p.eps1_output_9v_current() * 1000.0).round()).into(),
+                            ),
+                            (
+                                "status",
+                                true,
+                                Self::format_amp_output_status(
+                                    p.eps1_output_9v_overwrote(),
+                                    p.eps1_output_9v_status()
+                                ),
+                            ),
+                        ],
+                        &[
+                            (
+                                "eps 2 online",
+                                true,
+                                Self::format_bool(p.eps2_online()),
+                            ),
+                            (
+                                "rebooted",
+                                true,
+                                Self::format_bool(p.eps2_rebooted_in_last_5s()),
+                            ),
+                            (
+                                "batt 1 v",
+                                false,
+                                format!("{:.2}V", p.eps2_battery1_v()).into(),
+                            ),
+                            (
+                                "batt 1 temp",
+                                false,
+                                format!("{:.1}C", p.eps2_battery1_temperature()).into(),
+                            ),
+                            (
+                                "batt 2 v",
+                                false,
+                                format!("{:.2}V", p.eps2_battery2_v()).into(),
+                            ),
+                            (
+                                "batt 2 temp",
+                                false,
+                                format!("{:.1}C", p.eps2_battery2_temperature()).into(),
+                            ),
+                        ],
+                        &[
+                            (
+                                "3v3 out current",
+                                false,
+                                format!("{}mA", (p.eps2_output_3v3_current() * 1000.0).round()).into(),
+                            ),
+                            (
+                                "status",
+                                true,
+                                Self::format_amp_output_status(
+                                    p.eps2_output_3v3_overwrote(),
+                                    p.eps2_output_3v3_status()
+                                ),
+                            ),
+                            (
+                                "5v out current",
+                                false,
+                                format!("{}mA", (p.eps2_output_5v_current() * 1000.0).round()).into(),
+                            ),
+                            (
+                                "status",
+                                true,
+                                Self::format_amp_output_status(
+                                    p.eps2_output_5v_overwrote(),
+                                    p.eps2_output_5v_status()
+                                ),
+                            ),
+                            (
+                                "9v out current",
+                                false,
+                                format!("{}mA", (p.eps2_output_9v_current() * 1000.0).round()).into(),
+                            ),
+                            (
+                                "status",
+                                true,
+                                Self::format_amp_output_status(
+                                    p.eps2_output_9v_overwrote(),
+                                    p.eps2_output_9v_status()
+                                ),
+                            ),
+                        ],
+                    ],
+                ),
                 VLPDownlinkPacket::SelfTestResult(p) => todo!(),
-                VLPDownlinkPacket::LandedTelemetry(p) => todo!(),
                 VLPDownlinkPacket::Ack(p) => unreachable!(),
             }
         }

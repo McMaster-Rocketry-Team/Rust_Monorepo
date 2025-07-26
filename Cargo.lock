@@ -3973,7 +3973,7 @@ dependencies = [
 [[package]]
 name = "lora-modulation"
 version = "0.1.5"
-source = "git+https://github.com/lora-rs/lora-rs#4c8a8a800cb7e3de57651ec78f276c3e9f1b11df"
+source = "git+https://github.com/lora-rs/lora-rs.git#4c8a8a800cb7e3de57651ec78f276c3e9f1b11df"
 dependencies = [
  "defmt 0.3.100",
 ]
@@ -3981,7 +3981,7 @@ dependencies = [
 [[package]]
 name = "lora-phy"
 version = "3.0.2-alpha"
-source = "git+https://github.com/lora-rs/lora-rs#4c8a8a800cb7e3de57651ec78f276c3e9f1b11df"
+source = "git+https://github.com/lora-rs/lora-rs.git#4c8a8a800cb7e3de57651ec78f276c3e9f1b11df"
 dependencies = [
  "defmt 0.3.100",
  "document-features",
@@ -3995,7 +3995,7 @@ dependencies = [
 [[package]]
 name = "lorawan"
 version = "0.9.1"
-source = "git+https://github.com/lora-rs/lora-rs#4c8a8a800cb7e3de57651ec78f276c3e9f1b11df"
+source = "git+https://github.com/lora-rs/lora-rs.git#4c8a8a800cb7e3de57651ec78f276c3e9f1b11df"
 dependencies = [
  "aes",
  "cmac",
@@ -4007,7 +4007,7 @@ dependencies = [
 [[package]]
 name = "lorawan-device"
 version = "0.12.2"
-source = "git+https://github.com/lora-rs/lora-rs#4c8a8a800cb7e3de57651ec78f276c3e9f1b11df"
+source = "git+https://github.com/lora-rs/lora-rs.git#4c8a8a800cb7e3de57651ec78f276c3e9f1b11df"
 dependencies = [
  "defmt 0.3.100",
  "document-features",
@@ -4022,7 +4022,7 @@ dependencies = [
 [[package]]
 name = "lorawan-macros"
 version = "0.1.0"
-source = "git+https://github.com/lora-rs/lora-rs#4c8a8a800cb7e3de57651ec78f276c3e9f1b11df"
+source = "git+https://github.com/lora-rs/lora-rs.git#4c8a8a800cb7e3de57651ec78f276c3e9f1b11df"
 dependencies = [
  "proc-macro2",
  "quote",
