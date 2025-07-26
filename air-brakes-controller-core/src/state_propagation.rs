@@ -9,8 +9,9 @@ type VectorViewMut<'a, const R: usize> = Matrix<
     ViewStorageMut<'a, f32, Const<R>, Const<1>, Const<1>, Const<15>>,
 >;
 
+// ENU
 impl RocketState {
-    pub fn new()-> Self{
+    pub fn new() -> Self {
         RocketState(SVector::zeros())
     }
 
@@ -152,6 +153,9 @@ pub fn propagate_state(
 #[cfg(test)]
 mod test {
     use approx::assert_relative_eq;
+    use nalgebra::UnitVector3;
+
+    use crate::tests::init_logger;
 
     use super::*;
 
@@ -179,6 +183,39 @@ mod test {
             lerp(1.0f32 + 1.0 / 3.0, &[0.0, 1.0, 2.0, 3.0]),
             4.0,
             epsilon = 0.0001
+        );
+    }
+
+    #[test]
+    fn small_angle_correction_test() {
+        init_logger();
+
+        fn euler_angles_to_degrees(radians: (f32, f32, f32)) -> [f32; 3] {
+            [
+                radians.0.to_degrees(),
+                radians.1.to_degrees(),
+                radians.2.to_degrees(),
+            ]
+        }
+
+        let small_angle = Vector3::new(0f32.to_radians(), 0f32.to_radians(), 1f32.to_radians());
+        let delta_orientation_quaternion: UnitQuaternion<f32> =
+            UnitQuaternion::from_quaternion(Quaternion::from_parts(1.0, -small_angle / 2.0));
+
+        let mut orientation = UnitQuaternion::<f32>::identity();
+        orientation = UnitQuaternion::from_axis_angle(
+            &UnitVector3::new_normalize(Vector3::new(1f32, 0f32, 0f32)),
+            90f32.to_radians(),
+        );
+        log_info!(
+            "initial orientation: {:?}",
+            euler_angles_to_degrees(orientation.euler_angles())
+        );
+        orientation = delta_orientation_quaternion * orientation;
+
+        log_info!(
+            "rotated orientation: {:?}",
+            euler_angles_to_degrees(orientation.euler_angles())
         );
     }
 

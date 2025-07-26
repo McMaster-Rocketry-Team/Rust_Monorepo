@@ -116,19 +116,19 @@ impl Iterator for CanBusMultiFrameEncoder {
     }
 }
 
-pub struct CanSender<M: RawMutex, const N: usize> {
+pub struct CanSender<M: RawMutex, const N: usize, const PN: usize = 1024> {
     channel: Channel<M, (CanBusExtendedId, Vec<u8, 8>), N>,
     node_type: u8,
     node_id: u16,
     log_frame_id: u32,
-    log_pipe: Option<&'static Pipe<CriticalSectionRawMutex, 1024>>,
+    log_pipe: Option<&'static Pipe<CriticalSectionRawMutex, PN>>,
 }
 
-impl<M: RawMutex, const N: usize> CanSender<M, N> {
+impl<M: RawMutex, const N: usize, const PN: usize> CanSender<M, N, PN> {
     pub fn new(
         node_type: u8,
         node_id: u16,
-        log_pipe: Option<&'static Pipe<CriticalSectionRawMutex, 1024>>,
+        log_pipe: Option<&'static Pipe<CriticalSectionRawMutex, PN>>,
     ) -> Self {
         Self {
             channel: Channel::new(),
@@ -149,7 +149,7 @@ impl<M: RawMutex, const N: usize> CanSender<M, N> {
             }
         };
 
-        if let Some(log_pipe) = &self.log_pipe {
+        if let Some(log_pipe) = self.log_pipe {
             let mut buffer = [0u8; 8];
             loop {
                 match select(self.channel.receive(), log_pipe.read(&mut buffer)).await {
