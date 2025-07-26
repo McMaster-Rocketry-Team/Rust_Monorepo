@@ -59,15 +59,19 @@ impl VLPDownlinkPacket {
         }
     }
 
-    pub fn serialize(&self, mut buffer: &mut [u8]) -> usize {
-        buffer[0] = match self {
+    pub fn packet_type(&self) -> u8 {
+        match self {
             VLPDownlinkPacket::GPSBeacon(_) => 0,
             VLPDownlinkPacket::Ack(_) => 1,
             VLPDownlinkPacket::LowPowerTelemetry(_) => 2,
             VLPDownlinkPacket::Telemetry(_) => 3,
             VLPDownlinkPacket::SelfTestResult(_) => 4,
             VLPDownlinkPacket::LandedTelemetry(_) => 5,
-        };
+        }
+    }
+
+    pub fn serialize(&self, mut buffer: &mut [u8]) -> usize {
+        buffer[0] = self.packet_type();
         buffer = &mut buffer[1..];
 
         1 + match self {

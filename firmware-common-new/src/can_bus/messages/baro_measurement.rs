@@ -39,7 +39,7 @@ impl BaroMeasurementMessage {
         self.temperature_raw as f32 / 10.0
     }
 
-    pub fn altitude(&self) -> f32 {
+    pub fn altitude_asl(&self) -> f32 {
         return calculate_isa_altitude(Pascals(self.pressure() as f64)).0 as f32;
     }
 }
@@ -65,6 +65,6 @@ mod tests {
     fn altitude_calculation(){
         init_logger();
 
-        log_info!("{}", BaroMeasurementMessage::new(0, 103325.3, 30.0).altitude())
+        log_info!("{}", BaroMeasurementMessage::new(0, 103325.3, 30.0).altitude_asl())
     }
 }

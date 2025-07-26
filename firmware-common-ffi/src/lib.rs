@@ -381,22 +381,16 @@ pub extern "C" fn decode_lora_telemetry(
     };
 
     match VLPDownlinkPacket::deserialize(&data[..rx_len]) {
-        Some(VLPDownlinkPacket::GPSBeacon(packet)) => {
-            let (latitude, longitude) = packet.lat_lon();
-            DecodeLoraTelemetryResult::Success {
-                latitude,
-                longitude,
-                altitude_agl: 0.0,
-            }
-        }
-        Some(VLPDownlinkPacket::Telemetry(packet)) => {
-            let (latitude, longitude) = packet.lat_lon();
-            DecodeLoraTelemetryResult::Success {
-                latitude,
-                longitude,
-                altitude_agl: packet.altitude_agl(),
-            }
-        }
+        Some(VLPDownlinkPacket::GPSBeacon(packet)) => DecodeLoraTelemetryResult::Success {
+            latitude: packet.lat(),
+            longitude: packet.lon(),
+            altitude_agl: 0.0,
+        },
+        Some(VLPDownlinkPacket::Telemetry(packet)) => DecodeLoraTelemetryResult::Success {
+            latitude: packet.lat(),
+            longitude: packet.lon(),
+            altitude_agl: packet.altitude_agl(),
+        },
         _ => DecodeLoraTelemetryResult::Invalid(0),
     }
 }

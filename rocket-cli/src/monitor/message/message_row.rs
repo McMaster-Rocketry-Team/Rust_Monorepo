@@ -17,7 +17,7 @@ use firmware_common_new::can_bus::{
 use log::warn;
 use pad::{Alignment, PadStr as _};
 
-struct FieldWidget {
+pub struct FieldWidget {
     name: String,
     value: StyledString,
     last_changed_time: Instant,
@@ -26,7 +26,7 @@ struct FieldWidget {
 }
 
 impl FieldWidget {
-    fn new(name: String, value: StyledString, should_highlight: bool, bg: Color) -> Self {
+    pub fn new(name: String, value: StyledString, should_highlight: bool, bg: Color) -> Self {
         Self {
             name,
             value,
@@ -36,7 +36,7 @@ impl FieldWidget {
         }
     }
 
-    fn update(&mut self, value: StyledString) {
+    pub fn update(&mut self, value: StyledString) {
         if value != self.value {
             self.value = value;
             self.last_changed_time = Instant::now();
@@ -55,7 +55,7 @@ impl FieldWidget {
         }
     }
 
-    fn draw(&self, x_offset: &mut usize, printer: &Printer) {
+    pub fn draw(&self, x_offset: &mut usize, printer: &Printer) {
         let value_bg = if self.should_highlight {
             let change_elapsed_ms = (Instant::now() - self.last_changed_time)
                 .as_millis()
@@ -96,8 +96,8 @@ impl MessageRow {
             message,
             count,
             last_received_time: Instant::now(),
-            fields_line1: RwLock::new(Vec::new()),
-            fields_line2: RwLock::new(Vec::new()),
+            fields_line1: RwLock::new(vec![]),
+            fields_line2: RwLock::new(vec![]),
             bg,
         }
     }
@@ -270,9 +270,9 @@ impl MessageRow {
                             .into(),
                     ),
                     (
-                        "altitude",
+                        "altitude asl",
                         false,
-                        format!("{:.1}m", m.pressure())
+                        format!("{:.1}m", m.altitude_asl())
                             .pad_to_width_with_alignment(7, Alignment::Left)
                             .into(),
                     ),

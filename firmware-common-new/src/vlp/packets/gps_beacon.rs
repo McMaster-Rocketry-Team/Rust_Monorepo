@@ -73,8 +73,12 @@ impl GPSBeaconPacket {
         }
     }
 
-    pub fn lat_lon(&self) -> (f64, f64) {
-        (LatFac::to_float(self.lat), LonFac::to_float(self.lon))
+    pub fn lat(&self) -> f64 {
+        LatFac::to_float(self.lat)
+    }
+
+    pub fn lon(&self) -> f64 {
+        LonFac::to_float(self.lon)
     }
 
     pub fn num_of_fix_satellites(&self) -> u8 {
@@ -95,10 +99,9 @@ impl GPSBeaconPacket {
 
     #[cfg(feature = "json")]
     pub fn to_json(&self) -> json::JsonValue {
-        let (lat, lon) = self.lat_lon();
         json::object! {
-            lat: lat,
-            lon: lon,
+            lat: self.lat(),
+            lon: self.lon(),
             num_of_fix_satellites: self.num_of_fix_satellites(),
             battery_v: self.battery_v(),
             air_temperature: self.air_temperature(),

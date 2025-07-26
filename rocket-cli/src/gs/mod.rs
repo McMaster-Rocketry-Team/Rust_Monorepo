@@ -33,9 +33,10 @@ use firmware_common_new::{
 };
 use tokio::time;
 
-use crate::gs::{config::GroundStationConfig, rpc_radio::RpcRadio, serial_wrapper::SerialWrapper};
+use crate::gs::{config::GroundStationConfig, downlink_packet_display::DownlinkPacketDisplay, rpc_radio::RpcRadio, serial_wrapper::SerialWrapper};
 
 pub mod config;
+mod downlink_packet_display;
 pub mod find_ground_station;
 pub mod rpc_radio;
 pub mod serial_wrapper;
@@ -610,7 +611,7 @@ async fn tui_task(
                 .full_height(),
             )
             .child(
-                Panel::new(TextView::new("").with_name("downlink_packet"))
+                Panel::new(DownlinkPacketDisplay::new().with_name("downlink_packet"))
                     .title("Ground Station Downlink")
                     .full_screen(),
             ),
@@ -658,39 +659,8 @@ async fn tui_task(
         }
 
         if let Some((packet, status)) = client.try_receive() {
-            let mut downlink_packet = runner.find_name::<TextView>("downlink_packet").unwrap();
-            let formatted_packet = match packet {
-                VLPDownlinkPacket::GPSBeacon(packet) => {
-                    format!(
-                        "satelites: {}
-lat: {},
-lon: {},
-battery: {:.2}V
-main pyro: continuity={} fire={}
-drogue pyro: continuity={} fire={}
-",
-                        packet.num_of_fix_satellites(),
-                        packet.lat_lon().0,
-                        packet.lat_lon().1,
-                        packet.battery_v(),
-                        packet.pyro_main_continuity,
-                        packet.pyro_main_fire,
-                        packet.pyro_drogue_continuity,
-                        packet.pyro_drogue_fire,
-                    )
-                }
-                packet => format!("{:?}", packet),
-            };
-
-            downlink_packet.set_content(format!(
-                "received time: {}
-rssi={} snr={}
-{}",
-                chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
-                status.rssi,
-                status.snr,
-                formatted_packet
-            ));
+            let mut downlink_packet_display = runner.find_name::<DownlinkPacketDisplay>("downlink_packet").unwrap();
+            downlink_packet_display.update(packet, status);
         }
 
         runner.step();

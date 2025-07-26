@@ -4,6 +4,7 @@ mod message;
 mod node;
 mod status_bar;
 
+pub use message::message_row::FieldWidget;
 use chrono::Local;
 use config::MonitorConfig;
 use cursive::{

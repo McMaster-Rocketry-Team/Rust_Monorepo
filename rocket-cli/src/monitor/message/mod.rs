@@ -12,7 +12,7 @@ use firmware_common_new::can_bus::{
 use node_view::NodeView;
 use tokio::sync::broadcast;
 
-mod message_row;
+pub mod message_row;
 pub mod message_saver;
 mod node_view;
 pub mod status_row;

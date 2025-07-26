@@ -453,8 +453,12 @@ impl TelemetryPacket {
         self.num_of_fix_satellites.into()
     }
 
-    pub fn lat_lon(&self) -> (f64, f64) {
-        (LatFac::to_float(self.lat), LonFac::to_float(self.lon))
+    pub fn lat(&self) -> f64 {
+        LatFac::to_float(self.lat)
+    }
+
+    pub fn lon(&self) -> f64 {
+        LonFac::to_float(self.lon)
     }
 
     pub fn vl_battery_v(&self) -> f32 {
@@ -774,8 +778,8 @@ impl TelemetryPacket {
         json::object! {
             unix_clock_ready: self.unix_clock_ready(),
             num_of_fix_satellites: self.num_of_fix_satellites(),
-            lat: self.lat_lon().0,
-            lon: self.lat_lon().1,
+            lat: self.lat(),
+            lon: self.lon(),
             vl_battery_v: self.vl_battery_v(),
             air_temperature: self.air_temperature(),
             vl_stm32_temperature: self.vl_stm32_temperature(),
