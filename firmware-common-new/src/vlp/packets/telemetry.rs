@@ -895,8 +895,6 @@ impl TelemetryPacket {
 #[cfg(feature = "defmt")]
 impl defmt::Format for TelemetryPacket {
     fn format(&self, f: defmt::Formatter) {
-        let nonce: u8 = self.nonce.into();
-        let (lat, lon) = self.lat_lon();
         defmt::write!(f, "TelemetryPacket")
     }
 }

@@ -18,12 +18,12 @@ use sha2::Sha256;
 /// loop
 ///     Rocket->>GroundStation: Downlink telemetry
 ///
-///     Note over Rocket: waits up to 300 ms for potential uplink
+///     Note over Rocket: waits up to 500 ms for potential uplink
 ///
 ///     alt has pending uplink message
 ///         GroundStation->>Rocket: Uplink data + SHA-256 signature (key + last downlink + uplink data)
 ///         Rocket->>Rocket: Verify signature
-///         Note over GroundStation: waits up to 300 ms for ACK
+///         Note over GroundStation: waits up to 500 ms for ACK
 ///         Rocket->>GroundStation: ACK, verification code = SHA-256(uplink signature + key)
 ///         GroundStation->>GroundStation: Verify ACK
 ///     end
@@ -207,7 +207,7 @@ impl<'a, 'b, 'c, M: RawMutex, R: Radio> VLPGroundStationDaemon<'a, 'b, 'c, M, R>
         // send the packet and receive ack
         match self
             .radio
-            .tx_then_rx(&mut self.buffer, offset, RxMode::Single { timeout_ms: 300 })
+            .tx_then_rx(&mut self.buffer, offset, RxMode::Single { timeout_ms: 500 })
             .await
         {
             Ok((rx_len, packet_status)) => {
@@ -322,7 +322,7 @@ impl<'a, 'b, 'c, M: RawMutex, R: Radio> VLPAvionicsDaemon<'a, 'b, 'c, M, R> {
 
         match self
             .radio
-            .tx_then_rx(&mut self.buffer, offset, RxMode::Single { timeout_ms: 300 })
+            .tx_then_rx(&mut self.buffer, offset, RxMode::Single { timeout_ms: 500 })
             .await
         {
             Ok((rx_len, packet_status)) => {
