@@ -116,7 +116,7 @@ impl Iterator for CanBusMultiFrameEncoder {
     }
 }
 
-pub struct CanSender<M: RawMutex, const N: usize, const PN: usize = 1024> {
+pub struct CanSender<M: RawMutex, const N: usize = 10, const PN: usize = 1024> {
     channel: Channel<M, (CanBusExtendedId, Vec<u8, 8>), N>,
     node_type: u8,
     node_id: u16,
@@ -165,13 +165,17 @@ impl<M: RawMutex, const N: usize, const PN: usize> CanSender<M, N, PN> {
         }
     }
 
-    pub async fn send(&self, message: CanBusMessageEnum) -> u16 {
+    pub fn send(&self, message: CanBusMessageEnum) -> u16 {
         let id = message.get_id(self.node_type, self.node_id);
 
         let multi_frame_encoder = CanBusMultiFrameEncoder::new(message);
         let crc = multi_frame_encoder.crc;
         for data in multi_frame_encoder {
-            self.channel.send((id, data)).await;
+            let success = self.channel.try_send((id, data)).is_ok();
+            if !success {
+                log_warn!("can bus sender buffer overflow");
+                break;
+            }
         }
         crc
     }
