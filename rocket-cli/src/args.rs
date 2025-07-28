@@ -61,8 +61,7 @@ pub struct GenVlpKeyCli {
 
 #[derive(Parser, Debug)]
 pub struct GenOtaKeyCli {
-    pub secret_key_path: std::path::PathBuf,
-    pub public_key_path: std::path::PathBuf,
+    pub key_directory: std::path::PathBuf,
 }
 
 #[derive(Subcommand, Debug)]
