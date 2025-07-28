@@ -222,6 +222,9 @@ impl<const Q: usize> CanBusMultiFrameDecoder<Q> {
     }
 }
 
+/// N: number of messages buffered
+/// 
+/// SUBS: number of subscriptions
 pub struct CanReceiver<M: RawMutex, const N: usize, const SUBS: usize> {
     channel: PubSubChannel<M, SensorReading<BootTimestamp, ReceivedCanBusMessage>, N, SUBS, 1>,
     self_node_id: u16,
@@ -239,6 +242,7 @@ impl<M: RawMutex, const N: usize, const SUBS: usize> CanReceiver<M, N, SUBS> {
         self.self_node_id
     }
 
+    /// Q: number of concurrent decoders
     pub async fn run_daemon<R: CanBusRX, const Q: usize>(&self, rx: &mut R) {
         let mut decoder = CanBusMultiFrameDecoder::<Q>::new();
 

@@ -116,7 +116,10 @@ impl Iterator for CanBusMultiFrameEncoder {
     }
 }
 
-pub struct CanSender<M: RawMutex, const N: usize = 10, const PN: usize = 1024> {
+/// N: number of frames buffered
+/// 
+/// PN: bytes in the log pipe
+pub struct CanSender<M: RawMutex, const N: usize = 20, const PN: usize = 1024> {
     channel: Channel<M, (CanBusExtendedId, Vec<u8, 8>), N>,
     node_type: u8,
     node_id: u16,
