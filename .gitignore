@@ -7,4 +7,5 @@
 .DS_Store
 secret.key
 .rocket-cli.toml
+.rocket-cli.log
 logs

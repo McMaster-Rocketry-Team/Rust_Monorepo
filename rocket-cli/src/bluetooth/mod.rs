@@ -122,18 +122,14 @@ impl BluetoothConnectionMethod {
 
         let chunk_type = chunk[0] >> 6;
         let is_overrun = match chunk_type {
-            0b00 => {
-                decode_multiplexed_log_chunk(chunk, |frame| {
-                    log_demultiplexer.process_frame(frame, logs_tx);
-                })
-                .map_err(|e| anyhow!("{:?}", e))?
-            }
-            0b01 => {
-                decode_aggregated_can_bus_messages(chunk, |message| {
-                    messages_tx.send(message).ok();
-                })
-                .map_err(|e| anyhow!("{:?}", e))?
-            }
+            0b00 => decode_multiplexed_log_chunk(chunk, |frame| {
+                log_demultiplexer.process_frame(frame, logs_tx);
+            })
+            .map_err(|e: firmware_common_new::can_bus::telemetry::log_multiplexer::DecodeMultiplexedLogError| anyhow!("{:?}", e))?,
+            0b01 => decode_aggregated_can_bus_messages(chunk, |message| {
+                messages_tx.send(message).ok();
+            })
+            .map_err(|e| anyhow!("{:?}", e))?,
             typ => bail!("Invalid chunk type: {}", typ),
         };
 
@@ -151,7 +147,11 @@ impl ConnectionMethod for BluetoothConnectionMethod {
         if let Some(secret_path) = self.secret_path.clone()
             && let Some(firmware_elf_path) = self.firmware_elf_path.clone()
         {
-            let firmware_bytes = extract_bin_and_sign(&secret_path, &firmware_elf_path).await?;
+            let firmware_bytes = if self.node_type == NodeTypeEnum::PayloadActivation {
+                std::fs::read(&firmware_elf_path)?
+            } else {
+                extract_bin_and_sign(&secret_path, &firmware_elf_path).await?
+            };
             self.pab.ota(&firmware_bytes, self.node_type).await?;
         } else {
             warn!("Bluetooth connection method is not configured for download, skipping");
@@ -167,8 +167,6 @@ impl ConnectionMethod for BluetoothConnectionMethod {
         messages_tx: broadcast::Sender<DecodedMessage>,
         stop_rx: oneshot::Receiver<()>,
     ) -> Result<()> {
-        // sleep for 1 sec so we have time to see the logs before monitor takes over
-        sleep(Duration::from_secs(1)).await;
         info!("waiting for logs from bluetooth.....");
 
         let receive_future = async {
@@ -192,6 +190,6 @@ impl ConnectionMethod for BluetoothConnectionMethod {
             _ = stop_rx => {}
         }
 
-        todo!()
+        Ok(())
     }
 }
