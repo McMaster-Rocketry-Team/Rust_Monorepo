@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use anyhow::Ok;
 use anyhow::Result;
 use anyhow::anyhow;
 use btleplug::api::ValueNotification;
@@ -10,6 +11,7 @@ use btleplug::{
 };
 use futures::StreamExt;
 use log::info;
+use log::warn;
 use tokio::runtime::Handle;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
@@ -20,9 +22,8 @@ use crate::args::NodeTypeEnum;
 pub struct PayloadActivationPCB {
     peripheral: Peripheral,
     chunk_char: Characteristic,
-    target_char: Characteristic,
     ctrl_char: Characteristic,
-    ready_rx: mpsc::Receiver<u8>,
+    status_rx: mpsc::Receiver<u8>,
     pub log_rx: mpsc::Receiver<Vec<u8>>,
 }
 
@@ -40,24 +41,23 @@ impl PayloadActivationPCB {
                 .ok_or_else(|| anyhow!("characteristic {uuid} not found"))
         };
 
-        let chunk_char = get_char(0xfba7_891b_18cb_4055_ba5d_0e57396c2fcf)?;
-
-        // TODO: remove variable window size in firmware
-        let ready_char = get_char(0x5ff9_e042_eced_4d02_8f82_c99e81df389b)?;
-        let target_char = get_char(0x7090_bb12_25a4_46a2_8a6a_0b78b09bfcb0)?;
-        let ctrl_char = get_char(0xd42c_5206_03cc_47d0_aab8_773e02f831fc)?;
+        let chunk_char = get_char(0xfba7891b18cb4055ba5d0e57396c2fcf)?;
+        let status_char = get_char(0x5ff9e042eced4d028f82c99e81df389b)?;
+        let ctrl_char = get_char(0xd42c520603cc47d0aab8773e02f831fc)?;
 
         // TODO: add to firmware
-        let log_char = get_char(0xaf91_66c0_96c9_4917_b4ed_709938f3676d)?;
+        let log_char = get_char(0xd42c520603cc47d0aab8773e02f831fc)?;
 
+        peripheral.subscribe(&status_char).await?;
+        // peripheral.subscribe(&log_char)?;
         let mut notif_stream = peripheral.notifications().await?;
 
-        let (ready_tx, ready_rx) = mpsc::channel::<u8>(2);
+        let (status_tx, status_rx) = mpsc::channel::<u8>(2);
         let (log_tx, log_rx) = mpsc::channel::<Vec<u8>>(2);
         tokio::spawn(async move {
             while let Some(ValueNotification { uuid, value }) = notif_stream.next().await {
-                if uuid == ready_char.uuid {
-                    ready_tx.try_send(value[0]).ok();
+                if uuid == status_char.uuid {
+                    status_tx.try_send(value[0]).ok();
                 } else if uuid == log_char.uuid {
                     log_tx.try_send(value).ok();
                 }
@@ -67,80 +67,85 @@ impl PayloadActivationPCB {
         Ok(Self {
             peripheral,
             chunk_char,
-            target_char,
             ctrl_char,
-            ready_rx,
+            status_rx,
             log_rx,
         })
     }
 
+    async fn send_ctrl_no_reply(&mut self, cmd: &[u8]) -> Result<()> {
+        self.peripheral
+            .write(&self.ctrl_char, cmd, WriteType::WithoutResponse)
+            .await?;
+
+        Ok(())
+    }
+
+    async fn send_ctrl(&mut self, cmd: &[u8]) -> Result<()> {
+        self.send_ctrl_no_reply(cmd).await?;
+
+        let status = timeout(Duration::from_secs(5), self.status_rx.recv())
+            .await
+            .map_err(|_| anyhow!("status timeout"))?
+            .ok_or(anyhow!("status_rx channel closed"))?;
+
+        match status {
+            0 => Ok(()),
+            1 => Err(anyhow!("CrcError")),
+            2 => Err(anyhow!("AckTimeout")),
+            3 => Err(anyhow!("NodeDropped")),
+            4 => Err(anyhow!("NodeTypeEmpty")),
+            5 => Err(anyhow!("ErrorBleTimeout")),
+            6 => Err(anyhow!("ErrorBleDisconnected")),
+            7 => Err(anyhow!("ErrorBleLostSync")),
+            8 => Err(anyhow!("ErrorBleWrongChunkSequence")),
+            9 => Err(anyhow!("ErrorBleWrongChunkLength")),
+            10 => Err(anyhow!("ErrorSelfOta")),
+            11 => Err(anyhow!("ErrorInternal")),
+            _ => Err(anyhow!("unknown error")),
+        }
+    }
+
     pub async fn ota(&mut self, firmware_bytes: &[u8], node_type: NodeTypeEnum) -> Result<()> {
         static CHUNK_SIZE: usize = 244;
-        static WINDOW_SIZE: usize = 64;
-
-        let stat_to_error = |stat: u8| {
-            match stat {
-                0 => Ok(()),
-                1 => Err(anyhow!("upload failed: CRC error")),
-                2 => Err(anyhow!("upload failed: ACK timeout")),
-                3 => Err(anyhow!("upload failed: a node became inactive")),
-                4 => Err(anyhow!("upload failed: destination node not found")),
-                5 => Err(anyhow!("upload failed: timeout / out-of-sync")),
-                _ => Err(anyhow!("upload failed: unknown error")),
-            }
-        };
+        static WINDOW_SIZE: usize = 32;
 
         info!("initializing ota.....");
-        let nodetype: u8 = node_type.into();
-        self.peripheral
-            .write(
-                &self.target_char,
-                format!("t{nodetype}").as_bytes(),
-                WriteType::WithoutResponse,
-            )
-            .await?;
-
-        self.peripheral
-            .write(&self.ctrl_char, b"start", WriteType::WithoutResponse)
-            .await?;
+        // start session with node type
+        self.send_ctrl(&[0x2u8, node_type.into(), 0]).await?;
 
         info!("uploading firmware.....");
-        let mut i = 0usize;
+        let mut seq_num = 0u16;
         let mut sent = 0usize;
-        for chunk in firmware_bytes.chunks(CHUNK_SIZE) {
-            self.peripheral
-                .write(&self.chunk_char, chunk, WriteType::WithoutResponse)
-                .await?;
-            i += 1;
-            sent += chunk.len();
+        for window in firmware_bytes.chunks(CHUNK_SIZE * WINDOW_SIZE) {
+            // window start
+            let mut buf = [0x8, 0, 0];
+            buf[1..3].copy_from_slice(&seq_num.to_le_bytes());
+            self.send_ctrl_no_reply(&buf).await?;
 
-            if i == WINDOW_SIZE && sent < firmware_bytes.len() {
-                let stat = timeout(Duration::from_secs(5), self.ready_rx.recv())
-                    .await
-                    .map_err(|_| anyhow!("ready timeout"))?
-                    .ok_or(anyhow!("ready_rx channel closed"))?;
-                // TODO: use 0 to indicate no problem
-                stat_to_error(stat)?;
-
-                info!(
-                    "uploaded {}/{} ({}%)",
-                    sent,
-                    firmware_bytes.len(),
-                    (sent as f32 / firmware_bytes.len() as f32 * 100f32).round()
-                );
-
-                i = 0;
+            for chunk in window.chunks(CHUNK_SIZE) {
+                self.peripheral
+                    .write(&self.chunk_char, chunk, WriteType::WithoutResponse)
+                    .await?;
+                sent += chunk.len();
             }
-        }
 
-        self.peripheral
-            .write(&self.ctrl_char, b"end", WriteType::WithoutResponse)
-            .await?;
-        let stat = timeout(Duration::from_secs(5), self.ready_rx.recv())
-            .await
-            .map_err(|_| anyhow!("ready timeout"))?
-            .ok_or(anyhow!("ready_rx channel closed"))?;
-        stat_to_error(stat)?;
+            seq_num += 1;
+            // window end
+            let mut buf = [0x10, 0, 0];
+            if sent == firmware_bytes.len() {
+                buf[0] |= 0x20;
+            }
+            buf[1..3].copy_from_slice(&(window.len() as u16).to_le_bytes());
+            self.send_ctrl(&buf).await?;
+
+            info!(
+                "uploaded {}/{} ({}%)",
+                sent,
+                firmware_bytes.len(),
+                (sent as f32 / firmware_bytes.len() as f32 * 100f32).round()
+            );
+        }
 
         info!("upload success");
 
@@ -150,10 +155,21 @@ impl PayloadActivationPCB {
 
 impl Drop for PayloadActivationPCB {
     fn drop(&mut self) {
-        Handle::current().block_on(async {
-            if self.peripheral.is_connected().await.unwrap_or(false) {
-                self.peripheral.disconnect().await.ok();
-            }
-        });
+        warn!("try to drop pab");
+        // Handle::current().block_on(async {
+        //     if self.peripheral.is_connected().await.unwrap_or(false) {
+        //         self.peripheral.disconnect().await.ok();
+        //     }
+        // });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_ota() {
+        println!("{:?}", 10u16.to_le_bytes());
     }
 }

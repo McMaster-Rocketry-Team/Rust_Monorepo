@@ -114,17 +114,6 @@ pub async fn get_connection_method(
             .await?,
     );
     options.append(&mut SerialConnectionMethod::list_options().await?);
-    if download {
-        if options.is_empty() {
-            options.append(
-                &mut BluetoothConnectionMethod::list_options(secret_path, firmware_elf_path, node_type)
-                    .await?,
-            );
-        }else{
-            info!("other connection options exist, skipping bluetooth");
-        }   
-    }
-    
 
     if download {
         let all_options_len = options.len();
@@ -140,6 +129,17 @@ pub async fn get_connection_method(
                 filtered_out_options
             );
         }
+    }
+
+    if download {
+        if options.is_empty() {
+            options.append(
+                &mut BluetoothConnectionMethod::list_options(secret_path, firmware_elf_path, node_type)
+                    .await?,
+            );
+        }else{
+            info!("other connection options exist, skipping bluetooth");
+        }   
     }
 
     if options.len() == 0 {

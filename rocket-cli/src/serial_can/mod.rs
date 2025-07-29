@@ -19,7 +19,7 @@ use firmware_common_new::{
     },
     rpc::half_duplex_serial::HalfDuplexSerial,
 };
-use log::warn;
+use log::{info, warn};
 use packed_struct::prelude::*;
 use serialport::{SerialPortType, UsbPortInfo, available_ports};
 use tokio::{
@@ -40,6 +40,7 @@ impl ConnectionMethodFactory for SerialConnectionMethodFactory {
             .unwrap_or_default();
         let log_demultiplexer = LogDemultiplexer::new(elf_info_map);
 
+        info!("Opening serial port: {}", self.port_name);
         let serial = serialport::new(self.port_name.clone(), 115200)
             .timeout(Duration::from_secs(5))
             .open()

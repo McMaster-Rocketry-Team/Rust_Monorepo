@@ -22,7 +22,6 @@ use tokio::{
     time::sleep,
 };
 
-mod ble_download;
 pub mod demultiplex_log;
 mod extract_bin;
 mod payload_activation_pcb;
