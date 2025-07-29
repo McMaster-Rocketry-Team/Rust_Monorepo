@@ -21,7 +21,7 @@ pub struct DefmtElfInfo {
 
 pub type ELFInfoMap = HashMap<NodeTypeEnum, Pin<Box<DefmtElfInfo>>>;
 
-pub fn locate_elf_files(firmware_elf_path: Option<&PathBuf>) -> Result<ELFInfoMap> {
+pub fn locate_elf_files(firmware_elf_path: Option<PathBuf>) -> Result<ELFInfoMap> {
     let mut possible_paths: Vec<String> = vec![
         "./Rust_Monorepo".into(),
         "../Rust_Monorepo".into(),
@@ -168,6 +168,6 @@ mod test {
         let _ = env_logger::builder()
             .filter_level(LevelFilter::Info)
             .try_init();
-        locate_elf_files(Some(&PathBuf::from("./elf"))).unwrap();
+        locate_elf_files(Some(PathBuf::from("./elf"))).unwrap();
     }
 }

@@ -395,6 +395,51 @@ pub extern "C" fn decode_lora_telemetry(
     }
 }
 
+/// # Parameters
+/// - `firmware_sha512`: A pointer to the SHA512 of the firmware, a 64 bytes array
+/// - `signature`: A pointer to the signature, a 64 bytes array
+/// - `public_key_str`: A null-terminated string containing the base64-encoded public key
+#[unsafe(no_mangle)]
+pub extern "C" fn verify_firmware(
+    firmware_sha512: *const u8,
+    signature: *const u8,
+    public_key_str: *const u8,
+) -> bool {
+    use base64::prelude::*;
+
+    let firmware_sha512 = unsafe { core::slice::from_raw_parts(firmware_sha512, 64) };
+    let signature = unsafe { core::slice::from_raw_parts(signature, 64) };
+
+    // Parse the null-terminated string
+    let mut len = 0;
+    let mut ptr = public_key_str;
+    unsafe {
+        while *ptr != 0 {
+            len += 1;
+            ptr = ptr.add(1);
+        }
+    }
+    let public_key_str = unsafe { core::slice::from_raw_parts(public_key_str, len) };
+
+    // Convert to string and decode base64
+    let public_key_str = unsafe { core::str::from_utf8_unchecked(public_key_str) };
+
+    let mut public_key = [0u8; 32];
+    let decode_key_ok = BASE64_STANDARD
+        .decode_slice(public_key_str, &mut public_key)
+        .is_ok();
+    if !decode_key_ok {
+        return false;
+    }
+
+    firmware_common_new::bootloader::verify_firmware(
+        firmware_sha512.try_into().unwrap(),
+        signature.try_into().unwrap(),
+        public_key.as_slice().try_into().unwrap(),
+    )
+    .is_ok()
+}
+
 #[cfg(any(target_os = "none", target_os = "espidf"))]
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {

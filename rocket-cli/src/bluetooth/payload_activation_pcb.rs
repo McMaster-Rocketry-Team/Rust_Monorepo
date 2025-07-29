@@ -11,8 +11,6 @@ use btleplug::{
 };
 use futures::StreamExt;
 use log::info;
-use log::warn;
-use tokio::runtime::Handle;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
 use uuid::Uuid;
@@ -57,11 +55,7 @@ impl PayloadActivationPCB {
                 if uuid == status_char.uuid {
                     status_tx.try_send(value[0]).ok();
                 } else if uuid == log_char.uuid {
-                    info!("received log char");
-                    let success = log_tx.try_send(value).is_ok();
-                    if !success {
-                        warn!("log_tx overflow");
-                    }
+                    log_tx.try_send(value).ok();
                 }
             }
         });
@@ -152,26 +146,5 @@ impl PayloadActivationPCB {
         info!("upload success");
 
         Ok(())
-    }
-}
-
-impl Drop for PayloadActivationPCB {
-    fn drop(&mut self) {
-        warn!("try to drop pab");
-        // Handle::current().block_on(async {
-        //     if self.peripheral.is_connected().await.unwrap_or(false) {
-        //         self.peripheral.disconnect().await.ok();
-        //     }
-        // });
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn test_ota() {
-        println!("{:?}", 10u16.to_le_bytes());
     }
 }

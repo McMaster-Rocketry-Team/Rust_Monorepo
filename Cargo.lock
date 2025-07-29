@@ -2620,6 +2620,7 @@ dependencies = [
 name = "firmware-common-ffi"
 version = "0.6.0"
 dependencies = [
+ "base64",
  "firmware-common-new",
 ]
 

@@ -14,6 +14,7 @@ use std::io;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
+use anyhow::Ok;
 use anyhow::{Result, anyhow};
 use args::Cli;
 use args::ModeSelect;
@@ -31,6 +32,7 @@ use monitor::monitor_tui;
 use testing::decode_bluetooth_chunk::test_decode_bluetooth_chunk;
 use testing::mock_connection_method::MockConnectionMethod;
 
+use crate::connection_method::get_esp_connection_method;
 use crate::gen_key::gen_vlp_key;
 use crate::gs::find_ground_station::find_ground_station;
 use crate::gs::ground_station_tui;
@@ -54,17 +56,20 @@ async fn main() -> Result<()> {
             .await?;
 
             connection_method.download().await?;
-            monitor_tui(&mut connection_method, Some(&args.firmware_elf_path)).await?;
+            monitor_tui(&mut connection_method, Some(&args.firmware_elf_path)).await
+        }
+        ModeSelect::DownloadEsp(args) => {
+            let mut connection_method =
+                get_esp_connection_method(args.firmware_bin_path, args.node_type, args.secret_path)
+                    .await?;
 
-            connection_method.dispose().await
+            connection_method.download().await
         }
         ModeSelect::Attach(args) => {
             let mut connection_method =
                 get_connection_method(false, args.chip, args.elf, None, None).await?;
 
-            monitor_tui(&mut connection_method, None).await?;
-
-            connection_method.dispose().await
+            monitor_tui(&mut connection_method, None).await
         }
         ModeSelect::GroundStation => {
             let serial_path = find_ground_station().await?;

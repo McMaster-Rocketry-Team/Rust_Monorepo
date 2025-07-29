@@ -23,7 +23,6 @@ pub fn verify_firmware(
     signature: &[u8; 64],
     public_key: &[u8; 32],
 ) -> Result<(), VerifyFirmwareError> {
-    let signature: &[u8; 64] = signature.as_array().unwrap();
     let signature = Signature::try_from(signature).unwrap();
 
     let public_key = PublicKey::try_from(public_key).map_err(VerifyFirmwareError::SaltyError)?;

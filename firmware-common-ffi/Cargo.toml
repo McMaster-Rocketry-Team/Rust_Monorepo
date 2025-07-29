@@ -4,6 +4,7 @@ version = "0.6.0"
 edition = "2024"
 
 [dependencies]
+base64 = { version = "0.22.1", default-features = false }
 firmware-common-new = { path = "../firmware-common-new", default-features = false }
 
 [lib]

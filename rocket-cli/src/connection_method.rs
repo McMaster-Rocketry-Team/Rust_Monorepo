@@ -2,7 +2,7 @@ use std::{fs, path::PathBuf};
 
 use crate::{
     args::NodeTypeEnum,
-    bluetooth::BluetoothConnectionMethod,
+    bluetooth::{BluetoothConnectionMethod, BluetoothFirmwareType},
     elf_locator::{ElfInfo, find_newest_elf},
     monitor::{MonitorStatus, target_log::TargetLog},
     probe::ProbeConnectionMethod,
@@ -134,26 +134,50 @@ pub async fn get_connection_method(
     if download {
         if options.is_empty() {
             options.append(
-                &mut BluetoothConnectionMethod::list_options(secret_path, firmware_elf_path, node_type)
-                    .await?,
+                &mut BluetoothConnectionMethod::list_options(
+                    secret_path,
+                    firmware_elf_path.map(BluetoothFirmwareType::Elf),
+                    node_type,
+                )
+                .await?,
             );
-        }else{
+        } else {
             info!("other connection options exist, skipping bluetooth");
-        }   
+        }
     }
 
+    let mut option = select_connection_method_prompt(options)?;
+    option.factory.initialize().await
+}
+
+pub async fn get_esp_connection_method(
+    firmware_bin_path: PathBuf,
+    node_type: NodeTypeEnum,
+    secret_path: PathBuf,
+) -> Result<Box<dyn ConnectionMethod>> {
+    let options = BluetoothConnectionMethod::list_options(
+        Some(secret_path),
+        Some(BluetoothFirmwareType::Bin(firmware_bin_path)),
+        node_type,
+    )
+    .await?;
+
+    let mut option = select_connection_method_prompt(options)?;
+    option.factory.initialize().await
+}
+
+fn select_connection_method_prompt(mut options: Vec<ConnectionOption>) -> Result<ConnectionOption> {
     if options.len() == 0 {
         bail!("No connection methods found");
     }
 
     if options.len() == 1 {
-        let mut option = options.remove(0);
+        let option = options.remove(0);
         info!(
             "using the only avaliable connection method: {}",
             option.name
         );
-        let connection_method = option.factory.initialize().await?;
-        return Ok(connection_method);
+        return Ok(option);
     }
 
     for i in 0..options.len() {
@@ -167,10 +191,7 @@ pub async fn get_connection_method(
         bail!("Invalid choice");
     }
 
-    let mut option = options.remove(choice - 1);
-    let connection_method = option.factory.initialize().await?;
-
-    Ok(connection_method)
+    Ok(options.remove(choice - 1))
 }
 
 pub struct ConnectionOption {
@@ -197,8 +218,4 @@ pub trait ConnectionMethod {
         messages_tx: broadcast::Sender<DecodedMessage>,
         stop_rx: oneshot::Receiver<()>,
     ) -> Result<()>;
-
-    async fn dispose(&mut self) -> Result<()> {
-        Ok(())
-    }
 }

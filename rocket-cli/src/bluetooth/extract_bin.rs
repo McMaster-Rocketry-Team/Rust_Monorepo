@@ -7,16 +7,7 @@ use log::info;
 use salty::Sha512;
 use tempfile::NamedTempFile;
 
-pub async fn extract_bin_and_sign(
-    secret_path: &PathBuf,
-    firmware_elf_path: &PathBuf,
-) -> Result<Vec<u8>> {
-    let secret = std::fs::read(secret_path)?;
-    let secret = BASE64_STANDARD.decode(&secret)?;
-    if secret.len() != 32 {
-        bail!("Secret must be 32 bytes long.");
-    }
-
+pub async fn extract_bin_from_elf(firmware_elf_path: &PathBuf) -> Result<Vec<u8>> {
     let objcopy_path = cargo_binutils::Tool::Objcopy.path().map_err(|_| {
         anyhow!(
             "llvm-objcopy not found, Please install it by running 'rustup component add llvm-tools'"
@@ -40,19 +31,34 @@ pub async fn extract_bin_and_sign(
         );
     }
 
-    let mut firmware_bytes = std::fs::read(firmware_binary.path())?;
+    let firmware_bytes = std::fs::read(firmware_binary.path())?;
     info!("Firmware size: {}bytes", firmware_bytes.len());
     if firmware_bytes.len() % 8 != 0 {
         bail!("Firmware size is not a multiple of 8!");
     }
 
+    Ok(firmware_bytes)
+}
+
+pub async fn sign_firmware_binary(
+    firmware_bin_bytes: &mut Vec<u8>,
+    secret_path: &PathBuf,
+) -> Result<()> {
+    let secret = std::fs::read(secret_path)?;
+    let secret = BASE64_STANDARD.decode(&secret)?;
+    if secret.len() != 32 {
+        bail!("Secret must be 32 bytes long.");
+    }
+
     let mut sha512 = Sha512::new();
-    sha512.update(&firmware_bytes);
+    sha512.update(&firmware_bin_bytes);
 
     let signature: [u8; 64] =
         sign_firmware(&sha512.finalize(), secret.as_slice().try_into().unwrap());
-    firmware_bytes.splice(0..0, signature);
+
+    // Insert the signature at the beginning of firmware_bin_bytes in place
+    firmware_bin_bytes.splice(0..0, signature);
     info!("Firmware signed successfully");
 
-    Ok(firmware_bytes)
+    Ok(())
 }

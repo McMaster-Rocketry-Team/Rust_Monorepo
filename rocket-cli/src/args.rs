@@ -18,8 +18,11 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum ModeSelect {
-    #[command(about = "download firmware to target via probe or ota")]
+    #[command(about = "download firmware to stm32 via probe or ota")]
     Download(DownloadCli),
+
+    #[command(about = "download firmware to esp32 via probe or ota")]
+    DownloadEsp(DownloadEspCli),
 
     #[command(about = "attach to target via probe or ota")]
     Attach(AttachCli),
@@ -44,6 +47,13 @@ pub struct DownloadCli {
     pub secret_path: std::path::PathBuf,
     pub node_type: NodeTypeEnum,
     pub firmware_elf_path: std::path::PathBuf,
+}
+
+#[derive(Parser, Debug)]
+pub struct DownloadEspCli {
+    pub secret_path: std::path::PathBuf,
+    pub node_type: NodeTypeEnum,
+    pub firmware_bin_path: std::path::PathBuf,
 }
 
 #[derive(Parser, Debug)]
