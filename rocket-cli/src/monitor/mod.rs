@@ -23,7 +23,7 @@ use tokio::{
     time,
 };
 
-use crate::connection_method::ConnectionMethod;
+use crate::{connection_method::ConnectionMethod, enable_stdout_logging};
 use anyhow::Result;
 use std::{
     path::PathBuf,
@@ -160,6 +160,7 @@ async fn tui_task(
         );
     }
 
+    enable_stdout_logging(false);
     let mut runner = siv.runner();
     runner.refresh();
     let mut interval = time::interval(Duration::from_millis(1000 / 30));
@@ -213,6 +214,7 @@ async fn tui_task(
         runner.step();
         interval.tick().await;
     }
+    enable_stdout_logging(true);
 
     stop_tx.send(()).ok();
     Ok(())

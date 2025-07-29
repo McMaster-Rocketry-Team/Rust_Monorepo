@@ -51,13 +51,17 @@ impl PayloadActivationPCB {
         let mut notif_stream = peripheral.notifications().await?;
 
         let (status_tx, status_rx) = mpsc::channel::<u8>(2);
-        let (log_tx, log_rx) = mpsc::channel::<Vec<u8>>(2);
+        let (log_tx, log_rx) = mpsc::channel::<Vec<u8>>(10);
         tokio::spawn(async move {
             while let Some(ValueNotification { uuid, value }) = notif_stream.next().await {
                 if uuid == status_char.uuid {
                     status_tx.try_send(value[0]).ok();
                 } else if uuid == log_char.uuid {
-                    log_tx.try_send(value).ok();
+                    info!("received log char");
+                    let success = log_tx.try_send(value).is_ok();
+                    if !success {
+                        warn!("log_tx overflow");
+                    }
                 }
             }
         });

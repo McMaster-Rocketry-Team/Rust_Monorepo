@@ -34,10 +34,10 @@ use firmware_common_new::{
 use lora_phy::mod_params::PacketStatus;
 use tokio::time;
 
-use crate::gs::{
+use crate::{enable_stdout_logging, gs::{
     config::GroundStationConfig, downlink_packet_display::DownlinkPacketDisplay,
     rpc_radio::RpcRadio, serial_wrapper::SerialWrapper, vlp_client::VLPClientTrait,
-};
+}};
 
 pub mod config;
 mod downlink_packet_display;
@@ -640,6 +640,7 @@ pub async fn tui_task(
             ),
     );
 
+    enable_stdout_logging(false);
     let mut runner = siv.runner();
     runner.refresh();
     let mut interval = time::interval(Duration::from_millis(1000 / 30));
@@ -691,6 +692,7 @@ pub async fn tui_task(
         runner.step();
         interval.tick().await;
     }
+    enable_stdout_logging(false);
 
     Ok(())
 }

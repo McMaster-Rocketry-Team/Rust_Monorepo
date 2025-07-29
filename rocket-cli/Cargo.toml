@@ -49,3 +49,4 @@ serialport = "4.7.2"
 directories = "6.0.0"
 packed_struct = { version = "0.10.1", default-features = false }
 heapless = "0.8.0"
+fern = {version = "0.7.1", features = ["colored"]}

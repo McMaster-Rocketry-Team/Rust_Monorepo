@@ -9,13 +9,22 @@ mod probe;
 mod serial_can;
 mod testing;
 
+use std::fs::File;
+use std::io;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+
 use anyhow::{Result, anyhow};
 use args::Cli;
 use args::ModeSelect;
 use args::TestingModeSelect;
+use chrono::Local;
 use clap::Parser;
 use connection_method::ConnectionMethod;
 use connection_method::get_connection_method;
+use fern::Dispatch;
+use fern::colors::Color;
+use fern::colors::ColoredLevelConfig;
 use gen_key::gen_ota_key;
 use log::LevelFilter;
 use monitor::monitor_tui;
@@ -30,14 +39,9 @@ use crate::testing::send_fake_vlp_telemetry::send_fake_vlp_telemetry;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let args = Cli::parse();
-    env_logger::builder()
-        .filter_level(LevelFilter::Info)
-        .filter_module("rocket_cli", LevelFilter::Trace)
-        .filter_module("firmware_common_new", LevelFilter::Trace)
-        .try_init()
-        .ok();
+    init_logging()?;
 
+    let args = Cli::parse();
     match args.mode {
         ModeSelect::Download(args) => {
             let mut connection_method = get_connection_method(
@@ -83,4 +87,53 @@ async fn main() -> Result<()> {
             send_fake_vlp_telemetry(args).await
         }
     }
+}
+
+static STDOUT_ENABLED: AtomicBool = AtomicBool::new(true);
+
+pub fn enable_stdout_logging(enabled: bool) {
+    STDOUT_ENABLED.store(enabled, Ordering::Relaxed);
+}
+
+fn init_logging() -> Result<()> {
+    let colors = ColoredLevelConfig::new()
+        .error(Color::Red)
+        .warn(Color::Yellow)
+        .info(Color::Green)
+        .debug(Color::Blue)
+        .trace(Color::Magenta);
+
+    let stdout = Dispatch::new()
+        .filter(|_| STDOUT_ENABLED.load(Ordering::Relaxed))
+        .level(LevelFilter::Info)
+        .level_for("rocket_cli", LevelFilter::Trace)
+        .level_for("firmware_common_new", LevelFilter::Trace)
+        .format(move |out, message, record| {
+            out.finish(format_args!(
+                "{lvl:<5}[{target}] {msg}",
+                lvl = colors.color(record.level()),
+                target = record.target(),
+                msg = message
+            ))
+        })
+        .chain(io::stdout());
+
+    let logfile = Dispatch::new()
+        .level(LevelFilter::Info)
+        .level_for("rocket_cli", LevelFilter::Trace)
+        .level_for("firmware_common_new", LevelFilter::Trace)
+        .format(|out, message, record| {
+            out.finish(format_args!(
+                "{} {:<5} [{}] {}",
+                Local::now().format("%Y-%m-%d %H:%M:%S"),
+                record.level(),
+                record.target(),
+                message
+            ))
+        })
+        .chain(File::create(".rocket-cli.log")?);
+
+    Dispatch::new().chain(stdout).chain(logfile).apply()?;
+
+    Ok(())
 }

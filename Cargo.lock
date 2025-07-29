@@ -2534,6 +2534,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "fern"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4316185f709b23713e41e3195f90edef7fb00c3ed4adc79769cf09cc762a3b29"
+dependencies = [
+ "colored",
+ "log",
+]
+
+[[package]]
 name = "ferraris-calibration"
 version = "0.1.0"
 dependencies = [
@@ -5807,6 +5817,7 @@ dependencies = [
  "embedded-hal-async",
  "embedded-io-async",
  "env_logger",
+ "fern",
  "firmware-common-new",
  "futures",
  "globwalk",

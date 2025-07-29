@@ -123,14 +123,12 @@ impl BluetoothConnectionMethod {
         let chunk_type = chunk[0] >> 6;
         let is_overrun = match chunk_type {
             0b00 => {
-                debug!("received log multiplexer chunk");
                 decode_multiplexed_log_chunk(chunk, |frame| {
                     log_demultiplexer.process_frame(frame, logs_tx);
                 })
                 .map_err(|e| anyhow!("{:?}", e))?
             }
             0b01 => {
-                debug!("received aggregated message chunk");
                 decode_aggregated_can_bus_messages(chunk, |message| {
                     messages_tx.send(message).ok();
                 })
