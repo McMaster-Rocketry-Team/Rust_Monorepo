@@ -44,12 +44,10 @@ impl PayloadActivationPCB {
         let chunk_char = get_char(0xfba7891b18cb4055ba5d0e57396c2fcf)?;
         let status_char = get_char(0x5ff9e042eced4d028f82c99e81df389b)?;
         let ctrl_char = get_char(0xd42c520603cc47d0aab8773e02f831fc)?;
-
-        // TODO: add to firmware
-        let log_char = get_char(0xd42c520603cc47d0aab8773e02f831fc)?;
+        let log_char = get_char(0xd301e88042164ba78de7159bdda2f1ac)?;
 
         peripheral.subscribe(&status_char).await?;
-        // peripheral.subscribe(&log_char)?;
+        peripheral.subscribe(&log_char).await?;
         let mut notif_stream = peripheral.notifications().await?;
 
         let (status_tx, status_rx) = mpsc::channel::<u8>(2);

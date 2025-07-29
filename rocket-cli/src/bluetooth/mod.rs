@@ -171,6 +171,7 @@ impl ConnectionMethod for BluetoothConnectionMethod {
     ) -> Result<()> {
         // sleep for 1 sec so we have time to see the logs before monitor takes over
         sleep(Duration::from_secs(1)).await;
+        info!("waiting for logs from bluetooth.....");
 
         let receive_future = async {
             while let Some(chunk) = self.pab.log_rx.recv().await {
