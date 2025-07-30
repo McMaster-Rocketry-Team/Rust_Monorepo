@@ -188,14 +188,6 @@ impl LogViewer {
                                 ),
                             )
                             .child(
-                                "AMP Speed Bridge",
-                                Self::create_config_checkbox(
-                                    config.clone(),
-                                    |c| c.devices.amp_speed_bridge,
-                                    |c, v| c.devices.amp_speed_bridge = v,
-                                ),
-                            )
-                            .child(
                                 "ICARUS",
                                 Self::create_config_checkbox(
                                     config.clone(),

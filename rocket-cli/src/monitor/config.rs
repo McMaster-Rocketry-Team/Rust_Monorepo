@@ -30,7 +30,6 @@ pub struct LevelFilters {
 pub struct DeviceFilters {
     pub void_lake: bool,
     pub amp: bool,
-    pub amp_speed_bridge: bool,
     pub icarus: bool,
     pub payload_activation: bool,
     pub rocket_wifi: bool,
@@ -56,7 +55,6 @@ impl Default for MonitorConfig {
             devices: DeviceFilters {
                 void_lake: true,
                 amp: true,
-                amp_speed_bridge: true,
                 icarus: true,
                 payload_activation: true,
                 rocket_wifi: true,
@@ -155,7 +153,6 @@ impl MonitorConfig {
         let device_matches = match log.node_type {
             NodeTypeEnum::VoidLake => self.devices.void_lake,
             NodeTypeEnum::AMP => self.devices.amp,
-            NodeTypeEnum::AMPSpeedBridge => self.devices.amp_speed_bridge,
             NodeTypeEnum::ICARUS => self.devices.icarus,
             NodeTypeEnum::PayloadActivation => self.devices.payload_activation,
             NodeTypeEnum::RocketWifi => self.devices.rocket_wifi,

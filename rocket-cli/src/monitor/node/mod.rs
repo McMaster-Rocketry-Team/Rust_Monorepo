@@ -53,7 +53,6 @@ impl NodeStatusViewerChild {
             nodes: vec![
                 NodeStatusRow::new(VOID_LAKE_NODE_TYPE),
                 NodeStatusRow::new(AMP_NODE_TYPE),
-                NodeStatusRow::new(AMP_SPEED_BRIDGE_NODE_TYPE),
                 NodeStatusRow::new(ICARUS_NODE_TYPE),
                 NodeStatusRow::new(PAYLOAD_ACTIVATION_NODE_TYPE),
                 NodeStatusRow::new(PAYLOAD_ROCKET_WIFI_NODE_TYPE),

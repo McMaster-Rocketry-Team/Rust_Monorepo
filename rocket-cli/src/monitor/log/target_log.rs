@@ -9,7 +9,6 @@ impl NodeTypeEnum {
         match self {
             NodeTypeEnum::VoidLake => "VL",
             NodeTypeEnum::AMP => "AMP",
-            NodeTypeEnum::AMPSpeedBridge => "ASB",
             NodeTypeEnum::ICARUS => "ICA",
             NodeTypeEnum::PayloadActivation => "PA",
             NodeTypeEnum::RocketWifi => "RW",
@@ -26,7 +25,6 @@ impl NodeTypeEnum {
         match self {
             NodeTypeEnum::VoidLake => Color::Rgb(224, 246, 236),
             NodeTypeEnum::AMP => Color::Rgb(235, 235, 219),
-            NodeTypeEnum::AMPSpeedBridge => Color::Rgb(224, 252, 248),
             NodeTypeEnum::ICARUS => Color::Rgb(234, 232, 248),
             NodeTypeEnum::PayloadActivation => Color::Rgb(252, 237, 224),
             NodeTypeEnum::RocketWifi => Color::Rgb(244, 248, 244),

@@ -106,7 +106,6 @@ pub struct SendVLPTelemetryArgs {
 pub enum NodeTypeEnum {
     VoidLake,
     AMP,
-    AMPSpeedBridge,
     ICARUS,
     PayloadActivation,
     RocketWifi,
@@ -123,7 +122,6 @@ impl Display for NodeTypeEnum {
         match self {
             NodeTypeEnum::VoidLake => write!(f, "Void Lake"),
             NodeTypeEnum::AMP => write!(f, "AMP"),
-            NodeTypeEnum::AMPSpeedBridge => write!(f, "AMP Speed Bridge"),
             NodeTypeEnum::ICARUS => write!(f, "ICARUS"),
             NodeTypeEnum::PayloadActivation => write!(f, "Payload Activation"),
             NodeTypeEnum::RocketWifi => write!(f, "Rocket WiFi"),
@@ -142,7 +140,6 @@ impl From<u8> for NodeTypeEnum {
         match value {
             VOID_LAKE_NODE_TYPE => Self::VoidLake,
             AMP_NODE_TYPE => Self::AMP,
-            AMP_SPEED_BRIDGE_NODE_TYPE => Self::AMPSpeedBridge,
             ICARUS_NODE_TYPE => Self::ICARUS,
             PAYLOAD_ACTIVATION_NODE_TYPE => Self::PayloadActivation,
             PAYLOAD_ROCKET_WIFI_NODE_TYPE => Self::RocketWifi,
@@ -161,7 +158,6 @@ impl Into<u8> for NodeTypeEnum {
         match self {
             NodeTypeEnum::VoidLake => VOID_LAKE_NODE_TYPE,
             NodeTypeEnum::AMP => AMP_NODE_TYPE,
-            NodeTypeEnum::AMPSpeedBridge => AMP_SPEED_BRIDGE_NODE_TYPE,
             NodeTypeEnum::ICARUS => ICARUS_NODE_TYPE,
             NodeTypeEnum::PayloadActivation => PAYLOAD_ACTIVATION_NODE_TYPE,
             NodeTypeEnum::RocketWifi => PAYLOAD_ROCKET_WIFI_NODE_TYPE,

@@ -23,8 +23,6 @@ pub static VOID_LAKE_NODE_TYPE: u8 = node_types::VOID_LAKE_NODE_TYPE;
 #[unsafe(no_mangle)]
 pub static AMP_NODE_TYPE: u8 = node_types::AMP_NODE_TYPE;
 #[unsafe(no_mangle)]
-pub static AMP_SPEED_BRIDGE_NODE_TYPE: u8 = node_types::AMP_SPEED_BRIDGE_NODE_TYPE;
-#[unsafe(no_mangle)]
 pub static ICARUS_NODE_TYPE: u8 = node_types::ICARUS_NODE_TYPE;
 #[unsafe(no_mangle)]
 pub static PAYLOAD_ACTIVATION_NODE_TYPE: u8 = node_types::PAYLOAD_ACTIVATION_NODE_TYPE;
