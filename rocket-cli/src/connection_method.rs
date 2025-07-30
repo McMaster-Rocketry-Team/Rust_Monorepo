@@ -144,6 +144,15 @@ pub async fn get_connection_method(
         } else {
             info!("other connection options exist, skipping bluetooth");
         }
+    } else {
+        options.append(
+            &mut BluetoothConnectionMethod::list_options(
+                secret_path,
+                firmware_elf_path.map(BluetoothFirmwareType::Elf),
+                node_type,
+            )
+            .await?,
+        );
     }
 
     let mut option = select_connection_method_prompt(options)?;

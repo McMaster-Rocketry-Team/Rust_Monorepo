@@ -8,7 +8,7 @@ use crate::args::NodeTypeEnum;
 
 use super::log::target_log::TargetLog;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct MonitorConfig {
     pub levels: LevelFilters,
     pub devices: DeviceFilters,
@@ -16,7 +16,7 @@ pub struct MonitorConfig {
     pub search: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct LevelFilters {
     pub trace: bool,
     pub debug: bool,
@@ -26,7 +26,7 @@ pub struct LevelFilters {
     pub plain_text: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct DeviceFilters {
     pub void_lake: bool,
     pub amp: bool,

@@ -1,29 +1,22 @@
 pub mod log_saver;
+mod logs_view;
 pub mod target_log;
 
 use std::sync::{Arc, RwLock};
 
-use anyhow::Result;
 use cursive::{
-    Printer, Rect, Vec2, View,
-    direction::Direction,
-    event::{Callback, Event, EventResult, MouseButton, MouseEvent},
-    theme::{Color, ColorStyle, Style},
-    utils::markup::StyledString,
-    view::{
-        CannotFocus, Finder, Nameable as _, Resizable, ScrollStrategy, Scrollable as _,
-        ViewWrapper, scroll,
-    },
-    views::{
-        Button, Checkbox, Dialog, EditView, LinearLayout, ListView, NamedView, Panel, ScrollView,
-        TextView,
-    },
+    View,
+    event::EventResult,
+    theme::Color,
+    view::{Finder, Nameable as _, Resizable, ScrollStrategy, Scrollable as _, ViewWrapper},
+    views::{Button, Checkbox, Dialog, EditView, LinearLayout, ListView, Panel, TextView},
     wrap_impl,
 };
 use log::Level;
-use pad::PadStr;
-use target_log::{DefmtLogInfo, TargetLog};
+use target_log::TargetLog;
 use tokio::sync::broadcast;
+
+use crate::monitor::log::logs_view::LogsView;
 
 use super::config::MonitorConfig;
 
@@ -31,7 +24,6 @@ pub struct LogViewer {
     root: LinearLayout,
     logs_rx: Arc<RwLock<broadcast::Receiver<TargetLog>>>,
     paused: Arc<RwLock<bool>>,
-    config: Arc<RwLock<MonitorConfig>>,
 }
 
 impl LogViewer {
@@ -43,10 +35,10 @@ impl LogViewer {
         let config_a = config.clone();
         let config_b = config.clone();
         let config_c = config.clone();
+        let config_d = config.clone();
         Self {
             logs_rx: Arc::new(RwLock::new(logs_rx)),
             paused: paused.clone(),
-            config,
             root: LinearLayout::vertical()
                 .child(
                     LinearLayout::horizontal()
@@ -103,7 +95,7 @@ impl LogViewer {
                         ),
                 )
                 .child(
-                    LinearLayout::vertical()
+                    LogsView::new(config_d)
                         .with_name("logs")
                         .scrollable()
                         .scroll_strategy(ScrollStrategy::StickToBottom)
@@ -306,13 +298,10 @@ impl LogViewer {
 
     pub fn receive_logs(&mut self) {
         let mut logs_rx = self.logs_rx.write().unwrap();
-        let mut logs_view = self.root.find_name::<LinearLayout>("logs").unwrap();
+        let mut logs_view = self.root.find_name::<LogsView>("logs").unwrap();
         while let Ok(log) = logs_rx.try_recv() {
             if !*self.paused.read().unwrap() {
-                logs_view.add_child(LogRow::new(log, self.config.clone()));
-                while logs_view.len() > 500 {
-                    logs_view.remove_child(0);
-                }
+                logs_view.push_log(log);
             }
         }
     }
@@ -320,168 +309,6 @@ impl LogViewer {
 
 impl ViewWrapper for LogViewer {
     wrap_impl!(self.root: LinearLayout);
-}
-
-struct LogRow {
-    log: TargetLog,
-    last_size: Vec2,
-    show_line_number: bool,
-    config: Arc<RwLock<MonitorConfig>>,
-    matches: bool,
-    log_content_offset: usize,
-}
-
-impl LogRow {
-    pub fn new(log: TargetLog, config: Arc<RwLock<MonitorConfig>>) -> Self {
-        return Self {
-            log_content_offset: if log.defmt.is_some() { 23 } else { 8 },
-            log,
-            last_size: Vec2::zero(),
-            show_line_number: false,
-            config,
-            matches: false,
-        };
-    }
-}
-
-impl View for LogRow {
-    fn draw(&self, printer: &Printer) {
-        if !self.matches {
-            return;
-        }
-
-        let bg = self.log.node_type.background_color();
-
-        printer.with_color(ColorStyle::new(Color::Rgb(0, 0, 0), bg), |printer| {
-            for y in 0..printer.size.y {
-                printer.print_hline((0, y), printer.size.x, " ");
-            }
-
-            printer.print((0, 0), &self.log.node_type.short_name().pad_to_width(4));
-            printer.print(
-                (4, 0),
-                &self.log.node_id.map_or(String::from("xxx"), |id| format!("{:0>3X}", id)),
-            );
-
-            if let Some(defmt_info) = &self.log.defmt {
-                printer.print_styled(
-                    (8, 0),
-                    &StyledString::single_span(
-                        defmt_info.log_level.to_string().pad_to_width(6),
-                        Style::from_color_style(ColorStyle::front(log_level_foreground_color(
-                            defmt_info.log_level,
-                        ))),
-                    ),
-                );
-                let timestamp = defmt_info
-                    .timestamp
-                    .map_or(String::new(), |t| format!("{:>8.3}", t));
-                printer.print_styled(
-                    (14, 0),
-                    &StyledString::single_span(
-                        timestamp,
-                        Style::from_color_style(ColorStyle::front(Color::Rgb(100, 100, 100))),
-                    ),
-                );
-            }
-
-            if printer.size.x > self.log_content_offset {
-                let log_content_width = printer.size.x - self.log_content_offset;
-                let mut i = 0;
-                for y in 0..(printer.size.y - if self.show_line_number { 1 } else { 0 }) {
-                    printer.print(
-                        (self.log_content_offset, y),
-                        &self.log.log_content
-                            [i..(i + log_content_width).min(self.log.log_content.len())],
-                    );
-                    i += log_content_width;
-                }
-            }
-
-            if self.show_line_number {
-                if let Some(DefmtLogInfo {
-                    location: Some(location),
-                    ..
-                }) = &self.log.defmt
-                {
-                    printer.print(
-                        (0, printer.size.y - 1),
-                        &format!(
-                            "└─ {} @ {}:{}",
-                            location.module_path, location.file_path, location.line_number
-                        ),
-                    );
-                } else {
-                    printer.print((0, printer.size.y - 1), "└─ Line number info not avaliable");
-                }
-            }
-        });
-    }
-
-    fn required_size(&mut self, constraint: Vec2) -> Vec2 {
-        self.matches = self.config.read().unwrap().matches(&self.log);
-        if !self.matches {
-            return Vec2::zero();
-        }
-
-        if constraint.x <= self.log_content_offset || self.log.log_content.len() == 0 {
-            return Vec2 {
-                x: constraint.x,
-                y: 1,
-            };
-        }
-
-        let log_content_width = constraint.x - self.log_content_offset;
-        let log_content_lines = (self.log.log_content.len() - 1) / log_content_width + 1;
-
-        return Vec2 {
-            x: constraint.x,
-            y: log_content_lines + if self.show_line_number { 1 } else { 0 },
-        };
-    }
-
-    fn layout(&mut self, size: Vec2) {
-        self.last_size = size;
-    }
-
-    fn on_event(&mut self, event: Event) -> EventResult {
-        if !self.matches {
-            return EventResult::Ignored;
-        }
-        match event {
-            Event::Mouse {
-                event: mouse_event,
-                position,
-                offset,
-            } if position.fits_in_rect(offset, self.last_size) => {
-                if mouse_event == MouseEvent::Release(MouseButton::Left) {
-                    self.show_line_number = !self.show_line_number;
-                    EventResult::Consumed(None)
-                } else if mouse_event == MouseEvent::WheelUp || mouse_event == MouseEvent::WheelDown
-                {
-                    EventResult::Consumed(Some(Callback::from_fn(move |s| {
-                        let mut logs_scroll_view = s
-                            .find_name::<ScrollView<NamedView<LinearLayout>>>("logs_scroll_view")
-                            .unwrap();
-
-                        scroll::on_event(
-                            &mut *logs_scroll_view,
-                            event.clone(),
-                            |_, __| EventResult::Ignored,
-                            |_, __| Rect::from_point(Vec2::zero()),
-                        );
-                    })))
-                } else {
-                    EventResult::Ignored
-                }
-            }
-            _ => EventResult::Ignored,
-        }
-    }
-
-    fn take_focus(&mut self, _: Direction) -> Result<EventResult, CannotFocus> {
-        Ok(EventResult::Consumed(None))
-    }
 }
 
 pub fn log_level_foreground_color(log_level: Level) -> Color {
