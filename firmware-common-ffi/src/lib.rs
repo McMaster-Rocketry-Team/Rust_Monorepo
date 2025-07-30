@@ -1,6 +1,8 @@
 #![no_std]
 #![allow(static_mut_refs)]
 
+use core::mem::{self, MaybeUninit, transmute};
+
 use firmware_common_new::can_bus::messages::payload_eps_status::{
     PayloadEPSOutputStatus, PayloadEPSStatusMessage,
 };
@@ -72,8 +74,6 @@ pub static ICARUS_STATUS_MESSAGE_TYPE: u8 = messages::ICARUS_STATUS_MESSAGE_TYPE
 pub static DATA_TRANSFER_MESSAGE_TYPE: u8 = messages::DATA_TRANSFER_MESSAGE_TYPE;
 #[unsafe(no_mangle)]
 pub static ACK_MESSAGE_TYPE: u8 = messages::ACK_MESSAGE_TYPE;
-#[unsafe(no_mangle)]
-pub static LOG_MESSAGE_TYPE: u8 = messages::LOG_MESSAGE_TYPE;
 
 #[repr(C)]
 pub struct CanBusFrames {
@@ -139,10 +139,53 @@ pub extern "C" fn encode_can_bus_message(
     }
 }
 
-static mut LOG_MULTIPLEXER: Option<LogMultiplexer> = None;
+struct BtDiagnosticInfra {
+    log_multiplexer: LogMultiplexer,
+    message_aggregator: CanBusMessageAggregator,
+}
+
+#[unsafe(no_mangle)]
+pub static BT_DIAGNOSTIC_INFRA_SIZE: usize = mem::size_of::<BtDiagnosticInfra>();
+
+static mut BT_DIAGNOSTIC_INFRA: Option<&'static mut BtDiagnosticInfra> = None;
+
+/// Initializes the bluetooth diagnostic infrastructure.
+///
+/// This function must be called before using `log_multiplexer_create_chunk` or 
+/// `message_aggregator_create_chunk`.
+///
+/// # Parameters
+/// - `ptr`: A pointer to memory that will be used to store the diagnostic infrastructure.
+///
+/// # Safety
+///
+/// The caller must ensure:
+/// - The pointer points to at least `BT_DIAGNOSTIC_INFRA_SIZE` bytes of memory
+/// - The pointer is aligned to 8 bytes (typically satisfied by malloc)
+/// - The pointer remains valid for the entire lifetime of the program
+/// - `init_bluetooth_diagnostic`, `log_multiplexer_create_chunk`, 
+///   `message_aggregator_create_chunk`, and `process_can_bus_frame` are not 
+///   invoked concurrently
+#[unsafe(no_mangle)]
+pub extern "C" fn init_bluetooth_diagnostic(ptr: *mut u8) {
+    unsafe {
+        if BT_DIAGNOSTIC_INFRA.is_none() {
+            let infra: &'static mut MaybeUninit<BtDiagnosticInfra> = transmute(ptr);
+            let infra = infra.write(BtDiagnosticInfra {
+                log_multiplexer: LogMultiplexer::new(),
+                message_aggregator: CanBusMessageAggregator::new(),
+            });
+
+            BT_DIAGNOSTIC_INFRA = Some(infra)
+        }
+    }
+}
 
 /// Creates a multiplexed log chunk for sending over bluetooth.
 /// The logs come from can bus frames processed by `process_can_bus_frame`
+///
+/// # Prerequisites
+/// - `init_bluetooth_diagnostic` must be called first
 ///
 /// # Parameters
 /// - `buffer`: A pointer to the buffer where the created chunk will be written to
@@ -153,25 +196,28 @@ static mut LOG_MULTIPLEXER: Option<LogMultiplexer> = None;
 ///
 /// # Safety
 ///
-/// The caller is responsible for ensuring `log_multiplexer_create_chunk` and
-/// `process_can_bus_frame` is not invoked concurrently
+/// The caller is responsible for ensuring `init_bluetooth_diagnostic`,
+/// `log_multiplexer_create_chunk`, `message_aggregator_create_chunk`, and
+/// `process_can_bus_frame` are not invoked concurrently
 #[unsafe(no_mangle)]
 pub extern "C" fn log_multiplexer_create_chunk(buffer: *mut u8, buffer_length: usize) -> usize {
     let log_multiplexer = unsafe {
-        if LOG_MULTIPLEXER.is_none() {
-            LOG_MULTIPLEXER = Some(LogMultiplexer::new())
+        if let Some(infra) = &mut BT_DIAGNOSTIC_INFRA {
+            &mut infra.log_multiplexer
+        } else {
+            return 0;
         }
-        LOG_MULTIPLEXER.as_mut().unwrap()
     };
 
     let buffer = unsafe { core::slice::from_raw_parts_mut(buffer, buffer_length) };
     log_multiplexer.create_chunk(buffer)
 }
 
-static mut MESSAGE_AGGREGATOR: Option<CanBusMessageAggregator> = None;
-
 /// Creates a aggregated can bus message chunk for sending over bluetooth.
 /// The messages come from can bus frames processed by `process_can_bus_frame`
+///
+/// # Prerequisites
+/// - `init_bluetooth_diagnostic` must be called first
 ///
 /// # Parameters
 /// - `buffer`: A pointer to the buffer where the created chunk will be written to
@@ -182,15 +228,17 @@ static mut MESSAGE_AGGREGATOR: Option<CanBusMessageAggregator> = None;
 ///
 /// # Safety
 ///
-/// The caller is responsible for ensuring `message_aggregator_create_chunk` and
-/// `process_can_bus_frame` is not invoked concurrently
+/// The caller is responsible for ensuring `init_bluetooth_diagnostic`,
+/// `message_aggregator_create_chunk`, `log_multiplexer_create_chunk`, and
+/// `process_can_bus_frame` are not invoked concurrently
 #[unsafe(no_mangle)]
 pub extern "C" fn message_aggregator_create_chunk(buffer: *mut u8, buffer_length: usize) -> usize {
     let message_aggregator = unsafe {
-        if MESSAGE_AGGREGATOR.is_none() {
-            MESSAGE_AGGREGATOR = Some(CanBusMessageAggregator::new())
+        if let Some(infra) = &mut BT_DIAGNOSTIC_INFRA {
+            &mut infra.message_aggregator
+        } else {
+            return 0;
         }
-        MESSAGE_AGGREGATOR.as_mut().unwrap()
     };
 
     let buffer = unsafe { core::slice::from_raw_parts_mut(buffer, buffer_length) };
@@ -226,8 +274,9 @@ pub enum ProcessCanBusFrameResult {
 ///
 /// # Safety
 ///
-/// The caller is responsible for ensuring `log_multiplexer_create_chunk`, `message_aggregator_create_chunk` and
-/// `process_can_bus_frame` is not invoked concurrently
+/// The caller is responsible for ensuring `init_bluetooth_diagnostic`,
+/// `log_multiplexer_create_chunk`, `message_aggregator_create_chunk`, and
+/// `process_can_bus_frame` are not invoked concurrently
 #[unsafe(no_mangle)]
 pub extern "C" fn process_can_bus_frame(
     timestamp: u64,
@@ -245,25 +294,19 @@ pub extern "C" fn process_can_bus_frame(
         CAN_DECODER.as_mut().unwrap()
     };
 
-    let log_multiplexer = unsafe {
-        if LOG_MULTIPLEXER.is_none() {
-            LOG_MULTIPLEXER = Some(LogMultiplexer::new())
-        }
-        LOG_MULTIPLEXER.as_mut().unwrap()
-    };
+    let infra = unsafe { &mut BT_DIAGNOSTIC_INFRA };
 
-    let message_aggregator = unsafe {
-        if MESSAGE_AGGREGATOR.is_none() {
-            MESSAGE_AGGREGATOR = Some(CanBusMessageAggregator::new())
-        }
-        MESSAGE_AGGREGATOR.as_mut().unwrap()
-    };
-
-    log_multiplexer.process_frame(&frame);
+    if let Some(infra) = infra.as_mut() {
+        infra.log_multiplexer.process_frame(&frame);
+    }
     match decoder.process_frame(&frame) {
         Some(m) => {
             let id = CanBusExtendedId::from_raw(id);
-            message_aggregator.process_message(&id, &m.data.message, timestamp);
+            if let Some(infra) = infra.as_mut() {
+                infra
+                    .message_aggregator
+                    .process_message(&id, &m.data.message, timestamp);
+            }
             ProcessCanBusFrameResult::Message {
                 timestamp,
                 id,
