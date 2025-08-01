@@ -11,11 +11,11 @@ use crate::{
 use anyhow::{Result, bail};
 use async_trait::async_trait;
 use firmware_common_new::can_bus::telemetry::message_aggregator::DecodedMessage;
-use log::{info, warn};
+use log::{Level, info, warn};
 use probe_rs::probe::list::Lister;
 use regex::Regex;
 use tokio::{
-    io::{AsyncBufReadExt as _, BufReader},
+    io::{AsyncBufReadExt as _, AsyncReadExt, BufReader},
     process::Command,
     sync::{broadcast, oneshot, watch},
 };
@@ -176,40 +176,67 @@ impl ConnectionMethod for ProbeConnectionMethod {
 
         let stdout = child.stdout.take().unwrap();
         let stderr = child.stderr.take().unwrap();
-        let reader = BufReader::new(stdout);
+        let mut reader = BufReader::new(stdout);
+        let mut stdout_buffer = String::new();
         let stderr_reader = BufReader::new(stderr);
-        let mut lines = reader.lines();
         let mut stderr_lines = stderr_reader.lines();
         let mut stderr = String::new();
-        let re = Regex::new(r">>>>>(.*?)\|\|\|\|\|(.*?)\|\|\|\|\|(.*?)\|\|\|\|\|(.*?)\|\|\|\|\|(.*?)\|\|\|\|\|(.*?)<<<<<").unwrap();
+        let re = Regex::new(r">>>>>((?s:.*?))\|\|\|\|\|((?s:.*?))\|\|\|\|\|((?s:.*?))\|\|\|\|\|((?s:.*?))\|\|\|\|\|((?s:.*?))\|\|\|\|\|((?s:.*?))<<<<<").unwrap();
         status_tx.send(MonitorStatus::Normal).ok();
 
+        let node_type = self.node_type;
+        let logs_tx2 = logs_tx.clone();
         let stdout_fut = async {
             let read_logs_future = async move {
-                while let Some(line) = lines.next_line().await.unwrap() {
-                    if let Some(cap) = re.captures(&line) {
+                while let Ok(c) = reader.read_u8().await {
+                    stdout_buffer.push(c as char);
+                    if stdout_buffer.ends_with("\n") && !stdout_buffer.starts_with(">>>>>"){
                         let log = TargetLog {
-                            node_type: self.node_type,
+                            node_type: node_type,
                             node_id: None,
-                            log_content: cap.get(1).unwrap().as_str().to_string(),
+                            log_content: stdout_buffer[0..(stdout_buffer.len()-1)].into(),
                             defmt: Some(DefmtLogInfo {
-                                location: Some(DefmtLocationInfo {
-                                    file_path: cap.get(2).unwrap().as_str().to_string(),
-                                    line_number: cap.get(3).unwrap().as_str().to_string(),
-                                    module_path: cap.get(5).unwrap().as_str().to_string(),
-                                }),
-                                log_level: parse_log_level(cap.get(4).unwrap().as_str()),
-                                timestamp: cap.get(6).unwrap().as_str().parse::<f64>().ok(),
+                                location: None,
+                                log_level: Level::Warn,
+                                timestamp: None,
                             }),
                         };
-                        logs_tx.send(log).ok();
+                        logs_tx2.send(log).ok();
+                        stdout_buffer.clear();
+                    }
+                    if stdout_buffer.ends_with(">>>>>") {
+                        stdout_buffer = ">>>>>".into();
+                    }
+                    if stdout_buffer.ends_with("<<<<<") {
+                        if let Some(cap) = re.captures(&stdout_buffer) {
+                            let log = TargetLog {
+                                node_type: node_type,
+                                node_id: None,
+                                log_content: cap.get(1).unwrap().as_str().to_string(),
+                                defmt: Some(DefmtLogInfo {
+                                    location: Some(DefmtLocationInfo {
+                                        file_path: cap.get(2).unwrap().as_str().to_string(),
+                                        line_number: cap.get(3).unwrap().as_str().to_string(),
+                                        module_path: cap.get(5).unwrap().as_str().to_string(),
+                                    }),
+                                    log_level: parse_log_level(cap.get(4).unwrap().as_str()),
+                                    timestamp: cap.get(6).unwrap().as_str().parse::<f64>().ok(),
+                                }),
+                            };
+                            logs_tx2.send(log).ok();
+                        }
+                        stdout_buffer.clear();
                     }
                 }
             };
 
             tokio::select! {
-                _ = read_logs_future => {},
-                _ = stop_rx => {},
+                _ = read_logs_future => {
+                    info!("read_logs_future stopped");
+                },
+                _ = stop_rx => {
+                    info!("stop_rx stopped");
+                },
             }
 
             child.kill().await.ok();
@@ -217,10 +244,34 @@ impl ConnectionMethod for ProbeConnectionMethod {
 
         let stderr_fut = async {
             while let Some(line) = stderr_lines.next_line().await.unwrap() {
+                warn!("stderr: {}", line);
                 stderr.push_str(&line);
                 stderr.push('\n');
             }
+            info!("stderr_fut stopped");
         };
+
+        // let exit_status_fut = async {
+        //     loop {
+        //         sleep(Duration::from_millis(500)).await;
+        //         let result = child.try_wait();
+        //         info!("try wait: {:?}", result);
+        //         if let Ok(Some(status)) = result {
+        //             let log = TargetLog {
+        //                 node_type: self.node_type,
+        //                 node_id: None,
+        //                 log_content: format!("probe-rs existed with status {}", status),
+        //                 defmt: Some(DefmtLogInfo {
+        //                     location: None,
+        //                     log_level: Level::Warn,
+        //                     timestamp: None,
+        //                 }),
+        //             };
+        //             logs_tx.send(log).ok();
+        //             break;
+        //         };
+        //     }
+        // };
 
         tokio::join!(stdout_fut, stderr_fut);
 
@@ -229,5 +280,30 @@ impl ConnectionMethod for ProbeConnectionMethod {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_defmt_log_regex() {
+        let re = Regex::new(r">>>>>((?s:.*?))\|\|\|\|\|((?s:.*?))\|\|\|\|\|((?s:.*?))\|\|\|\|\|((?s:.*?))\|\|\|\|\|((?s:.*?))\|\|\|\|\|((?s:.*?))<<<<<").unwrap();
+
+        let test_log =
+            ">>>>>test\n\rmessage|||||src/main.rs|||||123|||||INFO|||||my_module|||||1.234<<<<<";
+        let captures = re.captures(test_log).unwrap();
+
+        assert_eq!(captures.get(1).unwrap().as_str(), "test\n\rmessage");
+        assert_eq!(captures.get(2).unwrap().as_str(), "src/main.rs");
+        assert_eq!(captures.get(3).unwrap().as_str(), "123");
+        assert_eq!(captures.get(4).unwrap().as_str(), "INFO");
+        assert_eq!(captures.get(5).unwrap().as_str(), "my_module");
+        assert_eq!(captures.get(6).unwrap().as_str(), "1.234");
+
+        // Test that regex doesn't match invalid format
+        let invalid_log = ">>>>missing separators and closing<<<<<";
+        assert!(re.captures(invalid_log).is_none());
     }
 }
