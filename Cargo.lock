@@ -191,7 +191,7 @@ dependencies = [
  "java-bindgen",
  "libm 0.2.15",
  "log",
- "nalgebra 0.33.2",
+ "nalgebra 0.34.0",
  "serde",
 ]
 
@@ -4312,6 +4312,20 @@ dependencies = [
  "approx",
  "matrixmultiply",
  "nalgebra-macros",
+ "num-complex",
+ "num-rational",
+ "num-traits",
+ "simba 0.9.0",
+ "typenum",
+]
+
+[[package]]
+name = "nalgebra"
+version = "0.34.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9cd59afb6639828b33677758314a4a1a745c15c02bc597095b851c8fd915cf49"
+dependencies = [
+ "approx",
  "num-complex",
  "num-rational",
  "num-traits",

@@ -1,49 +1,86 @@
-use nalgebra::{Const, Matrix, Quaternion, SVector, UnitQuaternion, Vector3, ViewStorageMut};
+use nalgebra::{
+    Const, Matrix, Quaternion, SMatrix, SVector, UnitQuaternion, Vector3, Vector4, ViewStorage,
+};
 
 pub struct RocketState(pub SVector<f32, 15>);
 
-type VectorViewMut<'a, const R: usize> = Matrix<
-    f32,
-    Const<R>,
-    Const<1>,
-    ViewStorageMut<'a, f32, Const<R>, Const<1>, Const<1>, Const<15>>,
->;
+type VectorView<'a, const R: usize> =
+    Matrix<f32, Const<R>, Const<1>, ViewStorage<'a, f32, Const<R>, Const<1>, Const<1>, Const<15>>>;
 
 // ENU
 impl RocketState {
-    pub fn new() -> Self {
-        RocketState(SVector::zeros())
+    pub fn new(
+        small_angle_correction: &Vector3<f32>,
+        velocity: &Vector3<f32>,
+        angular_velocity: &Vector3<f32>,
+        altitude_agl: f32,
+        sideways_moment_co: f32,
+        drag_coefficients: &Vector4<f32>,
+    ) -> Self {
+        let mut state = SVector::zeros();
+
+        // Small angle correction (indices 0-2)
+        state[0] = small_angle_correction[0];
+        state[1] = small_angle_correction[1];
+        state[2] = small_angle_correction[2];
+
+        // Velocity (indices 3-5)
+        state[3] = velocity[0];
+        state[4] = velocity[1];
+        state[5] = velocity[2];
+
+        // Angular velocity (indices 6-8)
+        state[6] = angular_velocity[0];
+        state[7] = angular_velocity[1];
+        state[8] = angular_velocity[2];
+
+        // Altitude AGL (index 9)
+        state[9] = altitude_agl;
+
+        // Sideways moment coefficient (index 10)
+        state[10] = sideways_moment_co;
+
+        // Drag coefficients (indices 11-14)
+        state[11] = drag_coefficients[0];
+        state[12] = drag_coefficients[1];
+        state[13] = drag_coefficients[2];
+        state[14] = drag_coefficients[3];
+
+        RocketState(state)
     }
 
-    pub fn delta_orientation(&mut self) -> VectorViewMut<'_, 3> {
-        self.0.fixed_view_mut::<3, 1>(0, 0)
+    pub fn small_angle_correction(&self) -> VectorView<'_, 3> {
+        self.0.fixed_view::<3, 1>(0, 0)
     }
 
-    pub fn velocity(&mut self) -> VectorViewMut<'_, 3> {
-        self.0.fixed_view_mut::<3, 1>(3, 0)
+    pub fn velocity(&self) -> VectorView<'_, 3> {
+        self.0.fixed_view::<3, 1>(3, 0)
     }
 
-    pub fn angular_velocity(&mut self) -> VectorViewMut<'_, 3> {
-        self.0.fixed_view_mut::<3, 1>(6, 0)
+    pub fn angular_velocity(&self) -> VectorView<'_, 3> {
+        self.0.fixed_view::<3, 1>(6, 0)
     }
 
-    pub fn altitude(&mut self) -> &mut f32 {
-        &mut self.0[9]
+    pub fn altitude_agl(&self) -> f32 {
+        self.0[9]
     }
 
-    pub fn side_ways_moment_coefficient(&mut self) -> &mut f32 {
-        &mut self.0[10]
+    pub fn sideways_moment_co(&self) -> f32 {
+        self.0[10]
     }
 
-    pub fn drag_coefficients(&mut self) -> VectorViewMut<'_, 4> {
-        self.0.fixed_view_mut::<4, 1>(11, 0)
+    pub fn drag_coefficients(&self) -> VectorView<'_, 4> {
+        self.0.fixed_view::<4, 1>(11, 0)
     }
 }
 
-pub struct StatePropagationConstants {
-    pub dt: f32,
+pub struct Derivative<T>(pub T);
+
+pub struct StateDerivativeConstants {
     pub launch_site_altitude_asl: f32,
     pub side_cd: f32,
+    pub burn_out_mass: f32,
+    pub moment_of_inertia: f32,
 }
 
 /// returns air density (kg/m^3) and speed of sound (m/s) at altitude (m)
@@ -71,87 +108,113 @@ fn lerp(
     (1.0 - t) * drag_coefficients[i] + t * drag_coefficients[i + 1]
 }
 
-fn signed_square(f: f32) -> f32 {
-    let sign = f.signum();
-    f * f * sign
-}
-
-pub fn propagate_state(
-    constants: &StatePropagationConstants,
-    mut orientation: UnitQuaternion<f32>,
-    RocketState(state): &RocketState,
+pub fn calculate_state_derivative(
     airbrakes_extention: f32, // 0-1
-) -> RocketState {
-    let delta_orientation = state.fixed_view::<3, 1>(0, 0);
-    // velocity relative to wind
-    let velocity = state.fixed_view::<3, 1>(3, 0);
-    let _angular_velocity = state.fixed_view::<3, 1>(6, 0);
-    let altitude = state[9];
-    let side_ways_moment_coefficient = state[10];
-    let drag_coefficients = state.fixed_view::<4, 1>(11, 0);
-    let (air_density, _) = approximate_air_density(constants.launch_site_altitude_asl + altitude);
+    orientation: UnitQuaternion<f32>,
+    state: &RocketState,
+    constants: &StateDerivativeConstants,
+) -> Derivative<RocketState> {
+    let altitude_asl = state.altitude_agl() + constants.launch_site_altitude_asl;
+    let (air_density, _) = approximate_air_density(altitude_asl);
 
-    // apply small angle correction to the orientation quaternion
-    let delta_orientation_quaternion: Quaternion<f32> =
-        Quaternion::from_parts(1.0, delta_orientation / 2.0);
-    let orientation_inner = orientation.as_mut_unchecked();
-    *orientation_inner = *orientation_inner * delta_orientation_quaternion;
-    orientation.renormalize();
-    let orientation_inv = orientation.inverse();
+    let delta_orientation = UnitQuaternion::from_quaternion(Quaternion::from_parts(
+        1.0,
+        -state.small_angle_correction() / 2.0,
+    ));
+    let true_orientation = delta_orientation * orientation;
 
-    let wind_velocity_rocket_frame = -orientation.transform_vector(&velocity.into());
+    let wind_vel_rocket_frame =
+        -true_orientation.inverse_transform_vector(&state.velocity().into());
 
     // calculate drag coefficient
-    let forward_cd = lerp(airbrakes_extention, drag_coefficients.as_slice());
+    let forward_cd = lerp(airbrakes_extention, state.drag_coefficients().as_slice());
     // cd is pre-divided by the mass
     let cd = Vector3::new(constants.side_cd, constants.side_cd, forward_cd);
 
-    // calculate linear acceleration
-    let acceleration_rocket_frame = 0.5f32
-        * air_density
-        * wind_velocity_rocket_frame
-            .map(signed_square)
+    let acc_rocket_frame = 0.5 * air_density / constants.burn_out_mass
+        * wind_vel_rocket_frame
+            .component_mul(&wind_vel_rocket_frame.abs())
             .component_mul(&cd);
-    let mut acceleration_world_frame = orientation_inv.transform_vector(&acceleration_rocket_frame);
-    acceleration_world_frame.z -= 9.81;
+    let mut acc_world_frame = true_orientation.transform_vector(&acc_rocket_frame);
+    acc_world_frame.z -= 9.81;
 
-    // calculate angular acceleration
     let mut angular_acceleration_rocket_frame = Vector3::<f32>::zeros();
-    // side_ways_moment_coefficient is pre-divided by the moment of inertia
-    angular_acceleration_rocket_frame.x = 0.5f32
-        * air_density
-        * signed_square(wind_velocity_rocket_frame.y)
-        * side_ways_moment_coefficient;
-    angular_acceleration_rocket_frame.y = -0.5f32
-        * air_density
-        * signed_square(wind_velocity_rocket_frame.x)
-        * side_ways_moment_coefficient;
+    angular_acceleration_rocket_frame.x = 0.5 * air_density / constants.moment_of_inertia
+        * wind_vel_rocket_frame.y
+        * wind_vel_rocket_frame.y.abs()
+        * state.sideways_moment_co();
+    angular_acceleration_rocket_frame.y = -0.5 * air_density / constants.moment_of_inertia
+        * wind_vel_rocket_frame.x
+        * wind_vel_rocket_frame.x.abs()
+        * state.sideways_moment_co();
+
     let angular_acceleration_world_frame =
-        orientation_inv.transform_vector(&angular_acceleration_rocket_frame);
+        true_orientation.transform_vector(&angular_acceleration_rocket_frame);
 
-    // calculate new state
-    let mut new_state = RocketState(state.clone());
-    // update velocity
-    let mut velocity = new_state.velocity();
-    velocity += acceleration_world_frame * constants.dt;
+    let angular_velocity_rocket_frame =
+        true_orientation.inverse_transform_vector(&state.angular_velocity().into());
 
-    // update altitude
-    *new_state.altitude() += velocity.z * constants.dt;
+    Derivative(RocketState::new(
+        &angular_velocity_rocket_frame,
+        &acc_world_frame,
+        &angular_acceleration_world_frame,
+        state.velocity().z,
+        0.0,
+        &Vector4::zeros(),
+    ))
+}
 
-    // update angular velocity
-    let mut angular_velocity = new_state.angular_velocity();
-    angular_velocity += angular_acceleration_world_frame * constants.dt;
+pub fn central_difference_jacobian(
+    airbrakes_ext: f32,
+    orientation: UnitQuaternion<f32>,
+    state: &RocketState,
+    constants: &StateDerivativeConstants,
+) -> SMatrix<f32, 15, 15> {
+    let x0 = state.0;
 
-    // update delta_orientation
-    let temp = angular_velocity * constants.dt;
-    let mut delta_orientation = new_state.delta_orientation();
-    delta_orientation += temp;
+    let mut j_mat = SMatrix::<f32, 15, 15>::zeros();
 
-    new_state
+    for j in 0..15 {
+        // TODO tune
+        let delta = match j {
+            0..3 => 0.1f32.to_radians(),
+            3..6 => 0.1f32.max(x0[j].abs() * 0.001),
+            6..9 => 1f32.to_radians(),
+            9 => 0.5f32,
+            10 => 0.001f32,
+            11..15 => 0.01f32,
+            _ => 0f32,
+        };
+
+        // x+δ
+        let mut x_plus = x0;
+        x_plus[j] += delta;
+        let f_plus =
+            calculate_state_derivative(airbrakes_ext, orientation, &RocketState(x_plus), constants);
+        let f_plus_vec = f_plus.0.0;
+
+        // x-δ
+        let mut x_minus = x0;
+        x_minus[j] -= delta;
+        let f_minus = calculate_state_derivative(
+            airbrakes_ext,
+            orientation,
+            &RocketState(x_minus),
+            constants,
+        );
+        let f_minus_vec = f_minus.0.0;
+
+        // central difference: (f+ − f−) / (2δ)
+        j_mat.set_column(j, &((f_plus_vec - f_minus_vec) / (2.0 * delta)));
+    }
+
+    j_mat
 }
 
 #[cfg(test)]
 mod test {
+    use core::hint::black_box;
+
     use approx::assert_relative_eq;
     use nalgebra::UnitVector3;
 
@@ -220,7 +283,51 @@ mod test {
     }
 
     #[test]
-    fn propagation_test_straight_up() {
-        // let mut state = RocketState()
+    fn jacobian_benchmark() {
+        use std::time::Instant;
+        
+        init_logger();
+        
+        // Create arbitrary but realistic test data
+        let airbrakes_ext = 0.5f32; // 50% extension
+        
+        let orientation = UnitQuaternion::from_axis_angle(
+            &UnitVector3::new_normalize(Vector3::new(0.1, 0.2, 0.9)),
+            15f32.to_radians(),
+        );
+        
+        let state = RocketState::new(
+            &Vector3::new(0.01, -0.02, 0.005), // small angle correction (radians)
+            &Vector3::new(2.0, -1.5, 45.0),    // velocity (m/s)
+            &Vector3::new(0.1, -0.05, 0.02),   // angular velocity (rad/s)
+            1200.0,                             // altitude AGL (m)
+            0.8,                                // sideways moment coefficient
+            &Vector4::new(0.4, 0.6, 0.8, 1.0), // drag coefficients
+        );
+        
+        let constants = StateDerivativeConstants {
+            launch_site_altitude_asl: 500.0,   // launch site altitude (m)
+            side_cd: 0.02,                     // side drag coefficient
+            burn_out_mass: 25.0,               // mass (kg)
+            moment_of_inertia: 2.5,            // moment of inertia (kg⋅m²)
+        };
+                
+        // Benchmark multiple runs
+        let num_runs = 100;
+        let start_time = Instant::now();
+        
+        for _ in 0..num_runs {
+            let _ = black_box(central_difference_jacobian(black_box(airbrakes_ext), black_box(orientation), black_box(&state), black_box(&constants)));
+        }
+        
+        let total_duration = start_time.elapsed();
+        let avg_duration = total_duration / num_runs;
+        
+        log_info!("Jacobian computation benchmark:");
+        log_info!("  Total time for {} runs: {:?}", num_runs, total_duration);
+        log_info!("  Average time per run: {:?}", avg_duration);
+        log_info!("  Average time per run (microseconds): {:.2}", avg_duration.as_micros());
+
+        log_info!("jacobian: {:?}", central_difference_jacobian(airbrakes_ext, orientation, &state, &constants));
     }
 }
