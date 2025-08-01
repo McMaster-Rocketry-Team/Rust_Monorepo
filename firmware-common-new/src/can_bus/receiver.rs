@@ -223,7 +223,7 @@ impl<const Q: usize> CanBusMultiFrameDecoder<Q> {
 }
 
 /// N: number of messages buffered
-/// 
+///
 /// SUBS: number of subscriptions
 pub struct CanReceiver<M: RawMutex, const N: usize, const SUBS: usize> {
     channel: PubSubChannel<M, SensorReading<BootTimestamp, ReceivedCanBusMessage>, N, SUBS, 1>,
@@ -273,6 +273,7 @@ impl<M: RawMutex, const N: usize, const SUBS: usize> CanReceiver<M, N, SUBS> {
 mod tests {
     use crate::{
         can_bus::{
+            custom_status::ozys_custom_status::OzysCustomStatus,
             messages::{
                 amp_status::PowerOutputStatus,
                 node_status::{NodeHealth, NodeMode, NodeStatusMessage},
@@ -289,12 +290,12 @@ mod tests {
     fn single_frame_encode_and_decode() {
         init_logger();
 
-        let message = CanBusMessageEnum::NodeStatus(NodeStatusMessage {
-            uptime_s: 10,
-            health: NodeHealth::Healthy,
-            mode: NodeMode::Operational,
-            custom_status: 123,
-        });
+        let message = CanBusMessageEnum::NodeStatus(NodeStatusMessage::new(
+            10,
+            NodeHealth::Healthy,
+            NodeMode::Maintenance,
+            OzysCustomStatus::new(false, false, false, false, false, 0.0),
+        ));
 
         let id = message.get_id(0, 1);
         let id: u32 = id.into();

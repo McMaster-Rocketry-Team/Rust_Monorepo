@@ -3,17 +3,13 @@ use ack::AckMessage;
 #[cfg(not(feature = "bootloader"))]
 use amp_control::AmpControlMessage;
 #[cfg(not(feature = "bootloader"))]
-use amp_reset_output::AmpResetOutputMessage;
-#[cfg(not(feature = "bootloader"))]
 use amp_overwrite::AmpOverwriteMessage;
+#[cfg(not(feature = "bootloader"))]
+use amp_reset_output::AmpResetOutputMessage;
 #[cfg(not(feature = "bootloader"))]
 use amp_status::AmpStatusMessage;
 #[cfg(not(feature = "bootloader"))]
-use vl_status::VLStatusMessage;
-#[cfg(not(feature = "bootloader"))]
 use baro_measurement::BaroMeasurementMessage;
-#[cfg(not(feature = "bootloader"))]
-use mag_measurement::MagMeasurementMessage;
 #[cfg(not(feature = "bootloader"))]
 use brightness_measurement::BrightnessMeasurementMessage;
 use core::fmt::Debug;
@@ -22,7 +18,11 @@ use data_transfer::DataTransferMessage;
 use icarus_status::IcarusStatusMessage;
 #[cfg(not(feature = "bootloader"))]
 use imu_measurement::IMUMeasurementMessage;
+#[cfg(not(feature = "bootloader"))]
+use mag_measurement::MagMeasurementMessage;
 use node_status::NodeStatusMessage;
+#[cfg(not(feature = "bootloader"))]
+use ozys_measurement::OzysMeasurementMessage;
 #[cfg(not(feature = "bootloader"))]
 use payload_eps_output_overwrite::PayloadEPSOutputOverwriteMessage;
 #[cfg(not(feature = "bootloader"))]
@@ -32,6 +32,8 @@ use reset::ResetMessage;
 use rocket_state::RocketStateMessage;
 #[cfg(not(feature = "bootloader"))]
 use unix_time::UnixTimeMessage;
+#[cfg(not(feature = "bootloader"))]
+use vl_status::VLStatusMessage;
 
 use super::id::{CanBusExtendedId, CanBusMessageTypeFlag, create_can_bus_message_type};
 
@@ -39,17 +41,13 @@ pub mod ack;
 #[cfg(not(feature = "bootloader"))]
 pub mod amp_control;
 #[cfg(not(feature = "bootloader"))]
-pub mod amp_reset_output;
-#[cfg(not(feature = "bootloader"))]
 pub mod amp_overwrite;
+#[cfg(not(feature = "bootloader"))]
+pub mod amp_reset_output;
 #[cfg(not(feature = "bootloader"))]
 pub mod amp_status;
 #[cfg(not(feature = "bootloader"))]
-pub mod vl_status;
-#[cfg(not(feature = "bootloader"))]
 pub mod baro_measurement;
-#[cfg(not(feature = "bootloader"))]
-pub mod mag_measurement;
 #[cfg(not(feature = "bootloader"))]
 pub mod brightness_measurement;
 pub mod data_transfer;
@@ -57,7 +55,11 @@ pub mod data_transfer;
 pub mod icarus_status;
 #[cfg(not(feature = "bootloader"))]
 pub mod imu_measurement;
+#[cfg(not(feature = "bootloader"))]
+pub mod mag_measurement;
 pub mod node_status;
+#[cfg(not(feature = "bootloader"))]
+pub mod ozys_measurement;
 #[cfg(not(feature = "bootloader"))]
 pub mod payload_eps_output_overwrite;
 #[cfg(not(feature = "bootloader"))]
@@ -67,6 +69,8 @@ pub mod reset;
 pub mod rocket_state;
 #[cfg(not(feature = "bootloader"))]
 pub mod unix_time;
+#[cfg(not(feature = "bootloader"))]
+pub mod vl_status;
 
 pub const RESET_MESSAGE_TYPE: u8 = create_can_bus_message_type(
     CanBusMessageTypeFlag {
@@ -147,6 +151,16 @@ pub const BRIGHTNESS_MEASUREMENT_MESSAGE_TYPE: u8 = create_can_bus_message_type(
         is_misc: false,
     },
     2,
+);
+pub const OZYS_MEASUREMENT_MESSAGE_TYPE: u8 = create_can_bus_message_type(
+    CanBusMessageTypeFlag {
+        is_measurement: true,
+        is_control: false,
+        is_status: false,
+        is_data: false,
+        is_misc: false,
+    },
+    5,
 );
 pub const AMP_STATUS_MESSAGE_TYPE: u8 = create_can_bus_message_type(
     CanBusMessageTypeFlag {
@@ -289,6 +303,8 @@ pub enum CanBusMessageEnum {
     MagMeasurement(MagMeasurementMessage),
     #[cfg(not(feature = "bootloader"))]
     BrightnessMeasurement(BrightnessMeasurementMessage),
+    #[cfg(not(feature = "bootloader"))]
+    OzysMeasurement(OzysMeasurementMessage),
 
     #[cfg(not(feature = "bootloader"))]
     AmpStatus(AmpStatusMessage),
@@ -333,6 +349,8 @@ impl CanBusMessageEnum {
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::BrightnessMeasurement(m) => m.priority(),
             #[cfg(not(feature = "bootloader"))]
+            CanBusMessageEnum::OzysMeasurement(m) => m.priority(),
+            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::AmpStatus(m) => m.priority(),
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::AmpOverwrite(m) => m.priority(),
@@ -371,6 +389,9 @@ impl CanBusMessageEnum {
             CanBusMessageEnum::MagMeasurement(_) => MAG_MEASUREMENT_MESSAGE_TYPE,
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::BrightnessMeasurement(_) => BRIGHTNESS_MEASUREMENT_MESSAGE_TYPE,
+            #[cfg(not(feature = "bootloader"))]
+            CanBusMessageEnum::OzysMeasurement(_) => OZYS_MEASUREMENT_MESSAGE_TYPE,
+
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::AmpStatus(_) => AMP_STATUS_MESSAGE_TYPE,
             #[cfg(not(feature = "bootloader"))]
@@ -419,6 +440,8 @@ impl CanBusMessageEnum {
                 Some(BrightnessMeasurementMessage::serialized_len())
             }
             #[cfg(not(feature = "bootloader"))]
+            OZYS_MEASUREMENT_MESSAGE_TYPE => Some(OzysMeasurementMessage::serialized_len()),
+            #[cfg(not(feature = "bootloader"))]
             AMP_STATUS_MESSAGE_TYPE => Some(AmpStatusMessage::serialized_len()),
             #[cfg(not(feature = "bootloader"))]
             AMP_OVERWRITE_MESSAGE_TYPE => Some(AmpOverwriteMessage::serialized_len()),
@@ -460,6 +483,8 @@ impl CanBusMessageEnum {
             CanBusMessageEnum::MagMeasurement(m) => m.serialize(buffer),
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::BrightnessMeasurement(m) => m.serialize(buffer),
+            #[cfg(not(feature = "bootloader"))]
+            CanBusMessageEnum::OzysMeasurement(m) => m.serialize(buffer),
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::AmpStatus(m) => m.serialize(buffer),
             #[cfg(not(feature = "bootloader"))]
@@ -511,6 +536,10 @@ impl CanBusMessageEnum {
             #[cfg(not(feature = "bootloader"))]
             BRIGHTNESS_MEASUREMENT_MESSAGE_TYPE => BrightnessMeasurementMessage::deserialize(data)
                 .map(CanBusMessageEnum::BrightnessMeasurement),
+            #[cfg(not(feature = "bootloader"))]
+            OZYS_MEASUREMENT_MESSAGE_TYPE => {
+                OzysMeasurementMessage::deserialize(data).map(CanBusMessageEnum::OzysMeasurement)
+            }
 
             #[cfg(not(feature = "bootloader"))]
             AMP_STATUS_MESSAGE_TYPE => {

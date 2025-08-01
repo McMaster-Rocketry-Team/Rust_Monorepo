@@ -370,12 +370,11 @@ mod test {
             (
                 CanBusExtendedId::new(5, NODE_STATUS_MESSAGE_TYPE, AMP_NODE_TYPE, 2),
                 2,
-                CanBusMessageEnum::NodeStatus(NodeStatusMessage {
-                    uptime_s: 10,
-                    health: NodeHealth::Healthy,
-                    mode: NodeMode::Maintenance,
-                    custom_status: 0,
-                }),
+                CanBusMessageEnum::NodeStatus(NodeStatusMessage::new_no_custom_status(
+                    10,
+                    NodeHealth::Healthy,
+                    NodeMode::Maintenance,
+                )),
             ),
             (
                 CanBusExtendedId::new(5, IMU_MEASUREMENT_MESSAGE_TYPE, VOID_LAKE_NODE_TYPE, 1),

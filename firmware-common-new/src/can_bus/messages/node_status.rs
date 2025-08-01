@@ -1,10 +1,14 @@
 use packed_struct::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use crate::can_bus::custom_status::{NodeCustomStatus, NodeCustomStatusExt};
+
 use super::{CanBusMessage, CanBusMessageEnum};
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
-#[derive(PrimitiveEnum_u8, Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(
+    PrimitiveEnum_u8, Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize,
+)]
 #[repr(C)]
 pub enum NodeHealth {
     /// The node is functioning properly.
@@ -18,7 +22,9 @@ pub enum NodeHealth {
 }
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
-#[derive(PrimitiveEnum_u8, Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(
+    PrimitiveEnum_u8, Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize,
+)]
 #[repr(C)]
 pub enum NodeMode {
     /// Normal operating mode.
@@ -47,10 +53,39 @@ pub struct NodeStatusMessage {
     pub health: NodeHealth,
     #[packed_field(bits = "26..28", ty = "enum")]
     pub mode: NodeMode,
-    
+
     /// Node specific status, only the lower 11 bits are used.
     #[packed_field(bits = "28..39")]
-    pub custom_status: u16,
+    custom_status_raw: u16,
+}
+
+impl NodeStatusMessage {
+    pub fn new(
+        uptime_s: u32,
+        health: NodeHealth,
+        mode: NodeMode,
+        status: impl NodeCustomStatusExt,
+    ) -> Self {
+        Self {
+            uptime_s,
+            health,
+            mode,
+            custom_status_raw: status.to_u16(),
+        }
+    }
+
+    pub fn new_no_custom_status(uptime_s: u32, health: NodeHealth, mode: NodeMode) -> Self {
+        Self {
+            uptime_s,
+            health,
+            mode,
+            custom_status_raw: 0,
+        }
+    }
+
+    pub fn custom_status<T: NodeCustomStatusExt>(&self) -> T {
+        T::from_u16(self.custom_status_raw)
+    }
 }
 
 impl CanBusMessage for NodeStatusMessage {

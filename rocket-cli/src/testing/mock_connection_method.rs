@@ -12,9 +12,9 @@ use anyhow::Result;
 use async_trait::async_trait;
 use firmware_common_new::can_bus::{
     messages::{
-        vl_status::{VLStatusMessage, FlightStage},
         baro_measurement::BaroMeasurementMessage,
         node_status::{NodeHealth, NodeMode, NodeStatusMessage},
+        vl_status::{FlightStage, VLStatusMessage},
     },
     node_types::{OZYS_NODE_TYPE, VOID_LAKE_NODE_TYPE},
     telemetry::message_aggregator::DecodedMessage,
@@ -33,9 +33,7 @@ impl ConnectionMethod for MockConnectionMethod {
         String::from("Mock Connection")
     }
 
-    async fn download(
-        &mut self,
-    ) -> Result<()> {
+    async fn download(&mut self) -> Result<()> {
         info!("Downloading.....");
         sleep(Duration::from_secs(1)).await;
         info!("Download done");
@@ -121,12 +119,11 @@ impl ConnectionMethod for MockConnectionMethod {
                 .send(DecodedMessage {
                     node_type: VOID_LAKE_NODE_TYPE,
                     node_id: 0xAB,
-                    message: NodeStatusMessage {
-                        uptime_s: void_lake_uptime_s,
-                        health: NodeHealth::Healthy,
-                        mode: NodeMode::Operational,
-                        custom_status: 0,
-                    }
+                    message: NodeStatusMessage::new_no_custom_status(
+                        void_lake_uptime_s,
+                        NodeHealth::Healthy,
+                        NodeMode::Operational,
+                    )
                     .into(),
                     count: 2,
                 })
@@ -158,12 +155,11 @@ impl ConnectionMethod for MockConnectionMethod {
                 .send(DecodedMessage {
                     node_type: OZYS_NODE_TYPE,
                     node_id: 0xFAF,
-                    message: NodeStatusMessage {
-                        uptime_s: ozys_uptime_s,
-                        health: NodeHealth::Healthy,
-                        mode: NodeMode::Operational,
-                        custom_status: 0,
-                    }
+                    message: NodeStatusMessage::new_no_custom_status(
+                        ozys_uptime_s,
+                        NodeHealth::Healthy,
+                        NodeMode::Operational,
+                    )
                     .into(),
                     count: 2,
                 })

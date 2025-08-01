@@ -1,3 +1,4 @@
+use core::f32;
 use std::{sync::RwLock, time::Instant};
 
 use convert_case::{Case, Casing};
@@ -130,6 +131,7 @@ impl MessageRow {
             CanBusMessageEnum::IMUMeasurement(_) => "IMU Measurement",
             CanBusMessageEnum::MagMeasurement(_) => "Mag Measurement",
             CanBusMessageEnum::BrightnessMeasurement(_) => "Brightness Measurement",
+            CanBusMessageEnum::OzysMeasurement(_) => "OZYS Measurement",
             CanBusMessageEnum::AmpStatus(_) => "AMP Status",
             CanBusMessageEnum::AmpOverwrite(_) => "AMP Overwrite",
             CanBusMessageEnum::AmpControl(_) => "AMP Control",
@@ -337,6 +339,32 @@ impl MessageRow {
                     false,
                     format!("{:>10.2}", m.brightness_lux()).into(),
                 )],
+            ),
+            CanBusMessageEnum::OzysMeasurement(m) => self.draw_fields(
+                printer,
+                1,
+                &[
+                    (
+                        "sg 1",
+                        false,
+                        format!("{:>8.5}", m.sg_1().unwrap_or(f32::NAN)).into(),
+                    ),
+                    (
+                        "sg 2",
+                        false,
+                        format!("{:>8.5}", m.sg_2().unwrap_or(f32::NAN)).into(),
+                    ),
+                    (
+                        "sg 3",
+                        false,
+                        format!("{:>8.5}", m.sg_3().unwrap_or(f32::NAN)).into(),
+                    ),
+                    (
+                        "sg 4",
+                        false,
+                        format!("{:>8.5}", m.sg_4().unwrap_or(f32::NAN)).into(),
+                    ),
+                ],
             ),
             CanBusMessageEnum::AmpStatus(m) => self.draw_fields(
                 printer,
