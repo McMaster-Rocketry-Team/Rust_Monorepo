@@ -185,6 +185,7 @@ name = "air-brakes-controller-core"
 version = "0.1.0"
 dependencies = [
  "approx",
+ "csv",
  "defmt 1.0.1",
  "env_logger",
  "heapless 0.8.0",
@@ -192,6 +193,7 @@ dependencies = [
  "libm 0.2.15",
  "log",
  "nalgebra 0.34.0",
+ "plotters",
  "serde",
 ]
 

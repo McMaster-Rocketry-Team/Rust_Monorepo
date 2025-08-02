@@ -2,7 +2,13 @@ use core::hint::black_box;
 
 use nalgebra::{UnitQuaternion, UnitVector3, Vector3, Vector4};
 
-use crate::{mekf::state_propagation::{build_measurement_matrix, central_difference_jacobian, RocketState, StateDerivativeConstants}, tests::{init_logger, to_matlab}};
+use crate::{
+    mekf::state_propagation::{
+        RocketState, StateDerivativeConstants, build_measurement_matrix,
+        central_difference_jacobian,
+    },
+    tests::{init_logger, to_matlab},
+};
 
 #[test]
 fn jacobian_benchmark() {
@@ -33,6 +39,8 @@ fn jacobian_benchmark() {
         side_cd: 0.02,                   // side drag coefficient
         burn_out_mass: 25.0,             // mass (kg)
         moment_of_inertia: 2.5,          // moment of inertia (kg⋅m²)
+        front_reference_area: 0.01368,
+        side_reference_area: 0.3575,
     };
 
     // Benchmark multiple runs

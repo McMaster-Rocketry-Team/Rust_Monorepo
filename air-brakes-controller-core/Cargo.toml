@@ -22,6 +22,8 @@ java-bindgen = "0.1.0-alpha.4"
 approx = "0.5.1"
 env_logger = "0.11.8"
 nalgebra = "0.34.0"
+csv = "1.1"
+plotters = "0.3"
 
 [lib]
 crate-type = ["lib", "cdylib"]

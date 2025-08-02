@@ -82,6 +82,32 @@ impl RocketState {
     pub fn drag_coefficients(&self) -> VectorView<'_, 4> {
         self.0.fixed_view::<4, 1>(14, 0)
     }
+
+    pub fn add_derivative(&self, d: &Derivative<RocketState>, dt: f32) -> RocketState {
+        let mut new_state = self.0.clone();
+
+        // Add derivative scaled by dt to each component
+        for i in 0..18 {
+            new_state[i] += d.0.0[i] * dt;
+        }
+
+        RocketState(new_state)
+    }
+
+    /// apply small angle correction to the supplied quaternion and
+    /// reset small angle correction to zero
+    pub fn reset_small_angle_correction(&mut self, orientation: &UnitQuaternion<f32>)->UnitQuaternion<f32> {
+        let delta_orientation = UnitQuaternion::from_quaternion(Quaternion::from_parts(
+            1.0,
+            -self.small_angle_correction() / 2.0,
+        ));
+        
+        self.0[0] = 0.0;
+        self.0[1] = 0.0;
+        self.0[2] = 0.0;
+
+        delta_orientation * *orientation
+    }
 }
 
 pub struct Derivative<T>(pub T);
@@ -91,6 +117,8 @@ pub struct StateDerivativeConstants {
     pub side_cd: f32,
     pub burn_out_mass: f32,
     pub moment_of_inertia: f32,
+    pub front_reference_area: f32,
+    pub side_reference_area: f32,
 }
 
 /// returns air density (kg/m^3) and speed of sound (m/s) at altitude (m)
@@ -120,7 +148,7 @@ fn lerp(
 
 pub fn calculate_state_derivative(
     airbrakes_extention: f32, // 0-1
-    orientation: UnitQuaternion<f32>,
+    orientation: &UnitQuaternion<f32>,
     state: &RocketState,
     constants: &StateDerivativeConstants,
 ) -> Derivative<RocketState> {
@@ -139,10 +167,18 @@ pub fn calculate_state_derivative(
     // calculate drag coefficient
     let forward_cd = lerp(airbrakes_extention, state.drag_coefficients().as_slice());
     let cd = Vector3::new(constants.side_cd, constants.side_cd, forward_cd);
+    let reference_area = Vector3::new(
+        constants.side_reference_area,
+        constants.side_reference_area,
+        constants.front_reference_area,
+    );
 
     let d_acc_rocket_frame = 0.5 * air_density / constants.burn_out_mass
         * 2.0
-        * wind_vel_rocket_frame.abs().component_mul(&cd);
+        * wind_vel_rocket_frame
+            .abs()
+            .component_mul(&cd)
+            .component_mul(&reference_area);
     let d_acc_world_frame = true_orientation.transform_vector(&d_acc_rocket_frame);
 
     // also depend on state.acceleration();
@@ -155,10 +191,12 @@ pub fn calculate_state_derivative(
 
     let mut angular_acceleration_rocket_frame = Vector3::<f32>::zeros();
     angular_acceleration_rocket_frame.x = 0.5 * air_density / constants.moment_of_inertia
+        * constants.side_reference_area
         * wind_vel_rocket_frame.y
         * wind_vel_rocket_frame.y.abs()
         * state.sideways_moment_co();
     angular_acceleration_rocket_frame.y = -0.5 * air_density / constants.moment_of_inertia
+        * constants.side_reference_area
         * wind_vel_rocket_frame.x
         * wind_vel_rocket_frame.x.abs()
         * state.sideways_moment_co();
@@ -206,8 +244,12 @@ pub fn central_difference_jacobian(
         // x+δ
         let mut x_plus = x0;
         x_plus[j] += delta;
-        let f_plus =
-            calculate_state_derivative(airbrakes_ext, orientation, &RocketState(x_plus), constants);
+        let f_plus = calculate_state_derivative(
+            airbrakes_ext,
+            &orientation,
+            &RocketState(x_plus),
+            constants,
+        );
         let f_plus_vec = f_plus.0.0;
 
         // x-δ
@@ -215,7 +257,7 @@ pub fn central_difference_jacobian(
         x_minus[j] -= delta;
         let f_minus = calculate_state_derivative(
             airbrakes_ext,
-            orientation,
+            &orientation,
             &RocketState(x_minus),
             constants,
         );

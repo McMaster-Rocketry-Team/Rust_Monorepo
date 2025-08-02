@@ -4,7 +4,7 @@
 // use java_bindgen::prelude::*;
 
 mod fmt;
-mod mekf;
+pub mod mekf;
 
 #[cfg(test)]
 mod tests;
