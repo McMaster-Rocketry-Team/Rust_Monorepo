@@ -4,6 +4,8 @@ use core::fmt::Write;
 use log::LevelFilter;
 use nalgebra::SMatrix;
 
+pub mod plot;
+
 pub fn init_logger() {
     #[cfg(feature = "log")]
     let _ = env_logger::builder()

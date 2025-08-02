@@ -1,5 +1,5 @@
 use nalgebra::{
-    Const, Matrix, Quaternion, SMatrix, SVector, UnitQuaternion, Vector3, Vector4, ViewStorage,
+    Quaternion, SMatrix, SVector, UnitQuaternion, Vector3, Vector4,
 };
 
 use crate::mekf::{Derivative, Measurement, RocketConstants, State};

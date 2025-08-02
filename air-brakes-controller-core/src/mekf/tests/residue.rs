@@ -2,12 +2,11 @@ use std::fs::File;
 
 use csv::Reader;
 use nalgebra::{Quaternion, UnitQuaternion, Vector3, Vector4};
-use plotters::prelude::*;
 use serde::Deserialize;
 
 use crate::{
-    mekf::{state_propagation::calculate_state_derivative, State, RocketConstants},
-    tests::init_logger,
+    mekf::{RocketConstants, State, state_propagation::calculate_state_derivative},
+    tests::{init_logger, plot::GlobalPlot},
 };
 
 #[derive(Deserialize)]
@@ -66,57 +65,6 @@ fn read_csv_records() -> Vec<CsvRecord> {
         .collect()
 }
 
-fn min_max_range(values: &[f32]) -> std::ops::Range<f32> {
-    let min = values.iter().fold(f32::INFINITY, |a, &b| a.min(b));
-    let max = values.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
-    min..max
-}
-
-fn plot_altitude_residues(
-    data: &Vec<(f32, f32)>,
-    data_name: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let file_path = format!(
-        "plots_out/{}_vs_time.png",
-        data_name.to_lowercase().replace(" ", "_")
-    );
-    let root = BitMapBackend::new(&file_path, (800, 600)).into_drawing_area();
-    root.fill(&WHITE)?;
-
-    // Extract time and altitude ranges more cleanly
-    let time_range = min_max_range(&data.iter().map(|(t, _)| *t).collect::<Vec<f32>>());
-    let value_range = min_max_range(&data.iter().map(|(_, a)| *a).collect::<Vec<f32>>());
-    log_info!("value range for {}: {:?}", data_name, value_range);
-
-    let mut chart = ChartBuilder::on(&root)
-        .caption(format!("{data_name} vs Time"), ("sans-serif", 40))
-        .margin(10)
-        .x_label_area_size(40)
-        .y_label_area_size(50)
-        .build_cartesian_2d(time_range, value_range)?;
-
-    chart
-        .configure_mesh()
-        .x_desc("Time (s)")
-        .y_desc(data_name)
-        .draw()?;
-
-    chart
-        .draw_series(LineSeries::new(data.iter().cloned(), &RED))?
-        .label(data_name)
-        .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 10, y)], &RED));
-
-    chart
-        .configure_series_labels()
-        .background_style(&WHITE.mix(0.8))
-        .border_style(&BLACK)
-        .draw()?;
-
-    root.present()?;
-    log_info!("Plot saved as {}", &file_path);
-    Ok(())
-}
-
 #[test]
 fn calculate_residue() {
     init_logger();
@@ -134,10 +82,8 @@ fn calculate_residue() {
     let current_records = csv_records.iter();
     let next_records = csv_records.iter().skip(1);
 
-    let mut residues = Vec::<CsvRecord>::new();
-    let mut euler_angle_residues = Vec::<(f32, f32, f32, f32)>::new();
-
     for (csv_record, next_record) in current_records.zip(next_records) {
+        GlobalPlot::set_time(csv_record.timestamp_s);
         let state = csv_record.to_rocket_state();
         let orientation = csv_record.to_orientation();
         let derivative = calculate_state_derivative(0.0, &orientation, &state, &constants);
@@ -148,139 +94,63 @@ fn calculate_residue() {
         let true_state = next_record.to_rocket_state();
         let true_orientation = next_record.to_orientation();
 
-        residues.push(CsvRecord {
-            timestamp_s: csv_record.timestamp_s,
-            altitude: true_state.altitude_asl() - predicted_state.altitude_asl(),
-            acc_x: true_state.acceleration().x - predicted_state.acceleration().x,
-            acc_y: true_state.acceleration().y - predicted_state.acceleration().y,
-            acc_z: true_state.acceleration().z - predicted_state.acceleration().z,
-            angular_velocity_x: true_state.angular_velocity().x
-                - predicted_state.angular_velocity().x,
-            angular_velocity_y: true_state.angular_velocity().y
-                - predicted_state.angular_velocity().y,
-            angular_velocity_z: true_state.angular_velocity().z
-                - predicted_state.angular_velocity().z,
-            velocity_x: true_state.velocity().x - predicted_state.velocity().x,
-            velocity_y: true_state.velocity().y - predicted_state.velocity().y,
-            velocity_z: true_state.velocity().z - predicted_state.velocity().z,
-            orientation_w: true_orientation.w - predicted_orientation.w,
-            orientation_x: true_orientation.i - predicted_orientation.i,
-            orientation_y: true_orientation.j - predicted_orientation.j,
-            orientation_z: true_orientation.k - predicted_orientation.k,
-        });
+        GlobalPlot::add_value(
+            "Altitude Residue x200",
+            (true_state.altitude_asl() - predicted_state.altitude_asl()) * 200.0,
+        );
+        GlobalPlot::add_value(
+            "Acc X Residue x200",
+            (true_state.acceleration().x - predicted_state.acceleration().x) * 200.0,
+        );
+        GlobalPlot::add_value(
+            "Acc Y Residue x200",
+            (true_state.acceleration().y - predicted_state.acceleration().y) * 200.0,
+        );
+        GlobalPlot::add_value(
+            "Acc Z Residue x200",
+            (true_state.acceleration().z - predicted_state.acceleration().z) * 200.0,
+        );
+        GlobalPlot::add_value(
+            "Velocity X Residue x200",
+            (true_state.velocity().x - predicted_state.velocity().x) * 200.0,
+        );
+        GlobalPlot::add_value(
+            "Velocity Y Residue x200",
+            (true_state.velocity().y - predicted_state.velocity().y) * 200.0,
+        );
+        GlobalPlot::add_value(
+            "Velocity Z Residue x200",
+            (true_state.velocity().z - predicted_state.velocity().z) * 200.0,
+        );
+        GlobalPlot::add_value(
+            "Angular Velocity X Residue x200",
+            (true_state.angular_velocity().x - predicted_state.angular_velocity().x) * 200.0,
+        );
+        GlobalPlot::add_value(
+            "Angular Velocity Y Residue x200",
+            (true_state.angular_velocity().y - predicted_state.angular_velocity().y) * 200.0,
+        );
+        GlobalPlot::add_value(
+            "Angular Velocity Z Residue x200",
+            (true_state.angular_velocity().z - predicted_state.angular_velocity().z) * 200.0,
+        );
 
+        // Calculate euler angle residues
         let predicted_euler_angle = predicted_orientation.euler_angles();
         let true_euler_angle = true_orientation.euler_angles();
-        euler_angle_residues.push((
-            csv_record.timestamp_s,
-            true_euler_angle.0 - predicted_euler_angle.0,
-            true_euler_angle.1 - predicted_euler_angle.1,
-            true_euler_angle.2 - predicted_euler_angle.2,
-        ));
+        GlobalPlot::add_value(
+            "Yaw Residue x200",
+            (true_euler_angle.0 - predicted_euler_angle.0).to_degrees() * 200.0,
+        );
+        GlobalPlot::add_value(
+            "Pitch Residue x200",
+            (true_euler_angle.1 - predicted_euler_angle.1).to_degrees() * 200.0,
+        );
+        GlobalPlot::add_value(
+            "Roll Residue x200",
+            (true_euler_angle.2 - predicted_euler_angle.2).to_degrees() * 200.0,
+        );
     }
 
-    plot_altitude_residues(
-        &residues
-            .iter()
-            .map(|r| (r.timestamp_s, r.altitude * 200.0))
-            .collect(),
-        "Altitude Residue x200",
-    )
-    .unwrap();
-    plot_altitude_residues(
-        &residues
-            .iter()
-            .map(|r| (r.timestamp_s, r.acc_x * 200.0))
-            .collect(),
-        "Acc X Residue x200",
-    )
-    .unwrap();
-    plot_altitude_residues(
-        &residues
-            .iter()
-            .map(|r| (r.timestamp_s, r.acc_y * 200.0))
-            .collect(),
-        "Acc Y Residue x200",
-    )
-    .unwrap();
-    plot_altitude_residues(
-        &residues
-            .iter()
-            .map(|r| (r.timestamp_s, r.acc_z * 200.0))
-            .collect(),
-        "Acc Z Residue x200",
-    )
-    .unwrap();
-    plot_altitude_residues(
-        &residues
-            .iter()
-            .map(|r| (r.timestamp_s, r.velocity_x * 200.0))
-            .collect(),
-        "Velocity X Residue x200",
-    )
-    .unwrap();
-    plot_altitude_residues(
-        &residues
-            .iter()
-            .map(|r| (r.timestamp_s, r.velocity_y * 200.0))
-            .collect(),
-        "Velocity Y Residue x200",
-    )
-    .unwrap();
-    plot_altitude_residues(
-        &residues
-            .iter()
-            .map(|r| (r.timestamp_s, r.velocity_z * 200.0))
-            .collect(),
-        "Velocity Z Residue x200",
-    )
-    .unwrap();
-    plot_altitude_residues(
-        &residues
-            .iter()
-            .map(|r| (r.timestamp_s, r.angular_velocity_x * 200.0))
-            .collect(),
-        "Angular Velocity X Residue x200",
-    )
-    .unwrap();
-    plot_altitude_residues(
-        &residues
-            .iter()
-            .map(|r| (r.timestamp_s, r.angular_velocity_y * 200.0))
-            .collect(),
-        "Angular Velocity Y Residue x200",
-    )
-    .unwrap();
-    plot_altitude_residues(
-        &residues
-            .iter()
-            .map(|r| (r.timestamp_s, r.angular_velocity_z * 200.0))
-            .collect(),
-        "Angular Velocity Z Residue x200",
-    )
-    .unwrap();
-    plot_altitude_residues(
-        &euler_angle_residues
-            .iter()
-            .map(|r| (r.0, r.1 * 200.0))
-            .collect(),
-        "Yaw Residue x200",
-    )
-    .unwrap();
-    plot_altitude_residues(
-        &euler_angle_residues
-            .iter()
-            .map(|r| (r.0, r.2 * 200.0))
-            .collect(),
-        "Pitch Residue x200",
-    )
-    .unwrap();
-    plot_altitude_residues(
-        &euler_angle_residues
-            .iter()
-            .map(|r| (r.0, r.3 * 200.0))
-            .collect(),
-        "Roll Residue x200",
-    )
-    .unwrap();
+    GlobalPlot::plot_all();
 }
