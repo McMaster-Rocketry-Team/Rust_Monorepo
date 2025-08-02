@@ -2,124 +2,9 @@ use nalgebra::{
     Const, Matrix, Quaternion, SMatrix, SVector, UnitQuaternion, Vector3, Vector4, ViewStorage,
 };
 
-pub struct RocketState(pub SVector<f32, 18>);
+use crate::mekf::{Derivative, State, RocketConstants};
 
-type VectorView<'a, const R: usize> =
-    Matrix<f32, Const<R>, Const<1>, ViewStorage<'a, f32, Const<R>, Const<1>, Const<1>, Const<18>>>;
 
-// ENU
-impl RocketState {
-    pub fn new(
-        small_angle_correction: &Vector3<f32>,
-        acceleration: &Vector3<f32>,
-        velocity: &Vector3<f32>,
-        angular_velocity: &Vector3<f32>,
-        altitude_agl: f32,
-        sideways_moment_co: f32,
-        drag_coefficients: &Vector4<f32>,
-    ) -> Self {
-        let mut state = SVector::zeros();
-
-        // Small angle correction (indices 0-2)
-        state[0] = small_angle_correction[0];
-        state[1] = small_angle_correction[1];
-        state[2] = small_angle_correction[2];
-
-        // Acceleration (indices 3-5)
-        state[3] = acceleration[0];
-        state[4] = acceleration[1];
-        state[5] = acceleration[2];
-
-        // Velocity (indices 6-8)
-        state[6] = velocity[0];
-        state[7] = velocity[1];
-        state[8] = velocity[2];
-
-        // Angular velocity (indices 9-11)
-        state[9] = angular_velocity[0];
-        state[10] = angular_velocity[1];
-        state[11] = angular_velocity[2];
-
-        // Altitude AGL (index 12)
-        state[12] = altitude_agl;
-
-        // Sideways moment coefficient (index 13)
-        state[13] = sideways_moment_co;
-
-        // Drag coefficients (indices 14-17)
-        state[14] = drag_coefficients[0];
-        state[15] = drag_coefficients[1];
-        state[16] = drag_coefficients[2];
-        state[17] = drag_coefficients[3];
-
-        RocketState(state)
-    }
-
-    pub fn small_angle_correction(&self) -> VectorView<'_, 3> {
-        self.0.fixed_view::<3, 1>(0, 0)
-    }
-
-    pub fn acceleration(&self) -> VectorView<'_, 3> {
-        self.0.fixed_view::<3, 1>(3, 0)
-    }
-
-    pub fn velocity(&self) -> VectorView<'_, 3> {
-        self.0.fixed_view::<3, 1>(6, 0)
-    }
-
-    pub fn angular_velocity(&self) -> VectorView<'_, 3> {
-        self.0.fixed_view::<3, 1>(9, 0)
-    }
-
-    pub fn altitude_agl(&self) -> f32 {
-        self.0[12]
-    }
-
-    pub fn sideways_moment_co(&self) -> f32 {
-        self.0[13]
-    }
-
-    pub fn drag_coefficients(&self) -> VectorView<'_, 4> {
-        self.0.fixed_view::<4, 1>(14, 0)
-    }
-
-    pub fn add_derivative(&self, d: &Derivative<RocketState>, dt: f32) -> RocketState {
-        let mut new_state = self.0.clone();
-
-        // Add derivative scaled by dt to each component
-        for i in 0..18 {
-            new_state[i] += d.0.0[i] * dt;
-        }
-
-        RocketState(new_state)
-    }
-
-    /// apply small angle correction to the supplied quaternion and
-    /// reset small angle correction to zero
-    pub fn reset_small_angle_correction(&mut self, orientation: &UnitQuaternion<f32>)->UnitQuaternion<f32> {
-        let delta_orientation = UnitQuaternion::from_quaternion(Quaternion::from_parts(
-            1.0,
-            -self.small_angle_correction() / 2.0,
-        ));
-
-        self.0[0] = 0.0;
-        self.0[1] = 0.0;
-        self.0[2] = 0.0;
-
-        delta_orientation * *orientation
-    }
-}
-
-pub struct Derivative<T>(pub T);
-
-pub struct StateDerivativeConstants {
-    pub launch_site_altitude_asl: f32,
-    pub side_cd: f32,
-    pub burn_out_mass: f32,
-    pub moment_of_inertia: f32,
-    pub front_reference_area: f32,
-    pub side_reference_area: f32,
-}
 
 /// returns air density (kg/m^3) and speed of sound (m/s) at altitude (m)
 /// approximated using a linear function from 0m and 3000m data from standard atmosphere model
@@ -149,11 +34,10 @@ fn lerp(
 pub fn calculate_state_derivative(
     airbrakes_extention: f32, // 0-1
     orientation: &UnitQuaternion<f32>,
-    state: &RocketState,
-    constants: &StateDerivativeConstants,
-) -> Derivative<RocketState> {
-    let altitude_asl = state.altitude_agl() + constants.launch_site_altitude_asl;
-    let (air_density, _) = approximate_air_density(altitude_asl);
+    state: &State,
+    constants: &RocketConstants,
+) -> Derivative<State> {
+    let (air_density, _) = approximate_air_density(state.altitude_asl());
 
     let delta_orientation = UnitQuaternion::from_quaternion(Quaternion::from_parts(
         1.0,
@@ -207,7 +91,7 @@ pub fn calculate_state_derivative(
     let angular_velocity_rocket_frame =
         true_orientation.inverse_transform_vector(&state.angular_velocity().into());
 
-    Derivative(RocketState::new(
+    Derivative(State::new(
         &angular_velocity_rocket_frame,
         &d_acc_world_frame,
         &state.acceleration().into(),
@@ -220,13 +104,13 @@ pub fn calculate_state_derivative(
 
 pub fn central_difference_jacobian(
     airbrakes_ext: f32,
-    orientation: UnitQuaternion<f32>,
-    state: &RocketState,
-    constants: &StateDerivativeConstants,
-) -> SMatrix<f32, 18, 18> {
+    orientation: &UnitQuaternion<f32>,
+    state: &State,
+    constants: &RocketConstants,
+) -> SMatrix<f32, { State::SIZE }, { State::SIZE }> {
     let x0 = state.0;
 
-    let mut j_mat = SMatrix::<f32, 18, 18>::zeros();
+    let mut j_mat = SMatrix::<f32, { State::SIZE }, { State::SIZE }>::zeros();
 
     for j in 0..x0.len() {
         // TODO tune
@@ -244,12 +128,8 @@ pub fn central_difference_jacobian(
         // x+δ
         let mut x_plus = x0;
         x_plus[j] += delta;
-        let f_plus = calculate_state_derivative(
-            airbrakes_ext,
-            &orientation,
-            &RocketState(x_plus),
-            constants,
-        );
+        let f_plus =
+            calculate_state_derivative(airbrakes_ext, orientation, &State(x_plus), constants);
         let f_plus_vec = f_plus.0.0;
 
         // x-δ
@@ -257,8 +137,8 @@ pub fn central_difference_jacobian(
         x_minus[j] -= delta;
         let f_minus = calculate_state_derivative(
             airbrakes_ext,
-            &orientation,
-            &RocketState(x_minus),
+            orientation,
+            &State(x_minus),
             constants,
         );
         let f_minus_vec = f_minus.0.0;
@@ -271,7 +151,11 @@ pub fn central_difference_jacobian(
     j_mat
 }
 
-pub fn build_measurement_matrix() -> SMatrix<f32, 7, 18> {
+pub const ROCKET_MEASUREMENT_SIZE: usize = 7;
+
+pub struct RocketMeasurement(pub SVector<f32, { State::SIZE }>);
+
+pub fn build_measurement_matrix() -> SMatrix<f32, ROCKET_MEASUREMENT_SIZE, { State::SIZE }> {
     let mut h = SMatrix::zeros();
 
     // ---- acceleration rows (rows 0-2) ----

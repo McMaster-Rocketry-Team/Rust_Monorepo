@@ -3,9 +3,10 @@ use core::hint::black_box;
 use nalgebra::{UnitQuaternion, UnitVector3, Vector3, Vector4};
 
 use crate::{
-    mekf::state_propagation::{
-        RocketState, StateDerivativeConstants, build_measurement_matrix,
-        central_difference_jacobian,
+    mekf::{
+        state_propagation::{
+             build_measurement_matrix, central_difference_jacobian,
+        }, State, RocketConstants
     },
     tests::{init_logger, to_matlab},
 };
@@ -24,7 +25,7 @@ fn jacobian_benchmark() {
         15f32.to_radians(),
     );
 
-    let state = RocketState::new(
+    let state = State::new(
         &Vector3::new(0.01, -0.02, 0.005), // small angle correction (radians)
         &Vector3::new(0.0, -1.5, 0.0),     // acceleration (m/s^2)
         &Vector3::new(2.0, 100.0, 45.0),   // velocity (m/s)
@@ -34,11 +35,10 @@ fn jacobian_benchmark() {
         &Vector4::new(0.4, 0.6, 0.8, 1.0), // drag coefficients
     );
 
-    let constants = StateDerivativeConstants {
-        launch_site_altitude_asl: 500.0, // launch site altitude (m)
-        side_cd: 0.02,                   // side drag coefficient
-        burn_out_mass: 25.0,             // mass (kg)
-        moment_of_inertia: 2.5,          // moment of inertia (kg⋅m²)
+    let constants = RocketConstants {
+        side_cd: 0.02,          // side drag coefficient
+        burn_out_mass: 25.0,    // mass (kg)
+        moment_of_inertia: 2.5, // moment of inertia (kg⋅m²)
         front_reference_area: 0.01368,
         side_reference_area: 0.3575,
     };
@@ -50,7 +50,7 @@ fn jacobian_benchmark() {
     for _ in 0..num_runs {
         let _ = black_box(central_difference_jacobian(
             black_box(airbrakes_ext),
-            black_box(orientation),
+            &black_box(orientation),
             black_box(&state),
             black_box(&constants),
         ));
@@ -72,7 +72,7 @@ fn jacobian_benchmark() {
         "A={};",
         to_matlab(&central_difference_jacobian(
             airbrakes_ext,
-            orientation,
+            &orientation,
             &state,
             &constants
         ))

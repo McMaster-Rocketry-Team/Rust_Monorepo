@@ -6,7 +6,7 @@ use plotters::prelude::*;
 use serde::Deserialize;
 
 use crate::{
-    mekf::state_propagation::{RocketState, StateDerivativeConstants, calculate_state_derivative},
+    mekf::{state_propagation::calculate_state_derivative, State, RocketConstants},
     tests::init_logger,
 };
 
@@ -30,8 +30,8 @@ struct CsvRecord {
 }
 
 impl CsvRecord {
-    fn to_rocket_state(&self) -> RocketState {
-        RocketState::new(
+    fn to_rocket_state(&self) -> State {
+        State::new(
             &Vector3::zeros(), // small angle correction starts at zero
             &Vector3::new(self.acc_x, self.acc_y, self.acc_z),
             &Vector3::new(self.velocity_x, self.velocity_y, self.velocity_z),
@@ -121,8 +121,7 @@ fn plot_altitude_residues(
 fn calculate_residue() {
     init_logger();
 
-    let constants = StateDerivativeConstants {
-        launch_site_altitude_asl: 0.0,
+    let constants = RocketConstants {
         side_cd: 0.5,
         burn_out_mass: 17.625,
         moment_of_inertia: 11.11,
@@ -151,7 +150,7 @@ fn calculate_residue() {
 
         residues.push(CsvRecord {
             timestamp_s: csv_record.timestamp_s,
-            altitude: true_state.altitude_agl() - predicted_state.altitude_agl(),
+            altitude: true_state.altitude_asl() - predicted_state.altitude_asl(),
             acc_x: true_state.acceleration().x - predicted_state.acceleration().x,
             acc_y: true_state.acceleration().y - predicted_state.acceleration().y,
             acc_z: true_state.acceleration().z - predicted_state.acceleration().z,
