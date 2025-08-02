@@ -138,7 +138,6 @@ pub fn calculate_state_derivative(
 
     // calculate drag coefficient
     let forward_cd = lerp(airbrakes_extention, state.drag_coefficients().as_slice());
-    // cd is pre-divided by the mass
     let cd = Vector3::new(constants.side_cd, constants.side_cd, forward_cd);
 
     let d_acc_rocket_frame = 0.5 * air_density / constants.burn_out_mass
@@ -230,7 +229,7 @@ pub fn central_difference_jacobian(
     j_mat
 }
 
-fn build_measurement_matrix() -> SMatrix<f32, 7, 18> {
+pub fn build_measurement_matrix() -> SMatrix<f32, 7, 18> {
     let mut h = SMatrix::zeros();
 
     // ---- acceleration rows (rows 0-2) ----
@@ -251,13 +250,10 @@ fn build_measurement_matrix() -> SMatrix<f32, 7, 18> {
 
 #[cfg(test)]
 mod test {
-    use core::{fmt::Display, hint::black_box};
-
     use approx::assert_relative_eq;
-    use nalgebra::{DMatrix, UnitVector3};
+    use nalgebra::UnitVector3;
 
     use crate::tests::init_logger;
-    use std::fmt::Write;
 
     use super::*;
 
@@ -319,102 +315,5 @@ mod test {
             "rotated orientation: {:?}",
             euler_angles_to_degrees(orientation.euler_angles())
         );
-    }
-
-    #[test]
-    fn jacobian_benchmark() {
-        use std::time::Instant;
-
-        init_logger();
-
-        // Create arbitrary but realistic test data
-        let airbrakes_ext = 0.5f32; // 50% extension
-
-        let orientation = UnitQuaternion::from_axis_angle(
-            &UnitVector3::new_normalize(Vector3::new(0.1, 0.2, 0.9)),
-            15f32.to_radians(),
-        );
-
-        let state = RocketState::new(
-            &Vector3::new(0.01, -0.02, 0.005), // small angle correction (radians)
-            &Vector3::new(0.0, -1.5, 0.0),     // acceleration (m/s^2)
-            &Vector3::new(2.0, 100.0, 45.0),   // velocity (m/s)
-            &Vector3::new(0.1, -0.05, 0.02),   // angular velocity (rad/s)
-            1200.0,                            // altitude AGL (m)
-            0.8,                               // sideways moment coefficient
-            &Vector4::new(0.4, 0.6, 0.8, 1.0), // drag coefficients
-        );
-
-        let constants = StateDerivativeConstants {
-            launch_site_altitude_asl: 500.0, // launch site altitude (m)
-            side_cd: 0.02,                   // side drag coefficient
-            burn_out_mass: 25.0,             // mass (kg)
-            moment_of_inertia: 2.5,          // moment of inertia (kg⋅m²)
-        };
-
-        // Benchmark multiple runs
-        let num_runs = 100;
-        let start_time = Instant::now();
-
-        for _ in 0..num_runs {
-            let _ = black_box(central_difference_jacobian(
-                black_box(airbrakes_ext),
-                black_box(orientation),
-                black_box(&state),
-                black_box(&constants),
-            ));
-        }
-
-        let total_duration = start_time.elapsed();
-        let avg_duration = total_duration / num_runs;
-
-        log_info!("Jacobian computation benchmark:");
-        log_info!("  Total time for {} runs: {:?}", num_runs, total_duration);
-        log_info!("  Average time per run: {:?}", avg_duration);
-        log_info!(
-            "  Average time per run (microseconds): {:.2}",
-            avg_duration.as_micros()
-        );
-
-        log_info!("jacobian:");
-        log_info!(
-            "A={};",
-            to_matlab(&central_difference_jacobian(
-                airbrakes_ext,
-                orientation,
-                &state,
-                &constants
-            ))
-        );
-        log_info!("measurement matrix:");
-        log_info!("H={};", to_matlab(&build_measurement_matrix()));
-    }
-
-    fn to_matlab<T, const R: usize, const C: usize>(m: &SMatrix<T, R, C>) -> String
-    where
-        T: Display, // Display gives plain "1.23", change to LowerExp if needed
-    {
-        let mut s = String::with_capacity(R * C * 8); // crude pre-allocation
-        s.push('[');
-
-        for r in 0..R {
-            for c in 0..C {
-                // ── value ─────────────────────────────
-                write!(&mut s, "{}", m[(r, c)]).unwrap();
-
-                // ── column separator ────────────────
-                if c < C - 1 {
-                    s.push(' '); // or ',' if you prefer "1, 2, 3"
-                }
-            }
-
-            // ── row separator ───────────────────────
-            if r < R - 1 {
-                s.push_str("; "); // or '\n' for multi-line output
-            }
-        }
-
-        s.push(']');
-        s
     }
 }
