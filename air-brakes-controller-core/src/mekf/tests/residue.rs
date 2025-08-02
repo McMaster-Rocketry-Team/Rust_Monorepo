@@ -136,6 +136,7 @@ fn calculate_residue() {
     let next_records = csv_records.iter().skip(1);
 
     let mut residues = Vec::<CsvRecord>::new();
+    let mut euler_angle_residues = Vec::<(f32, f32, f32, f32)>::new();
 
     for (csv_record, next_record) in current_records.zip(next_records) {
         let state = csv_record.to_rocket_state();
@@ -168,35 +169,53 @@ fn calculate_residue() {
             orientation_y: true_orientation.j - predicted_orientation.j,
             orientation_z: true_orientation.k - predicted_orientation.k,
         });
+
+        let predicted_euler_angle = predicted_orientation.euler_angles();
+        let true_euler_angle = true_orientation.euler_angles();
+        euler_angle_residues.push((
+            csv_record.timestamp_s,
+            true_euler_angle.0 - predicted_euler_angle.0,
+            true_euler_angle.1 - predicted_euler_angle.1,
+            true_euler_angle.2 - predicted_euler_angle.2,
+        ));
     }
 
     plot_altitude_residues(
         &residues
             .iter()
-            .map(|r| (r.timestamp_s, r.altitude*200.0))
+            .map(|r| (r.timestamp_s, r.altitude * 200.0))
             .collect(),
         "Altitude Residue x200",
     )
     .unwrap();
     plot_altitude_residues(
-        &residues.iter().map(|r| (r.timestamp_s, r.acc_x*200.0)).collect(),
+        &residues
+            .iter()
+            .map(|r| (r.timestamp_s, r.acc_x * 200.0))
+            .collect(),
         "Acc X Residue x200",
     )
     .unwrap();
     plot_altitude_residues(
-        &residues.iter().map(|r| (r.timestamp_s, r.acc_y*200.0)).collect(),
+        &residues
+            .iter()
+            .map(|r| (r.timestamp_s, r.acc_y * 200.0))
+            .collect(),
         "Acc Y Residue x200",
     )
     .unwrap();
     plot_altitude_residues(
-        &residues.iter().map(|r| (r.timestamp_s, r.acc_z*200.0)).collect(),
+        &residues
+            .iter()
+            .map(|r| (r.timestamp_s, r.acc_z * 200.0))
+            .collect(),
         "Acc Z Residue x200",
     )
     .unwrap();
     plot_altitude_residues(
         &residues
             .iter()
-            .map(|r| (r.timestamp_s, r.velocity_x*200.0))
+            .map(|r| (r.timestamp_s, r.velocity_x * 200.0))
             .collect(),
         "Velocity X Residue x200",
     )
@@ -204,7 +223,7 @@ fn calculate_residue() {
     plot_altitude_residues(
         &residues
             .iter()
-            .map(|r| (r.timestamp_s, r.velocity_y*200.0))
+            .map(|r| (r.timestamp_s, r.velocity_y * 200.0))
             .collect(),
         "Velocity Y Residue x200",
     )
@@ -212,9 +231,57 @@ fn calculate_residue() {
     plot_altitude_residues(
         &residues
             .iter()
-            .map(|r| (r.timestamp_s, r.velocity_z*200.0))
+            .map(|r| (r.timestamp_s, r.velocity_z * 200.0))
             .collect(),
         "Velocity Z Residue x200",
+    )
+    .unwrap();
+    plot_altitude_residues(
+        &residues
+            .iter()
+            .map(|r| (r.timestamp_s, r.angular_velocity_x * 200.0))
+            .collect(),
+        "Angular Velocity X Residue x200",
+    )
+    .unwrap();
+    plot_altitude_residues(
+        &residues
+            .iter()
+            .map(|r| (r.timestamp_s, r.angular_velocity_y * 200.0))
+            .collect(),
+        "Angular Velocity Y Residue x200",
+    )
+    .unwrap();
+    plot_altitude_residues(
+        &residues
+            .iter()
+            .map(|r| (r.timestamp_s, r.angular_velocity_z * 200.0))
+            .collect(),
+        "Angular Velocity Z Residue x200",
+    )
+    .unwrap();
+    plot_altitude_residues(
+        &euler_angle_residues
+            .iter()
+            .map(|r| (r.0, r.1 * 200.0))
+            .collect(),
+        "Yaw Residue x200",
+    )
+    .unwrap();
+    plot_altitude_residues(
+        &euler_angle_residues
+            .iter()
+            .map(|r| (r.0, r.2 * 200.0))
+            .collect(),
+        "Pitch Residue x200",
+    )
+    .unwrap();
+    plot_altitude_residues(
+        &euler_angle_residues
+            .iter()
+            .map(|r| (r.0, r.3 * 200.0))
+            .collect(),
+        "Roll Residue x200",
     )
     .unwrap();
 }

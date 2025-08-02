@@ -101,7 +101,7 @@ impl RocketState {
             1.0,
             -self.small_angle_correction() / 2.0,
         ));
-        
+
         self.0[0] = 0.0;
         self.0[1] = 0.0;
         self.0[2] = 0.0;
