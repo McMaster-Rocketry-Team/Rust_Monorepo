@@ -2,15 +2,16 @@ use nalgebra::{
     Const, Matrix, Quaternion, SMatrix, SVector, UnitQuaternion, Vector3, Vector4, ViewStorage,
 };
 
-pub struct RocketState(pub SVector<f32, 15>);
+pub struct RocketState(pub SVector<f32, 18>);
 
 type VectorView<'a, const R: usize> =
-    Matrix<f32, Const<R>, Const<1>, ViewStorage<'a, f32, Const<R>, Const<1>, Const<1>, Const<15>>>;
+    Matrix<f32, Const<R>, Const<1>, ViewStorage<'a, f32, Const<R>, Const<1>, Const<1>, Const<18>>>;
 
 // ENU
 impl RocketState {
     pub fn new(
         small_angle_correction: &Vector3<f32>,
+        acceleration: &Vector3<f32>,
         velocity: &Vector3<f32>,
         angular_velocity: &Vector3<f32>,
         altitude_agl: f32,
@@ -24,27 +25,32 @@ impl RocketState {
         state[1] = small_angle_correction[1];
         state[2] = small_angle_correction[2];
 
-        // Velocity (indices 3-5)
-        state[3] = velocity[0];
-        state[4] = velocity[1];
-        state[5] = velocity[2];
+        // Acceleration (indices 3-5)
+        state[3] = acceleration[0];
+        state[4] = acceleration[1];
+        state[5] = acceleration[2];
 
-        // Angular velocity (indices 6-8)
-        state[6] = angular_velocity[0];
-        state[7] = angular_velocity[1];
-        state[8] = angular_velocity[2];
+        // Velocity (indices 6-8)
+        state[6] = velocity[0];
+        state[7] = velocity[1];
+        state[8] = velocity[2];
 
-        // Altitude AGL (index 9)
-        state[9] = altitude_agl;
+        // Angular velocity (indices 9-11)
+        state[9] = angular_velocity[0];
+        state[10] = angular_velocity[1];
+        state[11] = angular_velocity[2];
 
-        // Sideways moment coefficient (index 10)
-        state[10] = sideways_moment_co;
+        // Altitude AGL (index 12)
+        state[12] = altitude_agl;
 
-        // Drag coefficients (indices 11-14)
-        state[11] = drag_coefficients[0];
-        state[12] = drag_coefficients[1];
-        state[13] = drag_coefficients[2];
-        state[14] = drag_coefficients[3];
+        // Sideways moment coefficient (index 13)
+        state[13] = sideways_moment_co;
+
+        // Drag coefficients (indices 14-17)
+        state[14] = drag_coefficients[0];
+        state[15] = drag_coefficients[1];
+        state[16] = drag_coefficients[2];
+        state[17] = drag_coefficients[3];
 
         RocketState(state)
     }
@@ -53,24 +59,28 @@ impl RocketState {
         self.0.fixed_view::<3, 1>(0, 0)
     }
 
-    pub fn velocity(&self) -> VectorView<'_, 3> {
+    pub fn acceleration(&self) -> VectorView<'_, 3> {
         self.0.fixed_view::<3, 1>(3, 0)
     }
 
-    pub fn angular_velocity(&self) -> VectorView<'_, 3> {
+    pub fn velocity(&self) -> VectorView<'_, 3> {
         self.0.fixed_view::<3, 1>(6, 0)
     }
 
+    pub fn angular_velocity(&self) -> VectorView<'_, 3> {
+        self.0.fixed_view::<3, 1>(9, 0)
+    }
+
     pub fn altitude_agl(&self) -> f32 {
-        self.0[9]
+        self.0[12]
     }
 
     pub fn sideways_moment_co(&self) -> f32 {
-        self.0[10]
+        self.0[13]
     }
 
     pub fn drag_coefficients(&self) -> VectorView<'_, 4> {
-        self.0.fixed_view::<4, 1>(11, 0)
+        self.0.fixed_view::<4, 1>(14, 0)
     }
 }
 
@@ -131,12 +141,18 @@ pub fn calculate_state_derivative(
     // cd is pre-divided by the mass
     let cd = Vector3::new(constants.side_cd, constants.side_cd, forward_cd);
 
-    let acc_rocket_frame = 0.5 * air_density / constants.burn_out_mass
-        * wind_vel_rocket_frame
-            .component_mul(&wind_vel_rocket_frame.abs())
-            .component_mul(&cd);
-    let mut acc_world_frame = true_orientation.transform_vector(&acc_rocket_frame);
-    acc_world_frame.z -= 9.81;
+    let d_acc_rocket_frame = 0.5 * air_density / constants.burn_out_mass
+        * 2.0
+        * wind_vel_rocket_frame.abs().component_mul(&cd);
+    let d_acc_world_frame = true_orientation.transform_vector(&d_acc_rocket_frame);
+
+    // also depend on state.acceleration();
+    // let acc_rocket_frame = 0.5 * air_density / constants.burn_out_mass
+    //     * wind_vel_rocket_frame
+    //         .component_mul(&wind_vel_rocket_frame.abs())
+    //         .component_mul(&cd);
+    // let mut acc_world_frame = true_orientation.transform_vector(&acc_rocket_frame);
+    // acc_world_frame.z -= 9.81;
 
     let mut angular_acceleration_rocket_frame = Vector3::<f32>::zeros();
     angular_acceleration_rocket_frame.x = 0.5 * air_density / constants.moment_of_inertia
@@ -156,7 +172,8 @@ pub fn calculate_state_derivative(
 
     Derivative(RocketState::new(
         &angular_velocity_rocket_frame,
-        &acc_world_frame,
+        &d_acc_world_frame,
+        &state.acceleration().into(),
         &angular_acceleration_world_frame,
         state.velocity().z,
         0.0,
@@ -169,20 +186,21 @@ pub fn central_difference_jacobian(
     orientation: UnitQuaternion<f32>,
     state: &RocketState,
     constants: &StateDerivativeConstants,
-) -> SMatrix<f32, 15, 15> {
+) -> SMatrix<f32, 18, 18> {
     let x0 = state.0;
 
-    let mut j_mat = SMatrix::<f32, 15, 15>::zeros();
+    let mut j_mat = SMatrix::<f32, 18, 18>::zeros();
 
-    for j in 0..15 {
+    for j in 0..x0.len() {
         // TODO tune
         let delta = match j {
             0..3 => 0.1f32.to_radians(),
-            3..6 => 0.1f32.max(x0[j].abs() * 0.001),
-            6..9 => 1f32.to_radians(),
-            9 => 0.5f32,
-            10 => 0.001f32,
-            11..15 => 0.01f32,
+            3..6 => 0.1f32,
+            6..9 => 0.1f32.max(x0[j].abs() * 0.001),
+            9..12 => 1f32.to_radians(),
+            12 => 0.5f32,
+            13 => 0.001f32,
+            14..18 => 0.01f32,
             _ => 0f32,
         };
 
@@ -205,20 +223,41 @@ pub fn central_difference_jacobian(
         let f_minus_vec = f_minus.0.0;
 
         // central difference: (f+ − f−) / (2δ)
-        j_mat.set_column(j, &((f_plus_vec - f_minus_vec) / (2.0 * delta)));
+        let column = (f_plus_vec - f_minus_vec) / (2.0 * delta);
+        j_mat.set_column(j, &column);
     }
 
     j_mat
 }
 
+fn build_measurement_matrix() -> SMatrix<f32, 7, 18> {
+    let mut h = SMatrix::zeros();
+
+    // ---- acceleration rows (rows 0-2) ----
+    h[(0, 3)] = 1.0; // ax   ← state[3]
+    h[(1, 4)] = 1.0; // ay   ← state[4]
+    h[(2, 5)] = 1.0; // az   ← state[5]
+
+    // ---- angular-rate rows (rows 3-5) ----
+    h[(3, 9)] = 1.0; // ωx   ← state[9]
+    h[(4, 10)] = 1.0; // ωy   ← state[10]
+    h[(5, 11)] = 1.0; // ωz   ← state[11]
+
+    // ---- altitude row (row 6) ----
+    h[(6, 12)] = 1.0; // h    ← state[12]
+
+    h
+}
+
 #[cfg(test)]
 mod test {
-    use core::hint::black_box;
+    use core::{fmt::Display, hint::black_box};
 
     use approx::assert_relative_eq;
-    use nalgebra::UnitVector3;
+    use nalgebra::{DMatrix, UnitVector3};
 
     use crate::tests::init_logger;
+    use std::fmt::Write;
 
     use super::*;
 
@@ -285,49 +324,97 @@ mod test {
     #[test]
     fn jacobian_benchmark() {
         use std::time::Instant;
-        
+
         init_logger();
-        
+
         // Create arbitrary but realistic test data
         let airbrakes_ext = 0.5f32; // 50% extension
-        
+
         let orientation = UnitQuaternion::from_axis_angle(
             &UnitVector3::new_normalize(Vector3::new(0.1, 0.2, 0.9)),
             15f32.to_radians(),
         );
-        
+
         let state = RocketState::new(
             &Vector3::new(0.01, -0.02, 0.005), // small angle correction (radians)
-            &Vector3::new(2.0, -1.5, 45.0),    // velocity (m/s)
+            &Vector3::new(0.0, -1.5, 0.0),     // acceleration (m/s^2)
+            &Vector3::new(2.0, 100.0, 45.0),   // velocity (m/s)
             &Vector3::new(0.1, -0.05, 0.02),   // angular velocity (rad/s)
-            1200.0,                             // altitude AGL (m)
-            0.8,                                // sideways moment coefficient
+            1200.0,                            // altitude AGL (m)
+            0.8,                               // sideways moment coefficient
             &Vector4::new(0.4, 0.6, 0.8, 1.0), // drag coefficients
         );
-        
+
         let constants = StateDerivativeConstants {
-            launch_site_altitude_asl: 500.0,   // launch site altitude (m)
-            side_cd: 0.02,                     // side drag coefficient
-            burn_out_mass: 25.0,               // mass (kg)
-            moment_of_inertia: 2.5,            // moment of inertia (kg⋅m²)
+            launch_site_altitude_asl: 500.0, // launch site altitude (m)
+            side_cd: 0.02,                   // side drag coefficient
+            burn_out_mass: 25.0,             // mass (kg)
+            moment_of_inertia: 2.5,          // moment of inertia (kg⋅m²)
         };
-                
+
         // Benchmark multiple runs
         let num_runs = 100;
         let start_time = Instant::now();
-        
+
         for _ in 0..num_runs {
-            let _ = black_box(central_difference_jacobian(black_box(airbrakes_ext), black_box(orientation), black_box(&state), black_box(&constants)));
+            let _ = black_box(central_difference_jacobian(
+                black_box(airbrakes_ext),
+                black_box(orientation),
+                black_box(&state),
+                black_box(&constants),
+            ));
         }
-        
+
         let total_duration = start_time.elapsed();
         let avg_duration = total_duration / num_runs;
-        
+
         log_info!("Jacobian computation benchmark:");
         log_info!("  Total time for {} runs: {:?}", num_runs, total_duration);
         log_info!("  Average time per run: {:?}", avg_duration);
-        log_info!("  Average time per run (microseconds): {:.2}", avg_duration.as_micros());
+        log_info!(
+            "  Average time per run (microseconds): {:.2}",
+            avg_duration.as_micros()
+        );
 
-        log_info!("jacobian: {:?}", central_difference_jacobian(airbrakes_ext, orientation, &state, &constants));
+        log_info!("jacobian:");
+        log_info!(
+            "A={};",
+            to_matlab(&central_difference_jacobian(
+                airbrakes_ext,
+                orientation,
+                &state,
+                &constants
+            ))
+        );
+        log_info!("measurement matrix:");
+        log_info!("H={};", to_matlab(&build_measurement_matrix()));
+    }
+
+    fn to_matlab<T, const R: usize, const C: usize>(m: &SMatrix<T, R, C>) -> String
+    where
+        T: Display, // Display gives plain "1.23", change to LowerExp if needed
+    {
+        let mut s = String::with_capacity(R * C * 8); // crude pre-allocation
+        s.push('[');
+
+        for r in 0..R {
+            for c in 0..C {
+                // ── value ─────────────────────────────
+                write!(&mut s, "{}", m[(r, c)]).unwrap();
+
+                // ── column separator ────────────────
+                if c < C - 1 {
+                    s.push(' '); // or ',' if you prefer "1, 2, 3"
+                }
+            }
+
+            // ── row separator ───────────────────────
+            if r < R - 1 {
+                s.push_str("; "); // or '\n' for multi-line output
+            }
+        }
+
+        s.push(']');
+        s
     }
 }
