@@ -2,9 +2,7 @@ use nalgebra::{
     Const, Matrix, Quaternion, SMatrix, SVector, UnitQuaternion, Vector3, Vector4, ViewStorage,
 };
 
-use crate::mekf::{Derivative, State, RocketConstants};
-
-
+use crate::mekf::{Derivative, Measurement, RocketConstants, State};
 
 /// returns air density (kg/m^3) and speed of sound (m/s) at altitude (m)
 /// approximated using a linear function from 0m and 3000m data from standard atmosphere model
@@ -135,12 +133,8 @@ pub fn central_difference_jacobian(
         // x-δ
         let mut x_minus = x0;
         x_minus[j] -= delta;
-        let f_minus = calculate_state_derivative(
-            airbrakes_ext,
-            orientation,
-            &State(x_minus),
-            constants,
-        );
+        let f_minus =
+            calculate_state_derivative(airbrakes_ext, orientation, &State(x_minus), constants);
         let f_minus_vec = f_minus.0.0;
 
         // central difference: (f+ − f−) / (2δ)
@@ -151,11 +145,9 @@ pub fn central_difference_jacobian(
     j_mat
 }
 
-pub const ROCKET_MEASUREMENT_SIZE: usize = 7;
-
 pub struct RocketMeasurement(pub SVector<f32, { State::SIZE }>);
 
-pub fn build_measurement_matrix() -> SMatrix<f32, ROCKET_MEASUREMENT_SIZE, { State::SIZE }> {
+pub fn build_measurement_matrix() -> SMatrix<f32, { Measurement::SIZE }, { State::SIZE }> {
     let mut h = SMatrix::zeros();
 
     // ---- acceleration rows (rows 0-2) ----
