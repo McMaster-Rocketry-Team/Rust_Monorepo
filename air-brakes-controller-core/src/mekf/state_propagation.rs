@@ -39,7 +39,7 @@ pub fn calculate_state_derivative(
 
     let delta_orientation = UnitQuaternion::from_quaternion(Quaternion::from_parts(
         1.0,
-        -state.small_angle_correction() / 2.0,
+        state.small_angle_correction() / 2.0,
     ));
     let true_orientation = delta_orientation * orientation;
 

@@ -38,21 +38,31 @@ impl GlobalPlot {
     }
 
     pub fn plot_all() {
-        // Clean up and recreate plots_out directory
-        if std::path::Path::new("plots_out").exists() {
-            std::fs::remove_dir_all("plots_out").unwrap();
-        }
         std::fs::create_dir_all("plots_out").unwrap();
 
+        let mut plot_paths = vec![];
         let plot_data = PLOT_DATA.write().unwrap();
-
         for (data_name, data) in plot_data.points.iter() {
-            plot_graph(data_name, data).unwrap();
+            plot_paths.push(plot_graph(data_name, data).unwrap());
+        }
+
+        // delete old plots
+        let entries = std::fs::read_dir("plots_out").unwrap();
+        for entry in entries {
+            let entry_path = entry.unwrap().path();
+            let file_name = entry_path.file_name().unwrap().to_str().unwrap();
+            let file_path = format!("plots_out/{}", file_name);
+            if !plot_paths.contains(&file_path) {
+                std::fs::remove_file(&file_path).unwrap()
+            }
         }
     }
 }
 
-fn plot_graph(data_name: &str, data: &Vec<(f32, f32)>) -> Result<(), Box<dyn std::error::Error>> {
+fn plot_graph(
+    data_name: &str,
+    data: &Vec<(f32, f32)>,
+) -> Result<String, Box<dyn std::error::Error>> {
     let file_path = format!(
         "plots_out/{}_vs_time.png",
         data_name.to_lowercase().replace(" ", "_")
@@ -89,8 +99,10 @@ fn plot_graph(data_name: &str, data: &Vec<(f32, f32)>) -> Result<(), Box<dyn std
         .draw()?;
 
     root.present()?;
+    drop(root);
+    drop(chart);
     log_info!("Plot saved as {}", &file_path);
-    Ok(())
+    Ok(file_path)
 }
 
 fn min_max_range(values: &[f32]) -> std::ops::Range<f32> {
