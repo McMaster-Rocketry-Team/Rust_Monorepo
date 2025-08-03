@@ -5,6 +5,7 @@
 
 mod fmt;
 pub mod mekf;
+pub mod dead_reckoning;
 
 #[cfg(test)]
 mod tests;

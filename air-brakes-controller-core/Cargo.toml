@@ -5,8 +5,8 @@ edition = "2024"
 
 [features]
 default = ["log", "std"]
-log = ["dep:log"]
-defmt = ["dep:defmt", "heapless/defmt-03"]
+log = ["dep:log", "firmware-common-new/log"]
+defmt = ["dep:defmt", "heapless/defmt-03", "firmware-common-new/defmt"]
 std = []
 
 [dependencies]
@@ -17,6 +17,8 @@ serde = { version = "1.0.219", default-features = false, features = ["derive"] }
 libm = "0.2.7"
 nalgebra = { version = "0.34.0", default-features = false, features = ["libm"] }
 java-bindgen = "0.1.0-alpha.4"
+firmware-common-new = { path = "../firmware-common-new", default-features = false}
+biquad = "0.5.0"
 
 [dev-dependencies]
 approx = "0.5.1"

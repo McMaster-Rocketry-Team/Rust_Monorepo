@@ -185,9 +185,11 @@ name = "air-brakes-controller-core"
 version = "0.1.0"
 dependencies = [
  "approx",
+ "biquad 0.5.0",
  "csv",
  "defmt 1.0.1",
  "env_logger",
+ "firmware-common-new",
  "heapless 0.8.0",
  "java-bindgen",
  "libm 0.2.15",
@@ -698,6 +700,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "820524f5e3e3add696ddf69f79575772e152c0e78e9f0370b56990a7e808ec3e"
 dependencies = [
  "libm 0.1.4",
+]
+
+[[package]]
+name = "biquad"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8580925877eb35ab50f987a1c2c193eb46000c8827c871bc3425070f086408cc"
+dependencies = [
+ "num-traits",
 ]
 
 [[package]]
@@ -2567,7 +2578,7 @@ version = "0.1.0"
 dependencies = [
  "ahrs",
  "approx",
- "biquad",
+ "biquad 0.4.2",
  "bitflags 2.9.1",
  "bitvec",
  "calculate-required-bits",
