@@ -70,13 +70,13 @@ fn calculate_residue() {
     init_logger();
 
     let constants = RocketConstants {
-        side_cd: 0.5,
+        side_cd: 0.55,
         burn_out_mass: 17.625,
         moment_of_inertia: 11.11,
         front_reference_area: 0.01368,
         side_reference_area: 0.3575,
     };
-    let delta_time = 1.0f32 / 200.0;
+    let delta_time = 1.0f32 / 1000.0;
 
     let csv_records = read_csv_records();
     let current_records = csv_records.iter();
@@ -94,61 +94,67 @@ fn calculate_residue() {
         let true_state = next_record.to_rocket_state();
         let true_orientation = next_record.to_orientation();
 
+        let d_acc_z = (next_record.acc_z - csv_record.acc_z) / delta_time;
         GlobalPlot::add_value(
-            "Altitude Residue x200",
-            (true_state.altitude_asl() - predicted_state.altitude_asl()) * 200.0,
+            "Real dAcc Z World Frame",
+            d_acc_z,
+        );
+
+        GlobalPlot::add_value(
+            "Altitude Residue x1000",
+            (true_state.altitude_asl() - predicted_state.altitude_asl()) * 1000.0,
         );
         GlobalPlot::add_value(
-            "Acc X Residue x200",
-            (true_state.acceleration().x - predicted_state.acceleration().x) * 200.0,
+            "Acc X Residue x1000",
+            (true_state.acceleration().x - predicted_state.acceleration().x) * 1000.0,
         );
         GlobalPlot::add_value(
-            "Acc Y Residue x200",
-            (true_state.acceleration().y - predicted_state.acceleration().y) * 200.0,
+            "Acc Y Residue x1000",
+            (true_state.acceleration().y - predicted_state.acceleration().y) * 1000.0,
         );
         GlobalPlot::add_value(
-            "Acc Z Residue x200",
-            (true_state.acceleration().z - predicted_state.acceleration().z) * 200.0,
+            "Acc Z Residue x1000",
+            (true_state.acceleration().z - predicted_state.acceleration().z) * 1000.0,
         );
         GlobalPlot::add_value(
-            "Velocity X Residue x200",
-            (true_state.velocity().x - predicted_state.velocity().x) * 200.0,
+            "Velocity X Residue x1000",
+            (true_state.velocity().x - predicted_state.velocity().x) * 1000.0,
         );
         GlobalPlot::add_value(
-            "Velocity Y Residue x200",
-            (true_state.velocity().y - predicted_state.velocity().y) * 200.0,
+            "Velocity Y Residue x1000",
+            (true_state.velocity().y - predicted_state.velocity().y) * 1000.0,
         );
         GlobalPlot::add_value(
-            "Velocity Z Residue x200",
-            (true_state.velocity().z - predicted_state.velocity().z) * 200.0,
+            "Velocity Z Residue x1000",
+            (true_state.velocity().z - predicted_state.velocity().z) * 1000.0,
         );
         GlobalPlot::add_value(
-            "Angular Velocity X Residue x200",
-            (true_state.angular_velocity().x - predicted_state.angular_velocity().x) * 200.0,
+            "Angular Velocity X Residue x1000",
+            (true_state.angular_velocity().x - predicted_state.angular_velocity().x) * 1000.0,
         );
         GlobalPlot::add_value(
-            "Angular Velocity Y Residue x200",
-            (true_state.angular_velocity().y - predicted_state.angular_velocity().y) * 200.0,
+            "Angular Velocity Y Residue x1000",
+            (true_state.angular_velocity().y - predicted_state.angular_velocity().y) * 1000.0,
         );
         GlobalPlot::add_value(
-            "Angular Velocity Z Residue x200",
-            (true_state.angular_velocity().z - predicted_state.angular_velocity().z) * 200.0,
+            "Angular Velocity Z Residue x1000",
+            (true_state.angular_velocity().z - predicted_state.angular_velocity().z) * 1000.0,
         );
 
         // Calculate euler angle residues
         let predicted_euler_angle = predicted_orientation.euler_angles();
         let true_euler_angle = true_orientation.euler_angles();
         GlobalPlot::add_value(
-            "Yaw Residue x200",
-            (true_euler_angle.0 - predicted_euler_angle.0).to_degrees() * 200.0,
+            "Yaw Residue x1000",
+            (true_euler_angle.0 - predicted_euler_angle.0).to_degrees() * 1000.0,
         );
         GlobalPlot::add_value(
-            "Pitch Residue x200",
-            (true_euler_angle.1 - predicted_euler_angle.1).to_degrees() * 200.0,
+            "Pitch Residue x1000",
+            (true_euler_angle.1 - predicted_euler_angle.1).to_degrees() * 1000.0,
         );
         GlobalPlot::add_value(
-            "Roll Residue x200",
-            (true_euler_angle.2 - predicted_euler_angle.2).to_degrees() * 200.0,
+            "Roll Residue x1000",
+            (true_euler_angle.2 - predicted_euler_angle.2).to_degrees() * 1000.0,
         );
     }
 

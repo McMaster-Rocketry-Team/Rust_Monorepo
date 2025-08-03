@@ -1,6 +1,4 @@
-use nalgebra::{
-    Quaternion, SMatrix, SVector, UnitQuaternion, Vector3, Vector4,
-};
+use nalgebra::{Quaternion, SMatrix, SVector, UnitQuaternion, Vector3, Vector4};
 
 use crate::mekf::{Derivative, Measurement, RocketConstants, State};
 
@@ -36,7 +34,6 @@ pub fn calculate_state_derivative(
     constants: &RocketConstants,
 ) -> Derivative<State> {
     let (air_density, _) = approximate_air_density(state.altitude_asl());
-
     let delta_orientation = UnitQuaternion::from_quaternion(Quaternion::from_parts(
         1.0,
         state.small_angle_correction() / 2.0,
@@ -55,21 +52,23 @@ pub fn calculate_state_derivative(
         constants.front_reference_area,
     );
 
-    let d_acc_rocket_frame = 0.5 * air_density / constants.burn_out_mass
-        * 2.0
-        * wind_vel_rocket_frame
-            .abs()
-            .component_mul(&cd)
-            .component_mul(&reference_area);
-    let d_acc_world_frame = true_orientation.transform_vector(&d_acc_rocket_frame);
-
-    // also depend on state.acceleration();
-    // let acc_rocket_frame = 0.5 * air_density / constants.burn_out_mass
+    // FIXME try to calculate d_acc (jerk) analytically gives the wrong result for some reason
+    // let d_acc_rocket_frame = 0.5 * air_density / constants.burn_out_mass
+    //     * 2.0
     //     * wind_vel_rocket_frame
-    //         .component_mul(&wind_vel_rocket_frame.abs())
-    //         .component_mul(&cd);
-    // let mut acc_world_frame = true_orientation.transform_vector(&acc_rocket_frame);
-    // acc_world_frame.z -= 9.81;
+    //         .abs()
+    //         .component_mul(&cd)
+    //         .component_mul(&reference_area);
+
+    let d_acc_world_frame = calculate_acc_world_frame_derivative(
+        &true_orientation,
+        air_density,
+        &wind_vel_rocket_frame,
+        &state.velocity().into(),
+        &cd,
+        &reference_area,
+        constants,
+    );
 
     let mut angular_acceleration_rocket_frame = Vector3::<f32>::zeros();
     angular_acceleration_rocket_frame.x = 0.5 * air_density / constants.moment_of_inertia
@@ -98,6 +97,40 @@ pub fn calculate_state_derivative(
         0.0,
         &Vector4::zeros(),
     ))
+}
+
+#[inline]
+fn calculate_acc_world_frame_derivative(
+    true_orientation: &UnitQuaternion<f32>,
+    air_density: f32,
+    wind_vel_rocket_frame: &Vector3<f32>,
+    velocity_world_frame: &Vector3<f32>,
+    cd: &Vector3<f32>,
+    reference_area: &Vector3<f32>,
+    constants: &RocketConstants,
+) -> Vector3<f32> {
+    let delta_time = 0.001f32;
+
+    let acc_rocket_frame = 0.5 * air_density / constants.burn_out_mass
+        * wind_vel_rocket_frame
+            .component_mul(&wind_vel_rocket_frame.abs())
+            .component_mul(cd)
+            .component_mul(reference_area);
+    let mut acc_world_frame = true_orientation.transform_vector(&acc_rocket_frame);
+    acc_world_frame.z -= 9.81;
+
+    let next_velocity = velocity_world_frame + acc_world_frame * delta_time;
+    let next_wind_vel_rocket_frame = -true_orientation.inverse_transform_vector(&next_velocity);
+    let next_acc_rocket_frame = 0.5 * air_density / constants.burn_out_mass
+        * next_wind_vel_rocket_frame
+            .component_mul(&next_wind_vel_rocket_frame.abs())
+            .component_mul(cd)
+            .component_mul(reference_area);
+    let mut next_acc_world_frame = true_orientation.transform_vector(&next_acc_rocket_frame);
+    next_acc_world_frame.z -= 9.81;
+
+    // ??? 1.14 is a magic number
+    (next_acc_world_frame - acc_world_frame) / delta_time * 1.14
 }
 
 pub fn central_difference_jacobian(
