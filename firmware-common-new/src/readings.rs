@@ -1,5 +1,6 @@
 use icao_isa::calculate_isa_altitude;
 use icao_units::si::Pascals;
+use nalgebra::Vector3;
 use serde::{Deserialize, Serialize};
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
@@ -26,7 +27,7 @@ impl BaroData {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct IMUData {
     /// m/s^2
-    pub acc: [f32; 3],
+    pub acc: Vector3<f32>,
     /// deg/s
-    pub gyro: [f32; 3],
+    pub gyro: Vector3<f32>,
 }

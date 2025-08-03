@@ -1,19 +1,23 @@
-mod welford;
 mod dead_reckoner;
+mod welford;
 
 use biquad::{Biquad, Coefficients, DirectForm2Transposed, Q_BUTTERWORTH_F32, ToHertz as _, Type};
 use firmware_common_new::readings::IMUData;
 use heapless::Deque;
-use nalgebra::{Quaternion, UnitQuaternion, UnitVector3, Vector3};
+use nalgebra::{UnitQuaternion, UnitVector3, Vector3};
 
-use crate::dead_reckoning::welford::Welford3;
+use crate::dead_reckoning::{dead_reckoner::DeadReckoner, welford::Welford3};
 
 const SAMPLES_PER_S: usize = 500;
 pub const DT: f32 = 1f32 / (SAMPLES_PER_S as f32);
 
 const IGNITION_DETECTION_ACCELERATION_THRESHOLD: f32 = 5.0 * 9.81;
+const UP: Vector3<f32> = Vector3::new(0.0, 0.0, 1.0);
 
 // 128KiB size budget to fit in DTCM-RAM of H743
+// av frame: reference frame of the IMU ic
+// rocket frame: reference frame of the rocket, z points to nose
+// earth frame: inertial reference frame of the earth
 pub enum RocketDeadReckoning {
     /// stable on pad, find out the orientation of the avionics relative to earth
     /// also find out imu biases
@@ -26,17 +30,23 @@ pub enum RocketDeadReckoning {
 
     /// first half second of powered flight, use the thrust vector to find
     /// out the orientation of the rocket relative to the avionics.
-    /// In a real launch, there will be some vibrations right after
-    /// ignition, which need to be filtered out
     Stage1 {
-        imu_data_list: Deque<IMUData, { SAMPLES_PER_S / 2 }>,
-        acc_variance: [f32; 3],
-        gyro_variance: [f32; 3],
-        gyro_bias: [f32; 3],
+        n: usize,
+        acc_welford: Welford3,
+        av_orientation_reckoner: DeadReckoner,
+        acc_variance: Vector3<f32>,
+        gyro_variance: Vector3<f32>,
+        gyro_bias: Vector3<f32>,
     },
 
     /// dead reckoning
-    Stage2 { gyro_bias: [f32; 3] },
+    Stage2 {
+        q_av_to_rocket: UnitQuaternion<f32>,
+        rocket_orientation_reckoner: DeadReckoner,
+        acc_variance: Vector3<f32>,
+        gyro_variance: Vector3<f32>,
+        gyro_bias: Vector3<f32>,
+    },
     // switch to MEKF if coasting and speed < 0.9 mach
 }
 
@@ -94,10 +104,10 @@ impl RocketDeadReckoning {
                                 gyro_welford: Welford3,
                             },
                             Second {
-                                acc_variance: [f32; 3],
-                                gyro_variance: [f32; 3],
-                                gyro_bias: [f32; 3],
-                                q_imu_to_inertial: UnitQuaternion<f32>,
+                                acc_variance: Vector3<f32>,
+                                gyro_variance: Vector3<f32>,
+                                gyro_bias: Vector3<f32>,
+                                av_orientation_reckoner: DeadReckoner,
                             },
                         }
 
@@ -117,57 +127,122 @@ impl RocketDeadReckoning {
 
                                     if i == SAMPLES_PER_S - 1 {
                                         // this is the gravity vector in rocket frame
-                                        let gravity_vector_rocket_frame: Vector3<f32> =
-                                            acc_welford.mean().into();
-                                        let up_vector_inertial_frame: Vector3<f32> =
-                                            Vector3::new(0.0, 0.0, 1.0);
+                                        let gravity_vector_av_frame: Vector3<f32> =
+                                            acc_welford.mean();
 
-                                        let q_imu_to_inertial = quaternion_from_start_and_end_vector(
-                                            gravity_vector_rocket_frame,
-                                            up_vector_inertial_frame,
+                                        let q_earth_to_av = quaternion_from_start_and_end_vector(
+                                            &UP,
+                                            &gravity_vector_av_frame,
                                         );
+                                        log_info!("q_earth_to_av: {}", q_earth_to_av);
+                                        let reckoner = DeadReckoner::new(q_earth_to_av);
 
                                         state = State::Second {
                                             acc_variance: acc_welford.variance().unwrap(),
                                             gyro_variance: gyro_welford.variance().unwrap(),
                                             gyro_bias: gyro_welford.mean(),
-                                            q_imu_to_inertial,
+                                            av_orientation_reckoner: reckoner,
                                         };
                                     }
                                 }
                                 State::Second {
-                                    acc_variance,
-                                    gyro_variance,
+                                    av_orientation_reckoner,
                                     gyro_bias,
-                                    q_imu_to_inertial,
+                                    ..
                                 } => {
-                                    
-                                },
+                                    av_orientation_reckoner
+                                        .update(&imu_data.acc, &(imu_data.gyro - *gyro_bias));
+                                }
                             }
                         }
 
-                        // calculate biases
-
-                        // calculate orientation of the avionics relative to earth
-
-                        // to stage 1
+                        if let State::Second {
+                            acc_variance,
+                            gyro_variance,
+                            gyro_bias,
+                            av_orientation_reckoner,
+                        } = state
+                        {
+                            *self = RocketDeadReckoning::Stage1 {
+                                n: 0,
+                                acc_welford: Welford3::new(),
+                                av_orientation_reckoner,
+                                acc_variance,
+                                gyro_variance,
+                                gyro_bias,
+                            };
+                        } else {
+                            unreachable!()
+                        }
                     }
                 }
             }
-            RocketDeadReckoning::Stage1 { .. } => todo!(),
-            RocketDeadReckoning::Stage2 { .. } => todo!(),
+            RocketDeadReckoning::Stage1 {
+                n,
+                acc_welford,
+                av_orientation_reckoner,
+                acc_variance,
+                gyro_variance,
+                gyro_bias,
+            } => {
+                acc_welford.update(&z.acc);
+                av_orientation_reckoner.update(&z.acc, &(z.gyro - *gyro_bias));
+
+                *n += 1;
+                if *n > SAMPLES_PER_S / 2 {
+                    let avg_acc_av_frame = acc_welford.mean();
+                    let avg_acc_earth_frame = av_orientation_reckoner
+                        .orientation
+                        .transform_vector(&avg_acc_av_frame);
+
+                    let launch_angle_deg = UP.angle(&avg_acc_earth_frame).to_degrees();
+                    log_info!("launch angle degree: {}", launch_angle_deg);
+
+                    let q_earth_to_rocket =
+                        quaternion_from_start_and_end_vector(&avg_acc_earth_frame, &UP);
+                    log_info!("q_earth_to_rocket: {}", q_earth_to_rocket);
+
+                    let q_av_to_earth = av_orientation_reckoner.orientation.inverse();
+                    let q_av_to_rocket = q_earth_to_rocket * q_av_to_earth; // TODO double check
+
+                    log_info!("q_av_to_rocket: {}", q_av_to_rocket);
+
+                    let rocket_orientation_reckoner = DeadReckoner::new(q_earth_to_rocket);
+
+                    *self = RocketDeadReckoning::Stage2 {
+                        q_av_to_rocket,
+                        rocket_orientation_reckoner,
+                        acc_variance: *acc_variance,
+                        gyro_variance: *gyro_variance,
+                        gyro_bias: *gyro_bias,
+                    };
+                }
+            }
+            RocketDeadReckoning::Stage2 {
+                q_av_to_rocket,
+                rocket_orientation_reckoner,
+                gyro_bias,
+                ..
+            } => {
+                let acc_rocket_frame = q_av_to_rocket.inverse_transform_vector(&z.acc);
+                let gyro_rocket_frame =
+                    q_av_to_rocket.inverse_transform_vector(&(z.gyro - *gyro_bias));
+
+                rocket_orientation_reckoner.update(&acc_rocket_frame, &gyro_rocket_frame);
+            }
         }
     }
 }
 
+/// returns a passive rotation quaternion that would rotate start vector to end vector
 fn quaternion_from_start_and_end_vector(
-    start: Vector3<f32>,
-    end: Vector3<f32>,
+    start: &Vector3<f32>,
+    end: &Vector3<f32>,
 ) -> UnitQuaternion<f32> {
     let start = start.normalize();
     let end = end.normalize();
 
-    let axis = UnitVector3::new_unchecked(end.cross(&start));
+    let axis = UnitVector3::new_normalize(end.cross(&start));
     let angle = end.angle(&start);
 
     UnitQuaternion::from_axis_angle(&axis, angle)
@@ -183,5 +258,19 @@ mod tests {
         init_logger();
 
         log_info!("{}", size_of::<RocketDeadReckoning>())
+    }
+
+    #[test]
+    fn test_quaternion_from_start_and_end_vector() {
+        init_logger();
+
+        let start = Vector3::new(0.0, 0.0, 1.0);
+        let end = Vector3::new(1.0, 0.0, 1.0).normalize();
+
+        let q_start_to_end = quaternion_from_start_and_end_vector(&start, &end);
+
+        let end2 = q_start_to_end.inverse_transform_vector(&start);
+
+        log_info!("{}, {}", end, end2)
     }
 }

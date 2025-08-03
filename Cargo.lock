@@ -2663,6 +2663,7 @@ dependencies = [
  "lora-modulation",
  "lora-phy",
  "micromath",
+ "nalgebra 0.34.0",
  "nmea 0.7.0",
  "num-traits",
  "packed_struct",
@@ -4456,6 +4457,7 @@ dependencies = [
  "num-complex",
  "num-rational",
  "num-traits",
+ "serde",
  "simba 0.9.0",
  "typenum",
 ]
@@ -4639,6 +4641,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "73f88a1307638156682bada9d7604135552957b7818057dcef22705b4d509495"
 dependencies = [
  "num-traits",
+ "serde",
 ]
 
 [[package]]
@@ -6433,6 +6436,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b3a386a501cd104797982c15ae17aafe8b9261315b5d07e3ec803f2ea26be0fa"
 dependencies = [
  "approx",
+ "libm 0.2.15",
  "num-complex",
  "num-traits",
  "paste",

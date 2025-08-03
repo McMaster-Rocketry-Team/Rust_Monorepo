@@ -44,14 +44,14 @@ impl DeadReckoner {
     /// # Arguments
     /// * `accel` - accelerometer measurement (specific force) in device frame (m/s²)
     /// * `gyro`  - angular rate measurement in device frame (rad/s)
-    pub fn update(&mut self, accel: Vector3<f32>, gyro: Vector3<f32>) {
+    pub fn update(&mut self, accel: &Vector3<f32>, gyro: &Vector3<f32>) {
         // 1) Integrate orientation: quaternion exponential via small-angle approx
         let delta_orientation =
             UnitQuaternion::from_quaternion(Quaternion::from_parts(1.0, -gyro * DT / 2.0));
         self.orientation = delta_orientation * self.orientation;
 
         // 2) Rotate accel into inertial frame and add gravity to get linear accel
-        let mut accel_inertial = self.orientation.inverse_transform_vector(&accel);
+        let mut accel_inertial = self.orientation.inverse_transform_vector(accel);
         accel_inertial.z -= self.gravity;
 
         // 3) Integrate velocity and position
@@ -79,14 +79,14 @@ mod tests {
         let acc_measurement = Vector3::new(0.0, 0.0, 0.0);
 
         for _ in 0..ticks {
-            reckoner.update(acc_measurement, gyro_measurement);
+            reckoner.update(&acc_measurement, &gyro_measurement);
         }
 
         // should be "UnitQuaternion angle: 1.5707971 − axis: (-1, 0, 0)"
         log_info!("orientation: {}", reckoner.orientation);
 
         // move to z axis
-        reckoner.update(Vector3::new(0.0, 0.0, 10000.0), Vector3::zeros());
+        reckoner.update(&Vector3::new(0.0, 0.0, 10000.0), &Vector3::zeros());
         log_info!("position: {}", reckoner.position);
         assert!(reckoner.position.y < -0.01);
     }
