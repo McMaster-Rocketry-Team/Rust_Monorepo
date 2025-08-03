@@ -19,4 +19,8 @@ impl<T: TimestampType, D> SensorReading<T, D> {
             data,
         }
     }
+
+    pub fn timestamp_s(&self) -> f64 {
+        self.timestamp_us as f64 / 1_000_000.0
+    }
 }

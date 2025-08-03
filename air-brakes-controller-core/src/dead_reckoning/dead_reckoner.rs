@@ -47,7 +47,7 @@ impl DeadReckoner {
     pub fn update(&mut self, accel: &Vector3<f32>, gyro: &Vector3<f32>) {
         // 1) Integrate orientation: quaternion exponential via small-angle approx
         let delta_orientation =
-            UnitQuaternion::from_quaternion(Quaternion::from_parts(1.0, -gyro * DT / 2.0));
+            UnitQuaternion::from_quaternion(Quaternion::from_parts(1.0, gyro * DT / 2.0)); // TODO ??
         self.orientation = delta_orientation * self.orientation;
 
         // 2) Rotate accel into inertial frame and add gravity to get linear accel

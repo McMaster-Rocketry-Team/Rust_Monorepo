@@ -56,6 +56,8 @@ impl GlobalPlot {
                 std::fs::remove_file(&file_path).unwrap()
             }
         }
+
+        log_info!("plots saved to plots_out/");
     }
 }
 
@@ -72,7 +74,6 @@ fn plot_graph(
 
     let time_range = min_max_range(&data.iter().map(|(t, _)| *t).collect::<Vec<f32>>());
     let value_range = min_max_range(&data.iter().map(|(_, a)| *a).collect::<Vec<f32>>());
-    log_info!("value range for {}: {:?}", data_name, value_range);
 
     let mut chart = ChartBuilder::on(&root)
         .caption(format!("{data_name} vs Time"), ("sans-serif", 40))
@@ -101,7 +102,6 @@ fn plot_graph(
     root.present()?;
     drop(root);
     drop(chart);
-    log_info!("Plot saved as {}", &file_path);
     Ok(file_path)
 }
 

@@ -7,7 +7,7 @@ use crate::mekf::{
     },
 };
 
-const DT: f32 = 1f32 / 1000f32;
+const DT: f32 = 1f32 / 500f32;
 
 pub struct RocketMEKF {
     orientation: UnitQuaternion<f32>,

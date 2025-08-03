@@ -58,3 +58,40 @@ impl Welford3 {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use approx::assert_relative_eq;
+
+    #[test]
+    fn test_mean() {
+        let mut welford = Welford3::new();
+        
+        // Test with no samples
+        assert_eq!(welford.mean(), Vector3::zeros());
+        
+        // Test with one sample
+        let sample1 = Vector3::new(1.0, 2.0, 3.0);
+        welford.update(&sample1);
+        assert_relative_eq!(welford.mean(), sample1, epsilon = 1e-6);
+        
+        // Test with two samples
+        let sample2 = Vector3::new(3.0, 4.0, 5.0);
+        welford.update(&sample2);
+        let expected_mean = Vector3::new(2.0, 3.0, 4.0); // (1+3)/2, (2+4)/2, (3+5)/2
+        assert_relative_eq!(welford.mean(), expected_mean, epsilon = 1e-6);
+        
+        // Test with three samples
+        let sample3 = Vector3::new(5.0, 6.0, 7.0);
+        welford.update(&sample3);
+        let expected_mean = Vector3::new(3.0, 4.0, 5.0); // (1+3+5)/3, (2+4+6)/3, (3+5+7)/3
+        assert_relative_eq!(welford.mean(), expected_mean, epsilon = 1e-6);
+        
+        // Test with negative values
+        let sample4 = Vector3::new(-2.0, -4.0, -6.0);
+        welford.update(&sample4);
+        let expected_mean = Vector3::new(1.75, 2.0, 2.25); // (1+3+5-2)/4, (2+4+6-4)/4, (3+5+7-6)/4
+        assert_relative_eq!(welford.mean(), expected_mean, epsilon = 1e-6);
+    }
+}

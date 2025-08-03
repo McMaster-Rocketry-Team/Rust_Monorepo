@@ -1,8 +1,10 @@
 mod dead_reckoner;
+#[cfg(test)]
+mod tests;
 mod welford;
 
 use biquad::{Biquad, Coefficients, DirectForm2Transposed, Q_BUTTERWORTH_F32, ToHertz as _, Type};
-use firmware_common_new::readings::IMUData;
+use firmware_common_new::{readings::IMUData, sensor_reading::SensorReading, time::TimestampType};
 use heapless::Deque;
 use nalgebra::{UnitQuaternion, UnitVector3, Vector3};
 
@@ -67,7 +69,7 @@ impl RocketDeadReckoning {
         }
     }
 
-    pub fn update(&mut self, z: IMUData) {
+    pub fn update(&mut self, z: &SensorReading<impl TimestampType, IMUData>) {
         match self {
             RocketDeadReckoning::OnPad {
                 imu_data_list,
@@ -76,15 +78,15 @@ impl RocketDeadReckoning {
                 z_acc_low_pass,
             } => {
                 let acc_low_passed = [
-                    x_acc_low_pass.run(z.acc[0]),
-                    y_acc_low_pass.run(z.acc[1]),
-                    z_acc_low_pass.run(z.acc[2]),
+                    x_acc_low_pass.run(z.data.acc[0]),
+                    y_acc_low_pass.run(z.data.acc[1]),
+                    z_acc_low_pass.run(z.data.acc[2]),
                 ];
 
                 if imu_data_list.is_full() {
-                    imu_data_list.pop_back().unwrap();
+                    imu_data_list.pop_front().unwrap();
                 }
-                imu_data_list.push_front(z).unwrap();
+                imu_data_list.push_back(z.data.clone()).unwrap();
 
                 if imu_data_list.is_full() {
                     // detect ignition
@@ -94,6 +96,7 @@ impl RocketDeadReckoning {
                         > IGNITION_DETECTION_ACCELERATION_THRESHOLD
                             * IGNITION_DETECTION_ACCELERATION_THRESHOLD
                     {
+                        log_info!("[{}] ignition detected, to stage 1", z.timestamp_s());
                         // 2 seconds of data in imu_data_list
                         // 0s-1s: rocket stable, calculate bias, variance, and orientation between avionics to ground
                         // 1s-2s: rocket shakes due to ignition, use dead reckoning to keep track of the orientation between avionics to ground
@@ -129,7 +132,6 @@ impl RocketDeadReckoning {
                                         // this is the gravity vector in rocket frame
                                         let gravity_vector_av_frame: Vector3<f32> =
                                             acc_welford.mean();
-
                                         let q_earth_to_av = quaternion_from_start_and_end_vector(
                                             &UP,
                                             &gravity_vector_av_frame,
@@ -185,11 +187,12 @@ impl RocketDeadReckoning {
                 gyro_variance,
                 gyro_bias,
             } => {
-                acc_welford.update(&z.acc);
-                av_orientation_reckoner.update(&z.acc, &(z.gyro - *gyro_bias));
+                acc_welford.update(&z.data.acc);
+                av_orientation_reckoner.update(&z.data.acc, &(z.data.gyro - *gyro_bias));
 
                 *n += 1;
                 if *n > SAMPLES_PER_S / 2 {
+                    log_info!("[{}] to stage 2", z.timestamp_s());
                     let avg_acc_av_frame = acc_welford.mean();
                     let avg_acc_earth_frame = av_orientation_reckoner
                         .orientation
@@ -207,7 +210,9 @@ impl RocketDeadReckoning {
 
                     log_info!("q_av_to_rocket: {}", q_av_to_rocket);
 
-                    let rocket_orientation_reckoner = DeadReckoner::new(q_earth_to_rocket);
+                    let mut rocket_orientation_reckoner = DeadReckoner::new(q_earth_to_rocket);
+                    rocket_orientation_reckoner.position = av_orientation_reckoner.position;
+                    rocket_orientation_reckoner.velocity = av_orientation_reckoner.velocity;
 
                     *self = RocketDeadReckoning::Stage2 {
                         q_av_to_rocket,
@@ -224,9 +229,9 @@ impl RocketDeadReckoning {
                 gyro_bias,
                 ..
             } => {
-                let acc_rocket_frame = q_av_to_rocket.inverse_transform_vector(&z.acc);
+                let acc_rocket_frame = q_av_to_rocket.inverse_transform_vector(&z.data.acc);
                 let gyro_rocket_frame =
-                    q_av_to_rocket.inverse_transform_vector(&(z.gyro - *gyro_bias));
+                    q_av_to_rocket.inverse_transform_vector(&(z.data.gyro - *gyro_bias));
 
                 rocket_orientation_reckoner.update(&acc_rocket_frame, &gyro_rocket_frame);
             }
@@ -249,7 +254,7 @@ fn quaternion_from_start_and_end_vector(
 }
 
 #[cfg(test)]
-mod tests {
+mod tests2 {
     use super::*;
     use crate::tests::init_logger;
 
