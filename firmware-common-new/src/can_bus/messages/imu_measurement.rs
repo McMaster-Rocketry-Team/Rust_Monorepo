@@ -1,3 +1,4 @@
+use nalgebra::Vector3;
 use packed_struct::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -17,23 +18,33 @@ pub struct IMUMeasurementMessage {
 }
 
 impl IMUMeasurementMessage {
-    pub fn new(timestamp_us: u64, acc: &[f32; 3], gyro: &[f32; 3]) -> Self {
+    pub fn new(timestamp_us: u64, acc: &Vector3<f32>, gyro: &Vector3<f32>) -> Self {
         Self {
-            acc_raw: acc.map(|x| u32::from_be_bytes(x.to_be_bytes())),
-            gyro_raw: gyro.map(|x| u32::from_be_bytes(x.to_be_bytes())),
+            acc_raw: vec3_to_u32_array(acc),
+            gyro_raw: vec3_to_u32_array(gyro),
             timestamp_us,
         }
     }
 
     /// Acceleration in m/s^2
-    pub fn acc(&self) -> [f32; 3] {
-        self.acc_raw.map(f32::from_bits)
+    pub fn acc(&self) -> Vector3<f32> {
+        Vector3::from_column_slice(&self.acc_raw.map(f32::from_bits))
     }
 
     /// Gyroscope in deg/s
-    pub fn gyro(&self) -> [f32; 3] {
-        self.gyro_raw.map(f32::from_bits)
+    pub fn gyro(&self) -> Vector3<f32> {
+        Vector3::from_column_slice(&self.gyro_raw.map(f32::from_bits))
     }
+}
+
+fn vec3_to_u32_array(vec: &Vector3<f32>) -> [u32;3]{
+    let mut result = [0u32;3];
+
+    result[0] = u32::from_be_bytes(vec.x.to_be_bytes());
+    result[1] = u32::from_be_bytes(vec.y.to_be_bytes());
+    result[2] = u32::from_be_bytes(vec.z.to_be_bytes());
+
+    result
 }
 
 impl CanBusMessage for IMUMeasurementMessage {

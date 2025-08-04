@@ -56,7 +56,7 @@ pub struct NodeStatusMessage {
 
     /// Node specific status, only the lower 11 bits are used.
     #[packed_field(bits = "28..39")]
-    custom_status_raw: u16,
+    pub custom_status_raw: u16,
 }
 
 impl NodeStatusMessage {
