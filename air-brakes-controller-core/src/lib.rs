@@ -4,12 +4,21 @@
 // use java_bindgen::prelude::*;
 
 mod fmt;
-pub mod mekf;
-pub mod dead_reckoning;
+mod state_estimator;
+
+pub use state_estimator::RocketStateEstimator;
 
 #[cfg(test)]
 mod tests;
 
+
+pub struct RocketConstants {
+    pub side_cd: f32,
+    pub burn_out_mass: f32,
+    pub moment_of_inertia: f32,
+    pub front_reference_area: f32,
+    pub side_reference_area: f32,
+}
 
 // #[derive(Default, JavaClass)]
 // struct OpenRocketPostStepInput {

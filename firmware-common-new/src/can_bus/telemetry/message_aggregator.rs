@@ -350,6 +350,7 @@ mod test {
         tests::init_logger,
     };
     use log::info;
+    use nalgebra::Vector3;
 
     use super::*;
 
@@ -363,8 +364,8 @@ mod test {
                 1,
                 CanBusMessageEnum::IMUMeasurement(IMUMeasurementMessage::new(
                     10000000,
-                    &[1.5, 2.5, 3.5],
-                    &[1.5, 2.5, 3.5],
+                    &Vector3::new(1.5, 2.5, 3.5),
+                    &Vector3::new(1.5, 2.5, 3.5),
                 )),
             ),
             (
@@ -381,8 +382,8 @@ mod test {
                 3,
                 CanBusMessageEnum::IMUMeasurement(IMUMeasurementMessage::new(
                     10000000,
-                    &[10.5, 20.5, 30.5],
-                    &[10.5, 20.5, 30.5],
+                    &Vector3::new(10.5, 20.5, 30.5),
+                    &Vector3::new(10.5, 20.5, 30.5),
                 )),
             ),
         ];
