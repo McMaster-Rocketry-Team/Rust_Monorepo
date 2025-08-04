@@ -4436,6 +4436,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9cd59afb6639828b33677758314a4a1a745c15c02bc597095b851c8fd915cf49"
 dependencies = [
  "approx",
+ "defmt 1.0.1",
  "glam 0.14.0",
  "glam 0.15.2",
  "glam 0.16.0",

@@ -2,9 +2,9 @@ use std::fs::File;
 
 use super::*;
 use crate::tests::{init_logger, plot::GlobalPlot};
+use csv::Reader;
 use firmware_common_new::time::BootTimestamp;
 use serde::Deserialize;
-use csv::Reader;
 
 #[derive(Deserialize)]
 struct CsvRecord {
@@ -20,10 +20,7 @@ struct CsvRecord {
 fn read_csv_records() -> Vec<CsvRecord> {
     let path = "./test_data/merged.csv";
     let mut reader = Reader::from_reader(File::open(path).unwrap());
-    reader
-        .deserialize()
-        .map(|row| row.unwrap())
-        .collect()
+    reader.deserialize().map(|row| row.unwrap()).collect()
 }
 
 #[test]
@@ -33,16 +30,27 @@ fn integration_test() {
     let csv_records = read_csv_records();
 
     let mut dead_reckoning = RocketDeadReckoning::new();
-    for csv_record in csv_records{
+    for (i, csv_record) in csv_records.iter().enumerate() {
         GlobalPlot::set_time(csv_record.timestamp_s);
-        let reading: SensorReading<BootTimestamp, IMUData> = SensorReading::new((csv_record.timestamp_s as f64 * 1000_000.0) as u64, IMUData{
-            acc: Vector3::new(csv_record.imu_acc_x, csv_record.imu_acc_y, csv_record.imu_acc_z),
-            gyro: Vector3::new(csv_record.gyro_x, csv_record.gyro_y, csv_record.gyro_z),
-        });
+        let reading: SensorReading<BootTimestamp, IMUData> = SensorReading::new(
+            (csv_record.timestamp_s as f64 * 1000_000.0) as u64,
+            IMUData {
+                acc: Vector3::new(
+                    csv_record.imu_acc_x,
+                    csv_record.imu_acc_y,
+                    csv_record.imu_acc_z,
+                ),
+                gyro: Vector3::new(csv_record.gyro_x, csv_record.gyro_y, csv_record.gyro_z),
+            },
+        );
 
         dead_reckoning.update(&reading);
 
-        if let RocketDeadReckoning::Stage2 { rocket_orientation_reckoner: reckoner,.. } = &dead_reckoning{
+        if let RocketDeadReckoning::Stage2 {
+            rocket_orientation_reckoner: reckoner,
+            ..
+        } = &dead_reckoning
+        {
             GlobalPlot::add_value("Dead Reckoning Pos X", reckoner.position.x);
             GlobalPlot::add_value("Dead Reckoning Pos Y", reckoner.position.y);
             GlobalPlot::add_value("Dead Reckoning Pos Z", reckoner.position.z);

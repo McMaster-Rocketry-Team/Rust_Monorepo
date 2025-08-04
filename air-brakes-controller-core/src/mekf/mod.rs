@@ -114,10 +114,8 @@ impl State {
         &mut self,
         orientation: &UnitQuaternion<f32>,
     ) -> UnitQuaternion<f32> {
-        let delta_orientation = UnitQuaternion::from_quaternion(Quaternion::from_parts(
-            1.0,
-            self.small_angle_correction() / 2.0, // TODO double check
-        ));
+        // TODO double check
+        let delta_orientation = UnitQuaternion::from_scaled_axis(self.small_angle_correction());
 
         self.0[0] = 0.0;
         self.0[1] = 0.0;

@@ -50,7 +50,7 @@ rkyv = { version = "0.8.10", default-features = false, features = [
     "pointer_width_32",
 ] }
 aligned = "0.4.2"
-nalgebra = { version = "0.34.0", default-features = false, features = ["libm-force", "serde-serialize"] }
+nalgebra = { version = "0.34.0", default-features = false, features = ["libm-force", "serde-serialize-no-std", "defmt"] }
 json ={ version = "0.12.4", optional = true}
 
 [dev-dependencies]
