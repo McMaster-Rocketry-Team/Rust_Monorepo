@@ -132,6 +132,7 @@ impl RocketDeadReckoning {
                                         // this is the gravity vector in rocket frame
                                         let gravity_vector_av_frame: Vector3<f32> =
                                             acc_welford.mean();
+                                            log_info!("gravity_vector_av_frame: {}", gravity_vector_av_frame);
                                         let q_earth_to_av = quaternion_from_start_and_end_vector(
                                             &UP,
                                             &gravity_vector_av_frame,

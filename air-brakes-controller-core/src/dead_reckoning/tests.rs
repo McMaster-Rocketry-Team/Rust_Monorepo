@@ -46,6 +46,18 @@ fn integration_test() {
 
         dead_reckoning.update(&reading);
 
+        // if let RocketDeadReckoning::Stage1 {
+        //     av_orientation_reckoner: reckoner,
+        //     ..
+        // } = &dead_reckoning
+        // {
+        //     let up = Vector3::new(0.0, 0.0, 1.0);
+        //     let nose_direction = reckoner.orientation.inverse_transform_vector(&up);
+        //     let tilt = up.angle(&nose_direction).to_degrees();
+
+        //     GlobalPlot::add_value("Dead Reckoning Tilt", tilt);
+        // }
+
         if let RocketDeadReckoning::Stage2 {
             rocket_orientation_reckoner: reckoner,
             ..

@@ -48,10 +48,10 @@ impl DeadReckoner {
         // 1) Integrate orientation: quaternion exponential via small-angle approx
         // TODO double check
         let delta_orientation = UnitQuaternion::from_scaled_axis(gyro * DT);
-        self.orientation = delta_orientation * self.orientation;
+        self.orientation = self.orientation * delta_orientation;
 
         // 2) Rotate accel into inertial frame and add gravity to get linear accel
-        let mut accel_inertial = self.orientation.inverse_transform_vector(accel);
+        let mut accel_inertial = self.orientation.transform_vector(accel);
         accel_inertial.z -= self.gravity;
 
         // 3) Integrate velocity and position
@@ -66,7 +66,33 @@ mod tests {
     use crate::tests::init_logger;
 
     #[test]
-    fn test() {
+    fn test_dead_reckoner() {
+        init_logger();
+
+        let mut reckoner = DeadReckoner::new_no_gravity(UnitQuaternion::identity());
+
+        // rotate by x axis 90 degrees
+        let rotation_speed_deg = 10f32;
+        let duration = 90f32 / rotation_speed_deg;
+        let ticks = (duration / DT).round() as usize;
+        let gyro_measurement = Vector3::new(rotation_speed_deg.to_radians(), 0.0, 0.0);
+        let acc_measurement = Vector3::new(0.0, 0.0, 0.0);
+
+        for _ in 0..ticks {
+            reckoner.update(&acc_measurement, &gyro_measurement);
+        }
+
+        // should be "UnitQuaternion angle: 1.5707971 − axis: (1, 0, 0)"
+        log_info!("orientation: {}", reckoner.orientation);
+
+        // move to z axis
+        reckoner.update(&Vector3::new(0.0, 0.0, 10000.0), &Vector3::zeros());
+        log_info!("position: {}", reckoner.position);
+        assert!(reckoner.position.y < -0.01);
+    }
+
+    #[test]
+    fn test_dead_reckoner2() {
         init_logger();
 
         let mut reckoner = DeadReckoner::new_no_gravity(UnitQuaternion::identity());
@@ -83,11 +109,45 @@ mod tests {
         }
 
         // should be "UnitQuaternion angle: 1.5707971 − axis: (-1, 0, 0)"
-        log_info!("orientation: {}", reckoner.orientation);
+        log_info!(
+            "orientation: {} {:?}",
+            reckoner.orientation,
+            reckoner.orientation
+        );
 
-        // move to z axis
-        reckoner.update(&Vector3::new(0.0, 0.0, 10000.0), &Vector3::zeros());
+        // rotate by y axis (world's z axis) 90 degrees
+        let gyro_measurement = Vector3::new(0.0, rotation_speed_deg.to_radians(), 0.0);
+
+        for _ in 0..ticks {
+            reckoner.update(&acc_measurement, &gyro_measurement);
+        }
+
+        log_info!(
+            "orientation: {} {:?}",
+            reckoner.orientation,
+            reckoner.orientation
+        );
+
+        // local x axis should point to world y axis now
+        // move to local x axis (world y axis)
+        let acc_measurement = Vector3::new(100000.0, 0.0, 0.0);
+        let accel_inertial = reckoner.orientation.transform_vector(&acc_measurement);
+        log_info!("accel_inertial: {}", accel_inertial);
+        reckoner.update(&acc_measurement, &Vector3::zeros());
         log_info!("position: {}", reckoner.position);
-        assert!(reckoner.position.y < -0.01);
+        // assert!(reckoner.position.y < -0.01);
+    }
+
+    #[test]
+    fn test_dead_reckoner3() {
+        init_logger();
+
+        let q_x_10 =
+            UnitQuaternion::from_scaled_axis(-Vector3::<f32>::new(10f32.to_radians(), 0.0, 0.0));
+        let q_y_90 =
+            UnitQuaternion::from_scaled_axis(-Vector3::<f32>::new(0.0, 90f32.to_radians(), 0.0));
+
+        log_info!("q_x_10 * q_y_90: {:?}", q_x_10 * q_y_90);
+        log_info!("q_y_90 * q_x_10: {:?}", q_y_90 * q_x_10);
     }
 }
