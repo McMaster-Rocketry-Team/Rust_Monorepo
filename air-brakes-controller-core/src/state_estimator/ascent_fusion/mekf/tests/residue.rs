@@ -51,7 +51,7 @@ impl CsvRecord {
             self.orientation_x,
             self.orientation_y,
             self.orientation_z,
-        )).inverse()
+        ))
     }
 }
 

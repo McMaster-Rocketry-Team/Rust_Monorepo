@@ -1,4 +1,4 @@
-use nalgebra::{SMatrix, SVector, UnitQuaternion, Vector3};
+use nalgebra::{SMatrix, UnitQuaternion, Vector3};
 
 use crate::{
     RocketConstants,
@@ -18,7 +18,8 @@ pub fn state_transition(
     let delta_orientation = UnitQuaternion::from_scaled_axis(state.small_angle_correction());
     let true_orientation = orientation * delta_orientation;
 
-    let wind_vel_rocket_frame = -true_orientation.transform_vector(&state.velocity().into());
+    let wind_vel_rocket_frame =
+        -true_orientation.inverse_transform_vector(&state.velocity().into());
 
     // calculate drag coefficient
     let forward_cd = lerp(airbrakes_extention, state.drag_coefficients().as_slice());
@@ -30,7 +31,7 @@ pub fn state_transition(
     );
 
     let d_acc_world_frame = calculate_acc_world_frame_derivative(
-        &true_orientation.inverse(), // todo move inverse into the function
+        &true_orientation,
         air_density,
         &wind_vel_rocket_frame,
         &state.velocity().into(),
@@ -53,12 +54,12 @@ pub fn state_transition(
         * state.sideways_moment_co();
 
     let angular_acceleration_world_frame =
-        true_orientation.inverse_transform_vector(&angular_acceleration_rocket_frame);
+        true_orientation.transform_vector(&angular_acceleration_rocket_frame);
     let next_angular_velocity_world_frame =
         state.angular_velocity() + angular_acceleration_world_frame * DT;
 
     let angular_velocity_rocket_frame =
-        true_orientation.transform_vector(&state.angular_velocity().into());
+        true_orientation.inverse_transform_vector(&state.angular_velocity().into());
     let next_small_angle_correction =
         state.small_angle_correction() + angular_velocity_rocket_frame * DT;
 
@@ -150,8 +151,6 @@ pub fn central_difference_jacobian(
     j_mat
 }
 
-pub struct RocketMeasurement(pub SVector<f32, { State::SIZE }>);
-
 pub fn build_measurement_matrix() -> SMatrix<f32, { Measurement::SIZE }, { State::SIZE }> {
     let mut h = SMatrix::zeros();
 
@@ -173,39 +172,11 @@ pub fn build_measurement_matrix() -> SMatrix<f32, { Measurement::SIZE }, { State
 
 #[cfg(test)]
 mod test {
-    use approx::assert_relative_eq;
     use nalgebra::{Quaternion, UnitVector3};
 
     use crate::tests::init_logger;
 
     use super::*;
-
-    #[test]
-    fn lerp_test() {
-        assert_relative_eq!(
-            lerp(-1f32 / 3.0, &[0.0, 1.0, 2.0, 3.0]),
-            -1.0,
-            epsilon = 0.0001
-        );
-        assert_relative_eq!(lerp(0.0f32, &[0.0, 1.0, 2.0, 3.0]), 0.0, epsilon = 0.0001);
-        assert_relative_eq!(
-            lerp(0.16666666f32, &[0.0, 1.0, 2.0, 3.0]),
-            0.5,
-            epsilon = 0.0001
-        );
-        assert_relative_eq!(lerp(0.5f32, &[0.0, 1.0, 2.0, 3.0]), 1.5, epsilon = 0.0001);
-        assert_relative_eq!(
-            lerp(0.83333333f32, &[0.0, 1.0, 2.0, 3.0]),
-            2.5,
-            epsilon = 0.0001
-        );
-        assert_relative_eq!(lerp(1.0f32, &[0.0, 1.0, 2.0, 3.0]), 3.0, epsilon = 0.0001);
-        assert_relative_eq!(
-            lerp(1.0f32 + 1.0 / 3.0, &[0.0, 1.0, 2.0, 3.0]),
-            4.0,
-            epsilon = 0.0001
-        );
-    }
 
     #[test]
     fn small_angle_correction_test() {

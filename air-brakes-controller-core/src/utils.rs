@@ -26,3 +26,39 @@ pub fn lerp(
     let t = (t - spacing * (i as f32)) * (len - 1) as f32;
     (1.0 - t) * values[i] + t * values[i + 1]
 }
+
+#[cfg(test)]
+mod test {
+    use approx::assert_relative_eq;
+
+    use super::*;
+
+    #[test]
+    fn lerp_test() {
+        assert_relative_eq!(
+            lerp(-1f32 / 3.0, &[0.0, 1.0, 2.0, 3.0]),
+            -1.0,
+            epsilon = 0.0001
+        );
+        assert_relative_eq!(lerp(0.0f32, &[0.0, 1.0, 2.0, 3.0]), 0.0, epsilon = 0.0001);
+        assert_relative_eq!(
+            lerp(0.16666666f32, &[0.0, 1.0, 2.0, 3.0]),
+            0.5,
+            epsilon = 0.0001
+        );
+        assert_relative_eq!(lerp(0.5f32, &[0.0, 1.0, 2.0, 3.0]), 1.5, epsilon = 0.0001);
+        assert_relative_eq!(
+            lerp(0.83333333f32, &[0.0, 1.0, 2.0, 3.0]),
+            2.5,
+            epsilon = 0.0001
+        );
+        assert_relative_eq!(lerp(1.0f32, &[0.0, 1.0, 2.0, 3.0]), 3.0, epsilon = 0.0001);
+        assert_relative_eq!(
+            lerp(1.0f32 + 1.0 / 3.0, &[0.0, 1.0, 2.0, 3.0]),
+            4.0,
+            epsilon = 0.0001
+        );
+    }
+
+
+}
