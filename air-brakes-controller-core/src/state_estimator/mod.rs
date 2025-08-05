@@ -65,3 +65,16 @@ pub struct FlightProfile {
     pub main_chute_delay_us: u32,
     pub time_above_mach_08_us: u32,
 }
+
+#[cfg(test)]
+mod test {
+    use crate::tests::init_logger;
+
+    use super::*;
+
+    #[test]
+    fn state_estimator_size() {
+        init_logger();
+        log_info!("size: {}", size_of::<RocketStateEstimator>())
+    }
+}

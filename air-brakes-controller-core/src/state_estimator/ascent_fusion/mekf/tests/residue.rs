@@ -5,10 +5,8 @@ use nalgebra::{Quaternion, UnitQuaternion, Vector3, Vector4};
 use serde::Deserialize;
 
 use super::super::state::State;
-use super::super::state_propagation::calculate_state_derivative;
 use crate::{
-    RocketConstants,
-    tests::{init_logger, plot::GlobalPlot},
+    state_estimator::ascent_fusion::mekf::state_propagation::state_transition, tests::{init_logger, plot::GlobalPlot}, RocketConstants
 };
 
 #[derive(Deserialize)]
@@ -53,7 +51,7 @@ impl CsvRecord {
             self.orientation_x,
             self.orientation_y,
             self.orientation_z,
-        ))
+        )).inverse()
     }
 }
 
@@ -89,9 +87,8 @@ fn calculate_residue() {
         GlobalPlot::set_time(csv_record.timestamp_s);
         let state = csv_record.to_rocket_state();
         let orientation = csv_record.to_orientation();
-        let derivative = calculate_state_derivative(0.0, &orientation, &state, &constants);
 
-        let mut predicted_state = state.add_derivative(&derivative, delta_time);
+        let mut predicted_state = state_transition(0.0, &orientation, &state, &constants);
         let predicted_orientation = predicted_state.reset_small_angle_correction(&orientation);
 
         let true_state = next_record.to_rocket_state();

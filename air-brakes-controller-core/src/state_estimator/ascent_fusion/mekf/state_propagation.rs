@@ -2,11 +2,76 @@ use nalgebra::{Quaternion, SMatrix, SVector, UnitQuaternion, Vector3, Vector4};
 
 use crate::{
     RocketConstants,
-    state_estimator::Measurement,
+    state_estimator::{DT, Measurement},
     utils::{approximate_air_density, lerp},
 };
 
 use super::state::{Derivative, State};
+
+pub fn state_transition(
+    airbrakes_extention: f32, // 0-1
+    orientation: &UnitQuaternion<f32>,
+    state: &State,
+    constants: &RocketConstants,
+) -> State {
+    let air_density = approximate_air_density(state.altitude_asl());
+    let delta_orientation = UnitQuaternion::from_scaled_axis(state.small_angle_correction());
+    let true_orientation = orientation * delta_orientation;
+
+    let wind_vel_rocket_frame = -true_orientation.transform_vector(&state.velocity().into());
+
+    // calculate drag coefficient
+    let forward_cd = lerp(airbrakes_extention, state.drag_coefficients().as_slice());
+    let cd = Vector3::new(constants.side_cd, constants.side_cd, forward_cd);
+    let reference_area = Vector3::new(
+        constants.side_reference_area,
+        constants.side_reference_area,
+        constants.front_reference_area,
+    );
+
+    let d_acc_world_frame = calculate_acc_world_frame_derivative(
+        &true_orientation.inverse(), // todo move inverse into the function
+        air_density,
+        &wind_vel_rocket_frame,
+        &state.velocity().into(),
+        &cd,
+        &reference_area,
+        constants,
+    );
+    let next_acc_world_frame = state.acceleration() + d_acc_world_frame * DT;
+
+    let mut angular_acceleration_rocket_frame = Vector3::<f32>::zeros();
+    angular_acceleration_rocket_frame.x = 0.5 * air_density / constants.moment_of_inertia
+        * constants.side_reference_area
+        * wind_vel_rocket_frame.y
+        * wind_vel_rocket_frame.y.abs()
+        * state.sideways_moment_co();
+    angular_acceleration_rocket_frame.y = -0.5 * air_density / constants.moment_of_inertia
+        * constants.side_reference_area
+        * wind_vel_rocket_frame.x
+        * wind_vel_rocket_frame.x.abs()
+        * state.sideways_moment_co();
+
+    let angular_acceleration_world_frame =
+        true_orientation.inverse_transform_vector(&angular_acceleration_rocket_frame);
+    let next_angular_velocity_world_frame =
+        state.angular_velocity() + angular_acceleration_world_frame * DT;
+
+    let angular_velocity_rocket_frame =
+        true_orientation.transform_vector(&state.angular_velocity().into());
+    let next_small_angle_correction =
+        state.small_angle_correction() + angular_velocity_rocket_frame * DT;
+
+    State::new(
+        &next_small_angle_correction,
+        &next_acc_world_frame,
+        &(state.velocity() + state.acceleration() * DT),
+        &next_angular_velocity_world_frame,
+        state.altitude_asl() + state.velocity().z * DT,
+        state.sideways_moment_co(),
+        &state.drag_coefficients(),
+    )
+}
 
 pub fn calculate_state_derivative(
     airbrakes_extention: f32, // 0-1
