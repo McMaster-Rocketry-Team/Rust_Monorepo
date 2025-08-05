@@ -2,10 +2,7 @@ mod altitude_kf;
 #[cfg(test)]
 mod tests;
 
-use firmware_common_new::{
-    sensor_reading::SensorReading, time::TimestampType,
-    vlp::packets::fire_pyro::PyroSelect,
-};
+use firmware_common_new::vlp::packets::fire_pyro::PyroSelect;
 use nalgebra::Vector1;
 
 use crate::{
@@ -67,7 +64,7 @@ impl BaroStateEstimator {
 
     pub fn update(
         &mut self,
-        z: &SensorReading<impl TimestampType, Measurement>,
+        z_imu_frame: &Measurement,
     ) -> Option<PyroSelect> {
         let mut deploy_pyro = None;
         match self {
@@ -76,7 +73,7 @@ impl BaroStateEstimator {
                 alt_asl_welford,
                 n,
             } => {
-                alt_asl_welford.update(&Vector1::new(z.data.altitude_asl()));
+                alt_asl_welford.update(&Vector1::new(z_imu_frame.altitude_asl()));
                 *n += 1;
 
                 if *n == SAMPLES_PER_S {
@@ -97,7 +94,7 @@ impl BaroStateEstimator {
                 locked_out_once,
             } => {
                 altitude_filter.predict();
-                altitude_filter.update(z.data.altitude_asl());
+                altitude_filter.update(z_imu_frame.altitude_asl());
                 let speed_of_sound = approximate_speed_of_sound(altitude_filter.altitude());
                 if !*locked_out_once
                     && altitude_filter.vertical_velocity().abs() > 0.8 * speed_of_sound
@@ -145,7 +142,7 @@ impl BaroStateEstimator {
                 samples_left,
             } => {
                 altitude_filter.predict();
-                altitude_filter.update(z.data.altitude_asl());
+                altitude_filter.update(z_imu_frame.altitude_asl());
 
                 *samples_left = samples_left.saturating_sub(1);
 
@@ -164,7 +161,7 @@ impl BaroStateEstimator {
                 launch_pad_altitude_asl,
             } => {
                 altitude_filter.predict();
-                altitude_filter.update(z.data.altitude_asl());
+                altitude_filter.update(z_imu_frame.altitude_asl());
 
                 if altitude_filter.altitude()
                     < profile.main_chute_altitude_agl + *launch_pad_altitude_asl
@@ -182,7 +179,7 @@ impl BaroStateEstimator {
                 samples_left,
             } => {
                 altitude_filter.predict();
-                altitude_filter.update(z.data.altitude_asl());
+                altitude_filter.update(z_imu_frame.altitude_asl());
 
                 *samples_left = samples_left.saturating_sub(1);
 
@@ -198,7 +195,7 @@ impl BaroStateEstimator {
                 altitude_filter, ..
             } => {
                 altitude_filter.predict();
-                altitude_filter.update(z.data.altitude_asl());
+                altitude_filter.update(z_imu_frame.altitude_asl());
             }
         }
 

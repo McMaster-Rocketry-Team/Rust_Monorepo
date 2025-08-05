@@ -2,7 +2,7 @@ use nalgebra::{SVector, UnitQuaternion, Vector3, Vector4};
 
 pub struct State(pub SVector<f32, { Self::SIZE }>);
 
-/// ENU
+/// ENU, all in earth frame
 impl State {
     pub const SIZE: usize = 18;
 

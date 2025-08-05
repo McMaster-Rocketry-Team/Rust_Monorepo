@@ -11,7 +11,8 @@ use crate::{
 };
 
 const ROCKET_CONSTANTS: RocketConstants = RocketConstants {
-    front_cd: [0.5, 0.5, 0.5, 0.5],
+    initial_front_cd: [0.5, 0.5, 0.5, 0.5],
+    initial_sideways_moment_co: 0.3,
     side_cd: 0.5,
     burn_out_mass: 17.625,
     moment_of_inertia: 11.11,

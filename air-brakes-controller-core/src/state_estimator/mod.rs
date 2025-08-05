@@ -1,9 +1,7 @@
-use firmware_common_new::{
-    sensor_reading::SensorReading, time::TimestampType, vlp::packets::fire_pyro::PyroSelect,
-};
+use firmware_common_new::vlp::packets::fire_pyro::PyroSelect;
 use nalgebra::{SVector, Vector3};
 
-use crate::state_estimator::{ascent_fusion::AscentFusionStateEstimator, baro::BaroStateEstimator};
+use crate::{state_estimator::{ascent_fusion::AscentFusionStateEstimator, baro::BaroStateEstimator}, RocketConstants};
 
 mod ascent_fusion;
 mod baro;
@@ -24,24 +22,25 @@ pub enum RocketStateEstimator {
 }
 
 impl RocketStateEstimator {
-    pub fn new(profile: FlightProfile) -> Self {
+    pub fn new(profile: FlightProfile, constants: RocketConstants) -> Self {
         Self::Ascent {
             baro_estimator: BaroStateEstimator::new(profile),
-            fusion_estimator: todo!(),
+            fusion_estimator: AscentFusionStateEstimator::new(constants),
         }
     }
 
     pub fn update(
         &mut self,
-        z: &SensorReading<impl TimestampType, Measurement>,
+        airbrakes_ext: f32,
+        z_imu_frame: &Measurement,
     ) -> Option<PyroSelect> {
         match self {
             Self::Ascent {
                 baro_estimator,
                 fusion_estimator,
             } => {
-                // TODO fusion_estimator.update(z)
-                let result = baro_estimator.update(z);
+                fusion_estimator.update(airbrakes_ext, z_imu_frame);
+                let result = baro_estimator.update(z_imu_frame);
 
                 if matches!(baro_estimator, BaroStateEstimator::DrogueChuteDelay { .. }) {
                     *self = Self::Descent {
@@ -51,12 +50,12 @@ impl RocketStateEstimator {
 
                 result
             }
-            Self::Descent { baro_estimator } => baro_estimator.update(z),
+            Self::Descent { baro_estimator } => baro_estimator.update(z_imu_frame),
         }
     }
 }
 
-/// Values are in imu frame
+
 #[derive(Debug, Clone)]
 pub struct Measurement(pub SVector<f32, { Self::SIZE }>);
 

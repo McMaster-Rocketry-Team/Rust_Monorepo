@@ -15,7 +15,8 @@ mod tests;
 #[derive(Debug, Clone)]
 pub struct RocketConstants {
     // front cd at 0%, 33%, 66% 100% air brakes
-    pub front_cd: [f32; 4],
+    pub initial_front_cd: [f32; 4],
+    pub initial_sideways_moment_co: f32,
     pub side_cd: f32,
     pub burn_out_mass: f32,
     pub moment_of_inertia: f32,

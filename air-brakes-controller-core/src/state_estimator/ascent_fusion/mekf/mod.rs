@@ -1,6 +1,6 @@
-use nalgebra::{SMatrix, UnitQuaternion};
+use nalgebra::{SMatrix, SVector, UnitQuaternion, Vector3};
 
-use state::State;
+pub use state::State;
 use state_propagation::{build_measurement_matrix, central_difference_jacobian, state_transition};
 
 use crate::{
@@ -19,32 +19,36 @@ pub struct MekfStateEstimator {
     constants: RocketConstants,
 
     /// covariance P_k|k
-    P: SMatrix<f32, { State::SIZE }, { State::SIZE }>,
+    p: SMatrix<f32, { State::SIZE }, { State::SIZE }>,
 
     /// process-noise covariance Q
-    Q: SMatrix<f32, { State::SIZE }, { State::SIZE }>,
+    q: SMatrix<f32, { State::SIZE }, { State::SIZE }>,
 
     /// measurement-noise covariance R
-    R: SMatrix<f32, { Measurement::SIZE }, { Measurement::SIZE }>,
+    r: SMatrix<f32, { Measurement::SIZE }, { Measurement::SIZE }>,
 
     /// measurement matrix
-    H: SMatrix<f32, { Measurement::SIZE }, { State::SIZE }>,
+    h: SMatrix<f32, { Measurement::SIZE }, { State::SIZE }>,
 }
 
 impl MekfStateEstimator {
     pub fn new(
         initial_orientation: UnitQuaternion<f32>,
         initial_state: State,
+        // the variances are in imu frame
+        acc_variance: Vector3<f32>,
+        gyro_variance: Vector3<f32>,
+        alt_variance: f32,
         constants: RocketConstants,
     ) -> Self {
         Self {
             orientation: initial_orientation,
             state: initial_state,
             constants,
-            H: build_measurement_matrix(),
-            P: todo!(),
-            Q: todo!(),
-            R: todo!(),
+            h: build_measurement_matrix(),
+            p: todo!(),
+            q: todo!(),
+            r: todo!(),
         }
     }
 
@@ -58,7 +62,7 @@ impl MekfStateEstimator {
     }
 
     pub fn predict(&mut self, airbrakes_ext: f32) {
-        let Fk = central_difference_jacobian(
+        let f = central_difference_jacobian(
             airbrakes_ext,
             &self.orientation,
             &self.state,
@@ -74,19 +78,28 @@ impl MekfStateEstimator {
         self.state
             .reset_small_angle_correction(&mut self.orientation);
 
-        self.P = &Fk * &self.P * Fk.transpose() + self.Q * DT;
-        self.P = 0.5 * (&self.P + self.P.transpose()); // keep symmetric
+        self.p = f * self.p * f.transpose() + self.q * DT;
+        self.p = 0.5 * (self.p + self.p.transpose()); // keep symmetric
     }
 
-    // todo convert z to different frame
-    pub fn update(&mut self, z: Measurement) {
-        let y = z.0 - self.h().0; // innovation
-        let S = self.H * &self.P * self.H.transpose() + &self.R;
-        let K = self.P * self.H.transpose() * S.try_inverse().unwrap();
+    pub fn update(&mut self, z_rocket_frame: Measurement) {
+        let z_earth_frame = Measurement::new(
+            &self.orientation.inverse_transform_vector(&z_rocket_frame.acceleration()),
+            &self
+                .orientation
+                .inverse_transform_vector(&z_rocket_frame.angular_velocity()),
+            z_rocket_frame.altitude_asl(),
+        );
+        let y = z_earth_frame.0 - self.h().0;
+        let s = self.h * self.p * self.h.transpose() + self.r;
+        let k = self.p * self.h.transpose() * s.try_inverse().unwrap();
 
-        self.state.0 += &K * y;
-        self.P =
-            (SMatrix::<f32, { State::SIZE }, { State::SIZE }>::identity() - &K * self.H) * &self.P;
-        self.P = 0.5 * (&self.P + self.P.transpose());
+        self.state.0 += k * y;
+        self.state
+            .reset_small_angle_correction(&mut self.orientation);
+
+        let i = SMatrix::<f32, { State::SIZE }, { State::SIZE }>::identity();
+        self.p = (i - k * self.h) * self.p;
+        self.p = 0.5 * (self.p + self.p.transpose());
     }
 }

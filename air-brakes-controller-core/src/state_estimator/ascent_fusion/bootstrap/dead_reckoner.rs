@@ -8,7 +8,7 @@ use crate::state_estimator::DT;
 pub struct DeadReckoner {
     /// Rotation from inertial frame to device frame
     pub orientation: UnitQuaternion<f32>,
-    /// Position in inertial frame (meters)
+    /// Position in inertial frame (meters), asl
     pub position: Vector3<f32>,
     /// Velocity in inertial frame (m/s)
     pub velocity: Vector3<f32>,

@@ -1,4 +1,4 @@
-use nalgebra::{Matrix2, SMatrix, SVector, Vector2};
+use nalgebra::{Matrix2, SMatrix, SVector, Vector1, Vector2};
 
 use crate::state_estimator::DT;
 
@@ -73,11 +73,12 @@ impl AltitudeKF {
 
         // P₋ = F P Fᵀ + Q
         self.p = self.f * self.p * self.f.transpose() + self.q;
+        self.p = 0.5 * (self.p + self.p.transpose()); // keep symmetric
     }
 
     /// Incorporate a new barometric altitude measurement (m)
     pub fn update(&mut self, z_baro: f32) {
-        let z = SVector::<f32, 1>::new(z_baro);
+        let z = Vector1::new(z_baro);
 
         // Innovation y = z - H x̂₋
         let y = z - self.h * self.x;
@@ -86,7 +87,7 @@ impl AltitudeKF {
         let s = self.h * self.p * self.h.transpose() + self.r;
 
         // Kalman gain K = P₋ Hᵀ S⁻¹
-        let k = self.p * self.h.transpose() * s.try_inverse().expect("S should be invertible");
+        let k = self.p * self.h.transpose() * s.try_inverse().unwrap();
 
         // State update x̂ = x̂₋ + K y
         self.x += k * y;
@@ -94,6 +95,7 @@ impl AltitudeKF {
         // Covariance update P = (I - K H) P₋
         let i = SMatrix::<f32, 2, 2>::identity();
         self.p = (i - k * self.h) * self.p;
+        self.p = 0.5 * (self.p + self.p.transpose());
     }
 
     pub fn altitude(&self) -> f32 {

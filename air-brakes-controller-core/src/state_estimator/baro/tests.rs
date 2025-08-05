@@ -3,7 +3,6 @@ use std::fs::File;
 use super::*;
 use crate::tests::{init_logger, plot::GlobalPlot};
 use csv::Reader;
-use firmware_common_new::time::BootTimestamp;
 use icao_isa::calculate_isa_altitude;
 use icao_units::si::Pascals;
 use nalgebra::Vector3;
@@ -40,10 +39,7 @@ fn integration_test() {
         GlobalPlot::set_time(csv_record.timestamp_s);
         let altitude_asl =
             calculate_isa_altitude(Pascals(csv_record.air_pressure_noisy as f64)).0 as f32;
-        let reading: SensorReading<BootTimestamp, Measurement> = SensorReading::new(
-            (csv_record.timestamp_s as f64 * 1000_000.0) as u64,
-            Measurement::new(&Vector3::zeros(), &Vector3::zeros(), altitude_asl),
-        );
+        let reading = Measurement::new(&Vector3::zeros(), &Vector3::zeros(), altitude_asl);
 
         estimator.update(&reading);
 

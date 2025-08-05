@@ -34,7 +34,8 @@ fn jacobian_benchmark() {
     );
 
     let constants = RocketConstants {
-        front_cd: [0.5, 0.5, 0.5, 0.5],
+        initial_front_cd: [0.5, 0.5, 0.5, 0.5],
+        initial_sideways_moment_co: 0.3,
         side_cd: 0.02,          // side drag coefficient
         burn_out_mass: 25.0,    // mass (kg)
         moment_of_inertia: 2.5, // moment of inertia (kg⋅m²)

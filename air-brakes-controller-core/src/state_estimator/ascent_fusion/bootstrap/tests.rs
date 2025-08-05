@@ -3,12 +3,12 @@ use std::fs::File;
 use super::*;
 use crate::tests::{init_logger, plot::GlobalPlot};
 use csv::Reader;
-use firmware_common_new::time::BootTimestamp;
 use serde::Deserialize;
 
 #[derive(Deserialize)]
 struct CsvRecord {
     timestamp_s: f32,
+    altitude: f32,
     imu_acc_x: f32,
     imu_acc_y: f32,
     imu_acc_z: f32,
@@ -30,18 +30,16 @@ fn integration_test() {
     let csv_records = read_csv_records();
 
     let mut dead_reckoning = BootstrapStateEstimator::new();
-    for (i, csv_record) in csv_records.iter().enumerate() {
+    for csv_record in csv_records.iter() {
         GlobalPlot::set_time(csv_record.timestamp_s);
-        let reading: SensorReading<BootTimestamp, IMUData> = SensorReading::new(
-            (csv_record.timestamp_s as f64 * 1000_000.0) as u64,
-            IMUData {
-                acc: Vector3::new(
-                    csv_record.imu_acc_x,
-                    csv_record.imu_acc_y,
-                    csv_record.imu_acc_z,
-                ),
-                gyro: Vector3::new(csv_record.gyro_x, csv_record.gyro_y, csv_record.gyro_z),
-            },
+        let reading = Measurement::new(
+            &Vector3::new(
+                csv_record.imu_acc_x,
+                csv_record.imu_acc_y,
+                csv_record.imu_acc_z,
+            ),
+            &Vector3::new(csv_record.gyro_x, csv_record.gyro_y, csv_record.gyro_z),
+            csv_record.altitude,
         );
 
         dead_reckoning.update(&reading);
