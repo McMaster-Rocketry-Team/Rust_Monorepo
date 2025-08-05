@@ -191,6 +191,8 @@ dependencies = [
  "env_logger",
  "firmware-common-new",
  "heapless 0.8.0",
+ "icao-isa 1.1.0",
+ "icao-units 1.1.0",
  "java-bindgen",
  "libm 0.2.15",
  "log",

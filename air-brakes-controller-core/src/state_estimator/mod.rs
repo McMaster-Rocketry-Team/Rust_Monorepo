@@ -1,11 +1,12 @@
+use firmware_common_new::{
+    sensor_reading::SensorReading, time::TimestampType, vlp::packets::fire_pyro::PyroSelect,
+};
 use nalgebra::{SVector, Vector3};
 
-use crate::state_estimator::{
-    baro::BaroStateEstimator, ascent_fusion::AscentFusionStateEstimator,
-};
+use crate::state_estimator::{ascent_fusion::AscentFusionStateEstimator, baro::BaroStateEstimator};
 
-mod baro;
 mod ascent_fusion;
+mod baro;
 mod welford;
 
 const SAMPLES_PER_S: usize = 500;
@@ -20,6 +21,39 @@ pub enum RocketStateEstimator {
     Descent {
         baro_estimator: BaroStateEstimator,
     },
+}
+
+impl RocketStateEstimator {
+    pub fn new(profile: FlightProfile) -> Self {
+        Self::Ascent {
+            baro_estimator: BaroStateEstimator::new(profile),
+            fusion_estimator: todo!(),
+        }
+    }
+
+    pub fn update(
+        &mut self,
+        z: &SensorReading<impl TimestampType, Measurement>,
+    ) -> Option<PyroSelect> {
+        match self {
+            Self::Ascent {
+                baro_estimator,
+                fusion_estimator,
+            } => {
+                // TODO fusion_estimator.update(z)
+                let result = baro_estimator.update(z);
+
+                if matches!(baro_estimator, BaroStateEstimator::DrogueChuteDelay { .. }) {
+                    *self = Self::Descent {
+                        baro_estimator: baro_estimator.clone(),
+                    }
+                }
+
+                result
+            }
+            Self::Descent { baro_estimator } => baro_estimator.update(z),
+        }
+    }
 }
 
 /// Values are in imu frame

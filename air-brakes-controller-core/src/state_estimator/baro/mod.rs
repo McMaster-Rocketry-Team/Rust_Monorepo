@@ -3,18 +3,19 @@ mod altitude_kf;
 mod tests;
 
 use firmware_common_new::{
-    readings::BaroData, sensor_reading::SensorReading, time::TimestampType,
+    sensor_reading::SensorReading, time::TimestampType,
     vlp::packets::fire_pyro::PyroSelect,
 };
 use nalgebra::Vector1;
 
 use crate::{
     state_estimator::{
-        DT, FlightProfile, SAMPLES_PER_S, baro::altitude_kf::AltitudeKF, welford::Welford,
+        baro::altitude_kf::AltitudeKF, welford::Welford, FlightProfile, Measurement, DT, SAMPLES_PER_S
     },
     utils::approximate_speed_of_sound,
 };
 
+#[derive(Debug, Clone)]
 pub enum BaroStateEstimator {
     Init {
         profile: FlightProfile,
@@ -66,7 +67,7 @@ impl BaroStateEstimator {
 
     pub fn update(
         &mut self,
-        z: &SensorReading<impl TimestampType, BaroData>,
+        z: &SensorReading<impl TimestampType, Measurement>,
     ) -> Option<PyroSelect> {
         let mut deploy_pyro = None;
         match self {
