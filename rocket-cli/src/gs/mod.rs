@@ -607,7 +607,7 @@ pub async fn tui_task(
                                         "Fire Main Pyro",
                                         "Manually fire main pyro?",
                                         FirePyroPacket {
-                                            pyro: PyroSelect::Pyro1,
+                                            pyro: PyroSelect::PyroMain,
                                         }
                                         .into(),
                                     ))
@@ -615,7 +615,7 @@ pub async fn tui_task(
                                         "Fire Drogue Pyro",
                                         "Manually fire drogue pyro?",
                                         FirePyroPacket {
-                                            pyro: PyroSelect::Pyro2,
+                                            pyro: PyroSelect::PyroDrogue,
                                         }
                                         .into(),
                                     )),

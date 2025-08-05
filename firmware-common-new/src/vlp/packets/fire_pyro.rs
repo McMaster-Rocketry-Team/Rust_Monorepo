@@ -9,8 +9,8 @@ use super::VLPUplinkPacket;
 )]
 #[repr(C)]
 pub enum PyroSelect {
-    Pyro1 = 0,
-    Pyro2 = 1,
+    PyroMain = 0,
+    PyroDrogue = 1,
 }
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
@@ -34,7 +34,7 @@ mod tests {
     #[test]
     fn test_serialize_deserialize() {
         let packet = FirePyroPacket {
-            pyro: PyroSelect::Pyro2,
+            pyro: PyroSelect::PyroDrogue,
         };
         let packet: VLPUplinkPacket = packet.into();
 

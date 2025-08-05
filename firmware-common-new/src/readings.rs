@@ -13,7 +13,7 @@ pub struct BaroData {
 }
 
 impl BaroData {
-    pub fn altitude(&self) -> f32 {
+    pub fn altitude_asl(&self) -> f32 {
         return calculate_isa_altitude(Pascals(self.pressure as f64)).0 as f32;
         // see https://github.com/pimoroni/bmp280-python/blob/master/library/bmp280/__init__.py
         // let air_pressure_hpa = self.pressure / 100.0;

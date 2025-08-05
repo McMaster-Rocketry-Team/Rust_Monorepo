@@ -1,6 +1,6 @@
 use nalgebra::{UnitQuaternion, Vector3};
 
-use crate::state_estimator::ascent_fusion::DT;
+use crate::state_estimator::DT;
 
 /// A simple dead-reckoning filter that tracks orientation, position, and velocity
 /// in an inertial frame using IMU measurements in the device frame.

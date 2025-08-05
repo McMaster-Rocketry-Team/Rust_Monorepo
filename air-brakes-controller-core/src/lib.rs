@@ -5,19 +5,22 @@
 
 mod fmt;
 mod state_estimator;
+mod utils;
 
 pub use state_estimator::RocketStateEstimator;
 
 #[cfg(test)]
 mod tests;
 
-
+#[derive(Debug, Clone)]
 pub struct RocketConstants {
+    // front cd at 0%, 33%, 66% 100% air brakes
+    pub front_cd: [f32; 4],
     pub side_cd: f32,
     pub burn_out_mass: f32,
     pub moment_of_inertia: f32,
     pub front_reference_area: f32,
-    pub side_reference_area: f32,
+    pub side_reference_area: f32
 }
 
 // #[derive(Default, JavaClass)]

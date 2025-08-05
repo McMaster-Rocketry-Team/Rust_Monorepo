@@ -1,19 +1,19 @@
 mod dead_reckoner;
 #[cfg(test)]
 mod tests;
-mod welford;
 
 use biquad::{Biquad, Coefficients, DirectForm2Transposed, Q_BUTTERWORTH_F32, ToHertz as _, Type};
 use firmware_common_new::{readings::IMUData, sensor_reading::SensorReading, time::TimestampType};
 use heapless::Deque;
 use nalgebra::{UnitQuaternion, UnitVector3, Vector3};
 
-use crate::state_estimator::ascent_fusion::{bootstrap::{dead_reckoner::DeadReckoner, welford::Welford3}, SAMPLES_PER_S};
+use crate::state_estimator::{
+    ascent_fusion::bootstrap::dead_reckoner::DeadReckoner, welford::Welford, SAMPLES_PER_S
+};
 
 const IGNITION_DETECTION_ACCELERATION_THRESHOLD: f32 = 5.0 * 9.81;
 const UP: Vector3<f32> = Vector3::new(0.0, 0.0, 1.0);
 
-// 128KiB size budget to fit in DTCM-RAM of H743
 // av frame: reference frame of the IMU ic
 // rocket frame: reference frame of the rocket, z points to nose
 // earth frame: inertial reference frame of the earth
@@ -31,7 +31,7 @@ pub enum BootstrapStateEstimator {
     /// out the orientation of the rocket relative to the avionics.
     Stage1 {
         n: usize,
-        acc_welford: Welford3,
+        acc_welford: Welford<3>,
         av_orientation_reckoner: DeadReckoner,
         acc_variance: Vector3<f32>,
         gyro_variance: Vector3<f32>,
@@ -68,7 +68,7 @@ impl BootstrapStateEstimator {
 
     pub fn update(&mut self, z: &SensorReading<impl TimestampType, IMUData>) {
         match self {
-            BootstrapStateEstimator::OnPad {
+            Self::OnPad {
                 imu_data_list,
                 x_acc_low_pass,
                 y_acc_low_pass,
@@ -100,8 +100,8 @@ impl BootstrapStateEstimator {
 
                         enum State {
                             First {
-                                acc_welford: Welford3,
-                                gyro_welford: Welford3,
+                                acc_welford: Welford<3>,
+                                gyro_welford: Welford<3>,
                             },
                             Second {
                                 acc_variance: Vector3<f32>,
@@ -112,8 +112,8 @@ impl BootstrapStateEstimator {
                         }
 
                         let mut state = State::First {
-                            acc_welford: Welford3::new(),
-                            gyro_welford: Welford3::new(),
+                            acc_welford: Welford::<3>::new(),
+                            gyro_welford: Welford::<3>::new(),
                         };
 
                         for (i, imu_data) in imu_data_list.iter().enumerate() {
@@ -129,7 +129,10 @@ impl BootstrapStateEstimator {
                                         // this is the gravity vector in rocket frame
                                         let gravity_vector_av_frame: Vector3<f32> =
                                             acc_welford.mean();
-                                            log_info!("gravity_vector_av_frame: {}", gravity_vector_av_frame);
+                                        log_info!(
+                                            "gravity_vector_av_frame: {}",
+                                            gravity_vector_av_frame
+                                        );
                                         let q_earth_to_av = quaternion_from_start_and_end_vector(
                                             &UP,
                                             &gravity_vector_av_frame,
@@ -163,9 +166,9 @@ impl BootstrapStateEstimator {
                             av_orientation_reckoner,
                         } = state
                         {
-                            *self = BootstrapStateEstimator::Stage1 {
+                            *self = Self::Stage1 {
                                 n: 0,
-                                acc_welford: Welford3::new(),
+                                acc_welford: Welford::<3>::new(),
                                 av_orientation_reckoner,
                                 acc_variance,
                                 gyro_variance,
@@ -177,7 +180,7 @@ impl BootstrapStateEstimator {
                     }
                 }
             }
-            BootstrapStateEstimator::Stage1 {
+            Self::Stage1 {
                 n,
                 acc_welford,
                 av_orientation_reckoner,
@@ -204,7 +207,7 @@ impl BootstrapStateEstimator {
                     log_info!("q_earth_to_rocket: {}", q_earth_to_rocket);
 
                     let q_av_to_earth = av_orientation_reckoner.orientation.inverse();
-                    let q_av_to_rocket = q_earth_to_rocket * q_av_to_earth; // TODO double check
+                    let q_av_to_rocket = q_earth_to_rocket * q_av_to_earth;
 
                     log_info!("q_av_to_rocket: {}", q_av_to_rocket);
 
@@ -212,7 +215,7 @@ impl BootstrapStateEstimator {
                     rocket_orientation_reckoner.position = av_orientation_reckoner.position;
                     rocket_orientation_reckoner.velocity = av_orientation_reckoner.velocity;
 
-                    *self = BootstrapStateEstimator::Stage2 {
+                    *self = Self::Stage2 {
                         q_av_to_rocket,
                         rocket_orientation_reckoner,
                         acc_variance: *acc_variance,
@@ -221,7 +224,7 @@ impl BootstrapStateEstimator {
                     };
                 }
             }
-            BootstrapStateEstimator::Stage2 {
+            Self::Stage2 {
                 q_av_to_rocket,
                 rocket_orientation_reckoner,
                 gyro_bias,

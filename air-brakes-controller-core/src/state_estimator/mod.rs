@@ -8,7 +8,12 @@ use crate::state_estimator::{
 mod ascent_baro;
 mod ascent_fusion;
 mod descent;
+mod welford;
 
+const SAMPLES_PER_S: usize = 500;
+const DT: f32 = 1f32 / (SAMPLES_PER_S as f32);
+
+// 128KiB size budget to fit in DTCM-RAM of H743
 pub enum RocketStateEstimator {
     Ascent {
         baro_estimator: AscentBaroStateEstimator,
@@ -49,4 +54,14 @@ impl Measurement {
     pub fn altitude_asl(&self) -> f32 {
         self.0[6]
     }
+}
+
+#[derive(Clone, Debug)]
+pub struct FlightProfile {
+    pub drogue_chute_minimum_time_us: u32,
+    pub drogue_chute_minimum_altitude_agl: f32,
+    pub drogue_chute_delay_us: u32,
+    pub main_chute_altitude_agl: f32,
+    pub main_chute_delay_us: u32,
+    pub time_above_mach_08_us: u32,
 }

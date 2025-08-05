@@ -1,33 +1,12 @@
 use nalgebra::{Quaternion, SMatrix, SVector, UnitQuaternion, Vector3, Vector4};
 
-use crate::{RocketConstants, state_estimator::Measurement};
+use crate::{
+    RocketConstants,
+    state_estimator::Measurement,
+    utils::{approximate_air_density, lerp},
+};
 
 use super::state::{Derivative, State};
-
-/// returns air density (kg/m^3) and speed of sound (m/s) at altitude (m)
-/// approximated using a linear function from 0m and 3000m data from standard atmosphere model
-pub fn approximate_air_density(altitude_asl: f32) -> (f32, f32) {
-    let air_density = 1.225 - altitude_asl * 0.0001053;
-    let speed_of_sound = 340.29 - altitude_asl * 0.003903;
-
-    (air_density, speed_of_sound)
-}
-
-fn lerp(
-    t: f32, // 0-1
-    drag_coefficients: &[f32],
-) -> f32 {
-    let len = drag_coefficients.len();
-    let spacing = 1.0f32 / ((len - 1) as f32);
-
-    let mut i = (t / spacing) as usize;
-    if i > len - 2 {
-        i = len - 2;
-    }
-
-    let t = (t - spacing * (i as f32)) * (len - 1) as f32;
-    (1.0 - t) * drag_coefficients[i] + t * drag_coefficients[i + 1]
-}
 
 pub fn calculate_state_derivative(
     airbrakes_extention: f32, // 0-1
@@ -35,7 +14,7 @@ pub fn calculate_state_derivative(
     state: &State,
     constants: &RocketConstants,
 ) -> Derivative<State> {
-    let (air_density, _) = approximate_air_density(state.altitude_asl());
+    let air_density = approximate_air_density(state.altitude_asl());
     let delta_orientation = UnitQuaternion::from_quaternion(Quaternion::from_parts(
         1.0,
         state.small_angle_correction() / 2.0,

@@ -1,12 +1,11 @@
 use nalgebra::{SMatrix, UnitQuaternion};
 
-use super::DT;
 use state::State;
 use state_propagation::{
     build_measurement_matrix, calculate_state_derivative, central_difference_jacobian,
 };
 
-use crate::{RocketConstants, state_estimator::Measurement};
+use crate::{state_estimator::{Measurement, DT}, RocketConstants};
 
 mod state;
 mod state_propagation;
@@ -80,6 +79,7 @@ impl MekfStateEstimator {
         self.P = 0.5 * (&self.P + self.P.transpose()); // keep symmetric
     }
 
+    // todo convert z to different frame
     pub fn update(&mut self, z: Measurement) {
         let y = z.0 - self.h().0; // innovation
         let S = self.H * &self.P * self.H.transpose() + &self.R;

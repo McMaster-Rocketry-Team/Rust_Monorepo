@@ -72,6 +72,7 @@ fn calculate_residue() {
     init_logger();
 
     let constants = RocketConstants {
+        front_cd: [0.5, 0.5, 0.5, 0.5],
         side_cd: 0.55,
         burn_out_mass: 17.625,
         moment_of_inertia: 11.11,
