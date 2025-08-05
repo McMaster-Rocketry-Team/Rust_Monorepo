@@ -1,13 +1,11 @@
 use nalgebra::{SVector, Vector3};
 
 use crate::state_estimator::{
-    ascent_baro::AscentBaroStateEstimator, ascent_fusion::AscentFusionStateEstimator,
-    descent::DescentStateEstimator,
+    baro::BaroStateEstimator, ascent_fusion::AscentFusionStateEstimator,
 };
 
-mod ascent_baro;
+mod baro;
 mod ascent_fusion;
-mod descent;
 mod welford;
 
 const SAMPLES_PER_S: usize = 500;
@@ -16,11 +14,11 @@ const DT: f32 = 1f32 / (SAMPLES_PER_S as f32);
 // 128KiB size budget to fit in DTCM-RAM of H743
 pub enum RocketStateEstimator {
     Ascent {
-        baro_estimator: AscentBaroStateEstimator,
+        baro_estimator: BaroStateEstimator,
         fusion_estimator: AscentFusionStateEstimator,
     },
     Descent {
-        estimator: DescentStateEstimator,
+        baro_estimator: BaroStateEstimator,
     },
 }
 

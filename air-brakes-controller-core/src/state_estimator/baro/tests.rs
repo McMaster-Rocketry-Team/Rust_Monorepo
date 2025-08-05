@@ -25,7 +25,7 @@ fn integration_test() {
 
     let csv_records = read_csv_records();
 
-    let mut estimator = AscentBaroStateEstimator::new(FlightProfile {
+    let mut estimator = BaroStateEstimator::new(FlightProfile {
         drogue_chute_minimum_time_us: 0,
         drogue_chute_minimum_altitude_agl: 2000.0,
         drogue_chute_delay_us: 0,
@@ -58,10 +58,6 @@ fn integration_test() {
             "Estimated Stddev",
             estimator.altitude_variance().unwrap_or_default().sqrt(),
         );
-
-        if deployed {
-            break;
-        }
     }
 
     GlobalPlot::plot_all();
