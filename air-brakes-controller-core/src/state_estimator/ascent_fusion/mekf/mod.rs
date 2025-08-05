@@ -1,11 +1,12 @@
 use nalgebra::{SMatrix, UnitQuaternion};
 
 use state::State;
-use state_propagation::{
-    build_measurement_matrix, calculate_state_derivative, central_difference_jacobian,
-};
+use state_propagation::{build_measurement_matrix, central_difference_jacobian, state_transition};
 
-use crate::{state_estimator::{Measurement, DT}, RocketConstants};
+use crate::{
+    RocketConstants,
+    state_estimator::{DT, Measurement},
+};
 
 mod state;
 mod state_propagation;
@@ -57,21 +58,19 @@ impl MekfStateEstimator {
     }
 
     pub fn predict(&mut self, airbrakes_ext: f32) {
-        let mut Fk = central_difference_jacobian(
+        let Fk = central_difference_jacobian(
             airbrakes_ext,
             &self.orientation,
             &self.state,
             &self.constants,
         );
-        Fk.iter_mut().for_each(|v| *v *= DT);
 
-        let state_derivative = calculate_state_derivative(
+        self.state = state_transition(
             airbrakes_ext,
             &self.orientation,
             &self.state,
             &self.constants,
         );
-        self.state.add_derivative(&state_derivative, DT);
         self.state
             .reset_small_angle_correction(&mut self.orientation);
 

@@ -1,7 +1,5 @@
 use nalgebra::{SVector, UnitQuaternion, Vector3, Vector4};
 
-pub struct Derivative<T>(pub T);
-
 pub struct State(pub SVector<f32, { Self::SIZE }>);
 
 /// ENU
@@ -80,16 +78,6 @@ impl State {
 
     pub fn drag_coefficients(&self) -> Vector4<f32> {
         self.0.fixed_view::<4, 1>(14, 0).into()
-    }
-
-    pub fn add_derivative(&self, d: &Derivative<State>, dt: f32) -> State {
-        let mut new_state = self.0.clone();
-
-        for i in 0..Self::SIZE {
-            new_state[i] += d.0.0[i] * dt;
-        }
-
-        State(new_state)
     }
 
     /// apply small angle correction to the supplied quaternion and
