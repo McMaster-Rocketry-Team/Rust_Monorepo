@@ -31,7 +31,7 @@ fn integration_test() {
 
     let mut dead_reckoning = BootstrapStateEstimator::new();
     for csv_record in csv_records.iter() {
-        GlobalPlot::set_time(csv_record.timestamp_s);
+        GlobalPlot::set_time_s(csv_record.timestamp_s);
         let reading = Measurement::new(
             &Vector3::new(
                 csv_record.imu_acc_x,

@@ -45,6 +45,10 @@ impl<const N: usize> Welford<N> {
             None
         }
     }
+
+    pub fn variance_magnitude(&self) -> Option<f32> {
+        self.variance().map(|v|v.magnitude())
+    }
 }
 
 #[cfg(test)]

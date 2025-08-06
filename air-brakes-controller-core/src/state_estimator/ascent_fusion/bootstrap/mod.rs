@@ -37,9 +37,10 @@ pub enum BootstrapStateEstimator {
         acc_welford: Welford<3>,
         av_orientation_reckoner: DeadReckoner,
         alt_variance: f32,
-        acc_variance: Vector3<f32>,
-        gyro_variance: Vector3<f32>,
+        acc_variance: f32,
+        gyro_variance: f32,
         gyro_bias: Vector3<f32>,
+        launch_pad_altitude_asl: f32,
     },
 
     /// dead reckoning
@@ -49,9 +50,10 @@ pub enum BootstrapStateEstimator {
         last_acc_rocket_frame: Vector3<f32>,
         last_gyro_rocket_frame: Vector3<f32>,
         alt_variance: f32,
-        acc_variance: Vector3<f32>,
-        gyro_variance: Vector3<f32>,
+        acc_variance: f32,
+        gyro_variance: f32,
         gyro_bias: Vector3<f32>,
+        launch_pad_altitude_asl: f32,
     },
     // switch to MEKF if coasting and speed < 0.8 mach
 }
@@ -118,10 +120,11 @@ impl BootstrapStateEstimator {
                             },
                             Second {
                                 alt_variance: f32, 
-                                acc_variance: Vector3<f32>,
-                                gyro_variance: Vector3<f32>,
+                                acc_variance: f32,
+                                gyro_variance: f32,
                                 gyro_bias: Vector3<f32>,
                                 av_orientation_reckoner: DeadReckoner,
+                                launch_pad_altitude_asl:f32,
                             },
                         }
 
@@ -157,14 +160,16 @@ impl BootstrapStateEstimator {
                                         );
                                         log_info!("q_earth_to_av: {}", q_earth_to_av);
                                         let mut reckoner = DeadReckoner::new(q_earth_to_av);
-                                        reckoner.position.z = alt_asl_welford.mean()[0];
+                                        let launch_pad_altitude_asl =  alt_asl_welford.mean()[0];
+                                        reckoner.position.z =launch_pad_altitude_asl;
 
                                         state = State::Second {
                                             alt_variance: alt_asl_welford.variance().unwrap()[0],
-                                            acc_variance: acc_welford.variance().unwrap(),
-                                            gyro_variance: gyro_welford.variance().unwrap(),
+                                            acc_variance: acc_welford.variance_magnitude().unwrap(),
+                                            gyro_variance: gyro_welford.variance_magnitude().unwrap(),
                                             gyro_bias: gyro_welford.mean(),
                                             av_orientation_reckoner: reckoner,
+                                            launch_pad_altitude_asl
                                         };
                                     }
                                 }
@@ -187,6 +192,7 @@ impl BootstrapStateEstimator {
                             gyro_variance,
                             gyro_bias,
                             av_orientation_reckoner,
+                            launch_pad_altitude_asl,
                         } = state
                         {
                             *self = Self::Stage1 {
@@ -197,6 +203,7 @@ impl BootstrapStateEstimator {
                                 acc_variance,
                                 gyro_variance,
                                 gyro_bias,
+                                launch_pad_altitude_asl,
                             };
                         } else {
                             unreachable!()
@@ -212,6 +219,7 @@ impl BootstrapStateEstimator {
                 acc_variance,
                 gyro_variance,
                 gyro_bias,
+                launch_pad_altitude_asl,
             } => {
                 acc_welford.update(&acc);
                 av_orientation_reckoner.update(&acc, &(gyro - *gyro_bias));
@@ -249,6 +257,7 @@ impl BootstrapStateEstimator {
                         gyro_bias: *gyro_bias,
                         last_acc_rocket_frame: q_av_to_rocket.inverse_transform_vector(&acc),
                         last_gyro_rocket_frame: q_av_to_rocket.inverse_transform_vector(&gyro),
+                        launch_pad_altitude_asl:*launch_pad_altitude_asl,
                     };
                 }
             }

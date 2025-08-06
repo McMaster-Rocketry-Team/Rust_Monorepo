@@ -9,10 +9,13 @@ use crate::{
             mekf::{MekfStateEstimator, State},
         },
     },
+    tests::plot::GlobalPlot,
 };
 
 mod bootstrap;
 mod mekf;
+#[cfg(test)]
+mod tests;
 
 pub enum AscentFusionStateEstimator {
     Bootstrap {
@@ -20,6 +23,7 @@ pub enum AscentFusionStateEstimator {
         constants: RocketConstants,
     },
     Ready {
+        launch_pad_altitude_asl: f32,
         estimator: MekfStateEstimator,
         q_av_to_rocket: UnitQuaternion<f32>,
         gyro_bias: Vector3<f32>,
@@ -52,9 +56,11 @@ impl AscentFusionStateEstimator {
                         alt_variance,
                         last_acc_rocket_frame,
                         last_gyro_rocket_frame,
+                        launch_pad_altitude_asl,
                         ..
                     } = estimator
                 {
+                    log_info!("[{}] switch to mekf", GlobalPlot::get_time_s());
                     let rocket_orientation = rocket_orientation_reckoner.orientation;
                     *self = Self::Ready {
                         estimator: MekfStateEstimator::new(
@@ -76,6 +82,7 @@ impl AscentFusionStateEstimator {
                         ),
                         q_av_to_rocket: *q_av_to_rocket,
                         gyro_bias: *gyro_bias,
+                        launch_pad_altitude_asl: *launch_pad_altitude_asl,
                     };
                 }
             }
@@ -83,16 +90,51 @@ impl AscentFusionStateEstimator {
                 estimator,
                 q_av_to_rocket,
                 gyro_bias,
+                ..
             } => {
                 let acc_rocket_frame =
                     q_av_to_rocket.inverse_transform_vector(&z_imu_frame.acceleration());
                 let gyro_rocket_frame = q_av_to_rocket
                     .inverse_transform_vector(&(z_imu_frame.angular_velocity() - *gyro_bias));
 
-                let z_rocket_frame = Measurement::new(&acc_rocket_frame, &gyro_rocket_frame, z_imu_frame.altitude_asl());
+                let z_rocket_frame = Measurement::new(
+                    &acc_rocket_frame,
+                    &gyro_rocket_frame,
+                    z_imu_frame.altitude_asl(),
+                );
                 estimator.predict(airbrakes_ext);
                 estimator.update(z_rocket_frame);
             }
+        }
+    }
+
+    pub fn altitude_agl(&self) -> f32 {
+        match self {
+            Self::Bootstrap {
+                estimator: BootstrapStateEstimator::OnPad { .. },
+                ..
+            } => 0.0,
+            Self::Bootstrap {
+                estimator:
+                    BootstrapStateEstimator::Stage1 {
+                        av_orientation_reckoner,
+                        ..
+                    },
+                ..
+            } => av_orientation_reckoner.position.z,
+            Self::Bootstrap {
+                estimator:
+                    BootstrapStateEstimator::Stage2 {
+                        rocket_orientation_reckoner,
+                        ..
+                    },
+                ..
+            } => rocket_orientation_reckoner.position.z,
+            Self::Ready {
+                estimator,
+                launch_pad_altitude_asl,
+                ..
+            } => estimator.state.altitude_asl() - launch_pad_altitude_asl,
         }
     }
 }

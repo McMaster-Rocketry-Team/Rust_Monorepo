@@ -6,30 +6,30 @@ use serde::Deserialize;
 
 use super::super::state::State;
 use crate::{
-    state_estimator::ascent_fusion::mekf::state_propagation::state_transition, tests::{init_logger, plot::GlobalPlot}, RocketConstants
+    state_estimator::{ascent_fusion::mekf::state_propagation::state_transition, DT}, tests::{init_logger, plot::GlobalPlot}, RocketConstants
 };
 
 #[derive(Deserialize)]
-struct CsvRecord {
-    timestamp_s: f32,
-    altitude: f32,
-    acc_x: f32,
-    acc_y: f32,
-    acc_z: f32,
-    angular_velocity_x: f32,
-    angular_velocity_y: f32,
-    angular_velocity_z: f32,
-    velocity_x: f32,
-    velocity_y: f32,
-    velocity_z: f32,
-    orientation_w: f32,
-    orientation_x: f32,
-    orientation_y: f32,
-    orientation_z: f32,
+pub(super) struct CsvRecord {
+    pub(super) timestamp_s: f32,
+    pub(super) altitude: f32,
+    pub(super) acc_x: f32,
+    pub(super) acc_y: f32,
+    pub(super) acc_z: f32,
+    pub(super) angular_velocity_x: f32,
+    pub(super) angular_velocity_y: f32,
+    pub(super) angular_velocity_z: f32,
+    pub(super) velocity_x: f32,
+    pub(super) velocity_y: f32,
+    pub(super) velocity_z: f32,
+    pub(super) orientation_w: f32,
+    pub(super) orientation_x: f32,
+    pub(super) orientation_y: f32,
+    pub(super) orientation_z: f32,
 }
 
 impl CsvRecord {
-    fn to_rocket_state(&self) -> State {
+    pub(super) fn to_rocket_state(&self) -> State {
         State::new(
             &Vector3::zeros(), // small angle correction starts at zero
             &Vector3::new(self.acc_x, self.acc_y, self.acc_z),
@@ -45,7 +45,7 @@ impl CsvRecord {
         )
     }
 
-    fn to_orientation(&self) -> UnitQuaternion<f32> {
+    pub(super) fn to_orientation(&self) -> UnitQuaternion<f32> {
         UnitQuaternion::from_quaternion(Quaternion::new(
             self.orientation_w,
             self.orientation_x,
@@ -55,7 +55,7 @@ impl CsvRecord {
     }
 }
 
-fn read_csv_records() -> Vec<CsvRecord> {
+pub(super) fn read_csv_records() -> Vec<CsvRecord> {
     let path = "./test_data/merged.csv";
     let mut reader = Reader::from_reader(File::open(path).unwrap());
     reader
@@ -78,14 +78,13 @@ fn calculate_residue() {
         front_reference_area: 0.01368,
         side_reference_area: 0.3575,
     };
-    let delta_time = 1.0f32 / 500.0;
 
     let csv_records = read_csv_records();
     let current_records = csv_records.iter();
     let next_records = csv_records.iter().skip(1);
 
     for (csv_record, next_record) in current_records.zip(next_records) {
-        GlobalPlot::set_time(csv_record.timestamp_s);
+        GlobalPlot::set_time_s(csv_record.timestamp_s);
         let state = csv_record.to_rocket_state();
         let orientation = csv_record.to_orientation();
 
@@ -95,7 +94,7 @@ fn calculate_residue() {
         let true_state = next_record.to_rocket_state();
         let true_orientation = next_record.to_orientation();
 
-        let d_acc_z = (next_record.acc_z - csv_record.acc_z) / delta_time;
+        let d_acc_z = (next_record.acc_z - csv_record.acc_z) / DT;
         GlobalPlot::add_value("Real dAcc Z World Frame", d_acc_z);
 
         GlobalPlot::add_value(

@@ -36,7 +36,7 @@ fn integration_test() {
         time_above_mach_08_us: 5_000_000,
     });
     for csv_record in csv_records.iter() {
-        GlobalPlot::set_time(csv_record.timestamp_s);
+        GlobalPlot::set_time_s(csv_record.timestamp_s);
         let altitude_asl =
             calculate_isa_altitude(Pascals(csv_record.air_pressure_noisy as f64)).0 as f32;
         let reading = Measurement::new(&Vector3::zeros(), &Vector3::zeros(), altitude_asl);

@@ -25,9 +25,14 @@ static PLOT_DATA: LazyLock<RwLock<GlobalPlotData>> = LazyLock::new(|| {
 pub struct GlobalPlot {}
 
 impl GlobalPlot {
-    pub fn set_time(time: f32) {
+    pub fn set_time_s(time: f32) {
         let mut plot_data = PLOT_DATA.write().unwrap();
         plot_data.time = time;
+    }
+
+    pub fn get_time_s() -> f32 {
+        let plot_data = PLOT_DATA.read().unwrap();
+        plot_data.time
     }
 
     pub fn add_value(name: &str, value: f32) {

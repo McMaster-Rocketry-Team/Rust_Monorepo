@@ -1,4 +1,4 @@
-use nalgebra::{SMatrix, SVector, UnitQuaternion, Vector3};
+use nalgebra::{SMatrix, SVector, UnitQuaternion};
 
 pub use state::State;
 use state_propagation::{build_measurement_matrix, central_difference_jacobian, state_transition};
@@ -15,7 +15,7 @@ mod tests;
 
 pub struct MekfStateEstimator {
     orientation: UnitQuaternion<f32>,
-    state: State,
+    pub state: State,
     constants: RocketConstants,
 
     /// covariance P_k|k
@@ -36,8 +36,8 @@ impl MekfStateEstimator {
         initial_orientation: UnitQuaternion<f32>,
         initial_state: State,
         // the variances are in imu frame
-        acc_variance: Vector3<f32>,
-        gyro_variance: Vector3<f32>,
+        acc_variance: f32,
+        gyro_variance: f32,
         alt_variance: f32,
         constants: RocketConstants,
     ) -> Self {
@@ -46,9 +46,43 @@ impl MekfStateEstimator {
             state: initial_state,
             constants,
             h: build_measurement_matrix(),
-            p: todo!(),
-            q: todo!(),
-            r: todo!(),
+            p: SMatrix::from_diagonal(&SVector::<f32, { State::SIZE }>::from_column_slice(
+                &[1e-4; { State::SIZE }],
+            )),
+            q: SMatrix::from_diagonal(
+                &SVector::<f32, { State::SIZE }>::from_column_slice(&[
+                    4.162997e-7,
+                    3.3608598e-5,
+                    3.812254e-6,
+                    3.6717886e-6,
+                    3.188936e-6,
+                    1.8793952e-6,
+                    3.8839986e-12,
+                    4.4831076e-11,
+                    4.6087963e-11,
+                    3.6660953e-8,
+                    2.7753133e-6,
+                    4.8287743e-6,
+                    1.1891631e-8,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                ])
+                .map(|x| x.max(1e-10)),
+            ),
+            r: SMatrix::from_diagonal(&SVector::<f32, { Measurement::SIZE }>::from_column_slice(
+                &[
+                    acc_variance,
+                    acc_variance,
+                    acc_variance,
+                    gyro_variance,
+                    gyro_variance,
+                    gyro_variance,
+                    alt_variance,
+                ],
+            )),
         }
     }
 
@@ -84,7 +118,9 @@ impl MekfStateEstimator {
 
     pub fn update(&mut self, z_rocket_frame: Measurement) {
         let z_earth_frame = Measurement::new(
-            &self.orientation.inverse_transform_vector(&z_rocket_frame.acceleration()),
+            &self
+                .orientation
+                .inverse_transform_vector(&z_rocket_frame.acceleration()),
             &self
                 .orientation
                 .inverse_transform_vector(&z_rocket_frame.angular_velocity()),
