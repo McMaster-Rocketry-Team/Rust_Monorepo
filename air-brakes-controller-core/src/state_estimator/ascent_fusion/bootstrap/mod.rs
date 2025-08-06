@@ -35,6 +35,7 @@ pub enum BootstrapStateEstimator {
     Stage1 {
         n: usize,
         acc_welford: Welford<3>,
+        pad_av_orientation: UnitQuaternion<f32>,
         av_orientation_reckoner: DeadReckoner,
         alt_variance: f32,
         acc_variance: f32,
@@ -46,9 +47,9 @@ pub enum BootstrapStateEstimator {
     /// dead reckoning
     Stage2 {
         q_av_to_rocket: UnitQuaternion<f32>,
-        rocket_orientation_reckoner: DeadReckoner,
-        last_acc_rocket_frame: Vector3<f32>,
-        last_gyro_rocket_frame: Vector3<f32>,
+        av_orientation_reckoner: DeadReckoner,
+        last_acc_imu_frame: Vector3<f32>,
+        last_gyro_imu_frame_unbiased: Vector3<f32>,
         alt_variance: f32,
         acc_variance: f32,
         gyro_variance: f32,
@@ -119,12 +120,13 @@ impl BootstrapStateEstimator {
                                 alt_asl_welford: Welford<1>,
                             },
                             Second {
-                                alt_variance: f32, 
+                                alt_variance: f32,
                                 acc_variance: f32,
                                 gyro_variance: f32,
                                 gyro_bias: Vector3<f32>,
+                                pad_av_orientation:UnitQuaternion<f32>,
                                 av_orientation_reckoner: DeadReckoner,
-                                launch_pad_altitude_asl:f32,
+                                launch_pad_altitude_asl: f32,
                             },
                         }
 
@@ -143,8 +145,7 @@ impl BootstrapStateEstimator {
                                 } => {
                                     acc_welford.update(&past_z.acceleration());
                                     gyro_welford.update(&past_z.angular_velocity());
-                                    alt_asl_welford
-                                        .update(&Vector1::new(past_z.altitude_asl()));
+                                    alt_asl_welford.update(&Vector1::new(past_z.altitude_asl()));
 
                                     if i == SAMPLES_PER_S - 1 {
                                         // this is the gravity vector in rocket frame
@@ -160,16 +161,19 @@ impl BootstrapStateEstimator {
                                         );
                                         log_info!("q_earth_to_av: {}", q_earth_to_av);
                                         let mut reckoner = DeadReckoner::new(q_earth_to_av);
-                                        let launch_pad_altitude_asl =  alt_asl_welford.mean()[0];
-                                        reckoner.position.z =launch_pad_altitude_asl;
+                                        let launch_pad_altitude_asl = alt_asl_welford.mean()[0];
+                                        reckoner.position.z = launch_pad_altitude_asl;
 
                                         state = State::Second {
                                             alt_variance: alt_asl_welford.variance().unwrap()[0],
                                             acc_variance: acc_welford.variance_magnitude().unwrap(),
-                                            gyro_variance: gyro_welford.variance_magnitude().unwrap(),
+                                            gyro_variance: gyro_welford
+                                                .variance_magnitude()
+                                                .unwrap(),
                                             gyro_bias: gyro_welford.mean(),
+                                            pad_av_orientation: q_earth_to_av,
                                             av_orientation_reckoner: reckoner,
-                                            launch_pad_altitude_asl
+                                            launch_pad_altitude_asl,
                                         };
                                     }
                                 }
@@ -191,6 +195,7 @@ impl BootstrapStateEstimator {
                             acc_variance,
                             gyro_variance,
                             gyro_bias,
+                            pad_av_orientation,
                             av_orientation_reckoner,
                             launch_pad_altitude_asl,
                         } = state
@@ -198,6 +203,7 @@ impl BootstrapStateEstimator {
                             *self = Self::Stage1 {
                                 n: 0,
                                 acc_welford: Welford::<3>::new(),
+                                pad_av_orientation,
                                 av_orientation_reckoner,
                                 alt_variance,
                                 acc_variance,
@@ -214,6 +220,7 @@ impl BootstrapStateEstimator {
             Self::Stage1 {
                 n,
                 acc_welford,
+                pad_av_orientation,
                 av_orientation_reckoner,
                 alt_variance,
                 acc_variance,
@@ -228,9 +235,7 @@ impl BootstrapStateEstimator {
                 if *n > SAMPLES_PER_S / 2 {
                     // log_info!("[{}] to stage 2", z_imu_frame.timestamp_s());
                     let avg_acc_av_frame = acc_welford.mean();
-                    let avg_acc_earth_frame = av_orientation_reckoner
-                        .orientation
-                        .transform_vector(&avg_acc_av_frame);
+                    let avg_acc_earth_frame = pad_av_orientation.transform_vector(&avg_acc_av_frame);
 
                     let launch_angle_deg = UP.angle(&avg_acc_earth_frame).to_degrees();
                     log_info!("launch angle degree: {}", launch_angle_deg);
@@ -239,57 +244,47 @@ impl BootstrapStateEstimator {
                         quaternion_from_start_and_end_vector(&avg_acc_earth_frame, &UP);
                     log_info!("q_earth_to_rocket: {}", q_earth_to_rocket);
 
-                    let q_av_to_earth = av_orientation_reckoner.orientation.inverse();
-                    let q_av_to_rocket = q_earth_to_rocket * q_av_to_earth;
-
-                    log_info!("q_av_to_rocket: {}", q_av_to_rocket);
-
-                    let mut rocket_orientation_reckoner = DeadReckoner::new(q_earth_to_rocket);
-                    rocket_orientation_reckoner.position = av_orientation_reckoner.position;
-                    rocket_orientation_reckoner.velocity = av_orientation_reckoner.velocity;
+                    let q_av_to_earth = pad_av_orientation.inverse();
+                    let q_av_to_rocket = q_av_to_earth * q_earth_to_rocket;
 
                     *self = Self::Stage2 {
                         q_av_to_rocket,
-                        rocket_orientation_reckoner,
+                        av_orientation_reckoner:av_orientation_reckoner.clone(),
                         alt_variance: *alt_variance,
                         acc_variance: *acc_variance,
                         gyro_variance: *gyro_variance,
                         gyro_bias: *gyro_bias,
-                        last_acc_rocket_frame: q_av_to_rocket.inverse_transform_vector(&acc),
-                        last_gyro_rocket_frame: q_av_to_rocket.inverse_transform_vector(&gyro),
-                        launch_pad_altitude_asl:*launch_pad_altitude_asl,
+                        last_acc_imu_frame: acc,
+                        last_gyro_imu_frame_unbiased: gyro - *gyro_bias,
+                        launch_pad_altitude_asl: *launch_pad_altitude_asl,
                     };
                 }
             }
             Self::Stage2 {
-                q_av_to_rocket,
-                rocket_orientation_reckoner,
+                av_orientation_reckoner,
                 gyro_bias,
-                last_acc_rocket_frame,
-                last_gyro_rocket_frame,
+                last_acc_imu_frame,
+                last_gyro_imu_frame_unbiased,
                 ..
             } => {
-                let acc_rocket_frame = q_av_to_rocket.inverse_transform_vector(&acc);
-                let gyro_rocket_frame =
-                    q_av_to_rocket.inverse_transform_vector(&(gyro - *gyro_bias));
+                av_orientation_reckoner.update(&acc, &(gyro - *gyro_bias));
 
-                rocket_orientation_reckoner.update(&acc_rocket_frame, &gyro_rocket_frame);
-                *last_acc_rocket_frame = acc_rocket_frame;
-                *last_gyro_rocket_frame = gyro_rocket_frame;
+                *last_acc_imu_frame = acc;
+                *last_gyro_imu_frame_unbiased = gyro - *gyro_bias;
             }
         }
     }
 
     pub fn should_switch_to_mekf(&self) -> bool {
         if let Self::Stage2 {
-            last_acc_rocket_frame,
-            rocket_orientation_reckoner,
+            last_acc_imu_frame: last_acc_rocket_frame,
+            av_orientation_reckoner,
             ..
         } = self
         {
-            let speed_of_sound = approximate_speed_of_sound(rocket_orientation_reckoner.position.z);
+            let speed_of_sound = approximate_speed_of_sound(av_orientation_reckoner.position.z);
             if last_acc_rocket_frame.z < 0.0
-                && rocket_orientation_reckoner.velocity.magnitude_squared()
+                && av_orientation_reckoner.velocity.magnitude_squared()
                     < (0.8 * speed_of_sound * 0.8 * speed_of_sound)
             {
                 return true;

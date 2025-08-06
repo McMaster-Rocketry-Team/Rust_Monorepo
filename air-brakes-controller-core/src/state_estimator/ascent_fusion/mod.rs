@@ -50,28 +50,29 @@ impl AscentFusionStateEstimator {
                     && let BootstrapStateEstimator::Stage2 {
                         q_av_to_rocket,
                         gyro_bias,
-                        rocket_orientation_reckoner,
+                        av_orientation_reckoner,
                         acc_variance,
                         gyro_variance,
                         alt_variance,
-                        last_acc_rocket_frame,
-                        last_gyro_rocket_frame,
+                        last_acc_imu_frame,
+                        last_gyro_imu_frame_unbiased,
                         launch_pad_altitude_asl,
                         ..
                     } = estimator
                 {
                     log_info!("[{}] switch to mekf", GlobalPlot::get_time_s());
-                    let rocket_orientation = rocket_orientation_reckoner.orientation;
+                    let av_orientation = av_orientation_reckoner.orientation;
+                    let rocket_orientation = av_orientation_reckoner.orientation * *q_av_to_rocket;
                     *self = Self::Ready {
                         estimator: MekfStateEstimator::new(
                             rocket_orientation,
                             State::new(
                                 &Vector3::zeros(),
-                                &rocket_orientation.inverse_transform_vector(last_acc_rocket_frame),
-                                &rocket_orientation_reckoner.velocity,
-                                &rocket_orientation
-                                    .inverse_transform_vector(last_gyro_rocket_frame),
-                                rocket_orientation_reckoner.position.z,
+                                &av_orientation.inverse_transform_vector(last_acc_imu_frame),
+                                &av_orientation_reckoner.velocity,
+                                &av_orientation
+                                    .inverse_transform_vector(last_gyro_imu_frame_unbiased),
+                                    av_orientation_reckoner.position.z,
                                 constants.initial_sideways_moment_co,
                                 &constants.initial_front_cd.into(),
                             ),
@@ -125,11 +126,11 @@ impl AscentFusionStateEstimator {
             Self::Bootstrap {
                 estimator:
                     BootstrapStateEstimator::Stage2 {
-                        rocket_orientation_reckoner,
+                        av_orientation_reckoner,
                         ..
                     },
                 ..
-            } => rocket_orientation_reckoner.position.z,
+            } => av_orientation_reckoner.position.z,
             Self::Ready {
                 estimator,
                 launch_pad_altitude_asl,
