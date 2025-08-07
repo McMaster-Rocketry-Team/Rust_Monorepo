@@ -108,3 +108,31 @@ macro_rules! log_assert {
         ::defmt::assert!($x);
     }};
 }
+
+// Macros for plotting hooks that are active only during tests
+macro_rules! plot_get_time_s {
+    () => {{
+        #[cfg(test)]
+        {
+            crate::tests::plot::GlobalPlot::get_time_s()
+        }
+        #[cfg(not(test))]
+        {
+            0.0_f32
+        }
+    }};
+}
+
+macro_rules! plot_add_value {
+    ($name:expr, $value:expr $(,)?) => {{
+        #[cfg(test)]
+        {
+            crate::tests::plot::GlobalPlot::add_value($name, $value);
+        }
+        #[cfg(not(test))]
+        {
+            // Ensure arguments are type-checked without generating code
+            let _ = (&$name, &$value);
+        }
+    }};
+}

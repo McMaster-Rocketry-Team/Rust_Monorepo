@@ -11,7 +11,6 @@ use crate::{
         Measurement, SAMPLES_PER_S, ascent_fusion::bootstrap::dead_reckoner::DeadReckoner,
         welford::Welford,
     },
-    tests::plot::GlobalPlot,
     utils::approximate_speed_of_sound,
 };
 

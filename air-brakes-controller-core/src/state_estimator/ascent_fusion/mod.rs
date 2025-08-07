@@ -9,7 +9,6 @@ use crate::{
             mekf::{MekfStateEstimator, State},
         },
     },
-    tests::plot::GlobalPlot,
 };
 
 mod bootstrap;
@@ -60,7 +59,7 @@ impl AscentFusionStateEstimator {
                         ..
                     } = estimator
                 {
-                    log_info!("[{}] switch to mekf", GlobalPlot::get_time_s());
+                    log_info!("[{}] switch to mekf", plot_get_time_s!());
                     let av_orientation = av_orientation_reckoner.orientation;
                     let rocket_orientation = av_orientation * *q_av_to_rocket;
                     // log_info!("initial acc: {}", last_acc_imu_frame);

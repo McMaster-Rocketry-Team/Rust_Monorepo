@@ -3,10 +3,7 @@ use nalgebra::{SMatrix, SVector, UnitQuaternion};
 pub use state::State;
 use state_propagation::{build_measurement_matrix, central_difference_jacobian, state_transition};
 
-use crate::{
-    RocketConstants,
-    state_estimator::{DT, Measurement},
-};
+use crate::{RocketConstants, state_estimator::Measurement};
 
 mod state;
 mod state_propagation;
@@ -70,7 +67,7 @@ impl MekfStateEstimator {
                     0.0,
                     0.0,
                 ])
-                .map(|x| x.max(1e-10)),
+                .map(|x| x.max(1e-10) * 10.0),
             ),
             r: SMatrix::from_diagonal(&SVector::<f32, { Measurement::SIZE }>::from_column_slice(
                 &[
@@ -110,8 +107,8 @@ impl MekfStateEstimator {
             &self.state,
             &self.constants,
         );
-        self.orientation = self.state
-            .reset_small_angle_correction(&self.orientation);
+        // self.orientation = self.state
+        //     .reset_small_angle_correction(&self.orientation);
         // log_info!("predicted state: {}", self.state.0);
 
         self.p = f * self.p * f.transpose() + self.q;
@@ -125,8 +122,7 @@ impl MekfStateEstimator {
         let k = self.p * self.h.transpose() * s.try_inverse().unwrap();
 
         self.state.0 += k * y;
-        self.orientation = self.state
-            .reset_small_angle_correction(&self.orientation);
+        self.orientation = self.state.reset_small_angle_correction(&self.orientation);
 
         let i = SMatrix::<f32, { State::SIZE }, { State::SIZE }>::identity();
         self.p = (i - k * self.h) * self.p;
