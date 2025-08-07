@@ -62,16 +62,17 @@ impl AscentFusionStateEstimator {
                 {
                     log_info!("[{}] switch to mekf", GlobalPlot::get_time_s());
                     let av_orientation = av_orientation_reckoner.orientation;
-                    let rocket_orientation = av_orientation_reckoner.orientation * *q_av_to_rocket;
+                    let rocket_orientation = av_orientation * *q_av_to_rocket;
+                    // log_info!("initial acc: {}", last_acc_imu_frame);
+                    // panic!("initial acc: {}", &av_orientation.transform_vector(last_acc_imu_frame));
                     *self = Self::Ready {
                         estimator: MekfStateEstimator::new(
                             rocket_orientation,
                             State::new(
                                 &Vector3::zeros(),
-                                &av_orientation.inverse_transform_vector(last_acc_imu_frame),
+                                &av_orientation.transform_vector(last_acc_imu_frame),
                                 &av_orientation_reckoner.velocity,
-                                &av_orientation
-                                    .inverse_transform_vector(last_gyro_imu_frame_unbiased),
+                                &av_orientation.transform_vector(last_gyro_imu_frame_unbiased),
                                 av_orientation_reckoner.position.z,
                                 constants.initial_sideways_moment_co,
                                 &constants.initial_front_cd.into(),
@@ -93,18 +94,18 @@ impl AscentFusionStateEstimator {
                 gyro_bias,
                 ..
             } => {
-                let acc_rocket_frame =
-                    q_av_to_rocket.inverse_transform_vector(&z_imu_frame.acceleration());
-                let gyro_rocket_frame = q_av_to_rocket
-                    .inverse_transform_vector(&(z_imu_frame.angular_velocity() - *gyro_bias));
+                let av_orientation = estimator.orientation * q_av_to_rocket.inverse();
+                let acc_earth_frame = av_orientation.transform_vector(&z_imu_frame.acceleration());
+                let gyro_earth_frame =
+                    av_orientation.transform_vector(&(z_imu_frame.angular_velocity() - *gyro_bias));
 
-                let z_rocket_frame = Measurement::new(
-                    &acc_rocket_frame,
-                    &gyro_rocket_frame,
+                let z_earth_frame = Measurement::new(
+                    &acc_earth_frame,
+                    &gyro_earth_frame,
                     z_imu_frame.altitude_asl(),
                 );
                 estimator.predict(airbrakes_ext);
-                estimator.update(z_rocket_frame);
+                estimator.update(z_earth_frame);
             }
         }
     }
@@ -158,10 +159,7 @@ impl AscentFusionStateEstimator {
                     },
                 ..
             } => Some(av_orientation_reckoner.orientation * *q_av_to_rocket),
-            Self::Ready {
-                estimator,
-                ..
-            } => Some(estimator.orientation),
+            Self::Ready { estimator, .. } => Some(estimator.orientation),
         }
     }
 }

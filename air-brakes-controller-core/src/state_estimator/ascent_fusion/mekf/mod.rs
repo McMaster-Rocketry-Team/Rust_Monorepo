@@ -103,28 +103,24 @@ impl MekfStateEstimator {
             &self.constants,
         );
 
+        // log_info!("before state: {}", self.state.0);
         self.state = state_transition(
             airbrakes_ext,
             &self.orientation,
             &self.state,
             &self.constants,
         );
+        self.orientation = self.state
+            .reset_small_angle_correction(&self.orientation);
+        // log_info!("predicted state: {}", self.state.0);
 
-        self.p = f * self.p * f.transpose() + self.q * DT;
+        self.p = f * self.p * f.transpose() + self.q;
         self.p = 0.5 * (self.p + self.p.transpose()); // keep symmetric
     }
 
-    pub fn update(&mut self, z_rocket_frame: Measurement) {
-        let z_earth_frame = Measurement::new(
-            &self
-                .orientation
-                .inverse_transform_vector(&z_rocket_frame.acceleration()),
-            &self
-                .orientation
-                .inverse_transform_vector(&z_rocket_frame.angular_velocity()),
-            z_rocket_frame.altitude_asl(),
-        );
+    pub fn update(&mut self, z_earth_frame: Measurement) {
         let y = z_earth_frame.0 - self.h().0;
+        // panic!("actual measurement: {}, predicted measurment: {}", z_earth_frame.0, self.h().0);
         let s = self.h * self.p * self.h.transpose() + self.r;
         let k = self.p * self.h.transpose() * s.try_inverse().unwrap();
 

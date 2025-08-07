@@ -8,8 +8,11 @@ use nalgebra::{UnitQuaternion, UnitVector3, Vector1, Vector3};
 
 use crate::{
     state_estimator::{
-        ascent_fusion::bootstrap::dead_reckoner::DeadReckoner, welford::Welford, Measurement, SAMPLES_PER_S
-    }, tests::plot::GlobalPlot, utils::approximate_speed_of_sound
+        Measurement, SAMPLES_PER_S, ascent_fusion::bootstrap::dead_reckoner::DeadReckoner,
+        welford::Welford,
+    },
+    tests::plot::GlobalPlot,
+    utils::approximate_speed_of_sound,
 };
 
 const IGNITION_DETECTION_ACCELERATION_THRESHOLD: f32 = 5.0 * 9.81;
@@ -122,7 +125,7 @@ impl BootstrapStateEstimator {
                                 acc_variance: f32,
                                 gyro_variance: f32,
                                 gyro_bias: Vector3<f32>,
-                                pad_av_orientation:UnitQuaternion<f32>,
+                                pad_av_orientation: UnitQuaternion<f32>,
                                 av_orientation_reckoner: DeadReckoner,
                                 launch_pad_altitude_asl: f32,
                             },
@@ -233,7 +236,8 @@ impl BootstrapStateEstimator {
                 if *n > SAMPLES_PER_S / 2 {
                     // log_info!("[{}] to stage 2", z_imu_frame.timestamp_s());
                     let avg_acc_av_frame = acc_welford.mean();
-                    let avg_acc_earth_frame = pad_av_orientation.transform_vector(&avg_acc_av_frame);
+                    let avg_acc_earth_frame =
+                        pad_av_orientation.transform_vector(&avg_acc_av_frame);
 
                     let launch_angle_deg = UP.angle(&avg_acc_earth_frame).to_degrees();
                     log_info!("launch angle degree: {}", launch_angle_deg);
@@ -247,7 +251,7 @@ impl BootstrapStateEstimator {
 
                     *self = Self::Stage2 {
                         q_av_to_rocket,
-                        av_orientation_reckoner:av_orientation_reckoner.clone(),
+                        av_orientation_reckoner: av_orientation_reckoner.clone(),
                         alt_variance: *alt_variance,
                         acc_variance: *acc_variance,
                         gyro_variance: *gyro_variance,
@@ -282,8 +286,10 @@ impl BootstrapStateEstimator {
         } = self
         {
             let last_acc_rocket_frame = q_av_to_rocket.inverse_transform_vector(last_acc_imu_frame);
+
             let speed_of_sound = approximate_speed_of_sound(av_orientation_reckoner.position.z);
-            if last_acc_rocket_frame.z < 0.0
+
+            if last_acc_rocket_frame.z < -5.0
                 && av_orientation_reckoner.velocity.magnitude_squared()
                     < (0.8 * speed_of_sound * 0.8 * speed_of_sound)
             {
