@@ -53,7 +53,7 @@ impl ConnectionMethodFactory for BluetoothConnectionMethodFactory {
             let peripherals = self.adapter.peripherals().await?;
             for peripheral in peripherals {
                 let properties = peripheral.properties().await;
-                info!("{:?} {:?}", peripheral, properties);
+                // info!("{:?} {:?}", peripheral, properties);
                 if let Ok(Some(properties)) = properties {
                     if properties.local_name == Some(self.bluetooth_name.clone()) {
                         peripheral.connect().await?;
