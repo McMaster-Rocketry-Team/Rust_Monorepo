@@ -14,7 +14,7 @@ mod state_propagation;
 mod tests;
 
 pub struct MekfStateEstimator {
-    orientation: UnitQuaternion<f32>,
+    pub orientation: UnitQuaternion<f32>,
     pub state: State,
     constants: RocketConstants,
 
@@ -109,8 +109,6 @@ impl MekfStateEstimator {
             &self.state,
             &self.constants,
         );
-        self.state
-            .reset_small_angle_correction(&mut self.orientation);
 
         self.p = f * self.p * f.transpose() + self.q * DT;
         self.p = 0.5 * (self.p + self.p.transpose()); // keep symmetric
@@ -131,8 +129,8 @@ impl MekfStateEstimator {
         let k = self.p * self.h.transpose() * s.try_inverse().unwrap();
 
         self.state.0 += k * y;
-        self.state
-            .reset_small_angle_correction(&mut self.orientation);
+        self.orientation = self.state
+            .reset_small_angle_correction(&self.orientation);
 
         let i = SMatrix::<f32, { State::SIZE }, { State::SIZE }>::identity();
         self.p = (i - k * self.h) * self.p;

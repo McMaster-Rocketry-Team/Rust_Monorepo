@@ -8,10 +8,8 @@ use nalgebra::{UnitQuaternion, UnitVector3, Vector1, Vector3};
 
 use crate::{
     state_estimator::{
-        Measurement, SAMPLES_PER_S, ascent_fusion::bootstrap::dead_reckoner::DeadReckoner,
-        welford::Welford,
-    },
-    utils::approximate_speed_of_sound,
+        ascent_fusion::bootstrap::dead_reckoner::DeadReckoner, welford::Welford, Measurement, SAMPLES_PER_S
+    }, tests::plot::GlobalPlot, utils::approximate_speed_of_sound
 };
 
 const IGNITION_DETECTION_ACCELERATION_THRESHOLD: f32 = 5.0 * 9.81;
@@ -277,16 +275,19 @@ impl BootstrapStateEstimator {
 
     pub fn should_switch_to_mekf(&self) -> bool {
         if let Self::Stage2 {
-            last_acc_imu_frame: last_acc_rocket_frame,
+            q_av_to_rocket,
+            last_acc_imu_frame,
             av_orientation_reckoner,
             ..
         } = self
         {
+            let last_acc_rocket_frame = q_av_to_rocket.inverse_transform_vector(last_acc_imu_frame);
             let speed_of_sound = approximate_speed_of_sound(av_orientation_reckoner.position.z);
             if last_acc_rocket_frame.z < 0.0
                 && av_orientation_reckoner.velocity.magnitude_squared()
                     < (0.8 * speed_of_sound * 0.8 * speed_of_sound)
             {
+                log_info!("last_acc_rocket_frame: {}", last_acc_rocket_frame);
                 return true;
             }
         }

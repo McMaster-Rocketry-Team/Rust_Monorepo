@@ -67,6 +67,7 @@ fn integration_test() {
         if let BootstrapStateEstimator::Stage2 {
             av_orientation_reckoner: reckoner,
             q_av_to_rocket,
+            last_acc_imu_frame,
             ..
         } = &dead_reckoning
         {
@@ -92,6 +93,9 @@ fn integration_test() {
                 rocket_orientation.j.to_string(),
                 rocket_orientation.k.to_string(),
             ]).unwrap();
+
+            let last_acc_rocket_frame = q_av_to_rocket.inverse_transform_vector(last_acc_imu_frame);
+            GlobalPlot::add_value("rocket acc z", last_acc_rocket_frame.z);
         }
     }
 

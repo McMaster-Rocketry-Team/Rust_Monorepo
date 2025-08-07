@@ -2,7 +2,7 @@ use std::fs::File;
 
 use super::*;
 use crate::tests::{init_logger, plot::GlobalPlot};
-use csv::Reader;
+use csv::{Reader, Writer};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -28,6 +28,18 @@ fn integration_test() {
     init_logger();
 
     let csv_records = read_csv_records();
+
+    let mut orientation_writer = Writer::from_path("./out_orientation.csv").unwrap();
+    orientation_writer
+        .write_record(&[
+            "timestamp_s",
+            "orientation_w",
+            "orientation_x",
+            "orientation_y",
+            "orientation_z",
+        ])
+        .unwrap();
+
     let constants = RocketConstants {
         initial_front_cd: [0.5, 0.5, 0.5, 0.5],
         initial_sideways_moment_co: 0.3,
@@ -51,6 +63,18 @@ fn integration_test() {
         );
 
         estimator.update(0.0, &reading);
+
+        if let Some(rocket_orientation) = estimator.rocket_orientation() {
+            orientation_writer
+                .write_record(&[
+                    csv_record.timestamp_s.to_string(),
+                    rocket_orientation.w.to_string(),
+                    rocket_orientation.i.to_string(),
+                    rocket_orientation.j.to_string(),
+                    rocket_orientation.k.to_string(),
+                ])
+                .unwrap();
+        }
 
         GlobalPlot::add_value("Estimated altitude agl", estimator.altitude_agl());
         GlobalPlot::add_value("true altitude agl", csv_record.altitude)

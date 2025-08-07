@@ -72,7 +72,7 @@ impl AscentFusionStateEstimator {
                                 &av_orientation_reckoner.velocity,
                                 &av_orientation
                                     .inverse_transform_vector(last_gyro_imu_frame_unbiased),
-                                    av_orientation_reckoner.position.z,
+                                av_orientation_reckoner.position.z,
                                 constants.initial_sideways_moment_co,
                                 &constants.initial_front_cd.into(),
                             ),
@@ -136,6 +136,32 @@ impl AscentFusionStateEstimator {
                 launch_pad_altitude_asl,
                 ..
             } => estimator.state.altitude_asl() - launch_pad_altitude_asl,
+        }
+    }
+
+    pub fn rocket_orientation(&self) -> Option<UnitQuaternion<f32>> {
+        match self {
+            Self::Bootstrap {
+                estimator: BootstrapStateEstimator::OnPad { .. },
+                ..
+            } => None,
+            Self::Bootstrap {
+                estimator: BootstrapStateEstimator::Stage1 { .. },
+                ..
+            } => None,
+            Self::Bootstrap {
+                estimator:
+                    BootstrapStateEstimator::Stage2 {
+                        q_av_to_rocket,
+                        av_orientation_reckoner,
+                        ..
+                    },
+                ..
+            } => Some(av_orientation_reckoner.orientation * *q_av_to_rocket),
+            Self::Ready {
+                estimator,
+                ..
+            } => Some(estimator.orientation),
         }
     }
 }
