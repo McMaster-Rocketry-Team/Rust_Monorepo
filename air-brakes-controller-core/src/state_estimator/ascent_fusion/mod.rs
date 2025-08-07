@@ -69,7 +69,6 @@ impl AscentFusionStateEstimator {
                             rocket_orientation,
                             State::new(
                                 &Vector3::zeros(),
-                                &av_orientation.transform_vector(last_acc_imu_frame),
                                 &av_orientation_reckoner.velocity,
                                 &av_orientation.transform_vector(last_gyro_imu_frame_unbiased),
                                 av_orientation_reckoner.position.z,
@@ -104,7 +103,7 @@ impl AscentFusionStateEstimator {
                     z_imu_frame.altitude_asl(),
                 );
                 estimator.predict(airbrakes_ext);
-                estimator.update(z_earth_frame);
+                estimator.update(airbrakes_ext, z_earth_frame);
             }
         }
     }

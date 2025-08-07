@@ -2,7 +2,7 @@ use super::residue::read_csv_records;
 use crate::{
     RocketConstants,
     state_estimator::{
-        ascent_fusion::mekf::{State, state_propagation::state_transition},
+        ascent_fusion::mekf::{State, state_transition::state_transition},
         welford::Welford,
     },
     tests::{init_logger, plot::GlobalPlot},

@@ -1,12 +1,23 @@
 use nalgebra::{SMatrix, SVector, UnitQuaternion};
 
 pub use state::State;
-use state_propagation::{build_measurement_matrix, central_difference_jacobian, state_transition};
+use state_transition::state_transition;
 
-use crate::{RocketConstants, state_estimator::Measurement};
+use crate::{
+    RocketConstants,
+    state_estimator::{
+        Measurement,
+        ascent_fusion::mekf::{
+            measurement_model::{measurement_model, measurement_model_jacobian},
+            state_transition::state_transition_jacobian,
+        },
+    },
+};
 
+mod jacobian;
+mod measurement_model;
 mod state;
-mod state_propagation;
+mod state_transition;
 #[cfg(test)]
 mod tests;
 
@@ -23,9 +34,6 @@ pub struct MekfStateEstimator {
 
     /// measurement-noise covariance R
     r: SMatrix<f32, { Measurement::SIZE }, { Measurement::SIZE }>,
-
-    /// measurement matrix
-    h: SMatrix<f32, { Measurement::SIZE }, { State::SIZE }>,
 }
 
 impl MekfStateEstimator {
@@ -42,7 +50,6 @@ impl MekfStateEstimator {
             orientation: initial_orientation,
             state: initial_state,
             constants,
-            h: build_measurement_matrix(),
             p: SMatrix::from_diagonal(&SVector::<f32, { State::SIZE }>::from_column_slice(
                 &[1e-4; { State::SIZE }],
             )),
@@ -83,17 +90,8 @@ impl MekfStateEstimator {
         }
     }
 
-    // what would sensor measure given current state?
-    fn h(&self) -> Measurement {
-        Measurement::new(
-            &self.state.acceleration().into(),
-            &self.state.angular_velocity().into(),
-            self.state.altitude_asl(),
-        )
-    }
-
     pub fn predict(&mut self, airbrakes_ext: f32) {
-        let f = central_difference_jacobian(
+        let f = state_transition_jacobian(
             airbrakes_ext,
             &self.orientation,
             &self.state,
@@ -115,17 +113,29 @@ impl MekfStateEstimator {
         self.p = 0.5 * (self.p + self.p.transpose()); // keep symmetric
     }
 
-    pub fn update(&mut self, z_earth_frame: Measurement) {
-        let y = z_earth_frame.0 - self.h().0;
+    pub fn update(&mut self, airbrakes_ext: f32, z_earth_frame: Measurement) {
+        let h = measurement_model(
+            airbrakes_ext,
+            &self.orientation,
+            &self.state,
+            &self.constants,
+        );
+        let y = z_earth_frame.0 - h.0;
         // panic!("actual measurement: {}, predicted measurment: {}", z_earth_frame.0, self.h().0);
-        let s = self.h * self.p * self.h.transpose() + self.r;
-        let k = self.p * self.h.transpose() * s.try_inverse().unwrap();
+        let h_jacobian = measurement_model_jacobian(
+            airbrakes_ext,
+            &self.orientation,
+            &self.state,
+            &self.constants,
+        );
+        let s = h_jacobian * self.p * h_jacobian.transpose() + self.r;
+        let k = self.p * h_jacobian.transpose() * s.try_inverse().unwrap();
 
         self.state.0 += k * y;
         self.orientation = self.state.reset_small_angle_correction(&self.orientation);
 
         let i = SMatrix::<f32, { State::SIZE }, { State::SIZE }>::identity();
-        self.p = (i - k * self.h) * self.p;
+        self.p = (i - k * h_jacobian) * self.p;
         self.p = 0.5 * (self.p + self.p.transpose());
     }
 }

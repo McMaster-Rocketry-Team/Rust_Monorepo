@@ -6,7 +6,9 @@ use serde::Deserialize;
 
 use super::super::state::State;
 use crate::{
-    state_estimator::{ascent_fusion::mekf::state_propagation::state_transition, DT}, tests::{init_logger, plot::GlobalPlot}, RocketConstants
+    RocketConstants,
+    state_estimator::{DT, ascent_fusion::mekf::state_transition::state_transition},
+    tests::{init_logger, plot::GlobalPlot},
 };
 
 #[derive(Deserialize)]
@@ -32,7 +34,6 @@ impl CsvRecord {
     pub(super) fn to_rocket_state(&self) -> State {
         State::new(
             &Vector3::zeros(), // small angle correction starts at zero
-            &Vector3::new(self.acc_x, self.acc_y, self.acc_z),
             &Vector3::new(self.velocity_x, self.velocity_y, self.velocity_z),
             &Vector3::new(
                 self.angular_velocity_x,
@@ -43,6 +44,10 @@ impl CsvRecord {
             0.3, // sideways moment coefficient (using default value)
             &Vector4::new(0.5, 0.5, 0.5, 0.5), // drag coefficients (using default values)
         )
+    }
+
+    pub(super) fn to_acc(&self) -> Vector3<f32> {
+        Vector3::new(self.acc_x, self.acc_y, self.acc_z)
     }
 
     pub(super) fn to_orientation(&self) -> UnitQuaternion<f32> {
@@ -89,9 +94,11 @@ fn calculate_residue() {
         let orientation = csv_record.to_orientation();
 
         let mut predicted_state = state_transition(0.0, &orientation, &state, &constants);
+        let predicted_acc = predicted_state.expected_acceleration(0.0, &orientation, &constants);
         let predicted_orientation = predicted_state.reset_small_angle_correction(&orientation);
 
         let true_state = next_record.to_rocket_state();
+        let true_acc = next_record.to_acc();
         let true_orientation = next_record.to_orientation();
 
         let d_acc_z = (next_record.acc_z - csv_record.acc_z) / DT;
@@ -101,18 +108,13 @@ fn calculate_residue() {
             "Altitude Residue x500",
             (true_state.altitude_asl() - predicted_state.altitude_asl()) * 500.0,
         );
-        GlobalPlot::add_value(
-            "Acc X Residue x500",
-            (true_state.acceleration().x - predicted_state.acceleration().x) * 500.0,
-        );
-        GlobalPlot::add_value(
-            "Acc Y Residue x500",
-            (true_state.acceleration().y - predicted_state.acceleration().y) * 500.0,
-        );
-        GlobalPlot::add_value(
-            "Acc Z Residue x500",
-            (true_state.acceleration().z - predicted_state.acceleration().z) * 500.0,
-        );
+
+
+        GlobalPlot::add_value("True Acc Z", true_acc.z);
+        GlobalPlot::add_value("Predicted Acc Z", predicted_acc.z);
+        GlobalPlot::add_value("Acc X Residue x500", (true_acc.x - predicted_acc.x) * 500.0);
+        GlobalPlot::add_value("Acc Y Residue x500", (true_acc.y - predicted_acc.y) * 500.0);
+        GlobalPlot::add_value("Acc Z Residue x500", (true_acc.z - predicted_acc.z) * 500.0);
         GlobalPlot::add_value(
             "Velocity X Residue x500",
             (true_state.velocity().x - predicted_state.velocity().x) * 500.0,

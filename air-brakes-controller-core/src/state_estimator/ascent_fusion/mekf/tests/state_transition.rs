@@ -5,7 +5,7 @@ use crate::{
     RocketConstants,
     state_estimator::{
         DT,
-        ascent_fusion::mekf::{state::State, state_propagation::state_transition},
+        ascent_fusion::mekf::{state::State, state_transition::state_transition},
     },
     tests::init_logger,
 };
@@ -27,7 +27,6 @@ fn test_small_angle_correction() {
     let orientation = UnitQuaternion::identity();
     let state = State::new(
         &Vector3::new(1.0f32.to_radians(), 0.0, 0.0),
-        &Vector3::zeros(),
         &Vector3::zeros(),
         &(Vector3::new(1.0f32.to_radians(), 0.0, 0.0) / DT),
         0.0,
@@ -58,7 +57,6 @@ fn test_wind_vel() {
     );
     let state = State::new(
         &Vector3::zeros(),
-        &Vector3::zeros(),
         &Vector3::new(0.0, 1.0, 0.0),
         &Vector3::zeros(),
         0.0,
@@ -83,7 +81,6 @@ fn test_acc_world_frame() {
         30f32.to_radians(),
     );
     let state = State::new(
-        &Vector3::zeros(),
         &Vector3::zeros(),
         // velocity towards the rocket nose
         &Vector3::new(0.0, -1.0 * 10.0, 3f32.sqrt() * 10.0),
@@ -111,7 +108,6 @@ fn test_angular_acc() {
     let orientation = UnitQuaternion::identity();
     let state = State::new(
         &Vector3::zeros(),
-        &Vector3::zeros(),
         &Vector3::new(10.0, 10.0, 0.0),
         &Vector3::zeros(),
         0.0,
@@ -136,7 +132,6 @@ fn test_angular_acc_world_frame() {
     );
     let state = State::new(
         &Vector3::zeros(),
-        &Vector3::zeros(),
         &Vector3::new(10.0, 10.0, 0.0),
         &Vector3::zeros(),
         0.0,
@@ -160,7 +155,6 @@ fn test_angular_vel() {
         90f32.to_radians(),
     );
     let state = State::new(
-        &Vector3::zeros(),
         &Vector3::zeros(),
         &Vector3::zeros(),
         &(Vector3::new(10.0f32.to_radians(), 0.0, 0.0) / DT),

@@ -3,11 +3,13 @@ use core::hint::black_box;
 use nalgebra::{UnitQuaternion, UnitVector3, Vector3, Vector4};
 
 use crate::{
-    tests::{init_logger, to_matlab}, RocketConstants,
+    RocketConstants,
+    state_estimator::ascent_fusion::mekf::{
+        State, measurement_model::measurement_model_jacobian,
+        state_transition::state_transition_jacobian,
+    },
+    tests::{init_logger, to_matlab},
 };
-
-use super::super::state::State;
-use super::super::state_propagation::{build_measurement_matrix, central_difference_jacobian};
 
 #[test]
 fn jacobian_benchmark() {
@@ -25,7 +27,6 @@ fn jacobian_benchmark() {
 
     let state = State::new(
         &Vector3::new(0.01, -0.02, 0.005), // small angle correction (radians)
-        &Vector3::new(0.0, -1.5, 0.0),     // acceleration (m/s^2)
         &Vector3::new(2.0, 100.0, 45.0),   // velocity (m/s)
         &Vector3::new(0.1, -0.05, 0.02),   // angular velocity (rad/s)
         1200.0,                            // altitude AGL (m)
@@ -48,7 +49,7 @@ fn jacobian_benchmark() {
     let start_time = Instant::now();
 
     for _ in 0..num_runs {
-        let _ = black_box(central_difference_jacobian(
+        let _ = black_box(state_transition_jacobian(
             black_box(airbrakes_ext),
             &black_box(orientation),
             black_box(&state),
@@ -70,7 +71,7 @@ fn jacobian_benchmark() {
     log_info!("jacobian:");
     log_info!(
         "A={};",
-        to_matlab(&central_difference_jacobian(
+        to_matlab(&state_transition_jacobian(
             airbrakes_ext,
             &orientation,
             &state,
@@ -78,5 +79,13 @@ fn jacobian_benchmark() {
         ))
     );
     log_info!("measurement matrix:");
-    log_info!("H={};", to_matlab(&build_measurement_matrix()));
+    log_info!(
+        "H={};",
+        to_matlab(&measurement_model_jacobian(
+            airbrakes_ext,
+            &orientation,
+            &state,
+            &constants
+        ))
+    );
 }
