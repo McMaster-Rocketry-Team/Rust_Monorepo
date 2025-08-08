@@ -52,6 +52,8 @@ impl State {
         self.0.fixed_view::<3, 1>(0, 0).into()
     }
 
+    /// Expected specific force in earth frame (non-gravitational acceleration):
+    /// transforms aerodynamic acceleration from body to earth frame.
     pub fn expected_acceleration(
         &self,
         airbrakes_extention: f32,
@@ -78,10 +80,7 @@ impl State {
                 .component_mul(&wind_vel_rocket_frame.abs())
                 .component_mul(&cd)
                 .component_mul(&reference_area);
-        let mut acc_world_frame = true_orientation.transform_vector(&acc_rocket_frame);
-        acc_world_frame.z -= 9.81;
-
-        acc_world_frame
+        true_orientation.transform_vector(&acc_rocket_frame)
     }
 
     pub fn velocity(&self) -> Vector3<f32> {

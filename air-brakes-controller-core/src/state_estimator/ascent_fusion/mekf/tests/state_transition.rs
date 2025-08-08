@@ -38,12 +38,15 @@ fn test_small_angle_correction() {
 
     let new_sac_deg = new_state.small_angle_correction().map(|r| r.to_degrees());
     log_info!("new sac deg: {}", new_sac_deg);
-    assert_relative_eq!(new_sac_deg.x, 2.0);
+    // With MEKF error-state, we no longer integrate small-angle with ω in the process model.
+    // The error-state remains unchanged here.
+    assert_relative_eq!(new_sac_deg.x, 1.0);
 
     let new_orientation = new_state.reset_small_angle_correction(&orientation);
     log_info!("new_orientation: {}", new_orientation);
     let (axis, angle) = new_orientation.axis_angle().unwrap();
-    assert_relative_eq!(angle.to_degrees(), 2.0);
+    // Reset injects the small-angle (1 deg) into the quaternion
+    assert_relative_eq!(angle.to_degrees(), 1.0);
     assert_relative_eq!(axis.x, 1.0);
 }
 
@@ -167,9 +170,9 @@ fn test_angular_vel() {
 
     let new_sac_deg = new_state.small_angle_correction().map(|r| r.to_degrees());
     log_info!("new sac deg: {}", new_sac_deg);
-    assert_relative_eq!(new_sac_deg.y, -10.0);
+    // Error-state is not integrated by process model; remains zero here.
+    assert_relative_eq!(new_sac_deg.y, 0.0);
 
     let new_orientation = new_state.reset_small_angle_correction(&orientation);
-    // should print [0.061628412, -0.061628412, 0.70441604, 0.70441604]
     log_info!("new_orientation: {:?}", new_orientation);
 }

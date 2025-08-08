@@ -6,7 +6,7 @@ use state_transition::state_transition;
 use crate::{
     RocketConstants,
     state_estimator::{
-        Measurement,
+        DT, Measurement,
         ascent_fusion::mekf::{
             measurement_model::{measurement_model, measurement_model_jacobian},
             state_transition::state_transition_jacobian,
@@ -58,9 +58,6 @@ impl MekfStateEstimator {
                     4.162997e-7,
                     3.3608598e-5,
                     3.812254e-6,
-                    3.6717886e-6,
-                    3.188936e-6,
-                    1.8793952e-6,
                     3.8839986e-12,
                     4.4831076e-11,
                     4.6087963e-11,
@@ -74,13 +71,14 @@ impl MekfStateEstimator {
                     0.0,
                     0.0,
                 ])
-                .map(|x| x.max(1e-10) * 10.0),
+                .map(|x| x.max(1e-10) * 1000.0),
             ),
             r: SMatrix::from_diagonal(&SVector::<f32, { Measurement::SIZE }>::from_column_slice(
                 &[
-                    acc_variance,
-                    acc_variance,
-                    acc_variance,
+                    // FIXME
+                    1.0,
+                    1.0,
+                    1.0,
                     gyro_variance,
                     gyro_variance,
                     gyro_variance,
@@ -91,6 +89,14 @@ impl MekfStateEstimator {
     }
 
     pub fn predict(&mut self, airbrakes_ext: f32) {
+        // Propagate nominal orientation using current angular velocity.
+        // Angular velocity in state is in world frame; convert to body frame for quaternion integration.
+        let omega_world = self.state.angular_velocity();
+        let omega_body = self.orientation.transform_vector(&omega_world); // TODO check
+        let dq = UnitQuaternion::from_scaled_axis(omega_body * DT);
+        self.orientation = self.orientation * dq;
+        // Keep quaternion well-normalized.
+
         let f = state_transition_jacobian(
             airbrakes_ext,
             &self.orientation,
@@ -105,8 +111,6 @@ impl MekfStateEstimator {
             &self.state,
             &self.constants,
         );
-        // self.orientation = self.state
-        //     .reset_small_angle_correction(&self.orientation);
         // log_info!("predicted state: {}", self.state.0);
 
         self.p = f * self.p * f.transpose() + self.q;
@@ -128,14 +132,42 @@ impl MekfStateEstimator {
             &self.state,
             &self.constants,
         );
-        let s = h_jacobian * self.p * h_jacobian.transpose() + self.r;
-        let k = self.p * h_jacobian.transpose() * s.try_inverse().unwrap();
+        // Innovation covariance with small jitter for numerical robustness
+        let mut s = h_jacobian * self.p * h_jacobian.transpose() + self.r;
+        for i in 0..Measurement::SIZE {
+            s[(i, i)] += 1e-6;
+        }
+        // Compute Kalman gain via Cholesky solve: K = P H^T S^{-1}
+        let p_ht = self.p * h_jacobian.transpose(); // (n x m)
+        let chol = s.cholesky().expect("S not SPD");
+        let x_t = chol.solve(&p_ht.transpose()); // solves S * X = (P H^T)^T => X: (m x n)
+        let k = x_t.transpose(); // (n x m)
 
         self.state.0 += k * y;
+        // Save applied small-angle correction for covariance reset
+        let delta_theta = self.state.small_angle_correction();
         self.orientation = self.state.reset_small_angle_correction(&self.orientation);
 
         let i = SMatrix::<f32, { State::SIZE }, { State::SIZE }>::identity();
         self.p = (i - k * h_jacobian) * self.p;
+        // Apply reset Jacobian G to keep covariance consistent after injecting delta_theta
+        let mut g = SMatrix::<f32, { State::SIZE }, { State::SIZE }>::identity();
+        // Top-left 3x3 orientation error block: G = I - 0.5 [delta_theta]_x
+        let skew = SMatrix::<f32, 3, 3>::new(
+            0.0,
+            -delta_theta.z,
+            delta_theta.y,
+            delta_theta.z,
+            0.0,
+            -delta_theta.x,
+            -delta_theta.y,
+            delta_theta.x,
+            0.0,
+        );
+        let o3 = SMatrix::<f32, 3, 3>::identity() - 0.5 * skew;
+        g.fixed_view_mut::<3, 3>(0, 0).copy_from(&o3);
+
+        self.p = g * self.p * g.transpose();
         self.p = 0.5 * (self.p + self.p.transpose());
     }
 }

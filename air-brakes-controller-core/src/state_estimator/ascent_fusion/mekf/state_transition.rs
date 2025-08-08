@@ -1,9 +1,7 @@
 use nalgebra::{SMatrix, UnitQuaternion, Vector3};
 
 use crate::{
-    RocketConstants,
-    state_estimator::{DT, Measurement},
-    utils::approximate_air_density,
+    state_estimator::{ascent_fusion::mekf::jacobian::central_difference_jacobian, Measurement, DT}, utils::approximate_air_density, RocketConstants
 };
 
 use super::state::State;
@@ -20,6 +18,12 @@ pub fn state_transition(
 
     let wind_vel_rocket_frame =
         -true_orientation.inverse_transform_vector(&state.velocity().into());
+
+    let gravity_world = Vector3::new(0.0, 0.0, -9.81);
+    let next_velocity = state.velocity()
+        + (state.expected_acceleration(airbrakes_extention, orientation, constants)
+            + gravity_world)
+            * DT;
 
     let mut angular_acceleration_rocket_frame = Vector3::<f32>::zeros();
     angular_acceleration_rocket_frame.x = 0.5 * air_density / constants.moment_of_inertia
@@ -38,15 +42,14 @@ pub fn state_transition(
     let next_angular_velocity_world_frame =
         state.angular_velocity() + angular_acceleration_world_frame * DT;
 
-    let angular_velocity_rocket_frame =
-        true_orientation.inverse_transform_vector(&state.angular_velocity().into());
-    let next_small_angle_correction =
-        state.small_angle_correction() + angular_velocity_rocket_frame * DT;
+    // In MEKF, the small-angle state represents the attitude error, not the
+    // nominal orientation. We propagate the nominal quaternion separately and
+    // keep the error-state angles zero-mean; do not integrate them with ω here.
+    let next_small_angle_correction = state.small_angle_correction();
 
     State::new(
         &next_small_angle_correction,
-        &(state.velocity()
-            + state.expected_acceleration(airbrakes_extention, orientation, constants) * DT),
+        &next_velocity,
         &next_angular_velocity_world_frame,
         state.altitude_asl() + state.velocity().z * DT,
         state.sideways_moment_co(),
@@ -60,7 +63,7 @@ pub fn state_transition_jacobian(
     state: &State,
     constants: &RocketConstants,
 ) -> SMatrix<f32, { State::SIZE }, { State::SIZE }> {
-    super::jacobian::central_difference_jacobian(&state.0, |v| {
+    central_difference_jacobian(&state.0, |v| {
         state_transition(airbrakes_ext, orientation, &State(*v), constants).0
     })
 }

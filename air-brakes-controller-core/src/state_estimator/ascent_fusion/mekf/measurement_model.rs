@@ -1,8 +1,7 @@
 use nalgebra::{SMatrix, UnitQuaternion};
 
 use crate::{
-    RocketConstants,
-    state_estimator::{Measurement, ascent_fusion::mekf::State},
+    state_estimator::{ascent_fusion::mekf::{jacobian::central_difference_jacobian, State}, Measurement}, RocketConstants
 };
 
 // h
@@ -12,6 +11,8 @@ pub fn measurement_model(
     state: &State,
     constants: &RocketConstants,
 ) -> Measurement {
+    // Measurement provides specific force in earth frame (accelerometer minus gravity),
+    // so we output model-predicted specific force (non-gravitational acceleration) here.
     Measurement::new(
         &state
             .expected_acceleration(airbrakes_extention, orientation, constants)
@@ -27,7 +28,7 @@ pub fn measurement_model_jacobian(
     state: &State,
     constants: &RocketConstants,
 ) -> SMatrix<f32, { Measurement::SIZE }, { State::SIZE }> {
-    super::jacobian::central_difference_jacobian(&state.0, |v| {
+    central_difference_jacobian(&state.0, |v| {
         measurement_model(airbrakes_ext, orientation, &State(*v), constants).0
     })
 }
