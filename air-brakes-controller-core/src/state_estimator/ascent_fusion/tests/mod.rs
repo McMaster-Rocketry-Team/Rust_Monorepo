@@ -77,7 +77,11 @@ fn integration_test() {
         }
 
         GlobalPlot::add_value("Estimated altitude agl", estimator.altitude_agl());
-        GlobalPlot::add_value("true altitude agl", csv_record.altitude)
+        GlobalPlot::add_value("true altitude agl", csv_record.altitude);
+        if let AscentFusionStateEstimator::Ready { estimator, .. } = &estimator{
+            GlobalPlot::add_value("Estimated Cd", estimator.state.drag_coefficients()[0]);
+            GlobalPlot::add_value("Estimated sideways_moment_co", estimator.state.sideways_moment_co());
+        }
     }
 
     GlobalPlot::plot_all();

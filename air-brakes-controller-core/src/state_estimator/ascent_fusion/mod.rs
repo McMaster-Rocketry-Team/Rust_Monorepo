@@ -53,7 +53,6 @@ impl AscentFusionStateEstimator {
                         acc_variance,
                         gyro_variance,
                         alt_variance,
-                        last_acc_imu_frame,
                         last_gyro_imu_frame_unbiased,
                         launch_pad_altitude_asl,
                         ..
@@ -62,8 +61,6 @@ impl AscentFusionStateEstimator {
                     log_info!("[{}] switch to mekf", plot_get_time_s!());
                     let av_orientation = av_orientation_reckoner.orientation;
                     let rocket_orientation = av_orientation * *q_av_to_rocket;
-                    // log_info!("initial acc: {}", last_acc_imu_frame);
-                    // panic!("initial acc: {}", &av_orientation.transform_vector(last_acc_imu_frame));
                     *self = Self::Ready {
                         estimator: MekfStateEstimator::new(
                             rocket_orientation,

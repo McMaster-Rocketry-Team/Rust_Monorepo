@@ -51,7 +51,7 @@ impl MekfStateEstimator {
             state: initial_state,
             constants,
             p: SMatrix::from_diagonal(&SVector::<f32, { State::SIZE }>::from_column_slice(
-                &[1e-4; { State::SIZE }],
+                &[1.0; { State::SIZE }],
             )),
             q: SMatrix::from_diagonal(
                 &SVector::<f32, { State::SIZE }>::from_column_slice(&[
