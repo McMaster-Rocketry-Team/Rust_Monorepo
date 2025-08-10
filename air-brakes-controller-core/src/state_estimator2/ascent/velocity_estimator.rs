@@ -1,143 +1,225 @@
-use nalgebra::{SMatrix, SVector, Vector2};
-use crate::state_estimator2::DT; // e.g. pub const DT: f32 = 0.02;
+use core::f32::consts::FRAC_PI_2;
 
-/// State: x = [theta, omega, length]^T
-/// Measurement: z = [x, y]^T = length * [sin(theta), cos(theta)]
-#[derive(Debug, Clone)]
+use nalgebra::{Matrix2, SMatrix, SVector};
+
+use crate::state_estimator2::DT;
+
+const N: usize = 5; // State: [z, s, theta, omega, b_tilt]
+const M: usize = 2; // Measurements: [tilt, altitude]
+const EPS: f32 = 1e-5;
+
+#[derive(Clone, Copy)]
+pub struct ProcessNoiseStd {
+    pub z: f32,     // model error on altitude propagation
+    pub s: f32,     // speed magnitude model error (accel input uncertainty)
+    pub theta: f32, // tilt model error
+    pub omega: f32, // tilt-rate random walk
+    pub b: f32,     // tilt-bias random walk
+}
+
+#[derive(Clone, Copy)]
+pub struct MeasNoiseStd {
+    pub tilt: f32, // radians
+    pub alt: f32,  // meters
+}
+
 pub struct VelocityEstimator {
-    x: SVector<f32, 3>,            // [θ, ω, L]
-    p: SMatrix<f32, 3, 3>,         // covariance
-    r: SMatrix<f32, 2, 2>,         // meas noise (2x2, isotropic)
-    sigma_alpha: f32,              // angular-accel std (rad/s^2)
-    sigma_ldot: f32,               // length-rate std (units/s)
-    theta_prev: f32,               // for monotonic θ
-    len_prev: f32,                 // for monotonic L
-    inflate_on_clip: f32,          // covariance inflation after clamping
+    x: SVector<f32, N>, // [altitude, speed magnitude, tilt, tilt rate, tilt bias]
+    P: SMatrix<f32, N, N>,
+    q: ProcessNoiseStd,
+    r: MeasNoiseStd,
+
+    /// When true, enforce monotonic constraints (coast-phase):
+    /// speed non-increasing, tilt non-decreasing.
+    pub constraints_enabled: bool,
+
+    // Internals for constraint reference
+    s_prev: f32,
+    theta_prev: f32,
 }
 
 impl VelocityEstimator {
-    /// Initialize from a Cartesian vector z0=[x,y]. omega0 is your initial angular rate guess.
-    /// meas_sigma_xy is per-axis std dev in the Cartesian measurement.
     pub fn new(
-        theta0: f32,
-        len0: f32,
-        omega0: f32,
-        sigma_alpha: f32,
-        sigma_ldot: f32,
-        meas_sigma_xy: f32,
+        initial_alt_asl: f32,
+        initial_speed: f32,
+        initial_tilt_rad: f32,
+        q: ProcessNoiseStd,
+        r: MeasNoiseStd,
     ) -> Self {
-        let x = SVector::<f32, 3>::new(theta0, omega0, len0);
-        let p = SMatrix::<f32, 3, 3>::identity() * 1e1;
-        let r = SMatrix::<f32, 2, 2>::identity() * (meas_sigma_xy * meas_sigma_xy);
+        let mut x = SVector::<f32, N>::zeros();
+        x[0] = initial_alt_asl;
+        x[1] = initial_speed.max(0.0);
+        x[2] = initial_tilt_rad.clamp(0.0, FRAC_PI_2);
+        x[3] = 0.0; // tilt rate
+        x[4] = 0.0; // tilt bias
+
+        // TODO change
+        let mut P = SMatrix::<f32, N, N>::zeros();
+        P[(0, 0)] = 10.0_f32.powi(2);
+        P[(1, 1)] = 50.0_f32.powi(2);
+        P[(2, 2)] = (10f32.to_radians()).powi(2);
+        P[(3, 3)] = (5f32.to_radians()).powi(2);
+        P[(4, 4)] = (5f32.to_radians()).powi(2);
 
         Self {
             x,
-            p,
+            P,
+            q,
             r,
-            sigma_alpha,
-            sigma_ldot,
-            theta_prev: theta0,
-            len_prev: len0,
-            inflate_on_clip: 1e-2,
+            constraints_enabled: false,
+            s_prev: x[1],
+            theta_prev: x[2],
         }
-    }
-
-    /// Fixed-step predict using constant DT.
-    /// θ←θ + ω·DT,  ω←ω,  L←L  (plus process noise)
-    fn predict(&mut self) {
-        let f = SMatrix::<f32, 3, 3>::new(
-            1.0, DT,  0.0,
-            0.0, 1.0, 0.0,
-            0.0, 0.0, 1.0,
-        );
-
-        // Q for [θ, ω] from white angular-acceleration (σ_α)
-        let sa2 = self.sigma_alpha * self.sigma_alpha;
-        let q_theta = 0.25 * DT.powi(4) * sa2;
-        let q_cross = 0.5  * DT.powi(3) * sa2;
-        let q_omega =         DT.powi(2) * sa2;
-
-        // Q for L from white length-rate (σ_Ldot)
-        let sl2 = self.sigma_ldot * self.sigma_ldot;
-        let q_len = DT.powi(2) * sl2;
-
-        let mut q = SMatrix::<f32, 3, 3>::zeros();
-        q[(0,0)] = q_theta; q[(0,1)] = q_cross;
-        q[(1,0)] = q_cross; q[(1,1)] = q_omega;
-        q[(2,2)] = q_len;
-
-        self.x = f * self.x;
-        self.p = f * self.p * f.transpose() + q;
-
-        self.enforce_constraints();
-    }
-
-    /// Update with Cartesian measurement z = [x, y]^T.
-    /// h(x) = [ L sin θ, L cos θ ]^T
-    pub fn update(&mut self, z: Vector2<f32>) {
-        self.predict();
-
-        let (theta, _omega, len) = (self.x[0], self.x[1], self.x[2]);
-        let (st, ct) = (theta.sin(), theta.cos());
-
-        // Predicted measurement
-        let zhat = Vector2::new(len * st, len * ct);
-
-        // Jacobian H = ∂h/∂x (2x3)
-        // [ [ L cosθ, 0, sinθ ],
-        //   [ -L sinθ, 0, cosθ ] ]
-        let h = SMatrix::<f32, 2, 3>::new(
-             len * ct, 0.0, st,
-            -len * st, 0.0, ct,
-        );
-
-        // Innovation
-        let y = z - zhat;
-
-        // Innovation covariance and gain
-        let s = h * self.p * h.transpose() + self.r;
-        let k = self.p * h.transpose() * s.try_inverse().expect("S must be PD");
-
-        // Joseph update for stability
-        self.x += k * y;
-        let i3 = SMatrix::<f32, 3, 3>::identity();
-        let kh = &k * &h;
-        self.p = (i3 - &kh) * self.p * (i3 - &kh).transpose() + &k * self.r * k.transpose();
-
-        self.enforce_constraints();
     }
 
     #[inline]
-    pub fn state(&self) -> (Vector2<f32>, f32) {
-        let theta = self.x[0];
-        let omega = self.x[1];
-        let len   = self.x[2];
-    
-        // θ=0 → (0, +1); clockwise-positive
-        let xy = Vector2::new(len * theta.sin(), len * theta.cos());
-        (xy, omega)
+    pub fn v_vertical(&self) -> f32 {
+        self.x[1] * self.x[2].cos()
+    }
+    #[inline]
+    pub fn v_horizontal(&self) -> f32 {
+        self.x[1] * self.x[2].sin()
     }
 
-    fn enforce_constraints(&mut self) {
-        let mut clamped = false;
+    #[inline]
+    pub fn altitude_asl(&self) -> f32 {
+        self.x[0]
+    }
 
-        // θ ∈ [0, π/2], nondecreasing (clockwise-positive by convention)
-        let theta_max = core::f32::consts::FRAC_PI_2;
-        if self.x[0] < self.theta_prev { self.x[0] = self.theta_prev; clamped = true; }
-        if self.x[0] < 0.0            { self.x[0] = 0.0;           clamped = true; }
-        if self.x[0] > theta_max      { self.x[0] = theta_max;      clamped = true; }
+    #[inline]
+    pub fn tilt(&self) -> f32 {
+        self.x[2]
+    }
 
-        // L ≥ 0, nonincreasing
-        if self.x[2] > self.len_prev  { self.x[2] = self.len_prev;  clamped = true; }
-        if self.x[2] < 0.0            { self.x[2] = 0.0;            clamped = true; }
+    /// Predict with inputs: a_z (vertical), a_h (horizontal magnitude), both in m/s^2.
+    pub fn predict(&mut self, a_z: f32, a_h: f32) {
+        let z = self.x[0];
+        let s = self.x[1].max(EPS);
+        let theta = self.x[2];
+        let omega = self.x[3];
+        let b = self.x[4];
 
-        if clamped {
-            // modest inflation to avoid overconfidence after projection
-            let d = SVector::<f32, 3>::new(self.inflate_on_clip, 0.0, self.inflate_on_clip);
-            self.p += SMatrix::<f32, 3, 3>::from_diagonal(&d);
+        // Raw propagation (discrete Euler)
+        let z_new = z + DT * s * theta.cos();
+        let s_raw = s + DT * (a_h * theta.sin() + a_z * theta.cos());
+        let theta_raw = theta + DT * omega;
+        let omega_new = omega; // random walk via Q
+        let b_new = b; // random walk via Q
+
+        // Always apply physical clamps
+        let mut s_new = s_raw.max(0.0);
+        let mut theta_new = theta_raw.clamp(0.0, core::f32::consts::FRAC_PI_2);
+
+        // Coast-phase monotonic constraints if enabled
+        let mut clamp_s = false;
+        let mut clamp_theta = false;
+        if self.constraints_enabled {
+            if s_new > self.s_prev {
+                s_new = self.s_prev;
+                clamp_s = true;
+            }
+            if theta_new < self.theta_prev {
+                theta_new = self.theta_prev;
+                clamp_theta = true;
+            }
         }
 
-        self.theta_prev = self.x[0];
-        self.len_prev   = self.x[2];
+        // Jacobian F = ∂f/∂x at previous state
+        let mut F = SMatrix::<f32, N, N>::identity();
+
+        // z' deps
+        F[(0, 1)] = DT * theta.cos();
+        F[(0, 2)] = -DT * s * theta.sin();
+
+        // s' deps; if clamped, freeze cross-term to avoid injecting nonsense
+        if !clamp_s {
+            F[(1, 1)] = 1.0;
+            F[(1, 2)] = DT * (a_h * theta.cos() - a_z * theta.sin());
+        } else {
+            F[(1, 1)] = 1.0;
+            F[(1, 2)] = 0.0;
+        }
+
+        // theta' deps; if clamped, drop dependence on omega
+        if !clamp_theta {
+            F[(2, 2)] = 1.0;
+            F[(2, 3)] = DT;
+        } else {
+            F[(2, 2)] = 1.0;
+            F[(2, 3)] = 0.0;
+        }
+
+        // Discrete process noise
+        let mut Q = SMatrix::<f32, N, N>::zeros();
+        Q[(0, 0)] = (self.q.z * DT).powi(2);
+        Q[(1, 1)] = (self.q.s * DT).powi(2);
+        Q[(2, 2)] = (self.q.theta * DT).powi(2);
+        Q[(3, 3)] = (self.q.omega * DT).powi(2);
+        Q[(4, 4)] = (self.q.b * DT).powi(2);
+
+        // Commit state
+        self.x[0] = z_new;
+        self.x[1] = s_new.max(0.0);
+        self.x[2] = theta_new;
+        self.x[3] = omega_new;
+        self.x[4] = b_new;
+
+        // Covariance
+        self.P = F * self.P * F.transpose() + Q;
+
+        // Update reference values regardless of mode so enabling constraints later is seamless
+        self.s_prev = self.x[1];
+        self.theta_prev = self.x[2];
+    }
+
+    /// Update with available measurements. Pass None to skip a channel.
+    /// Measurements: tilt_meas_rad (theta + bias), altitude_meas (z)
+    pub fn update(&mut self, tilt_meas_rad: f32, altitude_meas: Option<f32>) {
+        let mut H = SMatrix::<f32, M, N>::zeros();
+        let mut R = Matrix2::<f32>::zeros();
+        let mut y = SVector::<f32, M>::zeros();
+        let mut h = SVector::<f32, M>::zeros();
+
+        let mut rows = 1usize;
+
+        H[(rows, 2)] = 1.0; // theta
+        H[(rows, 4)] = 1.0; // bias
+        y[rows] = tilt_meas_rad;
+        h[rows] = self.x[2] + self.x[4];
+        R[(rows, rows)] = self.r.tilt.powi(2);
+        rows += 1;
+
+        if let Some(alt) = altitude_meas {
+            H[(rows, 0)] = 1.0; // z
+            y[rows] = alt;
+            h[rows] = self.x[0];
+            R[(rows, rows)] = self.r.alt.powi(2);
+            rows += 1;
+        }
+
+        let Hm = H.rows(0, rows).into_owned();
+        let ym = y.rows(0, rows).into_owned();
+        let hm = h.rows(0, rows).into_owned();
+        let Rm = R.slice((0, 0), (rows, rows)).into_owned();
+
+        let r = ym - hm;
+        let S = Hm.clone() * self.P * Hm.transpose() + Rm.clone();
+        let Sinv = S.clone().try_inverse().unwrap_or_else(|| {
+            let mut Sj = S.clone();
+            for i in 0..rows {
+                Sj[(i, i)] += 1e-6;
+            }
+            Sj.try_inverse().expect("Innovation matrix not invertible")
+        });
+        let K = self.P * Hm.transpose() * Sinv;
+
+        let I = SMatrix::<f32, N, N>::identity();
+        self.x += K.clone() * r;
+        let IKH = I - K.clone() * Hm;
+        self.P = IKH.clone() * self.P * IKH.transpose() + K.clone() * Rm * K.transpose();
+
+        // Always enforce physical ranges
+        self.x[1] = self.x[1].max(0.0);
+        self.x[2] = self.x[2].clamp(0.0, core::f32::consts::FRAC_PI_2);
     }
 }

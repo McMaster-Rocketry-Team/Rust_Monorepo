@@ -12,6 +12,7 @@ pub struct DeadReckoner {
     pub position: Vector3<f32>,
     /// Velocity in inertial frame (m/s)
     pub velocity: Vector3<f32>,
+    pub acceleration: Vector3<f32>,
 
     gravity: f32,
 }
@@ -26,6 +27,7 @@ impl DeadReckoner {
             orientation: initial_orientation,
             position: Vector3::zeros(),
             velocity: Vector3::zeros(),
+            acceleration: Vector3::zeros(),
             gravity: 9.81,
         }
     }
@@ -35,6 +37,7 @@ impl DeadReckoner {
             orientation: initial_orientation,
             position: Vector3::zeros(),
             velocity: Vector3::zeros(),
+            acceleration: Vector3::zeros(),
             gravity: 0.0,
         }
     }
@@ -52,6 +55,7 @@ impl DeadReckoner {
         // 2) Rotate accel into inertial frame and add gravity to get linear accel
         let mut accel_inertial = self.orientation.transform_vector(accel);
         accel_inertial.z -= self.gravity;
+        self.acceleration = accel_inertial;
 
         // 3) Integrate velocity and position
         self.position += self.velocity * DT + accel_inertial * (0.5 * DT * DT);

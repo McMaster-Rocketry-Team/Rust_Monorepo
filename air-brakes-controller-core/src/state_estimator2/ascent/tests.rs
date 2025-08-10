@@ -16,8 +16,8 @@ struct CsvRecord {
     gyro_x: f32,
     gyro_y: f32,
     gyro_z: f32,
-    velocity_x:f32,
-    velocity_y:f32,
+    velocity_x: f32,
+    velocity_y: f32,
 }
 
 fn read_csv_records() -> Vec<CsvRecord> {
@@ -43,14 +43,15 @@ fn integration_test() {
         ])
         .unwrap();
 
-    let mut estimator = AscentStateEstimator::new(FlightProfile {
+    let flight_profile = FlightProfile {
         drogue_chute_minimum_time_us: 0,
         drogue_chute_minimum_altitude_agl: 2000.0,
         drogue_chute_delay_us: 0,
         main_chute_altitude_agl: 400.0,
         main_chute_delay_us: 0,
         ignition_detection_acc_threshold: 3.0 * 9.81,
-    });
+    };
+    let mut estimator = AscentStateEstimator::new(flight_profile);
     for csv_record in csv_records.iter() {
         GlobalPlot::set_time_s(csv_record.timestamp_s);
         let reading = Measurement::new(
