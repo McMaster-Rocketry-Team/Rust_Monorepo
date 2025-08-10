@@ -5,7 +5,7 @@
 
 mod fmt;
 mod state_estimator;
-mod state_estimator2;
+pub mod state_estimator2;
 mod utils;
 
 pub use state_estimator::RocketStateEstimator;

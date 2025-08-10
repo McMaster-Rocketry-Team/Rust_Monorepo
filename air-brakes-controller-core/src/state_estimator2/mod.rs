@@ -1,6 +1,10 @@
 use nalgebra::{SVector, Vector3};
 
 mod ascent;
+mod descent;
+mod state_estimator;
+
+pub use state_estimator::RocketStateEstimator;
 
 const SAMPLES_PER_S: usize = 500;
 const DT: f32 = 1f32 / (SAMPLES_PER_S as f32);

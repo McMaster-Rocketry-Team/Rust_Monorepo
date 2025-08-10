@@ -54,6 +54,7 @@ pub enum AscentStateEstimator {
         av_orientation_reckoner: DeadReckoner,
         gyro_bias: Vector3<f32>,
         alt_variance: f32,
+        launch_pad_altitude_asl: f32,
     },
 
     /// dead reckoning until ap
@@ -63,9 +64,15 @@ pub enum AscentStateEstimator {
         gyro_bias: Vector3<f32>,
         velocity_estimator: VelocityEstimator,
         lock_out_state: BaroLockOutState,
+        alt_variance: f32,
+        launch_pad_altitude_asl: f32,
     },
 
-    Apogee {},
+    Apogee {
+        altitude_asl: f32,
+        alt_variance: f32,
+        launch_pad_altitude_asl: f32,
+    },
 }
 
 impl AscentStateEstimator {
@@ -135,6 +142,7 @@ impl AscentStateEstimator {
                                 pad_av_orientation: UnitQuaternion<f32>,
                                 av_orientation_reckoner: DeadReckoner,
                                 alt_variance: f32,
+                                launch_pad_altitude_asl:f32,
                             },
                         }
 
@@ -177,6 +185,7 @@ impl AscentStateEstimator {
                                             pad_av_orientation: q_earth_to_av,
                                             av_orientation_reckoner: reckoner,
                                             alt_variance: alt_asl_welford.variance().unwrap()[0],
+                                            launch_pad_altitude_asl,
                                         };
                                     }
                                 }
@@ -198,6 +207,7 @@ impl AscentStateEstimator {
                             pad_av_orientation,
                             av_orientation_reckoner,
                             alt_variance,
+                            launch_pad_altitude_asl,
                         } = state
                         {
                             *self = Self::Stage1 {
@@ -207,6 +217,7 @@ impl AscentStateEstimator {
                                 av_orientation_reckoner,
                                 gyro_bias,
                                 alt_variance,
+                                launch_pad_altitude_asl,
                             };
                         } else {
                             unreachable!()
@@ -221,6 +232,7 @@ impl AscentStateEstimator {
                 av_orientation_reckoner,
                 gyro_bias,
                 alt_variance,
+                launch_pad_altitude_asl,
             } => {
                 acc_welford.update(&acc);
                 av_orientation_reckoner.update(&acc, &(gyro - *gyro_bias));
@@ -251,6 +263,7 @@ impl AscentStateEstimator {
                             av_orientation_reckoner.position.z,
                             av_orientation_reckoner.velocity.magnitude(),
                             tilt(&q_av_to_rocket, &av_orientation_reckoner),
+                            // TODO tune
                             ProcessNoiseStd {
                                 z: 0.15,
                                 s: 8.0,
@@ -263,6 +276,8 @@ impl AscentStateEstimator {
                                 alt: 3.0,
                             },
                         ),
+                        alt_variance:*alt_variance,
+                        launch_pad_altitude_asl:*launch_pad_altitude_asl
                     };
                 }
             }
@@ -272,6 +287,8 @@ impl AscentStateEstimator {
                 velocity_estimator,
                 q_av_to_rocket,
                 lock_out_state,
+                alt_variance,
+                launch_pad_altitude_asl,
                 ..
             } => {
                 av_orientation_reckoner.update(&acc, &(gyro - *gyro_bias));
@@ -323,10 +340,14 @@ impl AscentStateEstimator {
                 }
 
                 if velocity_estimator.v_vertical() < 1.0 {
-                    *self = Self::Apogee {}
+                    *self = Self::Apogee {
+                        alt_variance:*alt_variance,
+                        altitude_asl: velocity_estimator.altitude_asl(),
+                        launch_pad_altitude_asl:*launch_pad_altitude_asl
+                    }
                 }
             }
-            Self::Apogee {} => {}
+            Self::Apogee {..} => {}
         }
     }
 
@@ -354,10 +375,6 @@ impl AscentStateEstimator {
             )),
             _ => None,
         }
-    }
-
-    pub fn is_apogee(&self) -> bool {
-        matches!(self, Self::Apogee { .. })
     }
 }
 
