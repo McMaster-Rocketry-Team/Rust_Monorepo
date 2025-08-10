@@ -187,7 +187,6 @@ impl VelocityEstimator {
         y[rows] = tilt_meas_rad;
         h[rows] = self.x[2] + self.x[4];
         R[(rows, rows)] = self.r.tilt.powi(2);
-        rows += 1;
 
         if let Some(alt) = altitude_meas {
             H[(rows, 0)] = 1.0; // z

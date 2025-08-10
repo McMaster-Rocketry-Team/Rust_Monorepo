@@ -252,15 +252,15 @@ impl AscentStateEstimator {
                             av_orientation_reckoner.velocity.magnitude(),
                             tilt(&q_av_to_rocket, &av_orientation_reckoner),
                             ProcessNoiseStd {
-                                z: todo!(),
-                                s: todo!(),
-                                theta: todo!(),
-                                omega: todo!(),
-                                b: todo!(),
+                                z: 0.15,
+                                s: 8.0,
+                                theta: 0.8f32.to_radians(),
+                                omega: 3.0f32.to_radians(),
+                                b: 0.07f32.to_radians(),
                             },
                             MeasNoiseStd {
-                                tilt: todo!(),
-                                alt: todo!(),
+                                tilt: 2.5f32.to_radians(),
+                                alt: 3.0,
                             },
                         ),
                     };
@@ -276,13 +276,21 @@ impl AscentStateEstimator {
             } => {
                 av_orientation_reckoner.update(&acc, &(gyro - *gyro_bias));
 
+                let reverse_horizontal_acceleration = av_orientation_reckoner
+                    .acceleration
+                    .angle(&av_orientation_reckoner.velocity)
+                    > 90f32.to_radians();
+                let mut horizontal_acceleration = Vector2::new(
+                    av_orientation_reckoner.acceleration.x,
+                    av_orientation_reckoner.acceleration.y,
+                )
+                .magnitude();
+                if reverse_horizontal_acceleration {
+                    horizontal_acceleration = -horizontal_acceleration;
+                }
                 velocity_estimator.predict(
                     av_orientation_reckoner.acceleration.z,
-                    Vector2::new(
-                        av_orientation_reckoner.acceleration.x,
-                        av_orientation_reckoner.acceleration.y,
-                    )
-                    .magnitude(),
+                    horizontal_acceleration,
                 );
                 if *lock_out_state == BaroLockOutState::LockOut {
                     velocity_estimator
@@ -307,6 +315,8 @@ impl AscentStateEstimator {
                             approximate_speed_of_sound(velocity_estimator.altitude_asl());
                         if velocity_estimator.v_vertical().abs() < 0.85 * speed_of_sound {
                             *lock_out_state = BaroLockOutState::AfterLockOut;
+                            velocity_estimator.constraints_enabled = true;
+                            // TODO also update process noise
                         }
                     }
                     BaroLockOutState::AfterLockOut => {}
