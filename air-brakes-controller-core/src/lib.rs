@@ -5,10 +5,10 @@
 
 mod fmt;
 mod state_estimator;
-pub mod state_estimator2;
+mod state_estimator2;
 mod utils;
 
-pub use state_estimator::RocketStateEstimator;
+pub use state_estimator2::{Measurement, FlightProfile, RocketStateEstimator};
 
 #[cfg(test)]
 mod tests;

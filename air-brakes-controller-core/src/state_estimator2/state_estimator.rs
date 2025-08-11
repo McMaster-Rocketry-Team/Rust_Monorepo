@@ -1,4 +1,6 @@
-use firmware_common_new::vlp::packets::fire_pyro::PyroSelect;
+use firmware_common_new::{
+    can_bus::messages::vl_status::FlightStage, vlp::packets::fire_pyro::PyroSelect,
+};
 
 use crate::state_estimator2::{
     DT, FlightProfile, Measurement, ascent::AscentStateEstimator, descent::altitude_kf::AltitudeKF,
@@ -133,6 +135,30 @@ impl RocketStateEstimator {
         }
 
         deploy_pyro
+    }
+
+    pub fn flight_stage(&self) -> FlightStage {
+        match self {
+            Self::Ascent {
+                ascent_state_estimator: AscentStateEstimator::OnPad { .. },
+                ..
+            } => FlightStage::Armed,
+            Self::Ascent {
+                ascent_state_estimator,
+                ..
+            } => {
+                if ascent_state_estimator.is_coasting() {
+                    FlightStage::Coasting
+                } else {
+                    FlightStage::PoweredAscent
+                }
+            }
+            Self::DrogueChuteDelay { .. } => FlightStage::Coasting,
+            Self::DrogueChuteDeployed { .. } => FlightStage::DrogueDeployed,
+            Self::MainChuteDelay { .. } => FlightStage::DrogueDeployed,
+            Self::MainChuteDeployed { .. } => FlightStage::MainDeployed,
+            Self::Landed | Self::FailedToReachMinApogee => FlightStage::Landed,
+        }
     }
 }
 

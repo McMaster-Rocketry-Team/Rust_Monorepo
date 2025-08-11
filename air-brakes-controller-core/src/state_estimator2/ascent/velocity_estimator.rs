@@ -196,10 +196,10 @@ impl VelocityEstimator {
             rows += 1;
         }
 
-        let Hm = H.rows(0, rows).into_owned();
-        let ym = y.rows(0, rows).into_owned();
-        let hm = h.rows(0, rows).into_owned();
-        let Rm = R.slice((0, 0), (rows, rows)).into_owned();
+        let Hm = H.rows(0,rows);
+        let ym = y.rows(0,rows);
+        let hm = h.rows(0,rows);
+        let Rm = R.view_range(0..rows, 0..rows);
 
         let r = ym - hm;
         let S = Hm.clone() * self.P * Hm.transpose() + Rm.clone();

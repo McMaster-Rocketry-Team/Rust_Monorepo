@@ -66,6 +66,7 @@ pub enum AscentStateEstimator {
         lock_out_state: BaroLockOutState,
         alt_variance: f32,
         launch_pad_altitude_asl: f32,
+        is_coasting: bool,
     },
 
     Apogee {
@@ -76,7 +77,7 @@ pub enum AscentStateEstimator {
 }
 
 impl AscentStateEstimator {
-    pub fn new(flight_profile: FlightProfile) -> Self {
+    pub(crate) fn new(flight_profile: FlightProfile) -> Self {
         let acc_low_pass_coeff = Coefficients::<f32>::from_params(
             Type::LowPass,
             (SAMPLES_PER_S as f32).hz(),
@@ -93,7 +94,7 @@ impl AscentStateEstimator {
         }
     }
 
-    pub fn update(&mut self, z_imu_frame: &Measurement) {
+    pub(crate) fn update(&mut self, z_imu_frame: &Measurement) {
         let acc = z_imu_frame.acceleration();
         let gyro = z_imu_frame.angular_velocity();
         match self {
@@ -142,7 +143,7 @@ impl AscentStateEstimator {
                                 pad_av_orientation: UnitQuaternion<f32>,
                                 av_orientation_reckoner: DeadReckoner,
                                 alt_variance: f32,
-                                launch_pad_altitude_asl:f32,
+                                launch_pad_altitude_asl: f32,
                             },
                         }
 
@@ -276,8 +277,9 @@ impl AscentStateEstimator {
                                 alt: 3.0,
                             },
                         ),
-                        alt_variance:*alt_variance,
-                        launch_pad_altitude_asl:*launch_pad_altitude_asl
+                        alt_variance: *alt_variance,
+                        launch_pad_altitude_asl: *launch_pad_altitude_asl,
+                        is_coasting: false,
                     };
                 }
             }
@@ -289,20 +291,26 @@ impl AscentStateEstimator {
                 lock_out_state,
                 alt_variance,
                 launch_pad_altitude_asl,
+                is_coasting,
                 ..
             } => {
                 av_orientation_reckoner.update(&acc, &(gyro - *gyro_bias));
 
-                let reverse_horizontal_acceleration = av_orientation_reckoner
-                    .acceleration
-                    .angle(&av_orientation_reckoner.velocity)
-                    > 90f32.to_radians();
+                if !*is_coasting {
+                    let speed_acc_angle = av_orientation_reckoner
+                        .acceleration
+                        .angle(&av_orientation_reckoner.velocity);
+                    if speed_acc_angle > 90f32.to_radians() {
+                        *is_coasting = true;
+                    }
+                }
+
                 let mut horizontal_acceleration = Vector2::new(
                     av_orientation_reckoner.acceleration.x,
                     av_orientation_reckoner.acceleration.y,
                 )
                 .magnitude();
-                if reverse_horizontal_acceleration {
+                if *is_coasting {
                     horizontal_acceleration = -horizontal_acceleration;
                 }
                 velocity_estimator.predict(
@@ -341,13 +349,53 @@ impl AscentStateEstimator {
 
                 if velocity_estimator.v_vertical() < 1.0 {
                     *self = Self::Apogee {
-                        alt_variance:*alt_variance,
+                        alt_variance: *alt_variance,
                         altitude_asl: velocity_estimator.altitude_asl(),
-                        launch_pad_altitude_asl:*launch_pad_altitude_asl
+                        launch_pad_altitude_asl: *launch_pad_altitude_asl,
                     }
                 }
             }
-            Self::Apogee {..} => {}
+            Self::Apogee { .. } => {}
+        }
+    }
+
+    pub fn is_coasting(&self) -> bool {
+        match self {
+            Self::OnPad { .. } | Self::Stage1 { .. } => false,
+            Self::Stage2 { is_coasting, .. } => *is_coasting,
+            Self::Apogee { .. } => true,
+        }
+    }
+
+    pub fn altitude_asl(&self) -> Option<f32> {
+        match self {
+            Self::OnPad { .. } => None,
+            Self::Stage1 {
+                av_orientation_reckoner,
+                ..
+            } => Some(av_orientation_reckoner.position.z),
+            Self::Stage2 {
+                velocity_estimator, ..
+            } => Some(velocity_estimator.altitude_asl()),
+            Self::Apogee { altitude_asl, .. } => Some(*altitude_asl),
+        }
+    }
+
+    pub fn launch_pad_altitude_asl(&self) -> Option<f32> {
+        match self {
+            Self::OnPad { .. } => None,
+            Self::Stage1 {
+                launch_pad_altitude_asl,
+                ..
+            }
+            | Self::Stage2 {
+                launch_pad_altitude_asl,
+                ..
+            }
+            | Self::Apogee {
+                launch_pad_altitude_asl,
+                ..
+            } => Some(*launch_pad_altitude_asl),
         }
     }
 
@@ -362,6 +410,7 @@ impl AscentStateEstimator {
         }
     }
 
+    // todo tilt = velocity tilt + high pass dead reckoning tilt
     pub fn tilt_and_velocity(&self) -> Option<(f32, Vector2<f32>)> {
         match self {
             Self::Stage2 {
