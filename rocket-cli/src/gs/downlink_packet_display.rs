@@ -351,11 +351,6 @@ impl View for DownlinkPacketDisplay {
                                 format!("{:.1}C", p.air_temperature()).into(),
                             ),
                             (
-                                "stm32 temperature",
-                                false,
-                                format!("{:.1}C", p.vl_stm32_temperature()).into(),
-                            ),
-                            (
                                 "servo temp",
                                 false,
                                 format!("{:.1}C", p.air_brakes_servo_temp()).into(),
@@ -395,23 +390,6 @@ impl View for DownlinkPacketDisplay {
                                 "cd",
                                 false,
                                 format!("{:.2}", p.cd()).into(),
-                            ),
-                        ],
-                        &[
-                            (
-                                "backup state",
-                                true,
-                                format!("{:?}", p.backup_flight_stage()).into(),
-                            ),
-                            (
-                                "backup max altitude agl",
-                                false,
-                                format!("{:.1}C", p.backup_max_air_speed()).into(),
-                            ),
-                            (
-                                "backup max air speed",
-                                false,
-                                format!("{:.1}m/s", p.backup_max_air_speed()).into(),
                             ),
                         ],
                         &[

@@ -1,5 +1,5 @@
 use nalgebra::{Matrix2, SMatrix, SVector, Vector1, Vector2};
-
+use micromath::F32Ext;
 use crate::state_estimator2::DT;
 
 /// Classic (linear) Kalman filter for a 1-D altitude + vertical-speed model.

@@ -1,5 +1,5 @@
 use core::f32::consts::FRAC_PI_2;
-
+use micromath::F32Ext;
 use nalgebra::{Matrix2, SMatrix, SVector};
 
 use crate::state_estimator2::DT;

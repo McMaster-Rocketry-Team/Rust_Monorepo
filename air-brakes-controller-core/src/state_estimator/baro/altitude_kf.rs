@@ -1,4 +1,5 @@
 use nalgebra::{Matrix2, SMatrix, SVector, Vector1, Vector2};
+use micromath::F32Ext;
 
 use crate::state_estimator::DT;
 

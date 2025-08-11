@@ -23,7 +23,7 @@ fixed_point_factory!(LonFac, f64, -180.0, 180.0, 0.00002146);
 
 fixed_point_factory!(BatteryVFac, f32, 2.5, 8.5, 0.01);
 fixed_point_factory!(TemperatureFac, f32, -10.0, 85.0, 0.2);
-fixed_point_factory!(AltitudeFac, f32, -100.0, 6000.0, 1.0);
+fixed_point_factory!(AltitudeFac, f32, -100.0, 7000.0, 1.0);
 fixed_point_factory!(APResidueFac, f32, -1000.0, 1000.0, 1.0);
 fixed_point_factory!(AirSpeedFac, f32, -100.0, 400.0, 2.0);
 fixed_point_factory!(AirBrakesExtensionPercentFac, f32, 0.0, 1.0, 0.04);
@@ -36,7 +36,7 @@ fixed_point_factory!(PayloadTemperatureFac, f32, 10.0, 85.0, 1.0);
 
 // 48 byte max size to achieve 0.5Hz with 250khz bandwidth + 12sf + 8cr lora
 #[derive(PackedStruct, Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "46")]
+#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "42")]
 pub struct TelemetryPacket {
     #[packed_field(bits = "0..4")]
     nonce: Integer<u8, packed_bits::Bits<4>>,
@@ -52,8 +52,6 @@ pub struct TelemetryPacket {
     vl_battery_v: Integer<BatteryVFacBase, packed_bits::Bits<BATTERY_V_FAC_BITS>>,
     #[packed_field(element_size_bits = "9")]
     air_temperature: Integer<TemperatureFacBase, packed_bits::Bits<TEMPERATURE_FAC_BITS>>,
-    #[packed_field(element_size_bits = "9")]
-    vl_stm32_temperature: Integer<TemperatureFacBase, packed_bits::Bits<TEMPERATURE_FAC_BITS>>,
 
     pyro_main_continuity: bool,
     pyro_drogue_continuity: bool,
@@ -62,23 +60,17 @@ pub struct TelemetryPacket {
     altitude_agl: Integer<AltitudeFacBase, packed_bits::Bits<ALTITUDE_FAC_BITS>>,
     #[packed_field(element_size_bits = "13")]
     max_altitude_agl: Integer<AltitudeFacBase, packed_bits::Bits<ALTITUDE_FAC_BITS>>,
-    #[packed_field(element_size_bits = "13")]
-    backup_max_altitude_agl: Integer<AltitudeFacBase, packed_bits::Bits<ALTITUDE_FAC_BITS>>,
 
     #[packed_field(element_size_bits = "8")]
     air_speed: Integer<AirSpeedFacBase, packed_bits::Bits<AIR_SPEED_FAC_BITS>>,
     #[packed_field(element_size_bits = "8")]
     max_air_speed: Integer<AirSpeedFacBase, packed_bits::Bits<AIR_SPEED_FAC_BITS>>,
-    #[packed_field(element_size_bits = "8")]
-    backup_max_air_speed: Integer<AirSpeedFacBase, packed_bits::Bits<AIR_SPEED_FAC_BITS>>,
 
     #[packed_field(element_size_bits = "8")]
     tilt_deg: Integer<TiltDegFacBase, packed_bits::Bits<TILT_DEG_FAC_BITS>>,
 
     #[packed_field(element_size_bits = "3", ty = "enum")]
     flight_stage: FlightStage,
-    #[packed_field(element_size_bits = "3", ty = "enum")]
-    backup_flight_stage: FlightStage,
 
     amp_online: bool,
     amp_rebooted_in_last_5s: bool,
@@ -220,23 +212,19 @@ impl TelemetryPacket {
 
         vl_battery_v: f32,
         air_temperature: f32,
-        vl_stm32_temperature: f32,
 
         pyro_main_continuity: bool,
         pyro_drogue_continuity: bool,
 
         altitude_agl: f32,
         max_altitude_agl: f32,
-        backup_max_altitude_agl: f32,
 
         air_speed: f32,
         max_air_speed: f32,
-        backup_max_air_speed: f32,
 
         tilt_deg: f32,
 
         flight_stage: FlightStage,
-        backup_flight_stage: FlightStage,
 
         amp_online: bool,
         amp_rebooted_in_last_5s: bool,
@@ -324,23 +312,19 @@ impl TelemetryPacket {
 
             vl_battery_v: BatteryVFac::to_fixed_point_capped(vl_battery_v),
             air_temperature: TemperatureFac::to_fixed_point_capped(air_temperature),
-            vl_stm32_temperature: TemperatureFac::to_fixed_point_capped(vl_stm32_temperature),
 
             pyro_main_continuity,
             pyro_drogue_continuity,
 
             altitude_agl: AltitudeFac::to_fixed_point_capped(altitude_agl),
             max_altitude_agl: AltitudeFac::to_fixed_point_capped(max_altitude_agl),
-            backup_max_altitude_agl: AltitudeFac::to_fixed_point_capped(backup_max_altitude_agl),
 
             air_speed: AirSpeedFac::to_fixed_point_capped(air_speed),
             max_air_speed: AirSpeedFac::to_fixed_point_capped(max_air_speed),
-            backup_max_air_speed: AirSpeedFac::to_fixed_point_capped(backup_max_air_speed),
 
             tilt_deg: TiltDegFac::to_fixed_point_capped(tilt_deg),
 
             flight_stage: flight_stage.into(),
-            backup_flight_stage: backup_flight_stage.into(),
 
             amp_online,
             amp_rebooted_in_last_5s,
@@ -483,10 +467,6 @@ impl TelemetryPacket {
         TemperatureFac::to_float(self.air_temperature)
     }
 
-    pub fn vl_stm32_temperature(&self) -> f32 {
-        TemperatureFac::to_float(self.vl_stm32_temperature)
-    }
-
     pub fn pyro_main_continuity(&self) -> bool {
         self.pyro_main_continuity
     }
@@ -503,10 +483,6 @@ impl TelemetryPacket {
         AltitudeFac::to_float(self.max_altitude_agl)
     }
 
-    pub fn backup_max_altitude_agl(&self) -> f32 {
-        AltitudeFac::to_float(self.backup_max_altitude_agl)
-    }
-
     pub fn air_speed(&self) -> f32 {
         AirSpeedFac::to_float(self.air_speed)
     }
@@ -515,20 +491,12 @@ impl TelemetryPacket {
         AirSpeedFac::to_float(self.max_air_speed)
     }
 
-    pub fn backup_max_air_speed(&self) -> f32 {
-        AirSpeedFac::to_float(self.backup_max_air_speed)
-    }
-
     pub fn tilt_deg(&self) -> f32 {
         TiltDegFac::to_float(self.tilt_deg)
     }
 
     pub fn flight_stage(&self) -> FlightStage {
         self.flight_stage
-    }
-
-    pub fn backup_flight_stage(&self) -> FlightStage {
-        self.backup_flight_stage
     }
 
     pub fn amp_online(&self) -> bool {
@@ -800,18 +768,14 @@ impl TelemetryPacket {
             lon: self.lon(),
             vl_battery_v: self.vl_battery_v(),
             air_temperature: self.air_temperature(),
-            vl_stm32_temperature: self.vl_stm32_temperature(),
             pyro_main_continuity: self.pyro_main_continuity(),
             pyro_drogue_continuity: self.pyro_drogue_continuity(),
             altitude_agl: self.altitude_agl(),
             max_altitude_agl: self.max_altitude_agl(),
-            backup_max_altitude_agl: self.backup_max_altitude_agl(),
             air_speed: self.air_speed(),
             max_air_speed: self.max_air_speed(),
-            backup_max_air_speed: self.backup_max_air_speed(),
             tilt_deg: self.tilt_deg(),
             flight_stage: format!("{:?}", self.flight_stage()),
-            backup_flight_stage: format!("{:?}", self.backup_flight_stage()),
 
             amp_online: self.amp_online(),
             amp_rebooted_in_last_5s: self.amp_rebooted_in_last_5s(),
@@ -912,25 +876,19 @@ pub struct TelemetryPacketBuilderState {
 
     pub vl_battery_v: f32,
     pub air_temperature: f32,
-    pub vl_stm32_temperature: f32,
 
     pub pyro_main_continuity: bool,
     pub pyro_drogue_continuity: bool,
 
     pub altitude: f32,
     max_altitude: f32,
-    pub backup_altitude: f32,
-    backup_max_altitude: f32,
 
     pub air_speed: f32,
     max_air_speed: f32,
-    pub backup_air_speed: f32,
-    backup_max_air_speed: f32,
 
     pub tilt_deg: f32,
 
     pub flight_stage: FlightStage,
-    pub backup_flight_stage: FlightStage,
 
     pub amp_online: bool,
     pub amp_uptime_s: u32,
@@ -1024,25 +982,19 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
 
                 vl_battery_v: 0.0,
                 air_temperature: 0.0,
-                vl_stm32_temperature: 0.0,
 
                 pyro_main_continuity: false,
                 pyro_drogue_continuity: false,
 
                 altitude: 0.0,
                 max_altitude: 0.0,
-                backup_altitude: 0.0,
-                backup_max_altitude: 0.0,
 
                 air_speed: 0.0,
                 max_air_speed: 0.0,
-                backup_air_speed: 0.0,
-                backup_max_air_speed: 0.0,
 
                 tilt_deg: 0.0,
 
                 flight_stage: FlightStage::Armed,
-                backup_flight_stage: FlightStage::Armed,
 
                 amp_online: false,
                 amp_uptime_s: 0,
@@ -1147,18 +1099,14 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 state.gps_location.as_ref().map(|g| g.lat_lon).flatten(),
                 state.vl_battery_v,
                 state.air_temperature,
-                state.vl_stm32_temperature,
                 state.pyro_main_continuity,
                 state.pyro_drogue_continuity,
                 state.altitude,
                 state.max_altitude,
-                state.backup_max_altitude,
                 state.air_speed,
                 state.max_air_speed,
-                state.backup_max_air_speed,
                 state.tilt_deg,
                 state.flight_stage,
-                state.backup_flight_stage,
                 state.amp_online,
                 state.amp_uptime_s < 5,
                 state.shared_battery_v,
@@ -1237,8 +1185,6 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
             update_fn(&mut state);
             state.max_altitude = state.altitude.max(state.max_altitude);
             state.max_air_speed = state.air_speed.max(state.max_air_speed);
-            state.backup_max_altitude = state.backup_altitude.max(state.backup_max_altitude);
-            state.backup_max_air_speed = state.backup_air_speed.max(state.backup_max_air_speed);
         })
     }
 }

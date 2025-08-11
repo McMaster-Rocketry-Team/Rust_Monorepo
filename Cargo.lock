@@ -196,6 +196,7 @@ dependencies = [
  "java-bindgen",
  "libm 0.2.15",
  "log",
+ "micromath",
  "nalgebra 0.34.0",
  "plotters",
  "serde",
