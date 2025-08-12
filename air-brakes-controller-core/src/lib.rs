@@ -4,11 +4,14 @@
 // use java_bindgen::prelude::*;
 
 mod fmt;
+
+mod controller;
 mod state_estimator;
 mod state_estimator2;
 mod utils;
 
-pub use state_estimator2::{Measurement, FlightProfile, RocketStateEstimator, RocketState};
+pub use state_estimator2::{FlightProfile, Measurement, RocketState, RocketStateEstimator};
+pub use controller::AirBrakesMPC;
 
 #[cfg(test)]
 mod tests;
@@ -22,7 +25,7 @@ pub struct RocketConstants {
     pub burn_out_mass: f32,
     pub moment_of_inertia: f32,
     pub front_reference_area: f32,
-    pub side_reference_area: f32
+    pub side_reference_area: f32,
 }
 
 // #[derive(Default, JavaClass)]

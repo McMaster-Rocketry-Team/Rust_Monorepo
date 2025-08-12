@@ -76,6 +76,8 @@ impl VelocityEstimator {
     pub fn v_vertical(&self) -> f32 {
         self.x[1] * self.x[2].cos()
     }
+
+    /// always positive
     #[inline]
     pub fn v_horizontal(&self) -> f32 {
         self.x[1] * self.x[2].sin()
@@ -86,6 +88,7 @@ impl VelocityEstimator {
         self.x[0]
     }
 
+    // in radians, 0 to PI/2, 0 being vertical
     #[inline]
     pub fn tilt(&self) -> f32 {
         self.x[2]

@@ -5,7 +5,7 @@ use super::{CanBusMessage, CanBusMessageEnum};
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PackedStruct, Clone, Debug, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize)]
-#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "31")]
+#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "19")]
 #[repr(C)]
 pub struct MagMeasurementMessage {
     mag_raw: [u32; 3],
