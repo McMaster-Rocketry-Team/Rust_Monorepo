@@ -2634,7 +2634,7 @@ dependencies = [
 
 [[package]]
 name = "firmware-common-ffi"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "base64",
  "firmware-common-new",
