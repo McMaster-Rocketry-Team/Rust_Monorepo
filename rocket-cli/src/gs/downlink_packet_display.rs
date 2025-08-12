@@ -386,11 +386,6 @@ impl View for DownlinkPacketDisplay {
                                 false,
                                 format!("{:.1}m", p.ap_residue()).into(),
                             ),
-                            (
-                                "cd",
-                                false,
-                                format!("{:.2}", p.cd()).into(),
-                            ),
                         ],
                         &[
                             ("icarus online", true, Self::format_bool(p.icarus_online())),

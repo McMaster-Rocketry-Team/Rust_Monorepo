@@ -16,19 +16,23 @@ pub struct IcarusStatusMessage {
     servo_temperature_raw: u16,
     /// Unit: 0.01A, e.g. 10 = 0.1A
     servo_current_raw: u16,
+
     /// Unit: deg/s
     pub servo_angular_velocity: i16,
+
+    pub ap_residue_m: i16,
 }
 
 impl IcarusStatusMessage {
     /// percentage: 0 - 1
-    pub fn new(commanded_extension_percentage: f32, actual_extension_percentage: f32, servo_temperature: f32, servo_current: f32, servo_angular_velocity: i16) -> Self {
+    pub fn new(commanded_extension_percentage: f32, actual_extension_percentage: f32, servo_temperature: f32, servo_current: f32, servo_angular_velocity: i16,ap_residue_m: i16,) -> Self {
         Self {
             commanded_extension_percentage: (commanded_extension_percentage * 1000.0) as u16,
             actual_extension_percentage: (actual_extension_percentage * 1000.0) as u16,
             servo_temperature_raw: (servo_temperature * 10.0) as u16,
             servo_current_raw: (servo_current * 100.0) as u16,
             servo_angular_velocity,
+            ap_residue_m,
         }
     }
 

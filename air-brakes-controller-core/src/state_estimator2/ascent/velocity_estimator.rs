@@ -174,51 +174,89 @@ impl VelocityEstimator {
 
     /// Update with available measurements. Pass None to skip a channel.
     /// Measurements: tilt_meas_rad (theta + bias), altitude_meas (z)
+    /// Update with measurements:
     pub fn update(&mut self, tilt_meas_rad: f32, altitude_meas: Option<f32>) {
-        let mut H = SMatrix::<f32, M, N>::zeros();
-        let mut R = Matrix2::<f32>::zeros();
-        let mut y = SVector::<f32, M>::zeros();
-        let mut h = SVector::<f32, M>::zeros();
+        // Build full-size (2x*) measurement structures once.
+        // Row 0 = tilt, Row 1 = altitude.
+        let mut H2 = SMatrix::<f32, 2, 5>::zeros();
+        H2[(0, 2)] = 1.0; // theta
+        H2[(0, 4)] = 1.0; // bias
+        H2[(1, 0)] = 1.0; // z
 
-        let mut rows = 1usize;
+        let mut R2 = Matrix2::<f32>::zeros();
+        R2[(0, 0)] = self.r.tilt.powi(2);
+        R2[(1, 1)] = self.r.alt.powi(2);
 
-        H[(rows, 2)] = 1.0; // theta
-        H[(rows, 4)] = 1.0; // bias
-        y[rows] = tilt_meas_rad;
-        h[rows] = self.x[2] + self.x[4];
-        R[(rows, rows)] = self.r.tilt.powi(2);
-
+        let mut y2 = SVector::<f32, 2>::zeros();
+        y2[0] = tilt_meas_rad;
         if let Some(alt) = altitude_meas {
-            H[(rows, 0)] = 1.0; // z
-            y[rows] = alt;
-            h[rows] = self.x[0];
-            R[(rows, rows)] = self.r.alt.powi(2);
-            rows += 1;
+            y2[1] = alt;
         }
 
-        let Hm = H.rows(0,rows);
-        let ym = y.rows(0,rows);
-        let hm = h.rows(0,rows);
-        let Rm = R.view_range(0..rows, 0..rows);
+        let mut h2 = SVector::<f32, 2>::zeros();
+        h2[0] = self.x[2] + self.x[4]; // theta + bias
+        h2[1] = self.x[0]; // z
 
-        let r = ym - hm;
-        let S = Hm.clone() * self.P * Hm.transpose() + Rm.clone();
-        let Sinv = S.clone().try_inverse().unwrap_or_else(|| {
-            let mut Sj = S.clone();
-            for i in 0..rows {
-                Sj[(i, i)] += 1e-6;
-            }
-            Sj.try_inverse().expect("Innovation matrix not invertible")
-        });
-        let K = self.P * Hm.transpose() * Sinv;
+        // Branch on whether altitude is present to avoid dynamic slicing.
+        if altitude_meas.is_none() {
+            // --- 1x1 case: use only the first row (tilt) via fixed_rows/fixed_view ---
+            let H1 = H2.fixed_rows::<1>(0); // 1x5 view
+            let y1 = y2.fixed_rows::<1>(0); // 1x1 view
+            let h1 = h2.fixed_rows::<1>(0); // 1x1 view
+            let R1 = R2.fixed_view::<1, 1>(0, 0); // 1x1 view
 
-        let I = SMatrix::<f32, N, N>::identity();
-        self.x += K.clone() * r;
-        let IKH = I - K.clone() * Hm;
-        self.P = IKH.clone() * self.P * IKH.transpose() + K.clone() * Rm * K.transpose();
+            // Innovation (scalar)
+            let r1 = y1 - h1; // 1x1
+            let s = (H1.clone() * self.P * H1.transpose())[(0, 0)] + R1[(0, 0)];
+            let s_inv = if s.abs() > 1e-9 {
+                1.0 / s
+            } else {
+                1.0 / (s + 1e-6)
+            };
+
+            // Kalman gain (5x1)
+            let K1 = (self.P * H1.transpose()) * s_inv;
+
+            // State update
+            self.x += K1.clone() * r1[(0, 0)];
+
+            // Joseph-form covariance update:
+            // P = (I - K H) P (I - K H)^T + K R K^T
+            let I = SMatrix::<f32, 5, 5>::identity();
+            let KH = K1.clone() * H1; // (5x1)*(1x5) -> 5x5
+            let IKH = I - KH;
+            // K R K^T with R scalar:
+            let krtkt = K1.clone() * (R1[(0, 0)]) * K1.transpose();
+            self.P = IKH.clone() * self.P * IKH.transpose() + krtkt;
+        } else {
+            // --- 2x2 case: use both rows (tilt + altitude) ---
+            let Hm = H2; // 2x5
+            let ym = y2; // 2x1
+            let hm = h2; // 2x1
+            let Rm = R2; // 2x2
+
+            let r = ym - hm; // 2x1
+            let S = Hm * self.P * Hm.transpose() + Rm; // 2x2
+            let Sinv = S.try_inverse().unwrap_or_else(|| {
+                let mut Sj = S;
+                Sj[(0, 0)] += 1e-6;
+                Sj[(1, 1)] += 1e-6;
+                Sj.try_inverse().expect("Innovation matrix not invertible")
+            });
+
+            let K = self.P * Hm.transpose() * Sinv; // 5x2
+
+            // State update
+            self.x += K.clone() * r;
+
+            // Joseph-form covariance update
+            let I = SMatrix::<f32, 5, 5>::identity();
+            let IKH = I - K.clone() * Hm;
+            self.P = IKH.clone() * self.P * IKH.transpose() + K * Rm * K.transpose();
+        }
 
         // Always enforce physical ranges
-        self.x[1] = self.x[1].max(0.0);
-        self.x[2] = self.x[2].clamp(0.0, core::f32::consts::FRAC_PI_2);
+        self.x[1] = self.x[1].max(0.0); // s ≥ 0
+        self.x[2] = self.x[2].clamp(0.0, core::f32::consts::FRAC_PI_2); // 0..π/2
     }
 }

@@ -25,10 +25,9 @@ fixed_point_factory!(BatteryVFac, f32, 2.5, 8.5, 0.01);
 fixed_point_factory!(TemperatureFac, f32, -10.0, 85.0, 0.2);
 fixed_point_factory!(AltitudeFac, f32, -100.0, 7000.0, 1.0);
 fixed_point_factory!(APResidueFac, f32, -1000.0, 1000.0, 1.0);
-fixed_point_factory!(AirSpeedFac, f32, -100.0, 400.0, 2.0);
+fixed_point_factory!(AirSpeedFac, f32, 0.0, 400.0, 2.0);
 fixed_point_factory!(AirBrakesExtensionPercentFac, f32, 0.0, 1.0, 0.04);
 fixed_point_factory!(TiltDegFac, f32, -90.0, 90.0, 1.0);
-fixed_point_factory!(CdFac, f32, 0.4, 0.85, 0.01);
 
 fixed_point_factory!(PayloadVoltageFac, f32, 2.0, 4.5, 0.05);
 fixed_point_factory!(PayloadCurrentFac, f32, 0.0, 2.0, 0.1);
@@ -113,8 +112,6 @@ pub struct TelemetryPacket {
     air_brakes_servo_temp: Integer<TemperatureFacBase, packed_bits::Bits<TEMPERATURE_FAC_BITS>>,
     #[packed_field(element_size_bits = "11")]
     ap_residue: Integer<APResidueFacBase, packed_bits::Bits<A_P_RESIDUE_FAC_BITS>>,
-    #[packed_field(element_size_bits = "6")]
-    cd: Integer<CdFacBase, packed_bits::Bits<CD_FAC_BITS>>,
 
     ozys1_online: bool,
     ozys1_rebooted_in_last_5s: bool,
@@ -252,7 +249,6 @@ impl TelemetryPacket {
         air_brakes_actual_extension_percentage: f32,
         air_brakes_servo_temp: f32,
         ap_residue: f32,
-        cd: f32,
 
         ozys1_online: bool,
         ozys1_rebooted_in_last_5s: bool,
@@ -363,7 +359,6 @@ impl TelemetryPacket {
                 ),
             air_brakes_servo_temp: TemperatureFac::to_fixed_point_capped(air_brakes_servo_temp),
             ap_residue: APResidueFac::to_fixed_point_capped(ap_residue),
-            cd: CdFac::to_fixed_point_capped(cd),
 
             ozys1_online,
             ozys1_rebooted_in_last_5s,
@@ -591,10 +586,6 @@ impl TelemetryPacket {
         APResidueFac::to_float(self.ap_residue)
     }
 
-    pub fn cd(&self) -> f32 {
-        CdFac::to_float(self.cd)
-    }
-
     pub fn ozys1_online(&self) -> bool {
         self.ozys1_online
     }
@@ -804,7 +795,6 @@ impl TelemetryPacket {
             air_brakes_actual_extension_percentage: self.air_brakes_actual_extension_percentage(),
             air_brakes_servo_temp: self.air_brakes_servo_temp(),
             ap_residue: self.ap_residue(),
-            cd: self.cd(),
 
             ozys1_online: self.ozys1_online(),
             ozys1_rebooted_in_last_5s: self.ozys1_rebooted_in_last_5s(),
@@ -880,8 +870,8 @@ pub struct TelemetryPacketBuilderState {
     pub pyro_main_continuity: bool,
     pub pyro_drogue_continuity: bool,
 
-    pub altitude: f32,
-    max_altitude: f32,
+    pub altitude_agl: f32,
+    max_altitude_agl: f32,
 
     pub air_speed: f32,
     max_air_speed: f32,
@@ -916,7 +906,6 @@ pub struct TelemetryPacketBuilderState {
     pub air_brakes_actual_extension_percentage: f32,
     pub air_brakes_servo_temp: f32,
     pub ap_residue: f32,
-    pub cd: f32,
 
     pub ozys1_online: bool,
     pub ozys1_uptime_s: u32,
@@ -986,8 +975,8 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 pyro_main_continuity: false,
                 pyro_drogue_continuity: false,
 
-                altitude: 0.0,
-                max_altitude: 0.0,
+                altitude_agl: 0.0,
+                max_altitude_agl: 0.0,
 
                 air_speed: 0.0,
                 max_air_speed: 0.0,
@@ -1022,7 +1011,6 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 air_brakes_actual_extension_percentage: 0.0,
                 air_brakes_servo_temp: 0.0,
                 ap_residue: 0.0,
-                cd: 0.0,
 
                 ozys1_online: false,
                 ozys1_uptime_s: 0,
@@ -1101,8 +1089,8 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 state.air_temperature,
                 state.pyro_main_continuity,
                 state.pyro_drogue_continuity,
-                state.altitude,
-                state.max_altitude,
+                state.altitude_agl,
+                state.max_altitude_agl,
                 state.air_speed,
                 state.max_air_speed,
                 state.tilt_deg,
@@ -1130,7 +1118,6 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 state.air_brakes_actual_extension_percentage,
                 state.air_brakes_servo_temp,
                 state.ap_residue,
-                state.cd,
                 state.ozys1_online,
                 state.ozys1_uptime_s < 5,
                 state.ozys2_online,
@@ -1183,7 +1170,7 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
         self.state.lock(|state| {
             let mut state = state.borrow_mut();
             update_fn(&mut state);
-            state.max_altitude = state.altitude.max(state.max_altitude);
+            state.max_altitude_agl = state.altitude_agl.max(state.max_altitude_agl);
             state.max_air_speed = state.air_speed.max(state.max_air_speed);
         })
     }

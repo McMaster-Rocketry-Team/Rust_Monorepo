@@ -1,6 +1,5 @@
-use firmware_common_new::{
-    can_bus::messages::vl_status::FlightStage, vlp::packets::fire_pyro::PyroSelect,
-};
+use firmware_common_new::vlp::packets::fire_pyro::PyroSelect;
+use nalgebra::Vector2;
 
 use crate::state_estimator2::{
     DT, FlightProfile, Measurement, ascent::AscentStateEstimator, descent::altitude_kf::AltitudeKF,
@@ -24,10 +23,12 @@ pub enum RocketStateEstimator {
     },
     MainChuteDelay {
         altitude_kf: AltitudeKF,
+        launch_pad_altitude_asl: f32,
         samples_left: usize,
     },
     MainChuteDeployed {
         altitude_kf: AltitudeKF,
+        launch_pad_altitude_asl: f32,
     },
     Landed,
     FailedToReachMinApogee,
@@ -104,12 +105,14 @@ impl RocketStateEstimator {
                     *self = Self::MainChuteDelay {
                         altitude_kf: altitude_kf.clone(),
                         samples_left: ns_to_ticks(profile.main_chute_delay_us),
+                        launch_pad_altitude_asl: *launch_pad_altitude_asl,
                     };
                 }
             }
             Self::MainChuteDelay {
                 altitude_kf,
                 samples_left,
+                launch_pad_altitude_asl,
             } => {
                 altitude_kf.predict();
                 altitude_kf.update(z_imu_frame.altitude_asl());
@@ -120,10 +123,11 @@ impl RocketStateEstimator {
                     deploy_pyro = Some(PyroSelect::PyroMain);
                     *self = Self::MainChuteDeployed {
                         altitude_kf: altitude_kf.clone(),
+                        launch_pad_altitude_asl: *launch_pad_altitude_asl,
                     };
                 }
             }
-            Self::MainChuteDeployed { altitude_kf } => {
+            Self::MainChuteDeployed { altitude_kf, .. } => {
                 altitude_kf.predict();
                 altitude_kf.update(z_imu_frame.altitude_asl());
 
@@ -137,29 +141,113 @@ impl RocketStateEstimator {
         deploy_pyro
     }
 
-    pub fn flight_stage(&self) -> FlightStage {
+    pub fn state(&self) -> RocketState {
         match self {
             Self::Ascent {
                 ascent_state_estimator: AscentStateEstimator::OnPad { .. },
                 ..
-            } => FlightStage::Armed,
+            } => RocketState::OnPad,
             Self::Ascent {
-                ascent_state_estimator,
+                ascent_state_estimator: estimator,
                 ..
             } => {
-                if ascent_state_estimator.is_coasting() {
-                    FlightStage::Coasting
+                if let Some((tilt, velocity)) = estimator.tilt_and_velocity()
+                    && let Some(altitude_asl) = estimator.altitude_asl()
+                    && let Some(launch_pad_altitude_asl) = estimator.launch_pad_altitude_asl()
+                {
+                    if estimator.is_coasting() {
+                        RocketState::PoweredAscent {
+                            tilt_deg: tilt.to_degrees(),
+                            velocity: velocity,
+                            altitude_asl,
+                            launch_pad_altitude_asl,
+                        }
+                    } else {
+                        RocketState::Coasting {
+                            tilt_deg: tilt.to_degrees(),
+                            velocity: velocity,
+                            altitude_asl,
+                            launch_pad_altitude_asl,
+                        }
+                    }
                 } else {
-                    FlightStage::PoweredAscent
+                    RocketState::OnPad
                 }
             }
-            Self::DrogueChuteDelay { .. } => FlightStage::Coasting,
-            Self::DrogueChuteDeployed { .. } => FlightStage::DrogueDeployed,
-            Self::MainChuteDelay { .. } => FlightStage::DrogueDeployed,
-            Self::MainChuteDeployed { .. } => FlightStage::MainDeployed,
-            Self::Landed | Self::FailedToReachMinApogee => FlightStage::Landed,
+            Self::DrogueChuteDelay {
+                altitude_kf,
+                launch_pad_altitude_asl,
+                ..
+            } => RocketState::DrogueChute {
+                deployed: false,
+                vertical_velocity: altitude_kf.vertical_velocity(),
+                altitude_asl: altitude_kf.altitude(),
+                launch_pad_altitude_asl: *launch_pad_altitude_asl,
+            },
+            Self::DrogueChuteDeployed {
+                altitude_kf,
+                launch_pad_altitude_asl,
+                ..
+            } => RocketState::DrogueChute {
+                deployed: true,
+                vertical_velocity: altitude_kf.vertical_velocity(),
+                altitude_asl: altitude_kf.altitude(),
+                launch_pad_altitude_asl: *launch_pad_altitude_asl,
+            },
+            Self::MainChuteDelay {
+                altitude_kf,
+                launch_pad_altitude_asl,
+                ..
+            } => RocketState::MainChute {
+                deployed: false,
+                vertical_velocity: altitude_kf.vertical_velocity(),
+                altitude_asl: altitude_kf.altitude(),
+                launch_pad_altitude_asl: *launch_pad_altitude_asl,
+            },
+            Self::MainChuteDeployed {
+                altitude_kf,
+                launch_pad_altitude_asl,
+                ..
+            } => RocketState::MainChute {
+                deployed: true,
+                vertical_velocity: altitude_kf.vertical_velocity(),
+                altitude_asl: altitude_kf.altitude(),
+                launch_pad_altitude_asl: *launch_pad_altitude_asl,
+            },
+            Self::Landed => RocketState::Landed,
+            Self::FailedToReachMinApogee => RocketState::FailedToReachMinApogee,
         }
     }
+}
+
+pub enum RocketState {
+    OnPad,
+    PoweredAscent {
+        tilt_deg: f32,
+        velocity: Vector2<f32>,
+        altitude_asl: f32,
+        launch_pad_altitude_asl: f32,
+    },
+    Coasting {
+        tilt_deg: f32,
+        velocity: Vector2<f32>,
+        altitude_asl: f32,
+        launch_pad_altitude_asl: f32,
+    },
+    DrogueChute {
+        deployed: bool,
+        vertical_velocity: f32,
+        altitude_asl: f32,
+        launch_pad_altitude_asl: f32,
+    },
+    MainChute {
+        deployed: bool,
+        vertical_velocity: f32,
+        altitude_asl: f32,
+        launch_pad_altitude_asl: f32,
+    },
+    Landed,
+    FailedToReachMinApogee,
 }
 
 fn ns_to_ticks(ns: u32) -> usize {

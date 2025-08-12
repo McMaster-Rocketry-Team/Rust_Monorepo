@@ -8,7 +8,7 @@ mod state_estimator;
 mod state_estimator2;
 mod utils;
 
-pub use state_estimator2::{Measurement, FlightProfile, RocketStateEstimator};
+pub use state_estimator2::{Measurement, FlightProfile, RocketStateEstimator, RocketState};
 
 #[cfg(test)]
 mod tests;

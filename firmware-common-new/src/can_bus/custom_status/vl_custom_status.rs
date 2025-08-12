@@ -16,6 +16,19 @@ pub struct VLCustomStatus {
     pub can_bus_ok: bool,
 }
 
+impl VLCustomStatus {
+    pub fn new() -> Self {
+        Self {
+            imu_ok: true,
+            baro_ok: true,
+            mag_ok: true,
+            gps_ok: true,
+            sd_ok: true,
+            can_bus_ok: true,
+        }
+    }
+}
+
 impl NodeCustomStatus for VLCustomStatus {}
 
 #[cfg(test)]

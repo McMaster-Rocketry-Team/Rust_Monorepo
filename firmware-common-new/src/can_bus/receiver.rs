@@ -89,6 +89,11 @@ impl StateMachine {
                     return None;
                 }
 
+                if frame_data.len() < 4 {
+                    // too short, minimum two byte crc + one byte data + one tail byte
+                    return None;
+                }
+
                 let mut data = Vec::new();
                 data.extend_from_slice(&frame_data[2..frame_data.len() - 1])
                     .unwrap();
