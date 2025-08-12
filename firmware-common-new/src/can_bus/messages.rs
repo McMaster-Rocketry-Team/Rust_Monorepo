@@ -1,6 +1,8 @@
 use crate::utils::FixedLenSerializable;
 use ack::AckMessage;
 #[cfg(not(feature = "bootloader"))]
+use airbrakes_control::AirBrakesControlMessage;
+#[cfg(not(feature = "bootloader"))]
 use amp_control::AmpControlMessage;
 #[cfg(not(feature = "bootloader"))]
 use amp_overwrite::AmpOverwriteMessage;
@@ -38,6 +40,8 @@ use vl_status::VLStatusMessage;
 use super::id::{CanBusExtendedId, CanBusMessageTypeFlag, create_can_bus_message_type};
 
 pub mod ack;
+#[cfg(not(feature = "bootloader"))]
+pub mod airbrakes_control;
 #[cfg(not(feature = "bootloader"))]
 pub mod amp_control;
 #[cfg(not(feature = "bootloader"))]
@@ -252,6 +256,16 @@ pub const ICARUS_STATUS_MESSAGE_TYPE: u8 = create_can_bus_message_type(
     },
     0,
 );
+pub const AIRBRAKES_CONTROL_MESSAGE_TYPE: u8 = create_can_bus_message_type(
+    CanBusMessageTypeFlag {
+        is_measurement: false,
+        is_control: true,
+        is_status: false,
+        is_data: false,
+        is_misc: false,
+    },
+    5,
+);
 pub const DATA_TRANSFER_MESSAGE_TYPE: u8 = create_can_bus_message_type(
     CanBusMessageTypeFlag {
         is_measurement: false,
@@ -326,6 +340,8 @@ pub enum CanBusMessageEnum {
     RocketState(RocketStateMessage),
     #[cfg(not(feature = "bootloader"))]
     IcarusStatus(IcarusStatusMessage),
+    #[cfg(not(feature = "bootloader"))]
+    AirBrakesControl(AirBrakesControlMessage),
 
     DataTransfer(DataTransferMessage),
     Ack(AckMessage),
@@ -368,6 +384,8 @@ impl CanBusMessageEnum {
             CanBusMessageEnum::RocketState(m) => m.priority(),
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::IcarusStatus(m) => m.priority(),
+            #[cfg(not(feature = "bootloader"))]
+            CanBusMessageEnum::AirBrakesControl(m) => m.priority(),
             CanBusMessageEnum::DataTransfer(m) => m.priority(),
             CanBusMessageEnum::Ack(m) => m.priority(),
         }
@@ -412,6 +430,8 @@ impl CanBusMessageEnum {
             CanBusMessageEnum::RocketState(_) => ROCKET_STATE_MESSAGE_TYPE,
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::IcarusStatus(_) => ICARUS_STATUS_MESSAGE_TYPE,
+            #[cfg(not(feature = "bootloader"))]
+            CanBusMessageEnum::AirBrakesControl(_) => AIRBRAKES_CONTROL_MESSAGE_TYPE,
             CanBusMessageEnum::DataTransfer(_) => DATA_TRANSFER_MESSAGE_TYPE,
             CanBusMessageEnum::Ack(_) => ACK_MESSAGE_TYPE,
         }
@@ -461,6 +481,8 @@ impl CanBusMessageEnum {
             ROCKET_STATE_MESSAGE_TYPE => Some(RocketStateMessage::serialized_len()),
             #[cfg(not(feature = "bootloader"))]
             ICARUS_STATUS_MESSAGE_TYPE => Some(IcarusStatusMessage::serialized_len()),
+            #[cfg(not(feature = "bootloader"))]
+            AIRBRAKES_CONTROL_MESSAGE_TYPE => Some(AirBrakesControlMessage::serialized_len()),
             DATA_TRANSFER_MESSAGE_TYPE => Some(DataTransferMessage::serialized_len()),
             ACK_MESSAGE_TYPE => Some(AckMessage::serialized_len()),
             _ => None,
@@ -503,6 +525,8 @@ impl CanBusMessageEnum {
             CanBusMessageEnum::RocketState(m) => m.serialize(buffer),
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::IcarusStatus(m) => m.serialize(buffer),
+            #[cfg(not(feature = "bootloader"))]
+            CanBusMessageEnum::AirBrakesControl(m) => m.serialize(buffer),
             CanBusMessageEnum::DataTransfer(m) => m.serialize(buffer),
             CanBusMessageEnum::Ack(m) => m.serialize(buffer),
         }
@@ -575,6 +599,10 @@ impl CanBusMessageEnum {
             #[cfg(not(feature = "bootloader"))]
             ICARUS_STATUS_MESSAGE_TYPE => {
                 IcarusStatusMessage::deserialize(data).map(CanBusMessageEnum::IcarusStatus)
+            }
+            #[cfg(not(feature = "bootloader"))]
+            AIRBRAKES_CONTROL_MESSAGE_TYPE => {
+                AirBrakesControlMessage::deserialize(data).map(CanBusMessageEnum::AirBrakesControl)
             }
 
             DATA_TRANSFER_MESSAGE_TYPE => {

@@ -5,39 +5,29 @@ use super::{CanBusMessage, CanBusMessageEnum};
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PackedStruct, Clone, Debug, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize)]
-#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "12")]
+#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "6")]
 #[repr(C)]
 pub struct IcarusStatusMessage {
-    /// Unit: 0.1%, e.g. 10 = 1%
-    commanded_extension_percentage: u16,
     /// Unit: 0.1%, e.g. 10 = 1%
     actual_extension_percentage: u16,
     /// Unit: 0.1C, e.g. 10 = 1C
     servo_temperature_raw: u16,
     /// Unit: 0.01A, e.g. 10 = 0.1A
     servo_current_raw: u16,
-
-    /// Unit: deg/s
-    pub servo_angular_velocity: i16,
-
-    pub ap_residue_m: i16,
 }
 
 impl IcarusStatusMessage {
     /// percentage: 0 - 1
-    pub fn new(commanded_extension_percentage: f32, actual_extension_percentage: f32, servo_temperature: f32, servo_current: f32, servo_angular_velocity: i16,ap_residue_m: i16,) -> Self {
+    pub fn new(
+        actual_extension_percentage: f32,
+        servo_temperature: f32,
+        servo_current: f32,
+    ) -> Self {
         Self {
-            commanded_extension_percentage: (commanded_extension_percentage * 1000.0) as u16,
             actual_extension_percentage: (actual_extension_percentage * 1000.0) as u16,
             servo_temperature_raw: (servo_temperature * 10.0) as u16,
             servo_current_raw: (servo_current * 100.0) as u16,
-            servo_angular_velocity,
-            ap_residue_m,
         }
-    }
-
-    pub fn commanded_extension_percentage(&self) -> f32 {
-        self.commanded_extension_percentage as f32 / 1000.0
     }
 
     pub fn actual_extension_percentage(&self) -> f32 {

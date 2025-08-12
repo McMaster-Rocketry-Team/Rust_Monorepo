@@ -141,6 +141,7 @@ impl MessageRow {
             CanBusMessageEnum::VLStatus(_) => "VL Status",
             CanBusMessageEnum::RocketState(_) => "Rocket State",
             CanBusMessageEnum::IcarusStatus(_) => "Icarus Status",
+            CanBusMessageEnum::AirBrakesControl(_) => "Airbrakes Control",
             CanBusMessageEnum::DataTransfer(_) => "Data Transfer",
             CanBusMessageEnum::Ack(_) => "Ack",
         }
@@ -525,30 +526,15 @@ impl MessageRow {
                         (
                             "velocity (m/s)",
                             false,
-                            format!(
-                                "{:>5.2}, {:>5.2}",
-                                m.velocity()[0],
-                                m.velocity()[1],
-                            )
-                            .into(),
+                            format!("{:>5.2}, {:>5.2}", m.velocity()[0], m.velocity()[1],).into(),
                         ),
                         (
                             "altitude agl",
                             false,
-                            format!("{:.1}m", m.altitude_asl() - m.launch_pad_altitude_asl())
+                            format!("{:.1}m", m.altitude_agl())
                                 .pad_to_width_with_alignment(7, Alignment::Left)
                                 .into(),
                         ),
-                    ],
-                );
-
-                let printer = printer.windowed(Rect::from_corners(Vec2::new(0, 1), printer.size));
-                self.draw_fields(
-                    &printer,
-                    2,
-                    &[
-                        ("Tilt deg", false, format!("{:>5.2}", m.tilt_deg(),).into()),
-                        // TODO velocity
                     ],
                 );
             }
@@ -556,11 +542,6 @@ impl MessageRow {
                 printer,
                 1,
                 &[
-                    (
-                        "commanded extension",
-                        false,
-                        format!("{:>4.1}%", m.commanded_extension_percentage() * 100.0).into(),
-                    ),
                     (
                         "actual extension",
                         false,
@@ -571,12 +552,16 @@ impl MessageRow {
                         false,
                         format!("{:.2}A", m.servo_current()).into(),
                     ),
-                    (
-                        "servo speed",
-                        false,
-                        format!("{:>4}deg/s", m.servo_angular_velocity).into(),
-                    ),
                 ],
+            ),
+            CanBusMessageEnum::AirBrakesControl(m) => self.draw_fields(
+                printer,
+                1,
+                &[(
+                    "commanded extension",
+                    false,
+                    format!("{:>4.1}%", m.extension_percentage() * 100.0).into(),
+                )],
             ),
             CanBusMessageEnum::DataTransfer(m) => self.draw_fields(
                 printer,
