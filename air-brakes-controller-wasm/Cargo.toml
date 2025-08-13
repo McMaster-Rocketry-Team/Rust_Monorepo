@@ -1,0 +1,11 @@
+[package]
+name = "air-brakes-controller-wasm"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+air-brakes-controller-core = { path = "../air-brakes-controller-core", default-features = false}
+nalgebra = { version = "0.34.0", default-features = false, features = ["libm-force"] }
+
+[lib]
+crate-type = ["cdylib"]

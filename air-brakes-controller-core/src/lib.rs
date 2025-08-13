@@ -12,7 +12,7 @@ mod utils;
 
 pub use state_estimator2::{FlightProfile, Measurement, RocketState, RocketStateEstimator};
 pub use controller::{AirBrakesMPC, RocketParameters};
-pub use utils::{approximate_air_density, approximate_speed_of_sound};
+pub use utils::{approximate_air_density, approximate_speed_of_sound, lerp};
 
 #[cfg(test)]
 mod tests;

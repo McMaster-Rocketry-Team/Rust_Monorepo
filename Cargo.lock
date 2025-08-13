@@ -202,6 +202,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "air-brakes-controller-wasm"
+version = "0.1.0"
+dependencies = [
+ "air-brakes-controller-core",
+ "nalgebra 0.34.0",
+]
+
+[[package]]
 name = "aligned"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

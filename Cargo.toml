@@ -15,7 +15,7 @@ members = [
     "air-brakes-controller-core",
     
     "rocket-cli",
-    "defmt-rtt-pipe",
+    "defmt-rtt-pipe", "air-brakes-controller-wasm",
 ]
 resolver = "2"
 
