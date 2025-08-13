@@ -151,20 +151,18 @@ impl RocketStateEstimator {
                 ascent_state_estimator: estimator,
                 ..
             } => {
-                if let Some((tilt, velocity)) = estimator.tilt_and_velocity()
+                if let Some(velocity) = estimator.velocity()
                     && let Some(altitude_asl) = estimator.altitude_asl()
                     && let Some(launch_pad_altitude_asl) = estimator.launch_pad_altitude_asl()
                 {
                     if estimator.is_coasting() {
                         RocketState::PoweredAscent {
-                            tilt_deg: tilt.to_degrees(),
                             velocity: velocity,
                             altitude_asl,
                             launch_pad_altitude_asl,
                         }
                     } else {
                         RocketState::Coasting {
-                            tilt_deg: tilt.to_degrees(),
                             velocity: velocity,
                             altitude_asl,
                             launch_pad_altitude_asl,
@@ -223,13 +221,11 @@ impl RocketStateEstimator {
 pub enum RocketState {
     OnPad,
     PoweredAscent {
-        tilt_deg: f32,
         velocity: Vector2<f32>,
         altitude_asl: f32,
         launch_pad_altitude_asl: f32,
     },
     Coasting {
-        tilt_deg: f32,
         velocity: Vector2<f32>,
         altitude_asl: f32,
         launch_pad_altitude_asl: f32,

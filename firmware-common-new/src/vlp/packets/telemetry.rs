@@ -24,7 +24,6 @@ fixed_point_factory!(LonFac, f64, -180.0, 180.0, 0.00002146);
 fixed_point_factory!(BatteryVFac, f32, 2.5, 8.5, 0.01);
 fixed_point_factory!(TemperatureFac, f32, -10.0, 85.0, 0.2);
 fixed_point_factory!(AltitudeFac, f32, -100.0, 7000.0, 1.0);
-fixed_point_factory!(APResidueFac, f32, -1000.0, 1000.0, 1.0);
 fixed_point_factory!(AirSpeedFac, f32, 0.0, 400.0, 2.0);
 fixed_point_factory!(AirBrakesExtensionPercentFac, f32, 0.0, 1.0, 0.04);
 fixed_point_factory!(TiltDegFac, f32, -90.0, 90.0, 1.0);
@@ -35,7 +34,7 @@ fixed_point_factory!(PayloadTemperatureFac, f32, 10.0, 85.0, 1.0);
 
 // 48 byte max size to achieve 0.5Hz with 250khz bandwidth + 12sf + 8cr lora
 #[derive(PackedStruct, Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "42")]
+#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "40")]
 pub struct TelemetryPacket {
     #[packed_field(bits = "0..4")]
     nonce: Integer<u8, packed_bits::Bits<4>>,
@@ -110,8 +109,6 @@ pub struct TelemetryPacket {
     >,
     #[packed_field(element_size_bits = "9")]
     air_brakes_servo_temp: Integer<TemperatureFacBase, packed_bits::Bits<TEMPERATURE_FAC_BITS>>,
-    #[packed_field(element_size_bits = "11")]
-    ap_residue: Integer<APResidueFacBase, packed_bits::Bits<A_P_RESIDUE_FAC_BITS>>,
 
     ozys1_online: bool,
     ozys1_rebooted_in_last_5s: bool,
@@ -248,7 +245,6 @@ impl TelemetryPacket {
         air_brakes_commanded_extension_percentage: f32,
         air_brakes_actual_extension_percentage: f32,
         air_brakes_servo_temp: f32,
-        ap_residue: f32,
 
         ozys1_online: bool,
         ozys1_rebooted_in_last_5s: bool,
@@ -358,7 +354,6 @@ impl TelemetryPacket {
                     air_brakes_actual_extension_percentage,
                 ),
             air_brakes_servo_temp: TemperatureFac::to_fixed_point_capped(air_brakes_servo_temp),
-            ap_residue: APResidueFac::to_fixed_point_capped(ap_residue),
 
             ozys1_online,
             ozys1_rebooted_in_last_5s,
@@ -582,10 +577,6 @@ impl TelemetryPacket {
         TemperatureFac::to_float(self.air_brakes_servo_temp)
     }
 
-    pub fn ap_residue(&self) -> f32 {
-        APResidueFac::to_float(self.ap_residue)
-    }
-
     pub fn ozys1_online(&self) -> bool {
         self.ozys1_online
     }
@@ -794,7 +785,6 @@ impl TelemetryPacket {
             air_brakes_commanded_extension_percentage: self.air_brakes_commanded_extension_percentage(),
             air_brakes_actual_extension_percentage: self.air_brakes_actual_extension_percentage(),
             air_brakes_servo_temp: self.air_brakes_servo_temp(),
-            ap_residue: self.ap_residue(),
 
             ozys1_online: self.ozys1_online(),
             ozys1_rebooted_in_last_5s: self.ozys1_rebooted_in_last_5s(),
@@ -905,7 +895,6 @@ pub struct TelemetryPacketBuilderState {
     pub air_brakes_commanded_extension_percentage: f32,
     pub air_brakes_actual_extension_percentage: f32,
     pub air_brakes_servo_temp: f32,
-    pub ap_residue: f32,
 
     pub ozys1_online: bool,
     pub ozys1_uptime_s: u32,
@@ -1010,7 +999,6 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 air_brakes_commanded_extension_percentage: 0.0,
                 air_brakes_actual_extension_percentage: 0.0,
                 air_brakes_servo_temp: 0.0,
-                ap_residue: 0.0,
 
                 ozys1_online: false,
                 ozys1_uptime_s: 0,
@@ -1117,7 +1105,6 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 state.air_brakes_commanded_extension_percentage,
                 state.air_brakes_actual_extension_percentage,
                 state.air_brakes_servo_temp,
-                state.ap_residue,
                 state.ozys1_online,
                 state.ozys1_uptime_s < 5,
                 state.ozys2_online,

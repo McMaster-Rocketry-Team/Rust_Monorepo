@@ -410,17 +410,14 @@ impl AscentStateEstimator {
         }
     }
 
-    // todo tilt = velocity tilt + high pass dead reckoning tilt
-    pub fn tilt_and_velocity(&self) -> Option<(f32, Vector2<f32>)> {
+    /// x and y always positive
+    pub fn velocity(&self) -> Option<Vector2<f32>> {
         match self {
             Self::Stage2 {
                 velocity_estimator, ..
-            } => Some((
-                velocity_estimator.tilt(),
-                Vector2::new(
-                    velocity_estimator.v_horizontal(),
-                    velocity_estimator.v_vertical(),
-                ),
+            } => Some(Vector2::new(
+                velocity_estimator.v_horizontal(),
+                velocity_estimator.v_vertical(),
             )),
             _ => None,
         }

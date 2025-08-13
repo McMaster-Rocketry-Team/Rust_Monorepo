@@ -78,12 +78,17 @@ fn integration_test() {
                 .unwrap();
         }
 
-        if let Some((tilt, velocity)) = estimator.tilt_and_velocity() {
+        if let Some(velocity) = estimator.velocity() {
+            let tilt = velocity.angle(&Vector2::new(0.0, 1.0));
             GlobalPlot::add_value("Estimated tilt", tilt.to_degrees());
             GlobalPlot::add_value("Estimated horizontal velocity", velocity.x);
-            let true_horizontal_velocity = Vector2::new(csv_record.velocity_x, csv_record.velocity_y).magnitude();
+            let true_horizontal_velocity =
+                Vector2::new(csv_record.velocity_x, csv_record.velocity_y).magnitude();
             GlobalPlot::add_value("True horizontal velocity", true_horizontal_velocity);
-            GlobalPlot::add_value("Horizontal velocity residue", velocity.x - true_horizontal_velocity);
+            GlobalPlot::add_value(
+                "Horizontal velocity residue",
+                velocity.x - true_horizontal_velocity,
+            );
         }
     }
 

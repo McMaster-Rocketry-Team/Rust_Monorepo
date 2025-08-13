@@ -19,8 +19,8 @@ impl AirBrakesMPC {
         }
     }
 
-    // returns air brakes extension percentage 0.0 - 1.0
-    pub fn update(&self, current_altitude_asl: f32, current_velocity: Vector2<f32>) -> f32 {
+    /// returns air brakes extension percentage 0.0 - 1.0
+    pub fn update(&mut self, current_altitude_asl: f32, current_velocity: Vector2<f32>) -> f32 {
         // Build initial state
         let initial_state = State {
             altitude_asl: current_altitude_asl,
@@ -75,12 +75,13 @@ struct State {
 
 struct Derivative<T>(T);
 
+#[derive(Clone, Debug)]
 pub struct RocketParameters {
-    burnout_mass: f32,
+    pub burnout_mass: f32,
     /// cd is a look up table from extension percentage to cd
     /// e.g. cd[2] is cd at 50% extension percentage
-    cd: [f32; 5],
-    reference_area: f32,
+    pub cd: [f32; 5],
+    pub reference_area: f32,
 }
 
 impl RocketParameters {
