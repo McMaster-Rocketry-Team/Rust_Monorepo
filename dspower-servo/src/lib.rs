@@ -85,11 +85,11 @@ struct MeasurementsRaw {
     temperature: i16,
 }
 
-pub struct DSPowerServo<S>
+pub struct DSPowerServo<'a, S>
 where
     S: Read + Write,
 {
-    serial: S,
+    serial: &'a mut S,
     // Maximum amount of buffer needed for a single response
     buffer: [u8; 19],
 }
@@ -119,11 +119,11 @@ pub enum Command {
     WriteRegister = 3,
 }
 
-impl<S> DSPowerServo<S>
+impl<'a, S> DSPowerServo<'a, S>
 where
     S: Read + Write,
 {
-    pub fn new(serial: S) -> Self {
+    pub fn new(serial: &'a mut S) -> Self {
         Self {
             serial,
             buffer: [0u8; 19],
@@ -147,7 +147,7 @@ where
             }
         };
 
-        let timeout_fut = delay.delay_ms(500);
+        let timeout_fut = delay.delay_ms(300);
 
         match select(timeout_fut, read_all_fut).await {
             Either::First(_) => {}
@@ -437,13 +437,13 @@ mod tests {
         }
 
         impl Read for MockSerial {
-            async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
+            async fn read(&mut self, _buf: &mut [u8]) -> Result<usize, Self::Error> {
                 unimplemented!()
             }
         }
 
         impl Write for MockSerial {
-            async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+            async fn write(&mut self, _buf: &[u8]) -> Result<usize, Self::Error> {
                 unimplemented!()
             }
         }
@@ -452,7 +452,8 @@ mod tests {
         fn test_craft_result() {
             init_logger();
 
-            let mut servo = DSPowerServo::new(MockSerial);
+            let mut serial = MockSerial;
+            let mut servo = DSPowerServo::new(&mut serial);
 
             let len = servo.craft_request(Command::GetStatus, None, &[]);
             assert_eq!(len, 6);
@@ -463,7 +464,8 @@ mod tests {
         fn test_craft_result2() {
             init_logger();
 
-            let mut servo = DSPowerServo::new(MockSerial);
+            let mut serial = MockSerial;
+            let mut servo = DSPowerServo::new(&mut serial);
 
             let len =
                 servo.craft_request(Command::WriteRegister, Some(0x12), &(200u16.to_le_bytes()));
@@ -507,7 +509,8 @@ mod tests {
             let serial = tokio_serial::new("/dev/ttyUSB0", 115200)
                 .open_native_async()
                 .unwrap();
-            let mut servo = DSPowerServo::new(SerialWrapper(serial));
+            let mut serial = SerialWrapper(serial);
+            let mut servo = DSPowerServo::new(&mut serial);
 
             servo.init(true).await.unwrap();
         }
@@ -519,7 +522,8 @@ mod tests {
             let serial = tokio_serial::new("/dev/ttyUSB0", 115200)
                 .open_native_async()
                 .unwrap();
-            let mut servo = DSPowerServo::new(SerialWrapper(serial));
+            let mut serial = SerialWrapper(serial);
+            let mut servo = DSPowerServo::new(&mut serial);
 
             servo.init(true).await.unwrap();
 
@@ -535,7 +539,8 @@ mod tests {
             let serial = tokio_serial::new("/dev/ttyUSB0", 115200)
                 .open_native_async()
                 .unwrap();
-            let mut servo = DSPowerServo::new(SerialWrapper(serial));
+            let mut serial = SerialWrapper(serial);
+            let mut servo = DSPowerServo::new(&mut serial);
 
             let status = servo.get_status().await.unwrap();
             println!("{:?}", status);
@@ -548,7 +553,8 @@ mod tests {
             let serial = tokio_serial::new("/dev/ttyUSB0", 115200)
                 .open_native_async()
                 .unwrap();
-            let mut servo = DSPowerServo::new(SerialWrapper(serial));
+            let mut serial = SerialWrapper(serial);
+            let mut servo = DSPowerServo::new(&mut serial);
 
             // read baud rate
             let mut buffer = [0u8; 2];
@@ -564,7 +570,8 @@ mod tests {
             let serial = tokio_serial::new("/dev/ttyUSB0", 115200)
                 .open_native_async()
                 .unwrap();
-            let mut servo = DSPowerServo::new(SerialWrapper(serial));
+            let mut serial = SerialWrapper(serial);
+            let mut servo = DSPowerServo::new(&mut serial);
 
             let measurements = servo.batch_read_measurements().await.unwrap();
 

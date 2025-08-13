@@ -4,18 +4,18 @@ use embedded_io_async::{Read, Write};
 
 use crate::{DSPowerServo, DSPowerServoError, Measurements};
 
-pub struct ServoSlidingModeController<'a, S>
+pub struct ServoSlidingModeController<'a,'b, S>
 where
     S: Read + Write,
 {
-    servo: &'a mut DSPowerServo<S>,
+    servo: &'a mut DSPowerServo<'b, S>,
     rotation_range_deg: Range<f32>,
 
     gain: f32,
     dead_zone_angle_deg: f32,
 }
 
-impl<'a, S> ServoSlidingModeController<'a, S>
+impl<'a,'b, S> ServoSlidingModeController<'a,'b, S>
 where
     S: Read + Write,
 {
@@ -46,7 +46,7 @@ where
     /// ```
     ///
     pub fn new(
-        servo: &'a mut DSPowerServo<S>,
+        servo: &'a mut DSPowerServo<'b,S>,
         rotation_range_deg: Range<f32>,
         gain: f32,
         dead_zone_angle_deg: f32,

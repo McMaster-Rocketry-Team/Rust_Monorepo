@@ -10,6 +10,7 @@ pub enum Mode {
     SelfTest = 1,
     Armed = 2,
     Landed = 3,
+    Demo = 4,
 }
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]

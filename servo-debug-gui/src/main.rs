@@ -30,7 +30,7 @@ struct Sample {
 const MAX_POINTS: usize = 20 * 100; // 20 s × 100 Hz
 
 async fn servo_worker(
-    mut servo: DSPowerServo<SerialWrapper>,
+    mut servo: DSPowerServo<'_, SerialWrapper>,
     cmd_rx: Receiver<f32>,         // GUI → servo (std sync_channel)
     sample_tx: SyncSender<Sample>, // servo → GUI
     mut current_cmd: f32,          // last command seen
@@ -207,7 +207,8 @@ fn main() -> eframe::Result<()> {
             .open_native_async()
             .expect("open serial port");
 
-        let mut servo = DSPowerServo::new(SerialWrapper(serial));
+        let serial = Box::leak(Box::new(SerialWrapper(serial)));
+        let mut servo = DSPowerServo::new(serial);
         servo.reset(&mut Delay).await.unwrap();
         servo.init(true).await.unwrap();
 
