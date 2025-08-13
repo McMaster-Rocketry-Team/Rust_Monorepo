@@ -381,13 +381,6 @@ impl View for DownlinkPacketDisplay {
                             ("tilt", false, format!("{:.1}deg", p.tilt_deg()).into()),
                         ],
                         &[
-                            (
-                                "ap residue",
-                                false,
-                                format!("{:.1}m", p.ap_residue()).into(),
-                            ),
-                        ],
-                        &[
                             ("icarus online", true, Self::format_bool(p.icarus_online())),
                             (
                                 "rebooted",
@@ -412,7 +405,6 @@ impl View for DownlinkPacketDisplay {
                                 )
                                 .into(),
                             ),
-                            
                         ],
                         &[
                             ("amp online", true, Self::format_bool(p.amp_online())),
@@ -489,21 +481,13 @@ impl View for DownlinkPacketDisplay {
                             ),
                         ],
                         &[
-                            (
-                                "ozys 1 online",
-                                true,
-                                Self::format_bool(p.ozys1_online()),
-                            ),
+                            ("ozys 1 online", true, Self::format_bool(p.ozys1_online())),
                             (
                                 "rebooted",
                                 true,
                                 Self::format_bool(p.ozys1_rebooted_in_last_5s()),
                             ),
-                            (
-                                "ozys 2 online",
-                                true,
-                                Self::format_bool(p.ozys2_online()),
-                            ),
+                            ("ozys 2 online", true, Self::format_bool(p.ozys2_online())),
                             (
                                 "rebooted",
                                 true,
@@ -521,11 +505,7 @@ impl View for DownlinkPacketDisplay {
                                 true,
                                 Self::format_bool(p.aero_rust_rebooted_in_last_5s()),
                             ),
-                            (
-                                "health",
-                                true,
-                                format!("{:?}", p.aero_rust_health()).into(),
-                            ),
+                            ("health", true, format!("{:?}", p.aero_rust_health()).into()),
                         ],
                         &[
                             (
@@ -550,11 +530,7 @@ impl View for DownlinkPacketDisplay {
                             ),
                         ],
                         &[
-                            (
-                                "eps 1 online",
-                                true,
-                                Self::format_bool(p.eps1_online()),
-                            ),
+                            ("eps 1 online", true, Self::format_bool(p.eps1_online())),
                             (
                                 "rebooted",
                                 true,
@@ -585,49 +561,48 @@ impl View for DownlinkPacketDisplay {
                             (
                                 "3v3 out current",
                                 false,
-                                format!("{}mA",( p.eps1_output_3v3_current() * 1000.0).round()).into(),
+                                format!("{}mA", (p.eps1_output_3v3_current() * 1000.0).round())
+                                    .into(),
                             ),
                             (
                                 "status",
                                 true,
                                 Self::format_amp_output_status(
                                     p.eps1_output_3v3_overwrote(),
-                                    p.eps1_output_3v3_status()
+                                    p.eps1_output_3v3_status(),
                                 ),
                             ),
                             (
                                 "5v out current",
                                 false,
-                                format!("{}mA", (p.eps1_output_5v_current() * 1000.0).round()).into(),
+                                format!("{}mA", (p.eps1_output_5v_current() * 1000.0).round())
+                                    .into(),
                             ),
                             (
                                 "status",
                                 true,
                                 Self::format_amp_output_status(
                                     p.eps1_output_5v_overwrote(),
-                                    p.eps1_output_5v_status()
+                                    p.eps1_output_5v_status(),
                                 ),
                             ),
                             (
                                 "9v out current",
                                 false,
-                                format!("{}mA", (p.eps1_output_9v_current() * 1000.0).round()).into(),
+                                format!("{}mA", (p.eps1_output_9v_current() * 1000.0).round())
+                                    .into(),
                             ),
                             (
                                 "status",
                                 true,
                                 Self::format_amp_output_status(
                                     p.eps1_output_9v_overwrote(),
-                                    p.eps1_output_9v_status()
+                                    p.eps1_output_9v_status(),
                                 ),
                             ),
                         ],
                         &[
-                            (
-                                "eps 2 online",
-                                true,
-                                Self::format_bool(p.eps2_online()),
-                            ),
+                            ("eps 2 online", true, Self::format_bool(p.eps2_online())),
                             (
                                 "rebooted",
                                 true,
@@ -658,40 +633,43 @@ impl View for DownlinkPacketDisplay {
                             (
                                 "3v3 out current",
                                 false,
-                                format!("{}mA", (p.eps2_output_3v3_current() * 1000.0).round()).into(),
+                                format!("{}mA", (p.eps2_output_3v3_current() * 1000.0).round())
+                                    .into(),
                             ),
                             (
                                 "status",
                                 true,
                                 Self::format_amp_output_status(
                                     p.eps2_output_3v3_overwrote(),
-                                    p.eps2_output_3v3_status()
+                                    p.eps2_output_3v3_status(),
                                 ),
                             ),
                             (
                                 "5v out current",
                                 false,
-                                format!("{}mA", (p.eps2_output_5v_current() * 1000.0).round()).into(),
+                                format!("{}mA", (p.eps2_output_5v_current() * 1000.0).round())
+                                    .into(),
                             ),
                             (
                                 "status",
                                 true,
                                 Self::format_amp_output_status(
                                     p.eps2_output_5v_overwrote(),
-                                    p.eps2_output_5v_status()
+                                    p.eps2_output_5v_status(),
                                 ),
                             ),
                             (
                                 "9v out current",
                                 false,
-                                format!("{}mA", (p.eps2_output_9v_current() * 1000.0).round()).into(),
+                                format!("{}mA", (p.eps2_output_9v_current() * 1000.0).round())
+                                    .into(),
                             ),
                             (
                                 "status",
                                 true,
                                 Self::format_amp_output_status(
                                     p.eps2_output_9v_overwrote(),
-                                    p.eps2_output_9v_status()
+                                    p.eps2_output_9v_status(),
                                 ),
                             ),
                         ],

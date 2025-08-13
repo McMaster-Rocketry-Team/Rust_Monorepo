@@ -7,7 +7,7 @@ edition = "2024"
 default = ["log", "std"]
 log = ["dep:log", "firmware-common-new/log"]
 defmt = ["dep:defmt", "heapless/defmt-03", "firmware-common-new/defmt"]
-std = ["dep:java-bindgen"]
+std = []
 
 [dependencies]
 defmt = { version = "1.0.1", optional = true }
@@ -16,7 +16,6 @@ heapless = { version = "0.8.0", features = ["serde"], default-features = false }
 serde = { version = "1.0.219", default-features = false, features = ["derive"] }
 libm = "0.2.7"
 nalgebra = { version = "0.34.0", default-features = false, features = ["libm-force"] }
-java-bindgen = {version = "0.1.0-alpha.4", optional = true}
 firmware-common-new = { path = "../firmware-common-new", default-features = false}
 biquad = "0.5.0"
 micromath = "2.1.0"
@@ -29,9 +28,3 @@ csv = "1.1"
 plotters = "0.3"
 icao-isa = "1.0.0"
 icao-units = "1.0.0"
-
-[lib]
-crate-type = ["lib", "cdylib"]
-
-[package.metadata.java-bindgen]
-package = "ca.macrocketry.airbrakes.or.interop"

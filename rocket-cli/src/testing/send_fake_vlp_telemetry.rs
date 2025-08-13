@@ -98,7 +98,6 @@ pub async fn send_fake_vlp_telemetry(args: SendVLPTelemetryArgs) -> Result<()> {
             0.0,
             0.0,
             50.0,
-            0.0,
             false,
             false,
             false,
