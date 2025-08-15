@@ -38,7 +38,8 @@ macro_rules! create_rpc {
             // define enums
             $(
                 $(
-                    #[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Clone, PartialEq, defmt::Format)]
+                    #[cfg_attr(feature = "defmt", derive(defmt::Format))]
+                    #[derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize, Debug, Clone, PartialEq)]
                     pub enum $enum_name {
                         $( $enum_body )*
                     }
@@ -170,12 +171,12 @@ macro_rules! create_rpc {
                 crc: crc::Crc::<u8>,
                 request_buffer: aligned::Aligned<aligned::A2, [u8; crate::max_const!(
                     $(
-                        size_of::<< [< $name:camel Request >] as Archive>::Archived>(),
+                        size_of::<< [< $name:camel Request >] as rkyv::Archive>::Archived>(),
                     )*
                 ) + 16]>,
                 response_buffer: aligned::Aligned<aligned::A2, [u8; crate::max_const!(
                     $(
-                        size_of::<< [< $name:camel Response >] as Archive>::Archived>(),
+                        size_of::<< [< $name:camel Response >] as rkyv::Archive>::Archived>(),
                     )*
                 ) + 1]>
             }
@@ -187,12 +188,12 @@ macro_rules! create_rpc {
                         crc: crc::Crc::<u8>::new(&crc::CRC_8_SMBUS),
                         request_buffer: aligned::Aligned([0u8; crate::max_const!(
                             $(
-                                size_of::<< [< $name:camel Request >] as Archive>::Archived>(),
+                                size_of::<< [< $name:camel Request >] as rkyv::Archive>::Archived>(),
                             )*
                         ) + 16]),
                         response_buffer: aligned::Aligned([0u8; crate::max_const!(
                             $(
-                                size_of::<< [< $name:camel Response >] as Archive>::Archived>(),
+                                size_of::<< [< $name:camel Response >] as rkyv::Archive>::Archived>(),
                             )*
                         ) + 1]),
                     }
@@ -204,7 +205,7 @@ macro_rules! create_rpc {
 
                     const REQUEST_STRUCT_MAX_SIZE: usize = crate::max_const!(
                         $(
-                            size_of::<< [< $name:camel Request >] as Archive>::Archived>(),
+                            size_of::<< [< $name:camel Request >] as rkyv::Archive>::Archived>(),
                         )*
                     );
 

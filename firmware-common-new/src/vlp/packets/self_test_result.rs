@@ -4,7 +4,7 @@ use embassy_sync::blocking_mutex::{Mutex as BlockingMutex, raw::RawMutex};
 use packed_struct::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::can_bus::messages::node_status::{NodeHealth, NodeMode};
+use crate::can_bus::messages::node_status::{NodeHealth, NodeMode, NodeStatusMessage};
 
 use super::VLPDownlinkPacket;
 
@@ -17,19 +17,32 @@ pub struct NodeStatus {
     #[packed_field(bits = "2..4", ty = "enum")]
     pub mode: NodeMode,
     pub rebooted_in_last_5s: bool,
-    
+
     /// Node specific status, only the lower 11 bits are used.
     #[packed_field(bits = "5..16")]
     pub custom_status: u16,
 }
 
 impl NodeStatus {
+    pub fn healthy(&self) -> bool {
+        self.health == NodeHealth::Healthy && self.mode == NodeMode::Operational
+    }
+
     pub fn offline() -> Self {
         NodeStatus {
             health: NodeHealth::Error,
             mode: NodeMode::Offline,
             rebooted_in_last_5s: false,
             custom_status: 0,
+        }
+    }
+
+    pub fn from_message(message: &NodeStatusMessage) -> Self {
+        Self {
+            health: message.health,
+            mode: message.mode,
+            rebooted_in_last_5s: message.uptime_s < 5,
+            custom_status: message.custom_status_raw,
         }
     }
 
@@ -89,6 +102,12 @@ pub struct SelfTestResultPacket {
     pub gps_ok: bool,
     pub sd_ok: bool,
     pub can_bus_ok: bool,
+    pub amp_out1_power_good: bool,
+    pub amp_out2_power_good: bool,
+    pub amp_out3_power_good: bool,
+    pub amp_out4_power_good: bool,
+    pub main_continuity: bool,
+    pub drogue_continuity: bool,
 }
 
 impl SelfTestResultPacket {
@@ -102,6 +121,12 @@ impl SelfTestResultPacket {
             gps_ok: self.gps_ok,
             sd_ok: self.sd_ok,
             can_bus_ok: self.can_bus_ok,
+            amp_out1_power_good: self.amp_out1_power_good,
+            amp_out2_power_good: self.amp_out2_power_good,
+            amp_out3_power_good: self.amp_out3_power_good,
+            amp_out4_power_good: self.amp_out4_power_good,
+            main_continuity: self.main_continuity,
+            drogue_continuity: self.drogue_continuity,
 
             amp: self.amp.to_json(),
             icarus: self.icarus.to_json(),
@@ -150,6 +175,12 @@ pub struct SelfTestResultPacketBuilderState {
     pub gps_ok: bool,
     pub sd_ok: bool,
     pub can_bus_ok: bool,
+    pub amp_out1_power_good: bool,
+    pub amp_out2_power_good: bool,
+    pub amp_out3_power_good: bool,
+    pub amp_out4_power_good: bool,
+    pub main_continuity: bool,
+    pub drogue_continuity: bool,
 }
 
 pub struct SelfTestResultPacketBuilder<M: RawMutex> {
@@ -178,6 +209,12 @@ impl<M: RawMutex> SelfTestResultPacketBuilder<M> {
                 gps_ok: false,
                 sd_ok: false,
                 can_bus_ok: false,
+                amp_out1_power_good: false,
+                amp_out2_power_good: false,
+                amp_out3_power_good: false,
+                amp_out4_power_good: false,
+                main_continuity: false,
+                drogue_continuity: false,
             })),
         }
     }
@@ -208,6 +245,12 @@ impl<M: RawMutex> SelfTestResultPacketBuilder<M> {
                 gps_ok: state.gps_ok,
                 sd_ok: state.sd_ok,
                 can_bus_ok: state.can_bus_ok,
+                amp_out1_power_good: state.amp_out1_power_good,
+                amp_out2_power_good: state.amp_out2_power_good,
+                amp_out3_power_good: state.amp_out3_power_good,
+                amp_out4_power_good: state.amp_out4_power_good,
+                main_continuity: state.main_continuity,
+                drogue_continuity: state.drogue_continuity,
             }
         })
     }
@@ -222,4 +265,3 @@ impl<M: RawMutex> SelfTestResultPacketBuilder<M> {
         })
     }
 }
-
