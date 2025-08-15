@@ -133,10 +133,10 @@ impl ConnectionMethod for SerialConnectionMethod {
         let mut can_decoder = CanBusMultiFrameDecoder::<16>::new();
 
         let usb_receive_fut = async {
-            let mut buffer = [0u8; 64];
+            let mut buffer = [0u8; { UsbCanBusFrame::SERIALIZED_SIZE * 4 }];
             loop {
                 let len = match self.serial.read(&mut buffer).await {
-                    Ok(data) => data,
+                    Ok(len) => len,
                     Err(serialport::Error {
                         kind: serialport::ErrorKind::Io(ErrorKind::TimedOut),
                         ..
