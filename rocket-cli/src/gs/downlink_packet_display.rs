@@ -6,7 +6,11 @@ use cursive::{
     utils::markup::StyledString,
 };
 use firmware_common_new::{
-    can_bus::messages::amp_status::PowerOutputStatus, vlp::packets::VLPDownlinkPacket,
+    can_bus::{
+        custom_status::{NodeCustomStatusExt, ozys_custom_status::OzysCustomStatus},
+        messages::amp_status::PowerOutputStatus,
+    },
+    vlp::packets::{VLPDownlinkPacket, self_test_result::NodeStatus},
 };
 use lora_phy::mod_params::PacketStatus;
 use pad::PadStr as _;
@@ -67,6 +71,20 @@ impl DownlinkPacketDisplay {
     fn format_bool(value: bool) -> StyledString {
         let s = if value { "T" } else { "F" };
         String::from(s).into()
+    }
+
+    fn format_node_status(value: &NodeStatus) -> StyledString {
+        String::from(format!(
+            "{:?}, {:?}{}",
+            value.health,
+            value.mode,
+            if value.rebooted_in_last_5s {
+                " rebooted"
+            } else {
+                ""
+            }
+        ))
+        .into()
     }
 
     fn format_amp_output_status(overwrote: bool, status: PowerOutputStatus) -> StyledString {
@@ -662,7 +680,103 @@ impl View for DownlinkPacketDisplay {
                         ],
                     ],
                 ),
-                VLPDownlinkPacket::SelfTestResult(p) => todo!(),
+                VLPDownlinkPacket::SelfTestResult(p) => self.draw_fields(
+                    &printer,
+                    &[
+                        &[
+                            ("imu ok", true, Self::format_bool(p.imu_ok)),
+                            ("baro ok", true, Self::format_bool(p.baro_ok)),
+                            ("mag ok", true, Self::format_bool(p.mag_ok)),
+                            ("gps ok", true, Self::format_bool(p.gps_ok)),
+                            ("sd ok", true, Self::format_bool(p.sd_ok)),
+                            ("can bus ok", true, Self::format_bool(p.can_bus_ok)),
+                        ],
+                        &[
+                            (
+                                "main continuity",
+                                true,
+                                Self::format_bool(p.main_continuity),
+                            ),
+                            (
+                                "drogue continuity",
+                                true,
+                                Self::format_bool(p.drogue_continuity),
+                            ),
+                        ],
+                        &[
+                            ("amp", true, Self::format_node_status(&p.amp)),
+                            ("out 1 good", true, Self::format_bool(p.amp_out1_power_good)),
+                            ("out 2 good", true, Self::format_bool(p.amp_out2_power_good)),
+                            ("out 3 good", true, Self::format_bool(p.amp_out3_power_good)),
+                            ("out 4 good", true, Self::format_bool(p.amp_out4_power_good)),
+                        ],
+                        &[
+                            ("icarus", true, Self::format_node_status(&p.icarus)),
+                            ("ozys 1", true, Self::format_node_status(&p.ozys1)),
+                            (
+                                "ozys 1 disk",
+                                false,
+                                format!(
+                                    "{}%",
+                                    (OzysCustomStatus::from_u16(p.ozys1.custom_status)
+                                        .disk_usage()
+                                        * 100.0)
+                                        .round()
+                                )
+                                .into(),
+                            ),
+                            ("ozys 2", true, Self::format_node_status(&p.ozys2)),
+                            (
+                                "ozys 2 disk",
+                                false,
+                                format!(
+                                    "{}%",
+                                    (OzysCustomStatus::from_u16(p.ozys2.custom_status)
+                                        .disk_usage()
+                                        * 100.0)
+                                        .round()
+                                )
+                                .into(),
+                            ),
+                        ],
+                        &[
+                            (
+                                "main bulkhead pcb",
+                                true,
+                                Self::format_node_status(&p.main_bulkhead_pcb),
+                            ),
+                            (
+                                "drogue bulkhead pcb",
+                                true,
+                                Self::format_node_status(&p.drogue_bulkhead_pcb),
+                            ),
+                        ],
+                        &[
+                            (
+                                "payload activation pcb",
+                                true,
+                                Self::format_node_status(&p.payload_activation_pcb),
+                            ),
+                            (
+                                "rocket wifi",
+                                true,
+                                Self::format_node_status(&p.rocket_wifi),
+                            ),
+                        ],
+                        &[
+                            (
+                                "payload eps 1",
+                                true,
+                                Self::format_node_status(&p.payload_eps1),
+                            ),
+                            (
+                                "payload eps 2",
+                                true,
+                                Self::format_node_status(&p.payload_eps2),
+                            ),
+                        ],
+                    ],
+                ),
                 VLPDownlinkPacket::Ack(p) => unreachable!(),
             }
         }

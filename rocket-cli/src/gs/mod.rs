@@ -14,7 +14,7 @@ use cursive::{
     },
 };
 use cursive_aligned_view::Alignable;
-use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
+use embassy_sync::blocking_mutex::raw::RawMutex;
 use firmware_common_new::{
     can_bus::messages::amp_overwrite::PowerOutputOverwrite,
     rpc::lora_rpc::LoraRpcClient,
@@ -49,6 +49,31 @@ pub mod rpc_radio;
 pub mod serial_wrapper;
 pub mod vlp_client;
 
+struct MultiThreadRawMutex {
+    mutex: std::sync::Mutex<()>,
+}
+
+unsafe impl Send for MultiThreadRawMutex {}
+unsafe impl Sync for MultiThreadRawMutex {}
+
+impl MultiThreadRawMutex {
+    pub const fn new() -> Self {
+        Self {
+            mutex: std::sync::Mutex::new(()),
+        }
+    }
+}
+
+unsafe impl RawMutex for MultiThreadRawMutex {
+    const INIT: Self = Self::new();
+    fn lock<R>(&self, f: impl FnOnce() -> R) -> R {
+        let g = self.mutex.lock().unwrap();
+        let result = f();
+        drop(g);
+        result
+    }
+}
+
 pub async fn ground_station_tui(serial_path: &str) -> Result<()> {
     let serial = serialport::new(serial_path, 115200)
         .timeout(Duration::from_secs(5))
@@ -70,11 +95,11 @@ pub async fn ground_station_tui(serial_path: &str) -> Result<()> {
         .await
         .unwrap();
     let mut rpc_radio = RpcRadio::new(client, None);
-    let vlp_gcm_client = Box::leak(Box::new(VLPGroundStation::<ThreadModeRawMutex>::new()));
+    let vlp_gcm_client = Box::leak(Box::new(VLPGroundStation::<MultiThreadRawMutex>::new()));
     let vlp_key = config.read().unwrap().vlp_key.clone();
     let mut daemon = vlp_gcm_client.daemon(&mut rpc_radio, &vlp_key);
 
-    struct VLPClientWrapper(&'static VLPGroundStation<ThreadModeRawMutex>);
+    struct VLPClientWrapper(&'static VLPGroundStation<MultiThreadRawMutex>);
 
     impl VLPClientTrait for VLPClientWrapper {
         fn send_nb(&self, packet: VLPUplinkPacket) {
@@ -607,6 +632,11 @@ pub fn tui_task(
                                         "Landed Mode",
                                         "Change rocket to landed mode?",
                                         ChangeModePacket { mode: Mode::Landed }.into(),
+                                    ))
+                                    .child(create_simple_packet_button(
+                                        "Demo Mode",
+                                        "Change rocket to demo mode?",
+                                        ChangeModePacket { mode: Mode::Demo }.into(),
                                     ))
                                     .child(create_reset_device_button())
                                     .child(create_overwrite_amp_button())

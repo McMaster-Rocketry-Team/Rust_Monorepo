@@ -38,6 +38,7 @@ impl OzysCustomStatus {
         }
     }
     
+    /// 0.0 - 1.0
     pub fn disk_usage(&self) -> f32 {
         self.disk_usage_raw as f32 / 63.0
     }
