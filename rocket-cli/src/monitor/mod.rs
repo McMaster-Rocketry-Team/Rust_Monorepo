@@ -4,7 +4,6 @@ mod message;
 mod node;
 mod status_bar;
 
-pub use message::message_row::FieldWidget;
 use chrono::Local;
 use config::MonitorConfig;
 use cursive::{
@@ -15,12 +14,13 @@ use cursive::{
 use firmware_common_new::can_bus::telemetry::message_aggregator::DecodedMessage;
 pub use log::target_log;
 use log::{LogViewer, log_saver::LogSaver};
+pub use message::message_row::FieldWidget;
 use message::{CanMessageViewer, message_saver::CanMessageSaver};
 use node::NodeStatusViewer;
 use status_bar::{SelectedTab, StatusBar};
 use tokio::{
     sync::{broadcast, oneshot, watch},
-    time,
+    task::spawn_blocking,
 };
 
 use crate::{connection_method::ConnectionMethod, enable_stdout_logging};
@@ -28,7 +28,7 @@ use anyhow::Result;
 use std::{
     path::PathBuf,
     sync::{Arc, RwLock},
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use self::target_log::TargetLog;
@@ -58,20 +58,19 @@ pub async fn monitor_tui(
     let log_saver = LogSaver::new(start_time, &bin_name, connection_method).await?;
     let message_saver = CanMessageSaver::new(start_time, &bin_name, connection_method).await?;
 
-    let (status_tx, status_rx) = watch::channel(MonitorStatus::Initialize);
+    let (status_tx, mut status_rx) = watch::channel(MonitorStatus::Initialize);
     let (logs_tx, logs_rx) = broadcast::channel::<TargetLog>(256);
     let logs_rx2 = logs_tx.subscribe();
     let (messages_tx, messages_rx) = broadcast::channel::<DecodedMessage>(32);
     let messages_rx2 = messages_tx.subscribe();
     let (stop_tx, stop_rx) = oneshot::channel::<()>();
 
-    let tui_future = tui_task(
-        connection_method.name(),
-        status_rx,
-        logs_rx,
-        messages_rx,
-        stop_tx,
-    );
+    let name = connection_method.name();
+    let tui_future = async {
+        status_rx.changed().await.unwrap();
+
+        spawn_blocking(move || tui_task(name, status_rx, logs_rx, messages_rx, stop_tx)).await
+    };
 
     let attach_future = connection_method.attach(status_tx, logs_tx, messages_tx, stop_rx);
 
@@ -85,16 +84,16 @@ pub async fn monitor_tui(
         message_saver_future
     );
     attach_result?;
-    tui_result?;
+    tui_result??;
     log_saver_result?;
     message_saver_result?;
 
     Ok(())
 }
 
-async fn tui_task(
+fn tui_task(
     connection_method_name: String,
-    mut status_rx: watch::Receiver<MonitorStatus>,
+    status_rx: watch::Receiver<MonitorStatus>,
     logs_rx: broadcast::Receiver<TargetLog>,
     messages_rx: broadcast::Receiver<DecodedMessage>,
     stop_tx: oneshot::Sender<()>,
@@ -102,8 +101,6 @@ async fn tui_task(
     let first_time = !MonitorConfig::exists();
     let config = Arc::new(RwLock::new(MonitorConfig::load()?));
     let messages_rx2 = messages_rx.resubscribe();
-
-    status_rx.changed().await?;
 
     let mut siv = cursive::default();
     let mut theme = siv.current_theme().clone();
@@ -163,7 +160,6 @@ async fn tui_task(
     enable_stdout_logging(false);
     let mut runner = siv.runner();
     runner.refresh();
-    let mut interval = time::interval(Duration::from_millis(1000 / 30));
 
     while runner.is_running() {
         {
@@ -212,7 +208,6 @@ async fn tui_task(
         }
 
         runner.step();
-        interval.tick().await;
     }
     enable_stdout_logging(true);
 

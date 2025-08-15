@@ -32,12 +32,15 @@ use firmware_common_new::{
     },
 };
 use lora_phy::mod_params::PacketStatus;
-use tokio::time;
+use tokio::task::spawn_blocking;
 
-use crate::{enable_stdout_logging, gs::{
-    config::GroundStationConfig, downlink_packet_display::DownlinkPacketDisplay,
-    rpc_radio::RpcRadio, serial_wrapper::SerialWrapper, vlp_client::VLPClientTrait,
-}};
+use crate::{
+    enable_stdout_logging,
+    gs::{
+        config::GroundStationConfig, downlink_packet_display::DownlinkPacketDisplay,
+        rpc_radio::RpcRadio, serial_wrapper::SerialWrapper, vlp_client::VLPClientTrait,
+    },
+};
 
 pub mod config;
 mod downlink_packet_display;
@@ -87,15 +90,20 @@ pub async fn ground_station_tui(serial_path: &str) -> Result<()> {
         }
     }
 
+    let vlp_client = Box::leak(Box::new(VLPClientWrapper(vlp_gcm_client)));
+    let config = config.clone();
+
     tokio::select! {
         _ = daemon.run() => {}
-        _ = tui_task(Box::leak(Box::new(VLPClientWrapper(vlp_gcm_client))), config.clone()) => {}
+        _ = spawn_blocking(move || {
+            tui_task(vlp_client, config)
+        }) => {}
     }
 
     Ok(())
 }
 
-pub async fn tui_task(
+pub fn tui_task(
     client: &'static impl VLPClientTrait,
     config: Arc<RwLock<GroundStationConfig>>,
 ) -> Result<()> {
@@ -643,7 +651,6 @@ pub async fn tui_task(
     enable_stdout_logging(false);
     let mut runner = siv.runner();
     runner.refresh();
-    let mut interval = time::interval(Duration::from_millis(1000 / 30));
 
     while runner.is_running() {
         if let Some(result) = client.try_get_send_result() {
@@ -690,7 +697,6 @@ pub async fn tui_task(
         }
 
         runner.step();
-        interval.tick().await;
     }
     enable_stdout_logging(false);
 

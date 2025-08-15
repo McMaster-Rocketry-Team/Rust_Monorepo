@@ -13,6 +13,7 @@ use firmware_common_new::{
     },
 };
 use lora_phy::mod_params::PacketStatus;
+use tokio::task::spawn_blocking;
 
 struct MockVLPClient {
     mock_packet: RwLock<Option<(VLPDownlinkPacket, PacketStatus)>>,
@@ -141,7 +142,9 @@ pub async fn mock_ground_station_tui() -> Result<()> {
 
     let client = Box::leak(Box::new(MockVLPClient::new()));
 
-    tui_task(client, config).await?;
+    spawn_blocking(move || {
+        tui_task(client, config)
+    }).await??;
 
     Ok(())
 }
