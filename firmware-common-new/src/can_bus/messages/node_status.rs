@@ -1,7 +1,7 @@
 use packed_struct::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::can_bus::custom_status::{NodeCustomStatus, NodeCustomStatusExt};
+use crate::can_bus::custom_status::NodeCustomStatusExt;
 
 use super::{CanBusMessage, CanBusMessageEnum};
 

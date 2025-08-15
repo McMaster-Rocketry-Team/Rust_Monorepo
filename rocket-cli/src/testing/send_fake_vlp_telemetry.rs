@@ -11,7 +11,7 @@ use anyhow::Result;
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use firmware_common_new::{
     can_bus::messages::{
-        amp_status::PowerOutputStatus, vl_status::FlightStage, node_status::NodeHealth,
+        amp_status::PowerOutputStatus, vl_status::FlightStage,
     },
     rpc::lora_rpc::LoraRpcClient,
     vlp::{
@@ -102,9 +102,6 @@ pub async fn send_fake_vlp_telemetry(args: SendVLPTelemetryArgs) -> Result<()> {
             false,
             false,
             false,
-            false,
-            false,
-            NodeHealth::Healthy,
             false,
             false,
             false,

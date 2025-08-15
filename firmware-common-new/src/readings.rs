@@ -31,3 +31,11 @@ pub struct IMUData {
     /// deg/s
     pub gyro: Vector3<f32>,
 }
+
+
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct MagData {
+    /// Tesla
+    pub mag: Vector3<f32>,
+}

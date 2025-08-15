@@ -496,19 +496,6 @@ impl View for DownlinkPacketDisplay {
                         ],
                         &[
                             (
-                                "aero rust online",
-                                true,
-                                Self::format_bool(p.aero_rust_online()),
-                            ),
-                            (
-                                "rebooted",
-                                true,
-                                Self::format_bool(p.aero_rust_rebooted_in_last_5s()),
-                            ),
-                            ("health", true, format!("{:?}", p.aero_rust_health()).into()),
-                        ],
-                        &[
-                            (
                                 "payload activation pcb online",
                                 true,
                                 Self::format_bool(p.payload_activation_pcb_online()),

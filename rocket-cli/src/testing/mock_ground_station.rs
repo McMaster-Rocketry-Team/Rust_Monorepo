@@ -3,9 +3,7 @@ use std::sync::{Arc, RwLock};
 use crate::gs::{config::GroundStationConfig, tui_task, vlp_client::VLPClientTrait};
 use anyhow::Result;
 use firmware_common_new::{
-    can_bus::messages::{
-        amp_status::PowerOutputStatus, vl_status::FlightStage, node_status::NodeHealth,
-    },
+    can_bus::messages::{amp_status::PowerOutputStatus, vl_status::FlightStage},
     vlp::{
         client::VLPTXError,
         packets::{
@@ -82,9 +80,6 @@ impl MockVLPClient {
                     false,
                     false,
                     false,
-                    false,
-                    false,
-                    NodeHealth::Healthy,
                     false,
                     false,
                     false,

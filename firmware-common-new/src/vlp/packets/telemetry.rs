@@ -5,11 +5,7 @@ use packed_struct::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    can_bus::messages::{
-        amp_status::PowerOutputStatus,
-        vl_status::FlightStage,
-        node_status::{NodeHealth, NodeMode},
-    },
+    can_bus::messages::{amp_status::PowerOutputStatus, vl_status::FlightStage},
     fixed_point_factory,
     gps::GPSData,
 };
@@ -34,7 +30,7 @@ fixed_point_factory!(PayloadTemperatureFac, f32, 10.0, 85.0, 1.0);
 
 // 48 byte max size to achieve 0.5Hz with 250khz bandwidth + 12sf + 8cr lora
 #[derive(PackedStruct, Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "40")]
+#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "39")]
 pub struct TelemetryPacket {
     #[packed_field(bits = "0..4")]
     nonce: Integer<u8, packed_bits::Bits<4>>,
@@ -115,11 +111,6 @@ pub struct TelemetryPacket {
 
     ozys2_online: bool,
     ozys2_rebooted_in_last_5s: bool,
-
-    aero_rust_online: bool,
-    aero_rust_rebooted_in_last_5s: bool,
-    #[packed_field(element_size_bits = "2", ty = "enum")]
-    aero_rust_health: NodeHealth,
 
     payload_activation_pcb_online: bool,
     payload_activation_pcb_rebooted_in_last_5s: bool,
@@ -252,10 +243,6 @@ impl TelemetryPacket {
         ozys2_online: bool,
         ozys2_rebooted_in_last_5s: bool,
 
-        aero_rust_online: bool,
-        aero_rust_rebooted_in_last_5s: bool,
-        aero_rust_health: NodeHealth,
-
         payload_activation_pcb_online: bool,
         payload_activation_pcb_rebooted_in_last_5s: bool,
 
@@ -360,10 +347,6 @@ impl TelemetryPacket {
 
             ozys2_online,
             ozys2_rebooted_in_last_5s,
-
-            aero_rust_online,
-            aero_rust_rebooted_in_last_5s,
-            aero_rust_health,
 
             payload_activation_pcb_online,
             payload_activation_pcb_rebooted_in_last_5s,
@@ -593,18 +576,6 @@ impl TelemetryPacket {
         self.ozys2_rebooted_in_last_5s
     }
 
-    pub fn aero_rust_online(&self) -> bool {
-        self.aero_rust_online
-    }
-
-    pub fn aero_rust_rebooted_in_last_5s(&self) -> bool {
-        self.aero_rust_rebooted_in_last_5s
-    }
-
-    pub fn aero_rust_health(&self) -> NodeHealth {
-        self.aero_rust_health
-    }
-
     pub fn payload_activation_pcb_online(&self) -> bool {
         self.payload_activation_pcb_online
     }
@@ -791,10 +762,6 @@ impl TelemetryPacket {
             ozys2_online: self.ozys2_online(),
             ozys2_rebooted_in_last_5s: self.ozys2_rebooted_in_last_5s(),
 
-            aero_rust_online: self.aero_rust_online(),
-            aero_rust_rebooted_in_last_5s: self.aero_rust_rebooted_in_last_5s(),
-            aero_rust_health: format!("{:?}", self.aero_rust_health()),
-
             payload_activation_pcb_online: self.payload_activation_pcb_online(),
             payload_activation_pcb_rebooted_in_last_5s: self.payload_activation_pcb_rebooted_in_last_5s(),
 
@@ -902,11 +869,6 @@ pub struct TelemetryPacketBuilderState {
     pub ozys2_online: bool,
     pub ozys2_uptime_s: u32,
 
-    pub aero_rust_uptime_s: u32,
-    pub aero_rust_health: NodeHealth,
-    pub aero_rust_mode: NodeMode,
-    pub aero_rust_status: u16,
-
     pub payload_activation_pcb_online: bool,
     pub payload_activation_pcb_uptime_s: u32,
 
@@ -1006,11 +968,6 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 ozys2_online: false,
                 ozys2_uptime_s: 0,
 
-                aero_rust_uptime_s: 0,
-                aero_rust_health: NodeHealth::Healthy,
-                aero_rust_mode: NodeMode::Offline,
-                aero_rust_status: 0,
-
                 payload_activation_pcb_online: false,
                 payload_activation_pcb_uptime_s: 0,
 
@@ -1109,9 +1066,6 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 state.ozys1_uptime_s < 5,
                 state.ozys2_online,
                 state.ozys2_uptime_s < 5,
-                true,
-                state.aero_rust_uptime_s < 5,
-                state.aero_rust_health,
                 state.payload_activation_pcb_online,
                 state.payload_activation_pcb_uptime_s < 5,
                 state.rocket_wifi_online,
