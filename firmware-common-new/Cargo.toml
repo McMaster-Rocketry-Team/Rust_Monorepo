@@ -6,7 +6,12 @@ edition = "2024"
 [features]
 default = ["log", "json"]
 log = ["dep:log"]
-defmt = ["dep:defmt", "heapless/defmt-03", "lora-phy/defmt-03", "nalgebra/defmt"]
+defmt = [
+    "dep:defmt",
+    "heapless/defmt-03",
+    "lora-phy/defmt-03",
+    "nalgebra/defmt",
+]
 std = []
 bootloader = []
 json = ["dep:json", "std"]
@@ -50,8 +55,11 @@ rkyv = { version = "0.8.10", default-features = false, features = [
     "pointer_width_32",
 ] }
 aligned = "0.4.2"
-nalgebra = { version = "0.34.0", default-features = false, features = ["libm-force", "serde-serialize-no-std"] }
-json ={ version = "0.12.4", optional = true}
+nalgebra = { version = "0.34.0", default-features = false, features = [
+    "libm-force",
+    "serde-serialize-no-std",
+] }
+json = { version = "0.12.4", optional = true }
 
 [dev-dependencies]
 approx = "0.5.1"
@@ -59,3 +67,4 @@ env_logger = "0.11.8"
 tokio = { version = "1.44.2", features = ["full"] }
 embassy-sync = { version = "0.7.0", features = ["std"] }
 lipsum = "0.9.1"
+critical-section = { version = "1.1", features = ["std"]}

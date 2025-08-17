@@ -55,8 +55,6 @@ impl Into<CanBusMessageEnum> for AmpStatusMessage {
 
 #[cfg(test)]
 mod test {
-    use std::assert_matches::assert_matches;
-
     use crate::tests::init_logger;
 
     use super::*;
@@ -72,11 +70,11 @@ mod test {
                 status: PowerOutputStatus::PowerGood,
             },
             out2: AmpOutputStatus {
-                overwrote: true,
-                status: PowerOutputStatus::PowerGood,
+                overwrote: false,
+                status: PowerOutputStatus::Disabled,
             },
             out3: AmpOutputStatus {
-                overwrote: false,
+                overwrote: true,
                 status: PowerOutputStatus::PowerBad,
             },
             out4: AmpOutputStatus {
@@ -96,16 +94,9 @@ mod test {
         let deserialized = CanBusMessageEnum::deserialize(message_type, &buffer[..len]).unwrap();
         log_info!("{:?}", deserialized);
 
-        assert_matches!(
+        assert_eq!(
             deserialized,
-            CanBusMessageEnum::AmpStatus(AmpStatusMessage {
-                shared_battery_mv: 8001,
-                out1: AmpOutputStatus {
-                    overwrote: true,
-                    status: PowerOutputStatus::PowerGood,
-                },
-                ..
-            })
+            source_message,
         );
     }
 }

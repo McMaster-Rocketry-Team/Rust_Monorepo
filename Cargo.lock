@@ -2647,6 +2647,7 @@ dependencies = [
  "calculate-required-bits",
  "chrono",
  "crc",
+ "critical-section",
  "defmt 1.0.1",
  "embassy-futures",
  "embassy-sync 0.7.0",
