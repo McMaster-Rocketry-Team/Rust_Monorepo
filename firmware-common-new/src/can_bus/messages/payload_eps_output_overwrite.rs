@@ -31,3 +31,35 @@ impl Into<CanBusMessageEnum> for PayloadEPSOutputOverwriteMessage {
         CanBusMessageEnum::PayloadEPSOutputOverwrite(self)
     }
 }
+
+#[cfg(test)]
+mod test {
+    use crate::tests::init_logger;
+
+    use super::*;
+
+    #[test]
+    fn test_serialize_deserialize() {
+        init_logger();
+
+        let status_message = PayloadEPSOutputOverwriteMessage {
+            out_3v3: PowerOutputOverwrite::ForceDisabled,
+            out_5v: PowerOutputOverwrite::ForceEnabled,
+            out_9v: PowerOutputOverwrite::NoOverwrite,
+            node_id: 10,
+        };
+
+        let source_message: CanBusMessageEnum = status_message.into();
+        let message = source_message.clone();
+        let mut buffer = [0u8; 64];
+        let message_type = message.get_message_type();
+        let len = message.serialize(&mut buffer);
+
+        log_info!("{:?}", &buffer[..len]);
+
+        let deserialized = CanBusMessageEnum::deserialize(message_type, &buffer[..len]).unwrap();
+        log_info!("{:?}", deserialized);
+
+        assert_eq!(deserialized, source_message,);
+    }
+}
