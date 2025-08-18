@@ -8,20 +8,20 @@ use serde::Deserialize;
 
 #[derive(Deserialize)]
 struct CsvRecord {
-    timestamp_s: f32,
-    altitude: f32,
+    time_us: f32,
+    // altitude: f32,
     imu_acc_x: f32,
     imu_acc_y: f32,
     imu_acc_z: f32,
     gyro_x: f32,
     gyro_y: f32,
     gyro_z: f32,
-    velocity_x: f32,
-    velocity_y: f32,
+    // velocity_x: f32,
+    // velocity_y: f32,
 }
 
 fn read_csv_records() -> Vec<CsvRecord> {
-    let path = "./test_data/merged.csv";
+    let path = "./test_data/flight_test.csv";
     let mut reader = Reader::from_reader(File::open(path).unwrap());
     reader.deserialize().map(|row| row.unwrap()).collect()
 }
@@ -45,23 +45,28 @@ fn integration_test() {
 
     let flight_profile = FlightProfile {
         drogue_chute_minimum_time_us: 0,
-        drogue_chute_minimum_altitude_agl: 2000.0,
+        drogue_chute_minimum_altitude_agl: 10.0,
         drogue_chute_delay_us: 0,
-        main_chute_altitude_agl: 400.0,
+        main_chute_altitude_agl: 5.0,
         main_chute_delay_us: 0,
-        ignition_detection_acc_threshold: 3.0 * 9.81,
+        ignition_detection_acc_threshold: 1.5 * 9.81,
     };
     let mut estimator = AscentStateEstimator::new(flight_profile);
     for csv_record in csv_records.iter() {
-        GlobalPlot::set_time_s(csv_record.timestamp_s);
+        let mut time_s = csv_record.time_us / 1_000_000.0;
+        GlobalPlot::set_time_s(time_s);
         let reading = Measurement::new(
             &Vector3::new(
-                csv_record.imu_acc_x,
-                csv_record.imu_acc_y,
-                csv_record.imu_acc_z,
+                csv_record.imu_acc_x * 9.81,
+                -csv_record.imu_acc_y * 9.81,
+                -csv_record.imu_acc_z * 9.81,
             ),
-            &Vector3::new(csv_record.gyro_x, csv_record.gyro_y, csv_record.gyro_z),
-            csv_record.altitude,
+            &Vector3::new(
+                csv_record.gyro_x.to_radians(),
+                csv_record.gyro_y.to_radians(),
+                csv_record.gyro_z.to_radians(),
+            ),
+            0.0,
         );
 
         estimator.update(&reading);
@@ -69,7 +74,7 @@ fn integration_test() {
         if let Some(rocket_orientation) = estimator.rocket_orientation() {
             orientation_writer
                 .write_record(&[
-                    csv_record.timestamp_s.to_string(),
+                    time_s.to_string(),
                     rocket_orientation.w.to_string(),
                     rocket_orientation.i.to_string(),
                     rocket_orientation.j.to_string(),
@@ -81,14 +86,15 @@ fn integration_test() {
         if let Some(velocity) = estimator.velocity() {
             let tilt = velocity.angle(&Vector2::new(0.0, 1.0));
             GlobalPlot::add_value("Estimated tilt", tilt.to_degrees());
+            GlobalPlot::add_value("Estimated vertical velocity", velocity.y);
             GlobalPlot::add_value("Estimated horizontal velocity", velocity.x);
-            let true_horizontal_velocity =
-                Vector2::new(csv_record.velocity_x, csv_record.velocity_y).magnitude();
-            GlobalPlot::add_value("True horizontal velocity", true_horizontal_velocity);
-            GlobalPlot::add_value(
-                "Horizontal velocity residue",
-                velocity.x - true_horizontal_velocity,
-            );
+            // let true_horizontal_velocity =
+            //     Vector2::new(csv_record.velocity_x, csv_record.velocity_y).magnitude();
+            // GlobalPlot::add_value("True horizontal velocity", true_horizontal_velocity);
+            // GlobalPlot::add_value(
+            //     "Horizontal velocity residue",
+            //     velocity.x - true_horizontal_velocity,
+            // );
         }
     }
 

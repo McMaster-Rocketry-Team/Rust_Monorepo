@@ -6,8 +6,7 @@ mod state_estimator;
 
 pub use state_estimator::{RocketStateEstimator, RocketState};
 
-// TODO change
-const SAMPLES_PER_S: usize = 440;
+const SAMPLES_PER_S: usize = 416;
 const DT: f32 = 1f32 / (SAMPLES_PER_S as f32);
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]

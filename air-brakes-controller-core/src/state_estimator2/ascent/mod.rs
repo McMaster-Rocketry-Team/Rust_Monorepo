@@ -2,6 +2,7 @@ use biquad::{
     Biquad as _, Coefficients, DirectForm2Transposed, Q_BUTTERWORTH_F32, ToHertz as _, Type,
 };
 use heapless::Deque;
+use log::info;
 use micromath::F32Ext;
 use nalgebra::{UnitQuaternion, UnitVector3, Vector1, Vector2, Vector3};
 
@@ -136,11 +137,10 @@ impl AscentStateEstimator {
                         > flight_profile.ignition_detection_acc_threshold
                             * flight_profile.ignition_detection_acc_threshold
                     {
-                        log_info!("ignition detected");
-                        // log_info!(
-                        //     "[{}] ignition detected, to stage 1",
-                        //     z_imu_frame.timestamp_s()
-                        // );
+                        log_info!(
+                            "[{}] ignition detected, to stage 1",
+                            plot_get_time_s!()
+                        );
                         // 2 seconds of data in imu_data_list
                         // 0s-1s: rocket stable, calculate bias, variance, and orientation between avionics to ground
                         // 1s-2s: rocket shakes due to ignition, use dead reckoning to keep track of the orientation between avionics to ground
@@ -224,6 +224,7 @@ impl AscentStateEstimator {
                             launch_pad_altitude_asl,
                         } = state
                         {
+                            info!("[{}] go to stage 1, {:?}", plot_get_time_s!(), av_orientation_reckoner);
                             *self = Self::Stage1 {
                                 n: 0,
                                 acc_welford: Welford::<3>::new(),
@@ -253,7 +254,7 @@ impl AscentStateEstimator {
 
                 *n += 1;
                 if *n > SAMPLES_PER_S / 2 {
-                    // log_info!("[{}] to stage 2", z_imu_frame.timestamp_s());
+                    log_info!("[{}] to stage 2", plot_get_time_s!());
                     let avg_acc_av_frame = acc_welford.mean();
                     let avg_acc_earth_frame =
                         pad_av_orientation.transform_vector(&avg_acc_av_frame);
@@ -268,7 +269,6 @@ impl AscentStateEstimator {
                     let q_av_to_earth = pad_av_orientation.inverse();
                     let q_av_to_rocket = q_av_to_earth * q_earth_to_rocket;
 
-                    log_info!("to stage 2");
                     *self = Self::Stage2 {
                         q_av_to_rocket,
                         av_orientation_reckoner: av_orientation_reckoner.clone(),
@@ -366,7 +366,7 @@ impl AscentStateEstimator {
                 }
 
                 if velocity_estimator.v_vertical() < 1.0 {
-                    log_info!("apogee detected");
+                    log_info!("[{}] apogee detected", plot_get_time_s!());
                     *self = Self::Apogee {
                         alt_variance: *alt_variance,
                         altitude_asl: velocity_estimator.altitude_asl(),
