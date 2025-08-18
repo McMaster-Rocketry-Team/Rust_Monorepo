@@ -8,7 +8,8 @@ const N: usize = 5; // State: [z, s, theta, omega, b_tilt]
 const M: usize = 2; // Measurements: [tilt, altitude]
 const EPS: f32 = 1e-5;
 
-#[derive(Clone, Copy)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Debug)]
 pub struct ProcessNoiseStd {
     pub z: f32,     // model error on altitude propagation
     pub s: f32,     // speed magnitude model error (accel input uncertainty)
@@ -17,12 +18,15 @@ pub struct ProcessNoiseStd {
     pub b: f32,     // tilt-bias random walk
 }
 
-#[derive(Clone, Copy)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Debug)]
 pub struct MeasNoiseStd {
     pub tilt: f32, // radians
     pub alt: f32,  // meters
 }
 
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Debug)]
 pub struct VelocityEstimator {
     x: SVector<f32, N>, // [altitude, speed magnitude, tilt, tilt rate, tilt bias]
     P: SMatrix<f32, N, N>,

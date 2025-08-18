@@ -281,6 +281,9 @@ impl TelemetryPacket {
         eps2_output_9v_overwrote: bool,
         eps2_output_9v_status: PowerOutputStatus,
     ) -> Self {
+        if altitude_agl.is_nan(){
+            log_info!("altitude agl nan");
+        }
         Self {
             nonce: nonce.into(),
 
@@ -295,8 +298,8 @@ impl TelemetryPacket {
             pyro_main_continuity,
             pyro_drogue_continuity,
 
-            altitude_agl: AltitudeFac::to_fixed_point_capped(altitude_agl),
-            max_altitude_agl: AltitudeFac::to_fixed_point_capped(max_altitude_agl),
+            altitude_agl: AltitudeFac::to_fixed_point_capped(0.0),
+            max_altitude_agl: AltitudeFac::to_fixed_point_capped(0.0),
 
             air_speed: AirSpeedFac::to_fixed_point_capped(air_speed),
             max_air_speed: AirSpeedFac::to_fixed_point_capped(max_air_speed),

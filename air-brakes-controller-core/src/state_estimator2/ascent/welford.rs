@@ -2,6 +2,7 @@ use nalgebra::SVector;
 
 
 /// Online estimator for mean and variance of 3-component f32 samples.
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone)]
 pub struct Welford<const N: usize> {
     count: u32,

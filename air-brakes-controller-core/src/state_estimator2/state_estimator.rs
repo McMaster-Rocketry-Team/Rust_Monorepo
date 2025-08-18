@@ -60,6 +60,16 @@ impl RocketStateEstimator {
                 {
                     let altitude_agl = altitude_asl - launch_pad_altitude_asl;
                     if altitude_agl < profile.drogue_chute_minimum_altitude_agl {
+                        log_info!(
+                            "altitude asl: {}, pad asl: {}",
+                            altitude_asl,
+                            launch_pad_altitude_asl
+                        );
+                        log_info!(
+                            "failed to reach min apogee: min={}, current={}",
+                            profile.drogue_chute_minimum_altitude_agl,
+                            altitude_agl
+                        );
                         *self = Self::FailedToReachMinApogee;
                     } else {
                         *self = Self::DrogueChuteDelay {
@@ -218,6 +228,8 @@ impl RocketStateEstimator {
     }
 }
 
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Clone, Debug)]
 pub enum RocketState {
     OnPad,
     PoweredAscent {
