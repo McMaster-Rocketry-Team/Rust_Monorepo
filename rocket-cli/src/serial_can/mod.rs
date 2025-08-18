@@ -158,16 +158,17 @@ impl ConnectionMethod for SerialConnectionMethod {
 
                     let parsed_id = CanBusExtendedId::from_raw(frame.id);
                     if parsed_id.message_type == LOG_MESSAGE_TYPE {
-                        let mut data = heapless::Vec::<u8, 8>::new();
-                        data.extend_from_slice(frame.data()).unwrap();
-                        self.log_demultiplexer.process_frame(
-                            DecodedLogFrame {
-                                node_type: parsed_id.node_type,
-                                node_id: parsed_id.node_id,
-                                data,
-                            },
-                            &logs_tx,
-                        );
+                        // FIXME sometimes panics
+                        // let mut data = heapless::Vec::<u8, 8>::new();
+                        // data.extend_from_slice(frame.data()).unwrap();
+                        // self.log_demultiplexer.process_frame(
+                        //     DecodedLogFrame {
+                        //         node_type: parsed_id.node_type,
+                        //         node_id: parsed_id.node_id,
+                        //         data,
+                        //     },
+                        //     &logs_tx,
+                        // );
                     } else {
                         let timestamp = std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
