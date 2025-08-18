@@ -384,7 +384,7 @@ impl View for DownlinkPacketDisplay {
                             (
                                 "max altitude agl",
                                 false,
-                                format!("{:.1}C", p.max_altitude_agl()).into(),
+                                format!("{:.1}m", p.max_altitude_agl()).into(),
                             ),
                             (
                                 "air speed",
