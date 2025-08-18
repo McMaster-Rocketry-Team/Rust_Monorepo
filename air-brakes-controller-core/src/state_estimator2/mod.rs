@@ -6,9 +6,11 @@ mod state_estimator;
 
 pub use state_estimator::{RocketStateEstimator, RocketState};
 
-const SAMPLES_PER_S: usize = 500;
+// TODO change
+const SAMPLES_PER_S: usize = 440;
 const DT: f32 = 1f32 / (SAMPLES_PER_S as f32);
 
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone)]
 pub struct Measurement(pub SVector<f32, { Self::SIZE }>);
 
@@ -40,6 +42,7 @@ impl Measurement {
     }
 }
 
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Clone, Debug)]
 pub struct FlightProfile {
     pub ignition_detection_acc_threshold: f32,

@@ -4,6 +4,7 @@ use crate::state_estimator2::DT;
 
 /// A simple dead-reckoning filter that tracks orientation, position, and velocity
 /// in an inertial frame using IMU measurements in the device frame.
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone)]
 pub struct DeadReckoner {
     /// Rotation from inertial frame to device frame

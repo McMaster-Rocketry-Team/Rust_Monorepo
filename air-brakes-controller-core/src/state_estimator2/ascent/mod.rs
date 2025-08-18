@@ -2,6 +2,7 @@ use biquad::{
     Biquad as _, Coefficients, DirectForm2Transposed, Q_BUTTERWORTH_F32, ToHertz as _, Type,
 };
 use heapless::Deque;
+use micromath::F32Ext;
 use nalgebra::{UnitQuaternion, UnitVector3, Vector1, Vector2, Vector3};
 
 use crate::{
@@ -24,6 +25,7 @@ mod welford;
 
 const UP: Vector3<f32> = Vector3::new(0.0, 0.0, 1.0);
 
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BaroLockOutState {
     BeforeLockOut,
@@ -34,13 +36,19 @@ pub enum BaroLockOutState {
 // av frame: reference frame of the IMU ic
 // rocket frame: reference frame of the rocket, z points to nose
 // earth frame: inertial reference frame of the earth
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Debug)]
 pub enum AscentStateEstimator {
     /// stable on pad, find out the orientation of the avionics relative to earth
     /// also find out imu biases
     OnPad {
+        #[cfg_attr(feature = "defmt", defmt(Debug2Format))]
         imu_data_list: Deque<Measurement, { SAMPLES_PER_S * 2 }>,
+        #[cfg_attr(feature = "defmt", defmt(Debug2Format))]
         x_acc_low_pass: DirectForm2Transposed<f32>,
+        #[cfg_attr(feature = "defmt", defmt(Debug2Format))]
         y_acc_low_pass: DirectForm2Transposed<f32>,
+        #[cfg_attr(feature = "defmt", defmt(Debug2Format))]
         z_acc_low_pass: DirectForm2Transposed<f32>,
         flight_profile: FlightProfile,
     },
@@ -120,10 +128,15 @@ impl AscentStateEstimator {
                     // detect ignition
                     let acc_magnitude_squared: f32 =
                         acc_low_passed.into_iter().map(|a| a * a).sum();
+                    // if acc_magnitude_squared.sqrt() > 11.0 {
+                    //     log_info!("magnitude: {}", acc_magnitude_squared.sqrt());
+                    // }
+
                     if acc_magnitude_squared
                         > flight_profile.ignition_detection_acc_threshold
                             * flight_profile.ignition_detection_acc_threshold
                     {
+                        log_info!("ignition detected");
                         // log_info!(
                         //     "[{}] ignition detected, to stage 1",
                         //     z_imu_frame.timestamp_s()
@@ -255,6 +268,7 @@ impl AscentStateEstimator {
                     let q_av_to_earth = pad_av_orientation.inverse();
                     let q_av_to_rocket = q_av_to_earth * q_earth_to_rocket;
 
+                    log_info!("to stage 2");
                     *self = Self::Stage2 {
                         q_av_to_rocket,
                         av_orientation_reckoner: av_orientation_reckoner.clone(),
@@ -281,6 +295,8 @@ impl AscentStateEstimator {
                         launch_pad_altitude_asl: *launch_pad_altitude_asl,
                         is_coasting: false,
                     };
+
+                    log_info!("state: {:?}", *self);
                 }
             }
             Self::Stage2 {
@@ -332,6 +348,7 @@ impl AscentStateEstimator {
                         let speed_of_sound =
                             approximate_speed_of_sound(velocity_estimator.altitude_asl());
                         if velocity_estimator.v_vertical().abs() > 0.9 * speed_of_sound {
+                            log_info!("baro lock out");
                             *lock_out_state = BaroLockOutState::LockOut;
                         }
                     }
@@ -339,6 +356,7 @@ impl AscentStateEstimator {
                         let speed_of_sound =
                             approximate_speed_of_sound(velocity_estimator.altitude_asl());
                         if velocity_estimator.v_vertical().abs() < 0.85 * speed_of_sound {
+                            log_info!("baro lock out finished");
                             *lock_out_state = BaroLockOutState::AfterLockOut;
                             velocity_estimator.constraints_enabled = true;
                             // TODO also update process noise
@@ -348,6 +366,7 @@ impl AscentStateEstimator {
                 }
 
                 if velocity_estimator.v_vertical() < 1.0 {
+                    log_info!("apogee detected");
                     *self = Self::Apogee {
                         alt_variance: *alt_variance,
                         altitude_asl: velocity_estimator.altitude_asl(),
@@ -443,5 +462,9 @@ fn quaternion_from_start_and_end_vector(
     let axis = UnitVector3::new_normalize(end.cross(&start));
     let angle = end.angle(&start);
 
-    UnitQuaternion::from_axis_angle(&axis, angle)
+    if angle.to_degrees() < 0.05 {
+        UnitQuaternion::identity()
+    } else {
+        UnitQuaternion::from_axis_angle(&axis, angle)
+    }
 }

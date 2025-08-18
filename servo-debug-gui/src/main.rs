@@ -203,7 +203,7 @@ fn main() -> eframe::Result<()> {
 
     // initialise the servo inside the runtime so we can `.await`
     let initial_angle = rt.block_on(async {
-        let serial = tokio_serial::new("/dev/ttyUSB0", 115200)
+        let serial = tokio_serial::new("COM17", 115200)
             .open_native_async()
             .expect("open serial port");
 
