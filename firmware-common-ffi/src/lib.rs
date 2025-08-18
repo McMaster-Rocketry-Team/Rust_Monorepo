@@ -107,13 +107,14 @@ pub struct CanBusFrames {
 /// All slices should be sent with the same `id` from the return value.
 #[unsafe(no_mangle)]
 pub extern "C" fn encode_can_bus_message(
-    message: CanBusMessageEnum,
+    message: *const CanBusMessageEnum,
     self_node_type: u8,
     self_node_id: u16,
     buffer: *mut u8,
     buffer_length: usize,
 ) -> CanBusFrames {
     let buffer = unsafe { core::slice::from_raw_parts_mut(buffer, buffer_length) };
+    let message = unsafe { &*message }.clone();
 
     let id = message.get_id(self_node_type, self_node_id);
 
@@ -139,6 +140,9 @@ pub extern "C" fn encode_can_bus_message(
     }
 }
 
+#[unsafe(no_mangle)]
+pub static CAN_BUS_MESSAGE_ENUM_SIZE: usize = mem::size_of::<CanBusMessageEnum>();
+
 struct BtDiagnosticInfra {
     log_multiplexer: LogMultiplexer,
     message_aggregator: CanBusMessageAggregator,
@@ -151,7 +155,7 @@ static mut BT_DIAGNOSTIC_INFRA: Option<&'static mut BtDiagnosticInfra> = None;
 
 /// Initializes the bluetooth diagnostic infrastructure.
 ///
-/// This function must be called before using `log_multiplexer_create_chunk` or 
+/// This function must be called before using `log_multiplexer_create_chunk` or
 /// `message_aggregator_create_chunk`.
 ///
 /// # Parameters
@@ -163,8 +167,8 @@ static mut BT_DIAGNOSTIC_INFRA: Option<&'static mut BtDiagnosticInfra> = None;
 /// - The pointer points to at least `BT_DIAGNOSTIC_INFRA_SIZE` bytes of memory
 /// - The pointer is aligned to 8 bytes (typically satisfied by malloc)
 /// - The pointer remains valid for the entire lifetime of the program
-/// - `init_bluetooth_diagnostic`, `log_multiplexer_create_chunk`, 
-///   `message_aggregator_create_chunk`, and `process_can_bus_frame` are not 
+/// - `init_bluetooth_diagnostic`, `log_multiplexer_create_chunk`,
+///   `message_aggregator_create_chunk`, and `process_can_bus_frame` are not
 ///   invoked concurrently
 #[unsafe(no_mangle)]
 pub extern "C" fn init_bluetooth_diagnostic(ptr: *mut u8) {
