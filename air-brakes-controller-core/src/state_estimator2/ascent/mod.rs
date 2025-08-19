@@ -2,7 +2,6 @@ use biquad::{
     Biquad as _, Coefficients, DirectForm2Transposed, Q_BUTTERWORTH_F32, ToHertz as _, Type,
 };
 use heapless::Deque;
-use log::info;
 use micromath::F32Ext;
 use nalgebra::{UnitQuaternion, UnitVector3, Vector1, Vector2, Vector3};
 
@@ -224,7 +223,7 @@ impl AscentStateEstimator {
                             launch_pad_altitude_asl,
                         } = state
                         {
-                            info!("[{}] go to stage 1, {:?}", plot_get_time_s!(), av_orientation_reckoner);
+                            log_info!("[{}] go to stage 1, {:?}", plot_get_time_s!(), av_orientation_reckoner);
                             *self = Self::Stage1 {
                                 n: 0,
                                 acc_welford: Welford::<3>::new(),
