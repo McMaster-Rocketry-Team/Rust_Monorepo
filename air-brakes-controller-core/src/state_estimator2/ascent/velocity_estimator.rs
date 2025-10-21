@@ -265,5 +265,9 @@ impl VelocityEstimator {
         // Always enforce physical ranges
         self.x[1] = self.x[1].max(0.0); // s ≥ 0
         self.x[2] = self.x[2].clamp(0.0, core::f32::consts::FRAC_PI_2); // 0..π/2
+
+
+        plot_add_value!("tilt rate", self.x[3]);
+        plot_add_value!("tilt bias", self.x[4]);
     }
 }
