@@ -5,6 +5,7 @@ use ack::AckPacket;
 use amp_output_overwrite::AMPOutputOverwritePacket;
 use change_mode::ChangeModePacket;
 use fire_pyro::FirePyroPacket;
+use set_target_apogee::SetTargetApogeePacket;
 use gps_beacon::GPSBeaconPacket;
 use low_power_telemetry::LowPowerTelemetryPacket;
 use payload_eps_output_overwrite::PayloadEPSOutputOverwritePacket;
@@ -24,6 +25,7 @@ pub mod payload_eps_output_overwrite;
 pub mod reset;
 pub mod self_test_result;
 pub mod telemetry;
+pub mod set_target_apogee;
 
 // TODO change
 pub const MAX_VLP_PACKET_SIZE: usize = 100;
@@ -93,6 +95,7 @@ pub enum VLPUplinkPacket {
     PayloadEPSOutputOverwrite(PayloadEPSOutputOverwritePacket),
     AMPOutputOverwrite(AMPOutputOverwritePacket),
     FirePyro(FirePyroPacket),
+    SetTargetApogee(SetTargetApogeePacket)
 }
 
 impl VLPUplinkPacket {
@@ -111,6 +114,7 @@ impl VLPUplinkPacket {
                 AMPOutputOverwritePacket::deserialize(data).map(VLPUplinkPacket::AMPOutputOverwrite)
             }
             4 => FirePyroPacket::deserialize(data).map(VLPUplinkPacket::FirePyro),
+            5 => SetTargetApogeePacket::deserialize(data).map(VLPUplinkPacket::SetTargetApogee),
             _ => None,
         }
     }
@@ -122,6 +126,7 @@ impl VLPUplinkPacket {
             VLPUplinkPacket::PayloadEPSOutputOverwrite(_) => 2,
             VLPUplinkPacket::AMPOutputOverwrite(_) => 3,
             VLPUplinkPacket::FirePyro(_) => 4,
+            VLPUplinkPacket::SetTargetApogee(_) => 5,
         };
         buffer = &mut buffer[1..];
 
@@ -131,6 +136,7 @@ impl VLPUplinkPacket {
             VLPUplinkPacket::PayloadEPSOutputOverwrite(packet) => packet.serialize(buffer),
             VLPUplinkPacket::AMPOutputOverwrite(packet) => packet.serialize(buffer),
             VLPUplinkPacket::FirePyro(packet) => packet.serialize(buffer),
+            VLPUplinkPacket::SetTargetApogee(packet) => packet.serialize(buffer),
         }
     }
 }

@@ -28,6 +28,7 @@ use firmware_common_new::{
             fire_pyro::{FirePyroPacket, PyroSelect},
             payload_eps_output_overwrite::PayloadEPSOutputOverwritePacket,
             reset::{DeviceToReset, ResetPacket},
+            set_target_apogee::SetTargetApogeePacket,
         },
     },
 };
@@ -158,6 +159,54 @@ pub fn tui_task(
             .set_visible(true);
     };
 
+    let create_set_target_altitude_input = || {
+        Button::new("Target apogee", move |s| {
+            s.add_layer(
+                Dialog::new()
+                    .title("Target apogee")
+                    .content(
+                        LinearLayout::horizontal()
+                            .child(TextView::new("Target Altitude (Meters): "))
+                            .child(
+                                LinearLayout::vertical()
+                                    .child(
+                                        EditView::new().content("").with_name("target_apogee"),
+                                    )
+                                    .fixed_width(10),
+                            ),
+                    )
+                    .dismiss_button("Cancel")
+                    .button("Confirm", {
+                        move |s| {
+                            let target_apogee = s
+                                .find_name::<EditView>("target_apogee")
+                                .unwrap()
+                                .get_content();
+                            let target_apogee = match target_apogee.parse::<f32>() {
+                                Ok(f) => f,
+                                Err(_) => {
+                                    s.add_layer(Dialog::info("Invalid target apogee value"));
+                                    return;
+                                }
+                            };
+
+                            let packet = VLPUplinkPacket::SetTargetApogee(
+                                SetTargetApogeePacket::new(target_apogee),
+                            );
+
+                            s.pop_layer().unwrap();
+
+                            send_packet(s, packet);
+
+                            s.add_layer(Dialog::info(
+                                format!("Sending new target apogee of {} meters", target_apogee).as_str(),
+                            ));
+                        }
+                    }),
+            );
+        })
+        .align_center_left()
+    };
     let create_simple_packet_button =
         |button_text: &str, dialog_message: &str, packet: VLPUplinkPacket| {
             let button_text = button_text.to_string();
@@ -607,6 +656,7 @@ pub fn tui_task(
                             HideableView::new(
                                 LinearLayout::vertical()
                                     .child(create_config_button())
+                                    .child(create_set_target_altitude_input())
                                     .child(create_simple_packet_button(
                                         "Low Power Mode",
                                         "Change rocket to low power mode?",
