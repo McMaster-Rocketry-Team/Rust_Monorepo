@@ -170,7 +170,7 @@ pub fn tui_task(
                             .child(
                                 LinearLayout::vertical()
                                     .child(
-                                        EditView::new().content("4000").with_name("target_apogee"),
+                                        EditView::new().content("").with_name("target_apogee (meters)"),
                                     )
                                     .fixed_width(10),
                             ),
@@ -199,7 +199,7 @@ pub fn tui_task(
                             send_packet(s, packet);
 
                             s.add_layer(Dialog::info(
-                                format!("Sending new target apogee of {}", target_apogee).as_str(),
+                                format!("Sending new target apogee of {} meters", target_apogee).as_str(),
                             ));
                         }
                     }),
