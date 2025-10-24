@@ -1,4 +1,3 @@
-use num_traits::Float;
 use packed_struct::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -6,13 +5,6 @@ use crate::fixed_point_factory;
 
 use super::VLPUplinkPacket;
 
-// #[cfg_attr(feature = "defmt", derive(defmt::Format))]
-// #[derive(
-//     PrimitiveEnum_u8, Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize,
-// )]
-// #[repr(C)]
-
-// note, AltitudeFac already exists, but for some reason everything its used for seems to be discarded...
 fixed_point_factory!(TargetAltitudeFac, f32, 0.0, 10_000.0, 0.01);
 
 #[derive(PackedStruct, Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -31,10 +23,6 @@ impl SetTargetApogeePacket {
 
     pub fn get_altitude(&self) -> f32 {
         TargetAltitudeFac::to_float(self.altitude)
-    }
-
-    pub fn set_altitude(&mut self, altitude: f32) {
-        self.altitude = TargetAltitudeFac::to_fixed_point_capped(altitude);
     }
 }
 

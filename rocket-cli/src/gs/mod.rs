@@ -170,9 +170,7 @@ pub fn tui_task(
                             .child(
                                 LinearLayout::vertical()
                                     .child(
-                                        EditView::new()
-                                            .content("4000") // TODO, get current target altitude and display here?
-                                            .with_name("target_apogee"),
+                                        EditView::new().content("4000").with_name("target_apogee"),
                                     )
                                     .fixed_width(10),
                             ),
@@ -198,20 +196,7 @@ pub fn tui_task(
 
                             s.pop_layer().unwrap();
 
-                            // send_packet(&mut siv, packet); // this makes the compiler complain
-
-                            client.send_nb(packet.clone());
-                            let mut last_uplink_packet = last_uplink_packet.write().unwrap();
-                            *last_uplink_packet = Some(packet);
-
-                            s.find_name::<HideableView<LinearLayout>>("uplink_buttons_hideable")
-                                .unwrap()
-                                .set_visible(false);
-                            s.find_name::<HideableView<TextView>>("uplink_sending_hideable")
-                                .unwrap()
-                                .set_visible(true);
-
-                            // same code, but compiler doesnt complain?
+                            send_packet(s, packet);
 
                             s.add_layer(Dialog::info(
                                 format!("Sending new target apogee of {}", target_apogee).as_str(),
