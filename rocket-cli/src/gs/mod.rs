@@ -166,11 +166,11 @@ pub fn tui_task(
                     .title("Target apogee")
                     .content(
                         LinearLayout::horizontal()
-                            .child(TextView::new("Target Altitude: "))
+                            .child(TextView::new("Target Altitude (Meters): "))
                             .child(
                                 LinearLayout::vertical()
                                     .child(
-                                        EditView::new().content("").with_name("target_apogee (meters)"),
+                                        EditView::new().content("").with_name("target_apogee"),
                                     )
                                     .fixed_width(10),
                             ),
