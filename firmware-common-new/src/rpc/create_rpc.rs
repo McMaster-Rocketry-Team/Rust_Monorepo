@@ -111,9 +111,12 @@ macro_rules! create_rpc {
                                     Err(e)?;
                                 }
                             }
-                            let received_crc = request_buffer[1];
+                            let received_crc = request_buffer[0];
+                            
+                            let mut digest = crc.digest();
+                            digest.update(&[request_buffer[1]]);
 
-                            match request_buffer[0] {
+                            match request_buffer[1] {
                                 $(
                                     $rpc_i => {
                                         let request_size = size_of::<<[< $name:camel Request >] as Archive>::Archived>();
@@ -130,7 +133,8 @@ macro_rules! create_rpc {
                                             }
                                         }
 
-                                        let calculated_crc = crc.checksum(&request_buffer[..request_size]);
+                                        digest.update(&request_buffer[..request_size]);
+                                        let calculated_crc = digest.finalize();
                                         if calculated_crc != received_crc {
                                             log_warn!("Command CRC mismatch, skipping. received: {}, calculated: {}", received_crc, calculated_crc);
                                             continue;
@@ -252,8 +256,8 @@ macro_rules! create_rpc {
                         )
                         .unwrap();
 
-                        self.request_buffer[14] = $rpc_i;
-                        self.request_buffer[15] = self.crc.checksum(&self.request_buffer[16..(request_size + 16)]);
+                        self.request_buffer[15] = $rpc_i;
+                        self.request_buffer[14] = self.crc.checksum(&self.request_buffer[15..(request_size + 16)]);
                         
                         self.serial.write_all(&self.request_buffer[14..(request_size + 16)]).await.map_err(RpcClientError::Serial)?;
                         self.serial.read_exact(&mut self.response_buffer[..(response_size + 1)]).await?;
