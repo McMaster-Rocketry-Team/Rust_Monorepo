@@ -266,8 +266,8 @@ impl VelocityEstimator {
         self.x[1] = self.x[1].max(0.0); // s ≥ 0
         self.x[2] = self.x[2].clamp(0.0, core::f32::consts::FRAC_PI_2); // 0..π/2
 
-
-        plot_add_value!("tilt rate", self.x[3]);
-        plot_add_value!("tilt bias", self.x[4]);
+        plot_add_value!("measured tilt deg", tilt_meas_rad.to_degrees());
+        plot_add_value!("tilt rate deg per s", self.x[3].to_degrees());
+        plot_add_value!("tilt bias deg", self.x[4].to_degrees());
     }
 }
