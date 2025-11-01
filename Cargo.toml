@@ -1,21 +1,17 @@
 [workspace]
 members = [
-    "firmware-common",
-    "vlfs",
-    "ferraris-calibration",
-    "vl-cli",
-    "calculate-required-bits",
-    "vl-host-lib",
-    "dspower-servo",
-
-    "servo-debug-gui",
-
     "firmware-common-new",
     "firmware-common-ffi",
-    "air-brakes-controller-core",
-    
     "rocket-cli",
-    "defmt-rtt-pipe", "air-brakes-controller-wasm",
+
+    "calculate-required-bits",
+    "defmt-rtt-pipe",
+
+    "dspower-servo",
+    "servo-debug-gui",
+
+    "air-brakes-controller-core",
+    "air-brakes-controller-wasm",
 ]
 resolver = "2"
 
