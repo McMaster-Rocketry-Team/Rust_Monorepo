@@ -6,10 +6,14 @@
     "cstdlib": "cpp",
     "cstddef": "cpp"
   },
-  "rust-analyzer.procMacro.ignored": {
-    "java-bindgen-macro": [
-      "java_bindgen",
-      "java_bindgen_java_class"
-    ]
-  }
+  "todohighlight.keywords": [
+    "TODO",
+    "todo!"
+  ],
+  "errorLens.enabledDiagnosticLevels": [
+    "error"
+  ],
+  "errorLens.messageEnabled": true,
+  "errorLens.enabled": true,
+  "window.title": "Monorepo ${separator} ${activeEditorShort}",
 }
