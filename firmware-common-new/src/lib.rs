@@ -14,6 +14,7 @@ mod tests;
 
 pub mod bootloader;
 pub mod can_bus;
+pub mod usb_encoder;
 pub(crate) mod fixed_point;
 pub mod gps;
 pub mod readings;

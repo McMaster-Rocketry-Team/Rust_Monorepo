@@ -176,7 +176,7 @@ impl<M: RawMutex, const N: usize, const PN: usize> CanSender<M, N, PN> {
         for data in multi_frame_encoder {
             let success = self.channel.try_send((id, data)).is_ok();
             if !success {
-                log_warn!("can bus sender buffer overflow");
+                // log_warn!("can bus sender buffer overflow");
                 break;
             }
         }

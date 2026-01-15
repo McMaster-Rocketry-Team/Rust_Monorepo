@@ -13,8 +13,8 @@ use std::fs::File;
 use std::io;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 
-use anyhow::Ok;
 use anyhow::{Result, anyhow};
 use args::Cli;
 use args::ModeSelect;
@@ -26,9 +26,14 @@ use connection_method::get_connection_method;
 use fern::Dispatch;
 use fern::colors::Color;
 use fern::colors::ColoredLevelConfig;
+use firmware_common_new::vlp::usb::CliRequest;
 use gen_key::gen_ota_key;
 use log::LevelFilter;
 use monitor::monitor_tui;
+use rusb::Context;
+use rusb::Device;
+use rusb::Direction;
+use rusb::Language;
 use testing::decode_bluetooth_chunk::test_decode_bluetooth_chunk;
 use testing::mock_connection_method::MockConnectionMethod;
 
@@ -91,6 +96,26 @@ async fn main() -> Result<()> {
         ModeSelect::Testing(TestingModeSelect::SendVLPTelemetry(args)) => {
             send_fake_vlp_telemetry(args).await
         }
+        ModeSelect::ListFiles => {
+            match list_files().await {
+                Ok(files) => {
+                    for filename in files {
+                        println!("{}", filename);
+                    }
+                }
+                Err(e) => {
+                    println!("[ERROR]: {}", e)
+                }
+            }
+            println!("done");
+            todo!()
+        }
+        ModeSelect::DownloadFile(download_file_args) => {
+            todo!()
+        }
+        ModeSelect::ClearStorage => {
+            todo!()
+        }
     }
 }
 
@@ -141,4 +166,70 @@ fn init_logging() -> Result<()> {
     Dispatch::new().chain(stdout).chain(logfile).apply()?;
 
     Ok(())
+}
+
+async fn list_files() -> anyhow::Result<Vec<String>> {
+    use rusb::*;
+
+    let ctx = Context::new()?;
+
+    let dev = ctx
+        .devices()?
+        .iter()
+        .find(|d| {
+            let serial_num = get_serial_number(&d).unwrap().unwrap();
+
+            let pred = serial_num == "4206980085";
+
+            if pred {
+                println!("connecting to VLF5");
+            }
+
+            pred
+        })
+        .expect("Device not found")
+        .open()?;
+
+    let iface = 0;
+    dev.claim_interface(iface)?;
+
+    dev.write_control(
+        rusb::request_type(Direction::Out, RequestType::Vendor, Recipient::Interface),
+        101,
+        CliRequest::List as u16, // corresponds to list
+        iface as u16,
+        &[],
+        std::time::Duration::from_secs(1),
+    )?;
+
+    let ep_in_addr = 0x81;
+
+    let mut buf = [0u8; 1024];
+
+    let n = dev.read_bulk(1, &mut buf, Duration::from_secs(2))?;
+
+    let message = buf.iter().map(|f| format!("{:?}", f)).collect();
+
+    println!("Received {} bytes: {:?}", n, &buf[..n]);
+
+    Ok(vec![message])
+}
+
+pub fn get_serial_number(device: &Device<Context>) -> Result<Option<String>> {
+    let desc = device.device_descriptor()?;
+
+    let Some(idx) = desc.serial_number_string_index() else {
+        return Ok(None);
+    };
+
+    let handle = device.open()?;
+
+    // Read available languages
+    let langs = handle.read_languages(Duration::from_secs(2))?;
+    let lang = langs.get(0).copied().unwrap();
+
+    // Read string
+    let serial = handle.read_string_descriptor(lang, idx, Duration::from_secs(2))?;
+
+    Ok(Some(serial))
 }
