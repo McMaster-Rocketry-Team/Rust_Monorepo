@@ -57,7 +57,7 @@ void send_example() {
 
     // 2. Get the CAN frame ID
     // Requires node_type and node_id of the sender
-    uint32_t frame_id = msg.get_id(10, 20);
+    uint32_t frame_id = get_frame_id(msg, 10, 20);
 
     // 3. Initialize the Multi-Frame Encoder
     CanBusMultiFrameEncoder encoder(msg);

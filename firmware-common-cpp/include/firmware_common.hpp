@@ -131,10 +131,6 @@ namespace can_bus {
 
         static constexpr uint8_t PRIORITY = 4;
 
-        uint32_t get_id(uint8_t node_type, uint16_t node_id) const noexcept {
-            return CanBusExtendedId::create(PRIORITY, MESSAGE_TYPE, node_type, node_id);
-        }
-
         void serialize(uint8_t* buffer) const noexcept {
              std::memset(buffer, 0, SIZE_BYTES);
              write_u16_be(buffer, crc);
@@ -175,10 +171,6 @@ namespace can_bus {
 
         static constexpr uint8_t PRIORITY = 2;
 
-        uint32_t get_id(uint8_t node_type, uint16_t node_id) const noexcept {
-            return CanBusExtendedId::create(PRIORITY, MESSAGE_TYPE, node_type, node_id);
-        }
-
         void serialize(uint8_t* buffer) const noexcept {
             uint8_t b = 0;
             b |= (static_cast<uint8_t>(out1) & 0x03) << 6;
@@ -207,10 +199,6 @@ namespace can_bus {
         AmpResetOutputMessage(uint8_t out = 0) noexcept : output(out) {}
 
         static constexpr uint8_t PRIORITY = 2;
-
-        uint32_t get_id(uint8_t node_type, uint16_t node_id) const noexcept {
-            return CanBusExtendedId::create(PRIORITY, MESSAGE_TYPE, node_type, node_id);
-        }
 
         void serialize(uint8_t* buffer) const noexcept {
             buffer[0] = output;
@@ -257,10 +245,6 @@ namespace can_bus {
         AmpOutputStatus out4;
 
         static constexpr uint8_t PRIORITY = 5;
-
-        uint32_t get_id(uint8_t node_type, uint16_t node_id) const noexcept {
-            return CanBusExtendedId::create(PRIORITY, MESSAGE_TYPE, node_type, node_id);
-        }
 
         void serialize(uint8_t* buffer) const noexcept {
             std::memset(buffer, 0, SIZE_BYTES);
@@ -309,10 +293,6 @@ namespace can_bus {
 
         static constexpr uint8_t PRIORITY = 3;
 
-        uint32_t get_id(uint8_t node_type, uint16_t node_id) const noexcept {
-            return CanBusExtendedId::create(PRIORITY, MESSAGE_TYPE, node_type, node_id);
-        }
-
         void serialize(uint8_t* buffer) const noexcept {
              write_u32_be(buffer, pressure_raw);
              write_u16_be(buffer + 4, temperature_raw);
@@ -347,10 +327,6 @@ namespace can_bus {
         }
 
         static constexpr uint8_t PRIORITY = 5;
-
-        uint32_t get_id(uint8_t node_type, uint16_t node_id) const noexcept {
-            return CanBusExtendedId::create(PRIORITY, MESSAGE_TYPE, node_type, node_id);
-        }
 
         void serialize(uint8_t* buffer) const noexcept {
             write_u32_be(buffer, brightness_lux_raw);
@@ -387,10 +363,6 @@ namespace can_bus {
             start_of_transfer(false), end_of_transfer(false), data_type(DataType::Firmware), destination_node_id(0) {}
 
         static constexpr uint8_t PRIORITY = 6;
-
-        uint32_t get_id(uint8_t node_type, uint16_t node_id) const noexcept {
-            return CanBusExtendedId::create(PRIORITY, MESSAGE_TYPE, node_type, node_id);
-        }
 
         void serialize(uint8_t* buffer) const noexcept {
             // 0..32: data
@@ -458,10 +430,6 @@ namespace can_bus {
 
         static constexpr uint8_t PRIORITY = 5;
 
-        uint32_t get_id(uint8_t node_type, uint16_t node_id) const noexcept {
-            return CanBusExtendedId::create(PRIORITY, MESSAGE_TYPE, node_type, node_id);
-        }
-
         void serialize(uint8_t* buffer) const noexcept {
             write_u16_be(buffer, actual_extension_percentage);
             write_u16_be(buffer + 2, servo_temperature_raw);
@@ -509,10 +477,6 @@ namespace can_bus {
 
         static constexpr uint8_t PRIORITY = 3;
 
-        uint32_t get_id(uint8_t node_type, uint16_t node_id) const noexcept {
-            return CanBusExtendedId::create(PRIORITY, MESSAGE_TYPE, node_type, node_id);
-        }
-
         void serialize(uint8_t* buffer) const noexcept {
             for(int i=0; i<3; i++) write_u32_be(buffer + i*4, acc_raw[i]);
             for(int i=0; i<3; i++) write_u32_be(buffer + 12 + i*4, gyro_raw[i]);
@@ -551,10 +515,6 @@ namespace can_bus {
         }
 
         static constexpr uint8_t PRIORITY = 3;
-
-        uint32_t get_id(uint8_t node_type, uint16_t node_id) const noexcept {
-            return CanBusExtendedId::create(PRIORITY, MESSAGE_TYPE, node_type, node_id);
-        }
 
         void serialize(uint8_t* buffer) const noexcept {
             for(int i=0; i<3; i++) write_u32_be(buffer + i*4, mag_raw[i]);
@@ -597,10 +557,6 @@ namespace can_bus {
 
         static constexpr uint8_t PRIORITY = 5;
 
-        uint32_t get_id(uint8_t node_type, uint16_t node_id) const noexcept {
-            return CanBusExtendedId::create(PRIORITY, MESSAGE_TYPE, node_type, node_id);
-        }
-
         void serialize(uint8_t* buffer) const noexcept {
             write_u24_be(buffer, uptime_s);
             
@@ -642,10 +598,6 @@ namespace can_bus {
 
         static constexpr uint8_t PRIORITY = 5;
 
-        uint32_t get_id(uint8_t node_type, uint16_t node_id) const noexcept {
-            return CanBusExtendedId::create(PRIORITY, MESSAGE_TYPE, node_type, node_id);
-        }
-
         void serialize(uint8_t* buffer) const noexcept {
             write_u32_be(buffer, sg_1_raw);
             write_u32_be(buffer + 4, sg_2_raw);
@@ -673,10 +625,6 @@ namespace can_bus {
         uint16_t node_id; // 12 bits
 
         static constexpr uint8_t PRIORITY = 2;
-
-        uint32_t get_id(uint8_t node_type, uint16_t node_id) const noexcept {
-            return CanBusExtendedId::create(PRIORITY, MESSAGE_TYPE, node_type, node_id);
-        }
 
         void serialize(uint8_t* buffer) const noexcept {
             // Byte 0: 3v3(2), 5v(2), 9v(2), node_id_hi(2)
@@ -750,10 +698,6 @@ namespace can_bus {
 
         static constexpr uint8_t PRIORITY = 5;
 
-        uint32_t get_id(uint8_t node_type, uint16_t node_id) const noexcept {
-            return CanBusExtendedId::create(PRIORITY, MESSAGE_TYPE, node_type, node_id);
-        }
-
         void serialize(uint8_t* buffer) const noexcept {
             write_u16_be(buffer, battery1_mv);
             write_u16_be(buffer + 2, battery1_temperature_raw);
@@ -786,10 +730,6 @@ namespace can_bus {
         bool into_bootloader;
 
         static constexpr uint8_t PRIORITY = 0;
-
-        uint32_t get_id(uint8_t node_type, uint16_t node_id) const noexcept {
-            return CanBusExtendedId::create(PRIORITY, MESSAGE_TYPE, node_type, node_id);
-        }
 
         void serialize(uint8_t* buffer) const noexcept {
             // Byte 0: node_id[11..4]
@@ -844,10 +784,6 @@ namespace can_bus {
 
         static constexpr uint8_t PRIORITY = 3;
 
-        uint32_t get_id(uint8_t node_type, uint16_t node_id) const noexcept {
-            return CanBusExtendedId::create(PRIORITY, MESSAGE_TYPE, node_type, node_id);
-        }
-
         void serialize(uint8_t* buffer) const noexcept {
             write_u32_be(buffer, velocity_raw[0]);
             write_u32_be(buffer + 4, velocity_raw[1]);
@@ -873,10 +809,6 @@ namespace can_bus {
         uint64_t timestamp_us;
 
         static constexpr uint8_t PRIORITY = 1;
-
-        uint32_t get_id(uint8_t node_type, uint16_t node_id) const noexcept {
-            return CanBusExtendedId::create(PRIORITY, MESSAGE_TYPE, node_type, node_id);
-        }
 
         void serialize(uint8_t* buffer) const noexcept {
             write_u56_be(buffer, timestamp_us);
@@ -908,10 +840,6 @@ namespace can_bus {
         uint16_t battery_mv;
 
         static constexpr uint8_t PRIORITY = 2;
-
-        uint32_t get_id(uint8_t node_type, uint16_t node_id) const noexcept {
-            return CanBusExtendedId::create(PRIORITY, MESSAGE_TYPE, node_type, node_id);
-        }
 
         void serialize(uint8_t* buffer) const noexcept {
             buffer[0] = static_cast<uint8_t>(flight_stage);
@@ -954,10 +882,6 @@ namespace can_bus {
 
         static constexpr uint8_t PRIORITY = 2;
 
-        uint32_t get_id(uint8_t node_type, uint16_t node_id) const noexcept {
-            return CanBusExtendedId::create(PRIORITY, MESSAGE_TYPE, node_type, node_id);
-        }
-
         void serialize(uint8_t* buffer) const noexcept {
             std::memset(buffer, 0, SIZE_BYTES); // Zero out for padding
             write_u16_be(buffer, extension_percentage);
@@ -983,10 +907,6 @@ namespace can_bus {
             : out1_enable(o1), out2_enable(o2), out3_enable(o3), out4_enable(o4) {}
 
         static constexpr uint8_t PRIORITY = 2;
-
-        uint32_t get_id(uint8_t node_type, uint16_t node_id) const noexcept {
-            return CanBusExtendedId::create(PRIORITY, MESSAGE_TYPE, node_type, node_id);
-        }
 
         void serialize(uint8_t* buffer) const noexcept {
             uint8_t byte = 0;
@@ -1033,6 +953,7 @@ namespace can_bus {
 
     struct PreUnixTimeMessage {
         static constexpr uint32_t MESSAGE_TYPE = 8;
+        static constexpr uint8_t PRIORITY = 1;
         static constexpr size_t SIZE_BYTES = 0;
         
         static PreUnixTimeMessage deserialize(const uint8_t* buffer) noexcept {
@@ -1069,6 +990,17 @@ namespace can_bus {
         UnixTimeMessage,
         VLStatusMessage
     >;
+
+    inline uint32_t get_frame_id(const CanBusMessage& message, uint8_t node_type, uint16_t node_id) noexcept {
+        return std::visit([node_type, node_id](const auto& msg) -> uint32_t {
+            using T = std::decay_t<decltype(msg)>;
+            if constexpr (std::is_same_v<T, std::monostate>) {
+                return 0;
+            } else {
+                return CanBusExtendedId::create(T::PRIORITY, T::MESSAGE_TYPE, node_type, node_id);
+            }
+        }, message);
+    }
 
     class CanBusMultiFrameEncoder {
     public:
