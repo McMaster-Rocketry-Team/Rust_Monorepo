@@ -118,7 +118,7 @@ pub extern "C" fn encode_can_bus_message(
 
     let id = message.get_id(self_node_type, self_node_id);
 
-    let multi_frame_encoder = CanBusMultiFrameEncoder::new(message);
+    let multi_frame_encoder = CanBusMultiFrameEncoder::new(&message);
     let crc = multi_frame_encoder.crc;
     let mut i = 0;
     for data in multi_frame_encoder {

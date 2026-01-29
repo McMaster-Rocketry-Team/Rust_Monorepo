@@ -4,6 +4,7 @@
 #include <cstring>
 #include <variant>
 #include <optional>
+#include <type_traits>
 
 namespace firmware_common {
 namespace can_bus {
@@ -1030,14 +1031,61 @@ namespace can_bus {
         }
     };
 
+    struct PreUnixTimeMessage {
+        static constexpr uint32_t MESSAGE_TYPE = 8;
+        static constexpr size_t SIZE_BYTES = 0;
+        
+        static PreUnixTimeMessage deserialize(const uint8_t* buffer) noexcept {
+            (void)buffer;
+            return PreUnixTimeMessage();
+        }
+
+        void serialize(uint8_t* buffer) const noexcept {
+            (void)buffer;
+        }
+    };
+
+    using CanBusMessage = std::variant<
+        std::monostate, // Represents no message or error
+        AckMessage,
+        AirBrakesControlMessage,
+        AmpControlMessage,
+        AmpOverwriteMessage,
+        AmpResetOutputMessage,
+        AmpStatusMessage,
+        BaroMeasurementMessage,
+        BrightnessMeasurementMessage,
+        DataTransferMessage,
+        IcarusStatusMessage,
+        IMUMeasurementMessage,
+        MagMeasurementMessage,
+        NodeStatusMessage,
+        OzysMeasurementMessage,
+        PayloadEPSOutputOverwriteMessage,
+        PayloadEPSStatusMessage,
+        PreUnixTimeMessage,
+        ResetMessage,
+        RocketStateMessage,
+        UnixTimeMessage,
+        VLStatusMessage
+    >;
+
     class CanBusMultiFrameEncoder {
     public:
-        static constexpr size_t MAX_CAN_MESSAGE_SIZE = 256; // Matching Rust's MAX_CAN_MESSAGE_SIZE if it were defined similarly
+        static constexpr size_t MAX_CAN_MESSAGE_SIZE = 64;
 
-        CanBusMultiFrameEncoder(const uint8_t* serialized_message, size_t len) noexcept
-            : message_len(len), offset(0), toggle(false) {
-            std::memcpy(this->serialized_message, serialized_message, len);
-            this->crc = calculate_crc(serialized_message, len);
+        CanBusMultiFrameEncoder(const CanBusMessage& message) noexcept
+            : offset(0), toggle(false) {
+            std::visit([this](const auto& msg) {
+                using T = std::decay_t<decltype(msg)>;
+                if constexpr (std::is_same_v<T, std::monostate>) {
+                    this->message_len = 0;
+                } else {
+                    this->message_len = T::SIZE_BYTES;
+                    msg.serialize(this->serialized_message);
+                }
+            }, message);
+            this->crc = calculate_crc(this->serialized_message, this->message_len);
         }
 
         struct Frame {
@@ -1113,41 +1161,6 @@ namespace can_bus {
             return crc;
         }
     };
-
-    struct PreUnixTimeMessage {
-        static constexpr uint32_t MESSAGE_TYPE = 8;
-        static constexpr size_t SIZE_BYTES = 0;
-        
-        static PreUnixTimeMessage deserialize(const uint8_t* buffer) noexcept {
-            (void)buffer;
-            return PreUnixTimeMessage();
-        }
-    };
-
-    using CanBusMessage = std::variant<
-        std::monostate, // Represents no message or error
-        AckMessage,
-        AirBrakesControlMessage,
-        AmpControlMessage,
-        AmpOverwriteMessage,
-        AmpResetOutputMessage,
-        AmpStatusMessage,
-        BaroMeasurementMessage,
-        BrightnessMeasurementMessage,
-        DataTransferMessage,
-        IcarusStatusMessage,
-        IMUMeasurementMessage,
-        MagMeasurementMessage,
-        NodeStatusMessage,
-        OzysMeasurementMessage,
-        PayloadEPSOutputOverwriteMessage,
-        PayloadEPSStatusMessage,
-        PreUnixTimeMessage,
-        ResetMessage,
-        RocketStateMessage,
-        UnixTimeMessage,
-        VLStatusMessage
-    >;
 
     inline std::optional<CanBusMessage> decode(uint8_t message_type, const uint8_t* buffer) noexcept {
         switch(message_type) {

@@ -59,14 +59,10 @@ void send_example() {
     // Requires node_type and node_id of the sender
     uint32_t frame_id = msg.get_id(10, 20);
 
-    // 3. Serialize the message to a byte array
-    uint8_t serialized[AirBrakesControlMessage::SIZE_BYTES];
-    msg.serialize(serialized);
+    // 3. Initialize the Multi-Frame Encoder
+    CanBusMultiFrameEncoder encoder(msg);
 
-    // 4. Initialize the Multi-Frame Encoder
-    CanBusMultiFrameEncoder encoder(serialized, sizeof(serialized));
-
-    // 5. Iterate through frames and send
+    // 4. Iterate through frames and send
     while (encoder.has_next()) {
         auto frame = encoder.next();
         

@@ -45,11 +45,11 @@ std::string resolve_path(const std::string& filename) {
 }
 
 // Helper to verify encoder output
-void check_encoder(const uint8_t* serialized_buffer, size_t len, const json& item, const std::string& msg_key) {
+void check_encoder(const firmware_common::can_bus::CanBusMessage& message, const json& item, const std::string& msg_key) {
     if (!item.contains("encoded_data")) return;
 
     auto expected_encoded = item["encoded_data"];
-    firmware_common::can_bus::CanBusMultiFrameEncoder encoder(serialized_buffer, len);
+    firmware_common::can_bus::CanBusMultiFrameEncoder encoder(message);
     
     size_t frame_idx = 0;
     while (encoder.has_next()) {
@@ -85,7 +85,7 @@ TEST(AirBrakesControlTest, ReferenceData) {
         msg.serialize(buffer);
         for (size_t i = 0; i < serialized_data.size(); ++i) EXPECT_EQ(buffer[i], serialized_data[i]);
         
-        check_encoder(buffer, firmware_common::can_bus::AirBrakesControlMessage::SIZE_BYTES, item, "AirBrakesControl");
+        check_encoder(msg, item, "AirBrakesControl");
     }
 }
 
@@ -113,7 +113,7 @@ TEST(AmpControlTest, ReferenceData) {
         msg.serialize(buffer);
         for (size_t i = 0; i < serialized_data.size(); ++i) EXPECT_EQ(buffer[i], serialized_data[i]);
         
-        check_encoder(buffer, firmware_common::can_bus::AmpControlMessage::SIZE_BYTES, item, "AmpControl");
+        check_encoder(msg, item, "AmpControl");
     }
 }
 
@@ -136,7 +136,7 @@ TEST(AckTest, ReferenceData) {
         msg.serialize(buffer);
         for (size_t i = 0; i < serialized_data.size(); ++i) EXPECT_EQ(buffer[i], serialized_data[i]) << "Mismatch at byte " << i;
         
-        check_encoder(buffer, firmware_common::can_bus::AckMessage::SIZE_BYTES, item, "Ack");
+        check_encoder(msg, item, "Ack");
     }
 }
 
@@ -166,7 +166,7 @@ TEST(AmpOverwriteTest, ReferenceData) {
         msg.serialize(buffer);
         for (size_t i = 0; i < serialized_data.size(); ++i) EXPECT_EQ(buffer[i], serialized_data[i]);
         
-        check_encoder(buffer, firmware_common::can_bus::AmpOverwriteMessage::SIZE_BYTES, item, "AmpOverwrite");
+        check_encoder(msg, item, "AmpOverwrite");
     }
 }
 
@@ -187,7 +187,7 @@ TEST(AmpResetOutputTest, ReferenceData) {
         msg.serialize(buffer);
         for (size_t i = 0; i < serialized_data.size(); ++i) EXPECT_EQ(buffer[i], serialized_data[i]);
         
-        check_encoder(buffer, firmware_common::can_bus::AmpResetOutputMessage::SIZE_BYTES, item, "AmpResetOutput");
+        check_encoder(msg, item, "AmpResetOutput");
     }
 }
 
@@ -228,7 +228,7 @@ TEST(AmpStatusTest, ReferenceData) {
         msg.serialize(buffer);
         for (size_t i = 0; i < serialized_data.size(); ++i) EXPECT_EQ(buffer[i], serialized_data[i]);
         
-        check_encoder(buffer, firmware_common::can_bus::AmpStatusMessage::SIZE_BYTES, item, "AmpStatus");
+        check_encoder(msg, item, "AmpStatus");
     }
 }
 
@@ -254,7 +254,7 @@ TEST(BaroMeasurementTest, ReferenceData) {
         msg.serialize(buffer);
         for (size_t i = 0; i < serialized_data.size(); ++i) EXPECT_EQ(buffer[i], serialized_data[i]);
         
-        check_encoder(buffer, firmware_common::can_bus::BaroMeasurementMessage::SIZE_BYTES, item, "BaroMeasurement");
+        check_encoder(msg, item, "BaroMeasurement");
     }
 }
 
@@ -278,7 +278,7 @@ TEST(BrightnessMeasurementTest, ReferenceData) {
         msg.serialize(buffer);
         for (size_t i = 0; i < serialized_data.size(); ++i) EXPECT_EQ(buffer[i], serialized_data[i]);
         
-        check_encoder(buffer, firmware_common::can_bus::BrightnessMeasurementMessage::SIZE_BYTES, item, "BrightnessMeasurement");
+        check_encoder(msg, item, "BrightnessMeasurement");
     }
 }
 
@@ -316,7 +316,7 @@ TEST(DataTransferTest, ReferenceData) {
         msg.serialize(buffer);
         for (size_t i = 0; i < serialized_data.size(); ++i) EXPECT_EQ(buffer[i], serialized_data[i]) << "Mismatch at byte " << i;
         
-        check_encoder(buffer, firmware_common::can_bus::DataTransferMessage::SIZE_BYTES, item, "DataTransfer");
+        check_encoder(msg, item, "DataTransfer");
     }
 }
 
@@ -342,7 +342,7 @@ TEST(IcarusStatusTest, ReferenceData) {
         msg.serialize(buffer);
         for (size_t i = 0; i < serialized_data.size(); ++i) EXPECT_EQ(buffer[i], serialized_data[i]);
         
-        check_encoder(buffer, firmware_common::can_bus::IcarusStatusMessage::SIZE_BYTES, item, "IcarusStatus");
+        check_encoder(msg, item, "IcarusStatus");
     }
 }
 
@@ -372,7 +372,7 @@ TEST(ImuMeasurementTest, ReferenceData) {
         msg.serialize(buffer);
         for (size_t i = 0; i < serialized_data.size(); ++i) EXPECT_EQ(buffer[i], serialized_data[i]);
         
-        check_encoder(buffer, firmware_common::can_bus::IMUMeasurementMessage::SIZE_BYTES, item, "IMUMeasurement");
+        check_encoder(msg, item, "IMUMeasurement");
     }
 }
 
@@ -398,7 +398,7 @@ TEST(MagMeasurementTest, ReferenceData) {
         msg.serialize(buffer);
         for (size_t i = 0; i < serialized_data.size(); ++i) EXPECT_EQ(buffer[i], serialized_data[i]);
         
-        check_encoder(buffer, firmware_common::can_bus::MagMeasurementMessage::SIZE_BYTES, item, "MagMeasurement");
+        check_encoder(msg, item, "MagMeasurement");
     }
 }
 
@@ -439,7 +439,7 @@ TEST(NodeStatusTest, ReferenceData) {
         msg.serialize(buffer);
         for (size_t i = 0; i < serialized_data.size(); ++i) EXPECT_EQ(buffer[i], serialized_data[i]);
         
-        check_encoder(buffer, firmware_common::can_bus::NodeStatusMessage::SIZE_BYTES, item, "NodeStatus");
+        check_encoder(msg, item, "NodeStatus");
     }
 }
 
@@ -467,7 +467,7 @@ TEST(OzysMeasurementTest, ReferenceData) {
         msg.serialize(buffer);
         for (size_t i = 0; i < serialized_data.size(); ++i) EXPECT_EQ(buffer[i], serialized_data[i]);
         
-        check_encoder(buffer, firmware_common::can_bus::OzysMeasurementMessage::SIZE_BYTES, item, "OzysMeasurement");
+        check_encoder(msg, item, "OzysMeasurement");
     }
 }
 
@@ -499,7 +499,7 @@ TEST(PayloadEPSOutputOverwriteTest, ReferenceData) {
         msg.serialize(buffer);
         for (size_t i = 0; i < serialized_data.size(); ++i) EXPECT_EQ(buffer[i], serialized_data[i]);
         
-        check_encoder(buffer, firmware_common::can_bus::PayloadEPSOutputOverwriteMessage::SIZE_BYTES, item, "PayloadEPSOutputOverwrite");
+        check_encoder(msg, item, "PayloadEPSOutputOverwrite");
     }
 }
 
@@ -546,7 +546,7 @@ TEST(PayloadEPSStatusTest, ReferenceData) {
         msg.serialize(buffer);
         for (size_t i = 0; i < serialized_data.size(); ++i) EXPECT_EQ(buffer[i], serialized_data[i]);
         
-        check_encoder(buffer, firmware_common::can_bus::PayloadEPSStatusMessage::SIZE_BYTES, item, "PayloadEPSStatus");
+        check_encoder(msg, item, "PayloadEPSStatus");
     }
 }
 
@@ -572,7 +572,7 @@ TEST(ResetTest, ReferenceData) {
         msg.serialize(buffer);
         for (size_t i = 0; i < serialized_data.size(); ++i) EXPECT_EQ(buffer[i], serialized_data[i]);
         
-        check_encoder(buffer, firmware_common::can_bus::ResetMessage::SIZE_BYTES, item, "Reset");
+        check_encoder(msg, item, "Reset");
     }
 }
 
@@ -602,7 +602,7 @@ TEST(RocketStateTest, ReferenceData) {
         msg.serialize(buffer);
         for (size_t i = 0; i < serialized_data.size(); ++i) EXPECT_EQ(buffer[i], serialized_data[i]);
         
-        check_encoder(buffer, firmware_common::can_bus::RocketStateMessage::SIZE_BYTES, item, "RocketState");
+        check_encoder(msg, item, "RocketState");
     }
 }
 
@@ -624,7 +624,7 @@ TEST(UnixTimeTest, ReferenceData) {
         msg.serialize(buffer);
         for (size_t i = 0; i < serialized_data.size(); ++i) EXPECT_EQ(buffer[i], serialized_data[i]);
         
-        check_encoder(buffer, firmware_common::can_bus::UnixTimeMessage::SIZE_BYTES, item, "UnixTime");
+        check_encoder(msg, item, "UnixTime");
     }
 }
 
@@ -659,17 +659,15 @@ TEST(VLStatusTest, ReferenceData) {
         msg.serialize(buffer);
         for (size_t i = 0; i < serialized_data.size(); ++i) EXPECT_EQ(buffer[i], serialized_data[i]);
         
-        check_encoder(buffer, firmware_common::can_bus::VLStatusMessage::SIZE_BYTES, item, "VLStatus");
+        check_encoder(msg, item, "VLStatus");
     }
 }
 
 TEST(CanBusMultiFrameDecoderTest, SingleFrame) {
     firmware_common::can_bus::NodeStatusMessage msg(10, firmware_common::can_bus::NodeHealth::Healthy, firmware_common::can_bus::NodeMode::Maintenance, 0);
-    uint8_t buffer[firmware_common::can_bus::NodeStatusMessage::SIZE_BYTES];
-    msg.serialize(buffer);
     uint32_t id = msg.get_id(10, 20);
 
-    firmware_common::can_bus::CanBusMultiFrameEncoder encoder(buffer, sizeof(buffer));
+    firmware_common::can_bus::CanBusMultiFrameEncoder encoder(msg);
     auto frame_data = encoder.next();
     
     firmware_common::can_bus::CanBusMultiFrameDecoder decoder;
@@ -686,11 +684,9 @@ TEST(CanBusMultiFrameDecoderTest, MultiFrame) {
     // PayloadEPSStatusMessage is 14 bytes, should be multi-frame
     firmware_common::can_bus::PayloadEPSStatusMessage msg;
     msg.battery1_mv = 7400;
-    uint8_t buffer[firmware_common::can_bus::PayloadEPSStatusMessage::SIZE_BYTES];
-    msg.serialize(buffer);
     uint32_t id = msg.get_id(10, 20);
 
-    firmware_common::can_bus::CanBusMultiFrameEncoder encoder(buffer, sizeof(buffer));
+    firmware_common::can_bus::CanBusMultiFrameEncoder encoder(msg);
     firmware_common::can_bus::CanBusMultiFrameDecoder decoder;
     std::optional<firmware_common::can_bus::ReceivedCanBusMessage> decoded;
 
@@ -711,8 +707,8 @@ TEST(CanBusMultiFrameDecoderTest, LRUDiscard) {
     
     // Fill up all 8 state machines with first frames of different IDs
     for (int i = 0; i < 8; ++i) {
-        uint8_t data[14] = {0};
-        firmware_common::can_bus::CanBusMultiFrameEncoder encoder(data, 14);
+        firmware_common::can_bus::PayloadEPSStatusMessage msg; // 14 bytes
+        firmware_common::can_bus::CanBusMultiFrameEncoder encoder(msg);
         auto frame_data = encoder.next();
         uint32_t id = firmware_common::can_bus::CanBusExtendedId::create(1, 34, 1, i);
         auto decoded = decoder.process_frame(id, frame_data.data, frame_data.len, static_cast<uint64_t>(1000 + i));
@@ -721,8 +717,8 @@ TEST(CanBusMultiFrameDecoderTest, LRUDiscard) {
 
     // Now send a 9th ID, it should discard the one with timestamp 1000 (i=0)
     {
-        uint8_t data[14] = {0};
-        firmware_common::can_bus::CanBusMultiFrameEncoder encoder(data, 14);
+        firmware_common::can_bus::PayloadEPSStatusMessage msg;
+        firmware_common::can_bus::CanBusMultiFrameEncoder encoder(msg);
         auto frame_data = encoder.next();
         uint32_t id = firmware_common::can_bus::CanBusExtendedId::create(1, 34, 1, 100);
         auto decoded = decoder.process_frame(id, frame_data.data, frame_data.len, 2000);
@@ -731,8 +727,8 @@ TEST(CanBusMultiFrameDecoderTest, LRUDiscard) {
 
     // If we now send the second frame for ID 0, it should fail/restart because it was discarded
     {
-        uint8_t data[14] = {0};
-        firmware_common::can_bus::CanBusMultiFrameEncoder encoder(data, 14);
+        firmware_common::can_bus::PayloadEPSStatusMessage msg;
+        firmware_common::can_bus::CanBusMultiFrameEncoder encoder(msg);
         encoder.next(); // skip first
         auto frame_data = encoder.next();
         uint32_t id = firmware_common::can_bus::CanBusExtendedId::create(1, 34, 1, 0);
