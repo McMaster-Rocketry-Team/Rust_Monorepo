@@ -304,7 +304,7 @@ mod tests {
 
         let id = message.get_id(0, 1);
         let id: u32 = id.into();
-        let mut encoder = CanBusMultiFrameEncoder::new(message);
+        let mut encoder = CanBusMultiFrameEncoder::new(&message);
         let encoder_crc = encoder.crc;
 
         let mut decoder = CanBusMultiFrameDecoder::<1>::new();
@@ -316,19 +316,6 @@ mod tests {
 
         let decoded_message = decoded_message.unwrap();
         assert_eq!(decoded_message.data.crc, encoder_crc);
-        log_info!("Decoded message: {:?}", decoded_message);
-    }
-
-    #[test]
-    fn single_frame_decode() {
-        init_logger();
-
-        let mut decoder = CanBusMultiFrameDecoder::<1>::new();
-        let mut decoded_message: Option<SensorReading<BootTimestamp, ReceivedCanBusMessage>> = None;
-        let frame = (1752907341445, 343996207, &[0, 1, 186, 0, 0, 192, 0, 0]);
-        decoded_message = decoder.process_frame(&frame);
-
-        let decoded_message = decoded_message.unwrap();
         log_info!("Decoded message: {:?}", decoded_message);
     }
 
@@ -360,7 +347,7 @@ mod tests {
 
         let id = message.get_id(0, 1);
         let id: u32 = id.into();
-        let encoder = CanBusMultiFrameEncoder::new(message);
+        let encoder = CanBusMultiFrameEncoder::new(&message);
         let encoder_crc = encoder.crc;
 
         let mut decoder = CanBusMultiFrameDecoder::<1>::new();

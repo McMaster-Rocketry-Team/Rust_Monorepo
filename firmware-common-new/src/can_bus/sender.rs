@@ -54,7 +54,7 @@ pub struct CanBusMultiFrameEncoder {
 }
 
 impl CanBusMultiFrameEncoder {
-    pub fn new(message: CanBusMessageEnum) -> Self {
+    pub fn new(message: &CanBusMessageEnum) -> Self {
         let mut serialized_message = [0u8; MAX_CAN_MESSAGE_SIZE];
         let len = message.serialize(&mut serialized_message);
 
@@ -173,7 +173,7 @@ impl<M: RawMutex, const N: usize, const PN: usize> CanSender<M, N, PN> {
     pub fn send(&self, message: CanBusMessageEnum) -> u16 {
         let id = message.get_id(self.node_type, self.node_id);
 
-        let multi_frame_encoder = CanBusMultiFrameEncoder::new(message);
+        let multi_frame_encoder = CanBusMultiFrameEncoder::new(&message);
         let crc = multi_frame_encoder.crc;
         for data in multi_frame_encoder {
             let success = self.channel.try_send((id, data)).is_ok();

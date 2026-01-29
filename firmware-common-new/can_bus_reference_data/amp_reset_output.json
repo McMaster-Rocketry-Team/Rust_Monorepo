@@ -8,6 +8,13 @@
     "message_type": 68,
     "serialized_data": [
       0
+    ],
+    "frame_id": 152084500,
+    "encoded_data": [
+      [
+        0,
+        192
+      ]
     ]
   },
   {
@@ -19,6 +26,13 @@
     "message_type": 68,
     "serialized_data": [
       255
+    ],
+    "frame_id": 152084500,
+    "encoded_data": [
+      [
+        255,
+        192
+      ]
     ]
   }
 ]

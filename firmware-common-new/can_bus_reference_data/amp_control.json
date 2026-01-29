@@ -11,6 +11,13 @@
     "message_type": 64,
     "serialized_data": [
       0
+    ],
+    "frame_id": 151035924,
+    "encoded_data": [
+      [
+        0,
+        192
+      ]
     ]
   },
   {
@@ -25,6 +32,13 @@
     "message_type": 64,
     "serialized_data": [
       240
+    ],
+    "frame_id": 151035924,
+    "encoded_data": [
+      [
+        240,
+        192
+      ]
     ]
   }
 ]

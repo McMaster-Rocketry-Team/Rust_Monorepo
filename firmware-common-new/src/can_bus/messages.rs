@@ -634,6 +634,8 @@ mod tests {
 
     use serde::{Deserialize, Serialize};
 
+    use crate::can_bus::sender::CanBusMultiFrameEncoder;
+
     use super::*;
 
     pub fn test_serialize_deserialize(messages: Vec<CanBusMessageEnum>) {
@@ -654,6 +656,8 @@ mod tests {
         message: CanBusMessageEnum,
         message_type: u8,
         serialized_data: Vec<u8>,
+        frame_id: u32,
+        encoded_data: Vec<Vec<u8>>,
     }
 
     pub fn create_reference_data(messages: Vec<CanBusMessageEnum>, name: &str) {
@@ -665,10 +669,17 @@ mod tests {
             let len = message.serialize(&mut buffer);
             let serialized_data = Vec::from(&buffer[..len]);
 
+            let encoder = CanBusMultiFrameEncoder::new(&message);
+            let encoded_data = encoder.map(|x| x.to_vec()).collect::<Vec<_>>();
+
+            let frame_id = message.get_id(10, 20).into();
+
             results.push(ReferenceData {
                 message,
                 message_type,
                 serialized_data,
+                frame_id,
+                encoded_data,
             });
         }
 
