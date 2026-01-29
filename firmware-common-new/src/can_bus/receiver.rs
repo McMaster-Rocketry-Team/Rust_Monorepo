@@ -14,8 +14,8 @@ use crate::{sensor_reading::SensorReading, time::BootTimestamp};
 use super::{
     CanBusFrame, CanBusRX,
     id::CanBusExtendedId,
-    messages::{CanBusMessageEnum, LOG_MESSAGE_TYPE},
-    sender::{CAN_CRC, MAX_CAN_MESSAGE_SIZE, TailByte},
+    messages::{CanBusMessageEnum, LOG_MESSAGE_TYPE, MAX_CAN_MESSAGE_SIZE},
+    sender::{CAN_CRC, TailByte},
 };
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]

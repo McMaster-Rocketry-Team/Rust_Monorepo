@@ -1,0 +1,38 @@
+[
+  {
+    "message": {
+      "IcarusStatus": {
+        "actual_extension_percentage": 0,
+        "servo_temperature_raw": 0,
+        "servo_current_raw": 0
+      }
+    },
+    "message_type": 160,
+    "serialized_data": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  {
+    "message": {
+      "IcarusStatus": {
+        "actual_extension_percentage": 65535,
+        "servo_temperature_raw": 65535,
+        "servo_current_raw": 65534
+      }
+    },
+    "message_type": 160,
+    "serialized_data": [
+      255,
+      255,
+      255,
+      255,
+      255,
+      254
+    ]
+  }
+]

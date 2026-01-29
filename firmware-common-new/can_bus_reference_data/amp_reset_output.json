@@ -1,0 +1,24 @@
+[
+  {
+    "message": {
+      "AmpResetOutput": {
+        "output": 0
+      }
+    },
+    "message_type": 68,
+    "serialized_data": [
+      0
+    ]
+  },
+  {
+    "message": {
+      "AmpResetOutput": {
+        "output": 255
+      }
+    },
+    "message_type": 68,
+    "serialized_data": [
+      255
+    ]
+  }
+]

@@ -1,0 +1,34 @@
+[
+  {
+    "message": {
+      "AirBrakesControl": {
+        "extension_percentage": 0
+      }
+    },
+    "message_type": 69,
+    "serialized_data": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  {
+    "message": {
+      "AirBrakesControl": {
+        "extension_percentage": 65535
+      }
+    },
+    "message_type": 69,
+    "serialized_data": [
+      255,
+      255,
+      0,
+      0,
+      0,
+      0
+    ]
+  }
+]

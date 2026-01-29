@@ -99,3 +99,54 @@ impl Into<CanBusMessageEnum> for NodeStatusMessage {
         CanBusMessageEnum::NodeStatus(self)
     }
 }
+
+#[cfg(test)]
+mod test {
+    use crate::{can_bus::messages::tests as can_bus_messages_test, tests::init_logger};
+    use super::*;
+
+    fn create_test_messages() -> Vec<CanBusMessageEnum> {
+        vec![
+            NodeStatusMessage {
+                uptime_s: 0,
+                health: NodeHealth::Healthy,
+                mode: NodeMode::Operational,
+                custom_status_raw: 0,
+            }
+            .into(),
+            NodeStatusMessage {
+                uptime_s: 0xFFFFFF,
+                health: NodeHealth::Critical,
+                mode: NodeMode::Offline,
+                custom_status_raw: 0x7FF,
+            }
+            .into(),
+            NodeStatusMessage {
+                uptime_s: 12345,
+                health: NodeHealth::Warning,
+                mode: NodeMode::Initialization,
+                custom_status_raw: 0,
+            }
+            .into(),
+            NodeStatusMessage {
+                uptime_s: 67890,
+                health: NodeHealth::Error,
+                mode: NodeMode::Maintenance,
+                custom_status_raw: 0,
+            }
+            .into(),
+        ]
+    }
+
+    #[test]
+    fn test_serialize_deserialize() {
+        init_logger();
+        can_bus_messages_test::test_serialize_deserialize(create_test_messages());
+    }
+
+    #[test]
+    fn create_reference_data() {
+        init_logger();
+        can_bus_messages_test::create_reference_data(create_test_messages(), "node_status");
+    }
+}

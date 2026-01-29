@@ -58,3 +58,38 @@ impl Into<CanBusMessageEnum> for IMUMeasurementMessage {
         CanBusMessageEnum::IMUMeasurement(self)
     }
 }
+
+#[cfg(test)]
+mod test {
+    use crate::{can_bus::messages::tests as can_bus_messages_test, tests::init_logger};
+    use super::*;
+
+    fn create_test_messages() -> Vec<CanBusMessageEnum> {
+        vec![
+            IMUMeasurementMessage::new(
+                0,
+                &Vector3::new(0.0, 0.0, 0.0),
+                &Vector3::new(0.0, 0.0, 0.0),
+            )
+            .into(),
+            IMUMeasurementMessage::new(
+                0x00FFFFFFFFFFFFFF,
+                &Vector3::new(f32::MAX, f32::MAX, f32::MAX),
+                &Vector3::new(f32::MAX, f32::MAX, f32::MAX),
+            )
+            .into(),
+        ]
+    }
+
+    #[test]
+    fn test_serialize_deserialize() {
+        init_logger();
+        can_bus_messages_test::test_serialize_deserialize(create_test_messages());
+    }
+
+    #[test]
+    fn create_reference_data() {
+        init_logger();
+        can_bus_messages_test::create_reference_data(create_test_messages(), "imu_measurement");
+    }
+}

@@ -12,12 +12,10 @@ use embassy_sync::{
 };
 use heapless::Vec;
 
-use crate::can_bus::messages::{CanBusMessageEnum, LOG_MESSAGE_TYPE};
+use crate::can_bus::messages::{CanBusMessageEnum, LOG_MESSAGE_TYPE, MAX_CAN_MESSAGE_SIZE};
 
 use super::{CanBusTX, id::CanBusExtendedId};
 use packed_struct::prelude::*;
-
-pub const MAX_CAN_MESSAGE_SIZE: usize = 64;
 
 #[derive(PackedStruct)]
 #[packed_struct]

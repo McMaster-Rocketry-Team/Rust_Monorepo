@@ -1,0 +1,52 @@
+[
+  {
+    "message": {
+      "BaroMeasurement": {
+        "pressure_raw": 0,
+        "temperature_raw": 0,
+        "timestamp_us": 0
+      }
+    },
+    "message_type": 128,
+    "serialized_data": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  {
+    "message": {
+      "BaroMeasurement": {
+        "pressure_raw": 2139095039,
+        "temperature_raw": 65535,
+        "timestamp_us": 72057594037927935
+      }
+    },
+    "message_type": 128,
+    "serialized_data": [
+      127,
+      127,
+      255,
+      255,
+      255,
+      255,
+      255,
+      255,
+      255,
+      255,
+      255,
+      255,
+      255
+    ]
+  }
+]

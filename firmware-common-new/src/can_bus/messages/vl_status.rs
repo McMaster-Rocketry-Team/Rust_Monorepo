@@ -39,3 +39,66 @@ impl Into<CanBusMessageEnum> for VLStatusMessage {
         CanBusMessageEnum::VLStatus(self)
     }
 }
+
+#[cfg(test)]
+mod test {
+    use crate::{can_bus::messages::tests as can_bus_messages_test, tests::init_logger};
+    use super::*;
+
+    fn create_test_messages() -> Vec<CanBusMessageEnum> {
+        vec![
+            VLStatusMessage {
+                flight_stage: FlightStage::LowPower,
+                battery_mv: 0,
+            }
+            .into(),
+            VLStatusMessage {
+                flight_stage: FlightStage::Landed,
+                battery_mv: u16::MAX,
+            }
+            .into(),
+            VLStatusMessage {
+                flight_stage: FlightStage::SelfTest,
+                battery_mv: 0,
+            }
+            .into(),
+            VLStatusMessage {
+                flight_stage: FlightStage::Armed,
+                battery_mv: 0,
+            }
+            .into(),
+            VLStatusMessage {
+                flight_stage: FlightStage::PoweredAscent,
+                battery_mv: 0,
+            }
+            .into(),
+            VLStatusMessage {
+                flight_stage: FlightStage::Coasting,
+                battery_mv: 0,
+            }
+            .into(),
+            VLStatusMessage {
+                flight_stage: FlightStage::DrogueDeployed,
+                battery_mv: 0,
+            }
+            .into(),
+            VLStatusMessage {
+                flight_stage: FlightStage::MainDeployed,
+                battery_mv: 0,
+            }
+            .into(),
+        ]
+    }
+
+    #[test]
+    fn test_serialize_deserialize() {
+        init_logger();
+        can_bus_messages_test::test_serialize_deserialize(create_test_messages());
+    }
+
+    #[test]
+    fn create_reference_data() {
+        init_logger();
+        can_bus_messages_test::create_reference_data(create_test_messages(), "vl_status");
+    }
+}

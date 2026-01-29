@@ -1,0 +1,30 @@
+[
+  {
+    "message": {
+      "AmpOverwrite": {
+        "out1": "NoOverwrite",
+        "out2": "ForceEnabled",
+        "out3": "ForceDisabled",
+        "out4": "NoOverwrite"
+      }
+    },
+    "message_type": 67,
+    "serialized_data": [
+      24
+    ]
+  },
+  {
+    "message": {
+      "AmpOverwrite": {
+        "out1": "ForceEnabled",
+        "out2": "ForceDisabled",
+        "out3": "NoOverwrite",
+        "out4": "ForceEnabled"
+      }
+    },
+    "message_type": 67,
+    "serialized_data": [
+      97
+    ]
+  }
+]

@@ -1,0 +1,36 @@
+[
+  {
+    "message": {
+      "UnixTime": {
+        "timestamp_us": 0
+      }
+    },
+    "message_type": 7,
+    "serialized_data": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  {
+    "message": {
+      "UnixTime": {
+        "timestamp_us": 72057594037927935
+      }
+    },
+    "message_type": 7,
+    "serialized_data": [
+      255,
+      255,
+      255,
+      255,
+      255,
+      255,
+      255
+    ]
+  }
+]

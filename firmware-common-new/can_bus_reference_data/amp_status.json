@@ -1,0 +1,66 @@
+[
+  {
+    "message": {
+      "AmpStatus": {
+        "shared_battery_mv": 0,
+        "out1": {
+          "overwrote": true,
+          "status": "PowerGood"
+        },
+        "out2": {
+          "overwrote": false,
+          "status": "Disabled"
+        },
+        "out3": {
+          "overwrote": true,
+          "status": "PowerBad"
+        },
+        "out4": {
+          "overwrote": false,
+          "status": "PowerBad"
+        }
+      }
+    },
+    "message_type": 33,
+    "serialized_data": [
+      0,
+      0,
+      160,
+      0,
+      192,
+      64
+    ]
+  },
+  {
+    "message": {
+      "AmpStatus": {
+        "shared_battery_mv": 65535,
+        "out1": {
+          "overwrote": true,
+          "status": "PowerGood"
+        },
+        "out2": {
+          "overwrote": false,
+          "status": "Disabled"
+        },
+        "out3": {
+          "overwrote": true,
+          "status": "PowerBad"
+        },
+        "out4": {
+          "overwrote": false,
+          "status": "PowerBad"
+        }
+      }
+    },
+    "message_type": 33,
+    "serialized_data": [
+      255,
+      255,
+      160,
+      0,
+      192,
+      64
+    ]
+  }
+]

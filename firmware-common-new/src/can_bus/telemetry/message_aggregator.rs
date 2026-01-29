@@ -3,8 +3,7 @@ use core::convert::Infallible;
 use crate::{
     can_bus::{
         id::CanBusExtendedId,
-        messages::{CanBusMessageEnum, DATA_TRANSFER_MESSAGE_TYPE},
-        sender::MAX_CAN_MESSAGE_SIZE,
+        messages::{CanBusMessageEnum, DATA_TRANSFER_MESSAGE_TYPE, MAX_CAN_MESSAGE_SIZE},
     },
     heatshrink::{HeatshrinkError, HeatshrinkWrapper},
 };
@@ -337,7 +336,7 @@ pub fn decode_aggregated_can_bus_messages(
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use crate::{
         can_bus::{
             messages::{

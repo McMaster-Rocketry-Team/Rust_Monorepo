@@ -54,3 +54,28 @@ impl Into<CanBusMessageEnum> for IcarusStatusMessage {
         CanBusMessageEnum::IcarusStatus(self)
     }
 }
+
+#[cfg(test)]
+mod test {
+    use crate::{can_bus::messages::tests as can_bus_messages_test, tests::init_logger};
+    use super::*;
+
+    fn create_test_messages() -> Vec<CanBusMessageEnum> {
+        vec![
+            IcarusStatusMessage::new(0.0, 0.0, 0.0).into(),
+            IcarusStatusMessage::new(65.535, 6553.5, 655.35).into(),
+        ]
+    }
+
+    #[test]
+    fn test_serialize_deserialize() {
+        init_logger();
+        can_bus_messages_test::test_serialize_deserialize(create_test_messages());
+    }
+
+    #[test]
+    fn create_reference_data() {
+        init_logger();
+        can_bus_messages_test::create_reference_data(create_test_messages(), "icarus_status");
+    }
+}

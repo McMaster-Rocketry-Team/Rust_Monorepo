@@ -1,0 +1,34 @@
+[
+  {
+    "message": {
+      "PayloadEPSOutputOverwrite": {
+        "out_3v3": "NoOverwrite",
+        "out_5v": "NoOverwrite",
+        "out_9v": "NoOverwrite",
+        "node_id": 0
+      }
+    },
+    "message_type": 65,
+    "serialized_data": [
+      0,
+      0,
+      0
+    ]
+  },
+  {
+    "message": {
+      "PayloadEPSOutputOverwrite": {
+        "out_3v3": "ForceEnabled",
+        "out_5v": "ForceDisabled",
+        "out_9v": "ForceEnabled",
+        "node_id": 4095
+      }
+    },
+    "message_type": 65,
+    "serialized_data": [
+      103,
+      255,
+      192
+    ]
+  }
+]

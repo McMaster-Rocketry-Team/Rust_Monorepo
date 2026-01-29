@@ -1,0 +1,74 @@
+[
+  {
+    "message": {
+      "NodeStatus": {
+        "uptime_s": 0,
+        "health": "Healthy",
+        "mode": "Operational",
+        "custom_status_raw": 0
+      }
+    },
+    "message_type": 32,
+    "serialized_data": [
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  {
+    "message": {
+      "NodeStatus": {
+        "uptime_s": 16777215,
+        "health": "Critical",
+        "mode": "Offline",
+        "custom_status_raw": 2047
+      }
+    },
+    "message_type": 32,
+    "serialized_data": [
+      255,
+      255,
+      255,
+      255,
+      254
+    ]
+  },
+  {
+    "message": {
+      "NodeStatus": {
+        "uptime_s": 12345,
+        "health": "Warning",
+        "mode": "Initialization",
+        "custom_status_raw": 0
+      }
+    },
+    "message_type": 32,
+    "serialized_data": [
+      0,
+      48,
+      57,
+      80,
+      0
+    ]
+  },
+  {
+    "message": {
+      "NodeStatus": {
+        "uptime_s": 67890,
+        "health": "Error",
+        "mode": "Maintenance",
+        "custom_status_raw": 0
+      }
+    },
+    "message_type": 32,
+    "serialized_data": [
+      1,
+      9,
+      50,
+      160,
+      0
+    ]
+  }
+]

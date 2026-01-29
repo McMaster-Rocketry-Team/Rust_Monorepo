@@ -32,6 +32,7 @@ use payload_eps_status::PayloadEPSStatusMessage;
 use reset::ResetMessage;
 #[cfg(not(feature = "bootloader"))]
 use rocket_state::RocketStateMessage;
+use static_assertions::const_assert;
 #[cfg(not(feature = "bootloader"))]
 use unix_time::UnixTimeMessage;
 #[cfg(not(feature = "bootloader"))]
@@ -296,6 +297,10 @@ pub const LOG_MESSAGE_TYPE: u8 = create_can_bus_message_type(
     },
     0,
 );
+
+pub const MAX_CAN_MESSAGE_SIZE: usize = 64;
+
+const_assert!(size_of::<CanBusMessageEnum>() <= MAX_CAN_MESSAGE_SIZE);
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Clone, Debug, PartialEq, Eq, Ord, PartialOrd, serde::Serialize, serde::Deserialize)]
@@ -604,6 +609,10 @@ impl CanBusMessageEnum {
             AIRBRAKES_CONTROL_MESSAGE_TYPE => {
                 AirBrakesControlMessage::deserialize(data).map(CanBusMessageEnum::AirBrakesControl)
             }
+            #[cfg(not(feature = "bootloader"))]
+            ROCKET_STATE_MESSAGE_TYPE => {
+                RocketStateMessage::deserialize(data).map(CanBusMessageEnum::RocketState)
+            }
 
             DATA_TRANSFER_MESSAGE_TYPE => {
                 DataTransferMessage::deserialize(data).map(CanBusMessageEnum::DataTransfer)
@@ -617,4 +626,61 @@ impl CanBusMessageEnum {
 pub trait CanBusMessage {
     /// 0-7, highest priority is 0
     fn priority(&self) -> u8;
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{fs, path::Path};
+
+    use serde::{Deserialize, Serialize};
+
+    use super::*;
+
+    pub fn test_serialize_deserialize(messages: Vec<CanBusMessageEnum>) {
+        for message in messages {
+            let mut buffer = [0u8; MAX_CAN_MESSAGE_SIZE];
+            let message_type = message.get_message_type();
+            let len = message.serialize(&mut buffer);
+
+            let deserialized =
+                CanBusMessageEnum::deserialize(message_type, &buffer[..len]).unwrap();
+
+            assert_eq!(deserialized, message);
+        }
+    }
+
+    #[derive(Serialize, Deserialize)]
+    struct ReferenceData {
+        message: CanBusMessageEnum,
+        message_type: u8,
+        serialized_data: Vec<u8>,
+    }
+
+    pub fn create_reference_data(messages: Vec<CanBusMessageEnum>, name: &str) {
+        let mut results = Vec::new();
+
+        for message in messages {
+            let mut buffer = [0u8; MAX_CAN_MESSAGE_SIZE];
+            let message_type = message.get_message_type();
+            let len = message.serialize(&mut buffer);
+            let serialized_data = Vec::from(&buffer[..len]);
+
+            results.push(ReferenceData {
+                message,
+                message_type,
+                serialized_data,
+            });
+        }
+
+        let reference_data_string = serde_json::to_string_pretty(&results).unwrap();
+
+        let path_str = format!("./can_bus_reference_data/{}.json", name);
+        let file_path = Path::new(&path_str);
+        if let Some(parent) = file_path.parent() {
+            if !parent.exists() {
+                std::fs::create_dir_all(parent).unwrap();
+            }
+        }
+        fs::write(&file_path, reference_data_string).unwrap();
+    }
 }

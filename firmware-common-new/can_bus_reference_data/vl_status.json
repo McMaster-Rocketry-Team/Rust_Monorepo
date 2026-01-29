@@ -1,0 +1,130 @@
+[
+  {
+    "message": {
+      "VLStatus": {
+        "flight_stage": "LowPower",
+        "battery_mv": 0
+      }
+    },
+    "message_type": 36,
+    "serialized_data": [
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  {
+    "message": {
+      "VLStatus": {
+        "flight_stage": "Landed",
+        "battery_mv": 65535
+      }
+    },
+    "message_type": 36,
+    "serialized_data": [
+      7,
+      255,
+      255,
+      0,
+      0
+    ]
+  },
+  {
+    "message": {
+      "VLStatus": {
+        "flight_stage": "SelfTest",
+        "battery_mv": 0
+      }
+    },
+    "message_type": 36,
+    "serialized_data": [
+      1,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  {
+    "message": {
+      "VLStatus": {
+        "flight_stage": "Armed",
+        "battery_mv": 0
+      }
+    },
+    "message_type": 36,
+    "serialized_data": [
+      2,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  {
+    "message": {
+      "VLStatus": {
+        "flight_stage": "PoweredAscent",
+        "battery_mv": 0
+      }
+    },
+    "message_type": 36,
+    "serialized_data": [
+      3,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  {
+    "message": {
+      "VLStatus": {
+        "flight_stage": "Coasting",
+        "battery_mv": 0
+      }
+    },
+    "message_type": 36,
+    "serialized_data": [
+      4,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  {
+    "message": {
+      "VLStatus": {
+        "flight_stage": "DrogueDeployed",
+        "battery_mv": 0
+      }
+    },
+    "message_type": 36,
+    "serialized_data": [
+      5,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  {
+    "message": {
+      "VLStatus": {
+        "flight_stage": "MainDeployed",
+        "battery_mv": 0
+      }
+    },
+    "message_type": 36,
+    "serialized_data": [
+      6,
+      0,
+      0,
+      0,
+      0
+    ]
+  }
+]

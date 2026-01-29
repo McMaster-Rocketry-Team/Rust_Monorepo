@@ -25,3 +25,40 @@ impl Into<CanBusMessageEnum> for AmpControlMessage {
         CanBusMessageEnum::AmpControl(self)
     }
 }
+
+#[cfg(test)]
+mod test {
+    use crate::{can_bus::messages::tests as can_bus_messages_test, tests::init_logger};
+    use super::*;
+
+    fn create_test_messages() -> Vec<CanBusMessageEnum> {
+        vec![
+            AmpControlMessage {
+                out1_enable: false,
+                out2_enable: false,
+                out3_enable: false,
+                out4_enable: false,
+            }
+            .into(),
+            AmpControlMessage {
+                out1_enable: true,
+                out2_enable: true,
+                out3_enable: true,
+                out4_enable: true,
+            }
+            .into(),
+        ]
+    }
+
+    #[test]
+    fn test_serialize_deserialize() {
+        init_logger();
+        can_bus_messages_test::test_serialize_deserialize(create_test_messages());
+    }
+
+    #[test]
+    fn create_reference_data() {
+        init_logger();
+        can_bus_messages_test::create_reference_data(create_test_messages(), "amp_control");
+    }
+}

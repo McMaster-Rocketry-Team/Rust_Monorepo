@@ -1,0 +1,32 @@
+[
+  {
+    "message": {
+      "Ack": {
+        "crc": 0,
+        "node_id": 0
+      }
+    },
+    "message_type": 66,
+    "serialized_data": [
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  {
+    "message": {
+      "Ack": {
+        "crc": 65535,
+        "node_id": 4095
+      }
+    },
+    "message_type": 66,
+    "serialized_data": [
+      255,
+      255,
+      255,
+      240
+    ]
+  }
+]

@@ -1,0 +1,128 @@
+[
+  {
+    "message": {
+      "PayloadEPSStatus": {
+        "battery1_mv": 0,
+        "battery1_temperature_raw": 0,
+        "battery2_mv": 0,
+        "battery2_temperature_raw": 0,
+        "output_3v3": {
+          "current_ma": 0,
+          "overwrote": false,
+          "status": "Disabled"
+        },
+        "output_5v": {
+          "current_ma": 0,
+          "overwrote": false,
+          "status": "Disabled"
+        },
+        "output_9v": {
+          "current_ma": 0,
+          "overwrote": false,
+          "status": "Disabled"
+        }
+      }
+    },
+    "message_type": 34,
+    "serialized_data": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  {
+    "message": {
+      "PayloadEPSStatus": {
+        "battery1_mv": 65535,
+        "battery1_temperature_raw": 65535,
+        "battery2_mv": 65535,
+        "battery2_temperature_raw": 65535,
+        "output_3v3": {
+          "current_ma": 8191,
+          "overwrote": true,
+          "status": "PowerBad"
+        },
+        "output_5v": {
+          "current_ma": 8191,
+          "overwrote": true,
+          "status": "PowerBad"
+        },
+        "output_9v": {
+          "current_ma": 8191,
+          "overwrote": true,
+          "status": "PowerBad"
+        }
+      }
+    },
+    "message_type": 34,
+    "serialized_data": [
+      255,
+      255,
+      255,
+      255,
+      255,
+      255,
+      255,
+      255,
+      255,
+      254,
+      255,
+      254,
+      255,
+      254
+    ]
+  },
+  {
+    "message": {
+      "PayloadEPSStatus": {
+        "battery1_mv": 1000,
+        "battery1_temperature_raw": 1000,
+        "battery2_mv": 1000,
+        "battery2_temperature_raw": 1000,
+        "output_3v3": {
+          "current_ma": 100,
+          "overwrote": false,
+          "status": "PowerGood"
+        },
+        "output_5v": {
+          "current_ma": 100,
+          "overwrote": false,
+          "status": "PowerGood"
+        },
+        "output_9v": {
+          "current_ma": 100,
+          "overwrote": false,
+          "status": "PowerGood"
+        }
+      }
+    },
+    "message_type": 34,
+    "serialized_data": [
+      3,
+      232,
+      3,
+      232,
+      3,
+      232,
+      3,
+      232,
+      3,
+      33,
+      3,
+      33,
+      3,
+      33
+    ]
+  }
+]

@@ -389,7 +389,7 @@ pub fn decode_multiplexed_log_chunk(
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use crate::tests::init_logger;
     use lipsum::lipsum;
     use log::info;

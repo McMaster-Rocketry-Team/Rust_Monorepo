@@ -1,0 +1,30 @@
+[
+  {
+    "message": {
+      "Reset": {
+        "node_id": 0,
+        "reset_all": false,
+        "into_bootloader": false
+      }
+    },
+    "message_type": 0,
+    "serialized_data": [
+      0,
+      0
+    ]
+  },
+  {
+    "message": {
+      "Reset": {
+        "node_id": 4095,
+        "reset_all": true,
+        "into_bootloader": true
+      }
+    },
+    "message_type": 0,
+    "serialized_data": [
+      255,
+      252
+    ]
+  }
+]

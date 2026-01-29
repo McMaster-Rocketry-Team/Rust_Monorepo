@@ -100,7 +100,7 @@ macro_rules! fixed_point_factory_slope {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use approx::assert_relative_eq;
 
     use crate::tests::init_logger;

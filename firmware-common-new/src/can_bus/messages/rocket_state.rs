@@ -53,3 +53,34 @@ impl Into<CanBusMessageEnum> for RocketStateMessage {
         CanBusMessageEnum::RocketState(self)
     }
 }
+
+#[cfg(test)]
+mod test {
+    use crate::{can_bus::messages::tests as can_bus_messages_test, tests::init_logger};
+    use super::*;
+
+    fn create_test_messages() -> Vec<CanBusMessageEnum> {
+        vec![
+            RocketStateMessage::new(0, &[0.0; 2], 0.0, false).into(),
+            RocketStateMessage::new(
+                0x00FFFFFFFFFFFFFF,
+                &[f32::MAX; 2],
+                f32::MAX,
+                true,
+            )
+            .into(),
+        ]
+    }
+
+    #[test]
+    fn test_serialize_deserialize() {
+        init_logger();
+        can_bus_messages_test::test_serialize_deserialize(create_test_messages());
+    }
+
+    #[test]
+    fn create_reference_data() {
+        init_logger();
+        can_bus_messages_test::create_reference_data(create_test_messages(), "rocket_state");
+    }
+}

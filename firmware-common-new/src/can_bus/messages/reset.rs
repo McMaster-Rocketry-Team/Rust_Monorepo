@@ -25,3 +25,38 @@ impl Into<CanBusMessageEnum> for ResetMessage {
         CanBusMessageEnum::Reset(self)
     }
 }
+
+#[cfg(test)]
+mod test {
+    use crate::{can_bus::messages::tests as can_bus_messages_test, tests::init_logger};
+    use super::*;
+
+    fn create_test_messages() -> Vec<CanBusMessageEnum> {
+        vec![
+            ResetMessage {
+                node_id: 0,
+                reset_all: false,
+                into_bootloader: false,
+            }
+            .into(),
+            ResetMessage {
+                node_id: 0xFFF,
+                reset_all: true,
+                into_bootloader: true,
+            }
+            .into(),
+        ]
+    }
+
+    #[test]
+    fn test_serialize_deserialize() {
+        init_logger();
+        can_bus_messages_test::test_serialize_deserialize(create_test_messages());
+    }
+
+    #[test]
+    fn create_reference_data() {
+        init_logger();
+        can_bus_messages_test::create_reference_data(create_test_messages(), "reset");
+    }
+}

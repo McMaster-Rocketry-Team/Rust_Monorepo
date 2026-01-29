@@ -4,7 +4,9 @@ use serde::{Deserialize, Serialize};
 use super::{CanBusMessage, CanBusMessageEnum};
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
-#[derive(PrimitiveEnum_u8, Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(
+    PrimitiveEnum_u8, Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize,
+)]
 #[repr(C)]
 pub enum PowerOutputStatus {
     Disabled = 0,
@@ -54,49 +56,67 @@ impl Into<CanBusMessageEnum> for AmpStatusMessage {
 }
 
 #[cfg(test)]
-mod test {
-    use crate::tests::init_logger;
+mod tests {
+    use crate::{can_bus::messages::tests as can_bus_messages_test, tests::init_logger};
 
     use super::*;
+
+    fn create_test_messages() -> Vec<CanBusMessageEnum> {
+        vec![
+            AmpStatusMessage {
+                shared_battery_mv: 0,
+                out1: AmpOutputStatus {
+                    overwrote: true,
+                    status: PowerOutputStatus::PowerGood,
+                },
+                out2: AmpOutputStatus {
+                    overwrote: false,
+                    status: PowerOutputStatus::Disabled,
+                },
+                out3: AmpOutputStatus {
+                    overwrote: true,
+                    status: PowerOutputStatus::PowerBad,
+                },
+                out4: AmpOutputStatus {
+                    overwrote: false,
+                    status: PowerOutputStatus::PowerBad,
+                },
+            }
+            .into(),
+            AmpStatusMessage {
+                shared_battery_mv: u16::MAX,
+                out1: AmpOutputStatus {
+                    overwrote: true,
+                    status: PowerOutputStatus::PowerGood,
+                },
+                out2: AmpOutputStatus {
+                    overwrote: false,
+                    status: PowerOutputStatus::Disabled,
+                },
+                out3: AmpOutputStatus {
+                    overwrote: true,
+                    status: PowerOutputStatus::PowerBad,
+                },
+                out4: AmpOutputStatus {
+                    overwrote: false,
+                    status: PowerOutputStatus::PowerBad,
+                },
+            }
+            .into(),
+        ]
+    }
 
     #[test]
     fn test_serialize_deserialize() {
         init_logger();
 
-        let status_message = AmpStatusMessage {
-            shared_battery_mv: 8001,
-            out1: AmpOutputStatus {
-                overwrote: true,
-                status: PowerOutputStatus::PowerGood,
-            },
-            out2: AmpOutputStatus {
-                overwrote: false,
-                status: PowerOutputStatus::Disabled,
-            },
-            out3: AmpOutputStatus {
-                overwrote: true,
-                status: PowerOutputStatus::PowerBad,
-            },
-            out4: AmpOutputStatus {
-                overwrote: false,
-                status: PowerOutputStatus::PowerBad,
-            },
-        };
+        can_bus_messages_test::test_serialize_deserialize(create_test_messages());
+    }
 
-        let source_message: CanBusMessageEnum = status_message.into();
-        let message = source_message.clone();
-        let mut buffer = [0u8; 64];
-        let message_type = message.get_message_type();
-        let len = message.serialize(&mut buffer);
+    #[test]
+    fn create_reference_data() {
+        init_logger();
 
-        log_info!("{:?}", &buffer[..len]);
-
-        let deserialized = CanBusMessageEnum::deserialize(message_type, &buffer[..len]).unwrap();
-        log_info!("{:?}", deserialized);
-
-        assert_eq!(
-            deserialized,
-            source_message,
-        );
+        can_bus_messages_test::create_reference_data(create_test_messages(), "amp_status");
     }
 }
