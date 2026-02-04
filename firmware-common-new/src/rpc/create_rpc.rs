@@ -85,7 +85,6 @@ macro_rules! create_rpc {
 
                     async {
                         let crc = Crc::<u8>::new(&CRC_8_SMBUS);
-                        let mut alloc = [MaybeUninit::<u8>::uninit(); 0];
 
                         const REQUEST_STRUCT_MAX_SIZE: usize = $crate::max_const!(
                             $(
@@ -149,7 +148,7 @@ macro_rules! create_rpc {
                                         to_bytes_in_with_alloc::<_, _, Failure>(
                                             &response,
                                             Buffer::from(&mut (*response_buffer)[..response_size]),
-                                            SubAllocator::new(&mut alloc),
+                                            SubAllocator::empty(),
                                         )
                                         .unwrap();
 
@@ -252,7 +251,7 @@ macro_rules! create_rpc {
                         to_bytes_in_with_alloc::<_, _, Failure>(
                             &request,
                             Buffer::from(&mut self.request_buffer[16..(request_size + 16)]),
-                            SubAllocator::new(&mut [MaybeUninit::<u8>::uninit(); 0]),
+                            SubAllocator::empty(),
                         )
                         .unwrap();
 
