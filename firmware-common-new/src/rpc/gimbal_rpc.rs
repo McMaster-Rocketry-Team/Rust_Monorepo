@@ -9,5 +9,7 @@ create_rpc! {
     4 get_deg | | -> (tilt_deg: f32, pan_deg: f32)
     5 set_focal_length_mm | focal_length_mm: f32 | -> ()
     6 get_focal_length_mm | | -> (focal_length_mm: f32)
-    7 get_gps_data | | -> (coordinates: Option<(f64, f64)>, timestamp_ms: Option<u64>)
+    // if coordinates are not available, return NaN, NaN
+    // if timestamp is not available, return 0
+    7 get_gps_data | | -> (longitude: f64, latitude: f64, timestamp_ms: u64)
 }
