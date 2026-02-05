@@ -94,10 +94,10 @@ macro_rules! create_rpc {
                         let mut request_buffer: Aligned<A2, [u8; $crate::max_const!(REQUEST_STRUCT_MAX_SIZE, 2)]> = Aligned([0u8; $crate::max_const!(REQUEST_STRUCT_MAX_SIZE, 2)]);
                         const RESPONSE_STRUCT_MAX_SIZE: usize = $crate::max_const!(
                             $(
-                                size_of::<< [< $name:camel Request >] as Archive>::Archived>(),
+                                size_of::<< [< $name:camel Response >] as Archive>::Archived>(),
                             )*
                         );
-                        let mut response_buffer: Aligned<A2, [u8; {RESPONSE_STRUCT_MAX_SIZE + 16}]> = Aligned([0u8; {RESPONSE_STRUCT_MAX_SIZE + 16}]);
+                        let mut response_buffer: Aligned<A2, [u8; {RESPONSE_STRUCT_MAX_SIZE + 1}]> = Aligned([0u8; {RESPONSE_STRUCT_MAX_SIZE + 1}]);
 
                         loop {
                             match serial.read_exact(&mut request_buffer[..2]).await {
