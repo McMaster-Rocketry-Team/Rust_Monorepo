@@ -1,7 +1,6 @@
 [workspace]
 members = [
     "firmware-common-new",
-    "firmware-common-ffi",
     "rocket-cli",
 
     "calculate-required-bits",
