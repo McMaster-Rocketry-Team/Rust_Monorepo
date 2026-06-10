@@ -33,7 +33,7 @@ pub fn verify_firmware(
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     #[test]

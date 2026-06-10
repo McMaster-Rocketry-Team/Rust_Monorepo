@@ -23,3 +23,28 @@ impl Into<CanBusMessageEnum> for AmpResetOutputMessage {
         CanBusMessageEnum::AmpResetOutput(self)
     }
 }
+
+#[cfg(test)]
+mod test {
+    use crate::{can_bus::messages::tests as can_bus_messages_test, tests::init_logger};
+    use super::*;
+
+    fn create_test_messages() -> Vec<CanBusMessageEnum> {
+        vec![
+            AmpResetOutputMessage { output: 0 }.into(),
+            AmpResetOutputMessage { output: u8::MAX }.into(),
+        ]
+    }
+
+    #[test]
+    fn test_serialize_deserialize() {
+        init_logger();
+        can_bus_messages_test::test_serialize_deserialize(create_test_messages());
+    }
+
+    #[test]
+    fn create_reference_data() {
+        init_logger();
+        can_bus_messages_test::create_reference_data(create_test_messages(), "amp_reset_output");
+    }
+}

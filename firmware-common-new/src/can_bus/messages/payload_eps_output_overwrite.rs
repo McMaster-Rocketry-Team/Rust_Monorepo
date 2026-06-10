@@ -34,32 +34,37 @@ impl Into<CanBusMessageEnum> for PayloadEPSOutputOverwriteMessage {
 
 #[cfg(test)]
 mod test {
-    use crate::tests::init_logger;
-
+    use crate::{can_bus::messages::tests as can_bus_messages_test, tests::init_logger};
     use super::*;
+
+    fn create_test_messages() -> Vec<CanBusMessageEnum> {
+        vec![
+            PayloadEPSOutputOverwriteMessage {
+                out_3v3: PowerOutputOverwrite::NoOverwrite,
+                out_5v: PowerOutputOverwrite::NoOverwrite,
+                out_9v: PowerOutputOverwrite::NoOverwrite,
+                node_id: 0,
+            }
+            .into(),
+            PayloadEPSOutputOverwriteMessage {
+                out_3v3: PowerOutputOverwrite::ForceEnabled,
+                out_5v: PowerOutputOverwrite::ForceDisabled,
+                out_9v: PowerOutputOverwrite::ForceEnabled,
+                node_id: 0xFFF,
+            }
+            .into(),
+        ]
+    }
 
     #[test]
     fn test_serialize_deserialize() {
         init_logger();
+        can_bus_messages_test::test_serialize_deserialize(create_test_messages());
+    }
 
-        let status_message = PayloadEPSOutputOverwriteMessage {
-            out_3v3: PowerOutputOverwrite::ForceDisabled,
-            out_5v: PowerOutputOverwrite::ForceEnabled,
-            out_9v: PowerOutputOverwrite::NoOverwrite,
-            node_id: 10,
-        };
-
-        let source_message: CanBusMessageEnum = status_message.into();
-        let message = source_message.clone();
-        let mut buffer = [0u8; 64];
-        let message_type = message.get_message_type();
-        let len = message.serialize(&mut buffer);
-
-        log_info!("{:?}", &buffer[..len]);
-
-        let deserialized = CanBusMessageEnum::deserialize(message_type, &buffer[..len]).unwrap();
-        log_info!("{:?}", deserialized);
-
-        assert_eq!(deserialized, source_message,);
+    #[test]
+    fn create_reference_data() {
+        init_logger();
+        can_bus_messages_test::create_reference_data(create_test_messages(), "payload_eps_output_overwrite");
     }
 }

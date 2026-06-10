@@ -4,7 +4,7 @@ use crate::{controller::rocket_dynamics::simulate_apogee_rk2, utils::lerp};
 
 const DT: f32 = 0.1;
 
-mod rocket_dynamics;
+pub(crate) mod rocket_dynamics;
 
 pub struct AirBrakesMPC {
     parameters: RocketParameters,
@@ -68,9 +68,9 @@ impl AirBrakesMPC {
 }
 
 #[derive(Debug, Clone)]
-struct State {
-    altitude_asl: f32,
-    velocity: Vector2<f32>,
+pub(crate) struct State {
+    pub(crate) altitude_asl: f32,
+    pub(crate) velocity: Vector2<f32>,
 }
 
 struct Derivative<T>(T);

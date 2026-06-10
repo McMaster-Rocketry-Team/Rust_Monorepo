@@ -32,7 +32,7 @@ impl VLCustomStatus {
 impl NodeCustomStatus for VLCustomStatus {}
 
 #[cfg(test)]
-mod test {
+mod tests {
     use crate::can_bus::custom_status::NodeCustomStatusExt;
 
     use super::*;

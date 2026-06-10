@@ -136,10 +136,7 @@ impl AscentStateEstimator {
                         > flight_profile.ignition_detection_acc_threshold
                             * flight_profile.ignition_detection_acc_threshold
                     {
-                        log_info!(
-                            "[{}] ignition detected, to stage 1",
-                            plot_get_time_s!()
-                        );
+                        log_info!("[{}] ignition detected, to stage 1", plot_get_time_s!());
                         // 2 seconds of data in imu_data_list
                         // 0s-1s: rocket stable, calculate bias, variance, and orientation between avionics to ground
                         // 1s-2s: rocket shakes due to ignition, use dead reckoning to keep track of the orientation between avionics to ground
@@ -223,7 +220,11 @@ impl AscentStateEstimator {
                             launch_pad_altitude_asl,
                         } = state
                         {
-                            log_info!("[{}] go to stage 1, {:?}", plot_get_time_s!(), av_orientation_reckoner);
+                            log_info!(
+                                "[{}] go to stage 1, {:?}",
+                                plot_get_time_s!(),
+                                av_orientation_reckoner
+                            );
                             *self = Self::Stage1 {
                                 n: 0,
                                 acc_welford: Welford::<3>::new(),
@@ -347,7 +348,7 @@ impl AscentStateEstimator {
                         let speed_of_sound =
                             approximate_speed_of_sound(velocity_estimator.altitude_asl());
                         if velocity_estimator.v_vertical().abs() > 0.9 * speed_of_sound {
-                            log_info!("baro lock out");
+                            log_info!("[{}] baro lock out", plot_get_time_s!());
                             *lock_out_state = BaroLockOutState::LockOut;
                         }
                     }
@@ -355,7 +356,7 @@ impl AscentStateEstimator {
                         let speed_of_sound =
                             approximate_speed_of_sound(velocity_estimator.altitude_asl());
                         if velocity_estimator.v_vertical().abs() < 0.85 * speed_of_sound {
-                            log_info!("baro lock out finished");
+                            log_info!("[{}] baro lock out finished", plot_get_time_s!());
                             *lock_out_state = BaroLockOutState::AfterLockOut;
                             velocity_estimator.constraints_enabled = true;
                             // TODO also update process noise
@@ -414,6 +415,16 @@ impl AscentStateEstimator {
                 launch_pad_altitude_asl,
                 ..
             } => Some(*launch_pad_altitude_asl),
+        }
+    }
+
+    pub fn altitude_agl(&self) -> f32 {
+        if let Some(altitude_asl) = self.altitude_asl()
+            && let Some(launch_pad_altitude_asl) = self.launch_pad_altitude_asl()
+        {
+            altitude_asl - launch_pad_altitude_asl
+        } else {
+            0.0
         }
     }
 

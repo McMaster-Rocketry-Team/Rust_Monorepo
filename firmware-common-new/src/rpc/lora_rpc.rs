@@ -1,5 +1,4 @@
 use crate::vlp::lora_config::LoraConfig;
-use core::mem::MaybeUninit;
 use rkyv::{Archive, Deserialize, Serialize};
 
 use crate::create_rpc;

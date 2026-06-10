@@ -38,3 +38,40 @@ impl Into<CanBusMessageEnum> for AmpOverwriteMessage {
         CanBusMessageEnum::AmpOverwrite(self)
     }
 }
+
+#[cfg(test)]
+mod test {
+    use crate::{can_bus::messages::tests as can_bus_messages_test, tests::init_logger};
+    use super::*;
+
+    fn create_test_messages() -> Vec<CanBusMessageEnum> {
+        vec![
+            AmpOverwriteMessage {
+                out1: PowerOutputOverwrite::NoOverwrite,
+                out2: PowerOutputOverwrite::ForceEnabled,
+                out3: PowerOutputOverwrite::ForceDisabled,
+                out4: PowerOutputOverwrite::NoOverwrite,
+            }
+            .into(),
+            AmpOverwriteMessage {
+                out1: PowerOutputOverwrite::ForceEnabled,
+                out2: PowerOutputOverwrite::ForceDisabled,
+                out3: PowerOutputOverwrite::NoOverwrite,
+                out4: PowerOutputOverwrite::ForceEnabled,
+            }
+            .into(),
+        ]
+    }
+
+    #[test]
+    fn test_serialize_deserialize() {
+        init_logger();
+        can_bus_messages_test::test_serialize_deserialize(create_test_messages());
+    }
+
+    #[test]
+    fn create_reference_data() {
+        init_logger();
+        can_bus_messages_test::create_reference_data(create_test_messages(), "amp_overwrite");
+    }
+}

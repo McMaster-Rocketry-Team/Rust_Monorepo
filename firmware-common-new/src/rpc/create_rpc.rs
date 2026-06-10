@@ -71,7 +71,7 @@ macro_rules! create_rpc {
                     fn [< $name:snake >](&mut self, $($req_var_name: $req_var_type, )*) -> impl core::future::Future<Output=[< $name:camel Response >]>;
                 )*
 
-                fn run_server<S: crate::rpc::half_duplex_serial::HalfDuplexSerial>(&mut self, serial: &mut S) -> impl core::future::Future<Output=Result<(), S::Error>> {
+                fn run_server<S: $crate::rpc::half_duplex_serial::HalfDuplexSerial>(&mut self, serial: &mut S) -> impl core::future::Future<Output=Result<(), S::Error>> {
                     use core::mem::size_of;
                     use crc::{Crc, CRC_8_SMBUS};
                     use embedded_io_async::ReadExactError;
@@ -85,20 +85,19 @@ macro_rules! create_rpc {
 
                     async {
                         let crc = Crc::<u8>::new(&CRC_8_SMBUS);
-                        let mut alloc = [MaybeUninit::<u8>::uninit(); 0];
 
-                        const REQUEST_STRUCT_MAX_SIZE: usize = crate::max_const!(
+                        const REQUEST_STRUCT_MAX_SIZE: usize = $crate::max_const!(
                             $(
                                 size_of::<< [< $name:camel Request >] as Archive>::Archived>(),
                             )*
                         );
-                        let mut request_buffer: Aligned<A2, [u8; crate::max_const!(REQUEST_STRUCT_MAX_SIZE, 2)]> = Aligned([0u8; crate::max_const!(REQUEST_STRUCT_MAX_SIZE, 2)]);
-                        const RESPONSE_STRUCT_MAX_SIZE: usize = crate::max_const!(
+                        let mut request_buffer: Aligned<A2, [u8; $crate::max_const!(REQUEST_STRUCT_MAX_SIZE, 2)]> = Aligned([0u8; $crate::max_const!(REQUEST_STRUCT_MAX_SIZE, 2)]);
+                        const RESPONSE_STRUCT_MAX_SIZE: usize = $crate::max_const!(
                             $(
-                                size_of::<< [< $name:camel Request >] as Archive>::Archived>(),
+                                size_of::<< [< $name:camel Response >] as Archive>::Archived>(),
                             )*
                         );
-                        let mut response_buffer: Aligned<A2, [u8; {RESPONSE_STRUCT_MAX_SIZE + 16}]> = Aligned([0u8; {RESPONSE_STRUCT_MAX_SIZE + 16}]);
+                        let mut response_buffer: Aligned<A2, [u8; {RESPONSE_STRUCT_MAX_SIZE + 1}]> = Aligned([0u8; {RESPONSE_STRUCT_MAX_SIZE + 1}]);
 
                         loop {
                             match serial.read_exact(&mut request_buffer[..2]).await {
@@ -111,9 +110,12 @@ macro_rules! create_rpc {
                                     Err(e)?;
                                 }
                             }
-                            let received_crc = request_buffer[1];
+                            let received_crc = request_buffer[0];
+                            
+                            let mut digest = crc.digest();
+                            digest.update(&[request_buffer[1]]);
 
-                            match request_buffer[0] {
+                            match request_buffer[1] {
                                 $(
                                     $rpc_i => {
                                         let request_size = size_of::<<[< $name:camel Request >] as Archive>::Archived>();
@@ -130,7 +132,8 @@ macro_rules! create_rpc {
                                             }
                                         }
 
-                                        let calculated_crc = crc.checksum(&request_buffer[..request_size]);
+                                        digest.update(&request_buffer[..request_size]);
+                                        let calculated_crc = digest.finalize();
                                         if calculated_crc != received_crc {
                                             log_warn!("Command CRC mismatch, skipping. received: {}, calculated: {}", received_crc, calculated_crc);
                                             continue;
@@ -145,7 +148,7 @@ macro_rules! create_rpc {
                                         to_bytes_in_with_alloc::<_, _, Failure>(
                                             &response,
                                             Buffer::from(&mut (*response_buffer)[..response_size]),
-                                            SubAllocator::new(&mut alloc),
+                                            SubAllocator::empty(),
                                         )
                                         .unwrap();
 
@@ -166,32 +169,32 @@ macro_rules! create_rpc {
                 }
             }
 
-            pub struct [< $rpc_name:camel RpcClient >]<'a, S: crate::rpc::half_duplex_serial::HalfDuplexSerial> {
+            pub struct [< $rpc_name:camel RpcClient >]<'a, S: $crate::rpc::half_duplex_serial::HalfDuplexSerial> {
                 serial: &'a mut S,
                 crc: crc::Crc::<u8>,
-                request_buffer: aligned::Aligned<aligned::A2, [u8; crate::max_const!(
+                request_buffer: aligned::Aligned<aligned::A2, [u8; $crate::max_const!(
                     $(
                         size_of::<< [< $name:camel Request >] as rkyv::Archive>::Archived>(),
                     )*
                 ) + 16]>,
-                response_buffer: aligned::Aligned<aligned::A2, [u8; crate::max_const!(
+                response_buffer: aligned::Aligned<aligned::A2, [u8; $crate::max_const!(
                     $(
                         size_of::<< [< $name:camel Response >] as rkyv::Archive>::Archived>(),
                     )*
                 ) + 1]>
             }
 
-            impl<'a, S: crate::rpc::half_duplex_serial::HalfDuplexSerial> [< $rpc_name:camel RpcClient >]<'a, S> {
+            impl<'a, S: $crate::rpc::half_duplex_serial::HalfDuplexSerial> [< $rpc_name:camel RpcClient >]<'a, S> {
                 pub fn new(serial: &'a mut S) -> Self {
                     Self {
                         serial,
                         crc: crc::Crc::<u8>::new(&crc::CRC_8_SMBUS),
-                        request_buffer: aligned::Aligned([0u8; crate::max_const!(
+                        request_buffer: aligned::Aligned([0u8; $crate::max_const!(
                             $(
                                 size_of::<< [< $name:camel Request >] as rkyv::Archive>::Archived>(),
                             )*
                         ) + 16]),
-                        response_buffer: aligned::Aligned([0u8; crate::max_const!(
+                        response_buffer: aligned::Aligned([0u8; $crate::max_const!(
                             $(
                                 size_of::<< [< $name:camel Response >] as rkyv::Archive>::Archived>(),
                             )*
@@ -199,11 +202,11 @@ macro_rules! create_rpc {
                     }
                 }
 
-                pub async fn reset(&mut self) -> Result<bool, crate::rpc::create_rpc::RpcClientError<S>> {
-                    use crate::rpc::create_rpc::RpcClientError;
+                pub async fn reset(&mut self) -> Result<bool, $crate::rpc::create_rpc::RpcClientError<S>> {
+                    use $crate::rpc::create_rpc::RpcClientError;
                     use core::mem::size_of;
 
-                    const REQUEST_STRUCT_MAX_SIZE: usize = crate::max_const!(
+                    const REQUEST_STRUCT_MAX_SIZE: usize = $crate::max_const!(
                         $(
                             size_of::<< [< $name:camel Request >] as rkyv::Archive>::Archived>(),
                         )*
@@ -226,9 +229,9 @@ macro_rules! create_rpc {
                 }
 
                 $(
-                    pub async fn [< $name:snake >](&mut self, $($req_var_name: $req_var_type, )*) -> Result<[< $name:camel Response >], crate::rpc::create_rpc::RpcClientError<S>> {
+                    pub async fn [< $name:snake >](&mut self, $($req_var_name: $req_var_type, )*) -> Result<[< $name:camel Response >], $crate::rpc::create_rpc::RpcClientError<S>> {
                         use core::mem::size_of;
-                        use crate::rpc::create_rpc::RpcClientError;
+                        use $crate::rpc::create_rpc::RpcClientError;
                         use rkyv::{
                             Archive,
                             api::low::{from_bytes_unchecked, to_bytes_in_with_alloc},
@@ -248,12 +251,12 @@ macro_rules! create_rpc {
                         to_bytes_in_with_alloc::<_, _, Failure>(
                             &request,
                             Buffer::from(&mut self.request_buffer[16..(request_size + 16)]),
-                            SubAllocator::new(&mut [MaybeUninit::<u8>::uninit(); 0]),
+                            SubAllocator::empty(),
                         )
                         .unwrap();
 
-                        self.request_buffer[14] = $rpc_i;
-                        self.request_buffer[15] = self.crc.checksum(&self.request_buffer[16..(request_size + 16)]);
+                        self.request_buffer[15] = $rpc_i;
+                        self.request_buffer[14] = self.crc.checksum(&self.request_buffer[15..(request_size + 16)]);
                         
                         self.serial.write_all(&self.request_buffer[14..(request_size + 16)]).await.map_err(RpcClientError::Serial)?;
                         self.serial.read_exact(&mut self.response_buffer[..(response_size + 1)]).await?;

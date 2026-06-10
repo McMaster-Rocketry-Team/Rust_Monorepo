@@ -70,3 +70,48 @@ impl Into<CanBusMessageEnum> for DataTransferMessage {
         CanBusMessageEnum::DataTransfer(self)
     }
 }
+
+#[cfg(test)]
+mod test {
+    use crate::{can_bus::messages::tests as can_bus_messages_test, tests::init_logger};
+    use super::*;
+
+    fn create_test_messages() -> std::vec::Vec<CanBusMessageEnum> {
+        let mut data_max: heapless::Vec<u8, 32> = heapless::Vec::new();
+        data_max.resize_default(32).unwrap();
+        data_max.fill(0xFF);
+
+        vec![
+            DataTransferMessage::new(
+                heapless::Vec::new(),
+                DataType::Firmware,
+                0,
+                false,
+                false,
+                0
+            )
+            .into(),
+            DataTransferMessage::new(
+                data_max,
+                DataType::Data,
+                u8::MAX,
+                true,
+                true,
+                0xFFF
+            )
+            .into(),
+        ]
+    }
+
+    #[test]
+    fn test_serialize_deserialize() {
+        init_logger();
+        can_bus_messages_test::test_serialize_deserialize(create_test_messages());
+    }
+
+    #[test]
+    fn create_reference_data() {
+        init_logger();
+        can_bus_messages_test::create_reference_data(create_test_messages(), "data_transfer");
+    }
+}

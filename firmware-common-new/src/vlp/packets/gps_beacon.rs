@@ -129,7 +129,7 @@ impl Into<VLPDownlinkPacket> for GPSBeaconPacket {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     #[test]

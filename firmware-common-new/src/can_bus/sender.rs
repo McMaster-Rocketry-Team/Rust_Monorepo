@@ -1,3 +1,5 @@
+use core::cell::Cell;
+
 use crc::Crc;
 use embassy_futures::{
     select::{Either, select},
@@ -10,12 +12,10 @@ use embassy_sync::{
 };
 use heapless::Vec;
 
-use crate::can_bus::messages::{CanBusMessageEnum, LOG_MESSAGE_TYPE};
+use crate::can_bus::messages::{CanBusMessageEnum, LOG_MESSAGE_TYPE, MAX_CAN_MESSAGE_SIZE};
 
 use super::{CanBusTX, id::CanBusExtendedId};
 use packed_struct::prelude::*;
-
-pub const MAX_CAN_MESSAGE_SIZE: usize = 64;
 
 #[derive(PackedStruct)]
 #[packed_struct]
@@ -54,7 +54,7 @@ pub struct CanBusMultiFrameEncoder {
 }
 
 impl CanBusMultiFrameEncoder {
-    pub fn new(message: CanBusMessageEnum) -> Self {
+    pub fn new(message: &CanBusMessageEnum) -> Self {
         let mut serialized_message = [0u8; MAX_CAN_MESSAGE_SIZE];
         let len = message.serialize(&mut serialized_message);
 
@@ -117,7 +117,7 @@ impl Iterator for CanBusMultiFrameEncoder {
 }
 
 /// N: number of frames buffered
-/// 
+///
 /// PN: bytes in the log pipe
 pub struct CanSender<M: RawMutex, const N: usize = 20, const PN: usize = 1024> {
     channel: Channel<M, (CanBusExtendedId, Vec<u8, 8>), N>,
@@ -125,6 +125,7 @@ pub struct CanSender<M: RawMutex, const N: usize = 20, const PN: usize = 1024> {
     node_id: u16,
     log_frame_id: u32,
     log_pipe: Option<&'static Pipe<CriticalSectionRawMutex, PN>>,
+    in_overflow: Cell<bool>,
 }
 
 impl<M: RawMutex, const N: usize, const PN: usize> CanSender<M, N, PN> {
@@ -139,6 +140,7 @@ impl<M: RawMutex, const N: usize, const PN: usize> CanSender<M, N, PN> {
             node_id,
             log_frame_id: CanBusExtendedId::new(7, LOG_MESSAGE_TYPE, node_type, node_id).into(),
             log_pipe,
+            in_overflow: Cell::new(false),
         }
     }
 
@@ -171,13 +173,19 @@ impl<M: RawMutex, const N: usize, const PN: usize> CanSender<M, N, PN> {
     pub fn send(&self, message: CanBusMessageEnum) -> u16 {
         let id = message.get_id(self.node_type, self.node_id);
 
-        let multi_frame_encoder = CanBusMultiFrameEncoder::new(message);
+        let multi_frame_encoder = CanBusMultiFrameEncoder::new(&message);
         let crc = multi_frame_encoder.crc;
         for data in multi_frame_encoder {
             let success = self.channel.try_send((id, data)).is_ok();
             if !success {
-                // log_warn!("can bus sender buffer overflow");
+                if !self.in_overflow.get() {
+                    log_warn!("can bus sender buffer overflow");
+                    self.in_overflow.set(true);
+                }
                 break;
+            } else if self.in_overflow.get() {
+                log_info!("can bus sender recovered from overflow");
+                self.in_overflow.set(false);
             }
         }
         crc

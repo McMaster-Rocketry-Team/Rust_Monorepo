@@ -66,3 +66,34 @@ impl Into<CanBusMessageEnum> for OzysMeasurementMessage {
         CanBusMessageEnum::OzysMeasurement(self)
     }
 }
+
+#[cfg(test)]
+mod test {
+    use crate::{can_bus::messages::tests as can_bus_messages_test, tests::init_logger};
+    use super::*;
+
+    fn create_test_messages() -> Vec<CanBusMessageEnum> {
+        vec![
+            OzysMeasurementMessage::new(None, None, None, None).into(),
+            OzysMeasurementMessage::new(
+                Some(f32::MAX),
+                Some(f32::MIN),
+                Some(0.0),
+                Some(-1.0),
+            )
+            .into(),
+        ]
+    }
+
+    #[test]
+    fn test_serialize_deserialize() {
+        init_logger();
+        can_bus_messages_test::test_serialize_deserialize(create_test_messages());
+    }
+
+    #[test]
+    fn create_reference_data() {
+        init_logger();
+        can_bus_messages_test::create_reference_data(create_test_messages(), "ozys_measurement");
+    }
+}

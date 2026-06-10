@@ -1,0 +1,9 @@
+---
+alwaysApply: true
+---
+
+This codebase targets single-core embedded devices. Use `Cell<bool>` or regular `bool` instead of `AtomicBool` when interior mutability is needed for flags. Avoid atomic types unless multi-core synchronization is explicitly required.
+
+Async primitives are provided by `embassy_sync` crate.
+
+When a mutex is needed, prefer `BlockingMutex<M, RefCell<T>>` over async mutexes when you don't need to hold the value across `.await` points. `BlockingMutex` is more performant than async mutex for synchronous critical sections. Import from `embassy_sync::blocking_mutex::{Mutex as BlockingMutex, raw::RawMutex}`.

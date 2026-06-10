@@ -40,3 +40,32 @@ impl Into<CanBusMessageEnum> for MagMeasurementMessage {
         CanBusMessageEnum::MagMeasurement(self)
     }
 }
+
+#[cfg(test)]
+mod test {
+    use crate::{can_bus::messages::tests as can_bus_messages_test, tests::init_logger};
+    use super::*;
+
+    fn create_test_messages() -> Vec<CanBusMessageEnum> {
+        vec![
+            MagMeasurementMessage::new(0, &[0.0; 3]).into(),
+            MagMeasurementMessage::new(
+                0x00FFFFFFFFFFFFFF,
+                &[f32::MAX; 3],
+            )
+            .into(),
+        ]
+    }
+
+    #[test]
+    fn test_serialize_deserialize() {
+        init_logger();
+        can_bus_messages_test::test_serialize_deserialize(create_test_messages());
+    }
+
+    #[test]
+    fn create_reference_data() {
+        init_logger();
+        can_bus_messages_test::create_reference_data(create_test_messages(), "mag_measurement");
+    }
+}

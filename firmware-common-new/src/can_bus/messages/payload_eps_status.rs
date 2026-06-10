@@ -23,11 +23,11 @@ pub struct PayloadEPSOutputStatus {
 pub struct PayloadEPSStatusMessage {
     pub battery1_mv: u16,
     /// Unit: 0.1C, e.g. 250 = 25C
-    battery1_temperature_raw: u16,
+    pub battery1_temperature_raw: u16,
 
     pub battery2_mv: u16,
     /// Unit: 0.1C, e.g. 250 = 25C
-    battery2_temperature_raw: u16,
+    pub battery2_temperature_raw: u16,
 
     #[packed_field(element_size_bytes = "2")]
     pub output_3v3: PayloadEPSOutputStatus,
@@ -77,5 +77,74 @@ impl CanBusMessage for PayloadEPSStatusMessage {
 impl Into<CanBusMessageEnum> for PayloadEPSStatusMessage {
     fn into(self) -> CanBusMessageEnum {
         CanBusMessageEnum::PayloadEPSStatus(self)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::{can_bus::messages::tests as can_bus_messages_test, tests::init_logger};
+    use super::*;
+
+    fn create_test_messages() -> Vec<CanBusMessageEnum> {
+        let output_status_min = PayloadEPSOutputStatus {
+            current_ma: 0,
+            overwrote: false,
+            status: PowerOutputStatus::Disabled,
+        };
+        let output_status_max = PayloadEPSOutputStatus {
+            current_ma: 0x1FFF, // 13 bits
+            overwrote: true,
+            status: PowerOutputStatus::PowerBad,
+        };
+         let output_status_mid = PayloadEPSOutputStatus {
+            current_ma: 100,
+            overwrote: false,
+            status: PowerOutputStatus::PowerGood,
+        };
+
+        vec![
+            PayloadEPSStatusMessage {
+                battery1_mv: 0,
+                battery1_temperature_raw: 0,
+                battery2_mv: 0,
+                battery2_temperature_raw: 0,
+                output_3v3: output_status_min.clone(),
+                output_5v: output_status_min.clone(),
+                output_9v: output_status_min.clone(),
+            }
+            .into(),
+            PayloadEPSStatusMessage {
+                battery1_mv: u16::MAX,
+                battery1_temperature_raw: u16::MAX,
+                battery2_mv: u16::MAX,
+                battery2_temperature_raw: u16::MAX,
+                output_3v3: output_status_max.clone(),
+                output_5v: output_status_max.clone(),
+                output_9v: output_status_max.clone(),
+            }
+            .into(),
+             PayloadEPSStatusMessage {
+                battery1_mv: 1000,
+                battery1_temperature_raw: 1000,
+                battery2_mv: 1000,
+                battery2_temperature_raw: 1000,
+                output_3v3: output_status_mid.clone(),
+                output_5v: output_status_mid.clone(),
+                output_9v: output_status_mid.clone(),
+            }
+            .into(),
+        ]
+    }
+
+    #[test]
+    fn test_serialize_deserialize() {
+        init_logger();
+        can_bus_messages_test::test_serialize_deserialize(create_test_messages());
+    }
+
+    #[test]
+    fn create_reference_data() {
+        init_logger();
+        can_bus_messages_test::create_reference_data(create_test_messages(), "payload_eps_status");
     }
 }
