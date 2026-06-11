@@ -5377,6 +5377,7 @@ dependencies = [
  "clap-num",
  "convert_case",
  "critical-section",
+ "csv",
  "cursive",
  "cursive-aligned-view",
  "defmt-decoder",
