@@ -166,13 +166,13 @@ impl RocketStateEstimator {
                     && let Some(launch_pad_altitude_asl) = estimator.launch_pad_altitude_asl()
                 {
                     if estimator.is_coasting() {
-                        RocketState::PoweredAscent {
+                        RocketState::Coasting {
                             velocity: velocity,
                             altitude_asl,
                             launch_pad_altitude_asl,
                         }
                     } else {
-                        RocketState::Coasting {
+                        RocketState::PoweredAscent {
                             velocity: velocity,
                             altitude_asl,
                             launch_pad_altitude_asl,
