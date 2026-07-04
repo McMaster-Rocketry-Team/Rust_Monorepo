@@ -12,8 +12,13 @@ pub(crate) mod utils;
 #[cfg(test)]
 mod tests;
 
+
+pub mod flight_data_record;
+pub mod flight_storage;
+
 pub mod bootloader;
 pub mod can_bus;
+pub mod usb_encoder;
 pub(crate) mod fixed_point;
 pub mod gps;
 pub mod readings;

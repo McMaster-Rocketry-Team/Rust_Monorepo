@@ -1,10 +1,12 @@
 use core::marker::PhantomData;
 
 use crate::time::TimestampType;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(
+    Serialize, Deserialize, Debug, Clone, rkyv::Serialize, rkyv::Archive, rkyv::Deserialize
+)]
 pub struct SensorReading<T: TimestampType, D> {
     _phantom_timestamp: PhantomData<T>,
     pub timestamp_us: u64,

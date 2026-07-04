@@ -5,8 +5,9 @@ use super::{CanBusMessage, CanBusMessageEnum};
 
 /// may skip stages, may go back to a previous stage
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
-#[derive(PrimitiveEnum_u8, Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize)]
-#[repr(C)]
+#[derive(PrimitiveEnum_u8, Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[rkyv(derive(Clone, Copy, Debug))]
+#[repr(u8)]
 pub enum FlightStage {
     LowPower = 0,
     SelfTest = 1,

@@ -36,9 +36,23 @@ pub enum ModeSelect {
     #[command(about = "generate private and public keys for ota")]
     GenOtaKey(GenOtaKeyCli),
 
+    #[command(about = "List files on void lake(connected through USB)")]
+    ListFiles,
+
+    #[command(about = "Download a file from void lake(connected through USB)")]
+    DownloadFile(DownloadFileArgs),
+
+    #[command(about = "clear files from void lake(connected through USB)")]
+    ClearStorage,
+
     #[clap(subcommand)]
     #[command(about = "functions used for testing")]
     Testing(TestingModeSelect),
+}
+
+#[derive(Parser, Debug)]
+pub struct DownloadFileArgs {
+    pub filename: String,
 }
 
 #[derive(Parser, Debug)]
