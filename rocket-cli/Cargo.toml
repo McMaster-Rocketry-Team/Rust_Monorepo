@@ -5,7 +5,8 @@ edition = "2024"
 
 [dependencies]
 firmware-common-new = { path = "../firmware-common-new", default-features = false, features = [
-    "log"
+    "log",
+    "std",
 ]}
 anyhow = "1.0.86"
 clap = { version = "4.5.7", features = ["derive"] }

@@ -1,10 +1,10 @@
 //! Read flight-data records off a VLF5 over USB-C and write them as CSV.
 //!
-//! The VLF5 firmware logs [`FlightDataRecord`]s to its SD card. This module
-//! speaks the small vendor protocol in [`firmware_common_new::flight_storage`]:
-//! a vendor control transfer carries a [`CliRequest`] in `wValue`, and the
-//! device replies on the bulk-IN endpoint with a header followed (for
-//! downloads) by the raw SD data blocks.
+//! The VLF5 firmware logs tagged [`LogRecord`]s (IMU + SLOW) to its SD card.
+//! This module speaks the small vendor protocol in
+//! [`firmware_common_new::flight_storage`]: a vendor control transfer carries a
+//! [`CliRequest`] in `wValue`, and the device replies on the bulk-IN endpoint
+//! with a header followed (for downloads) by the raw SD data blocks.
 
 use anyhow::Context as _;
 use anyhow::{Result, anyhow, bail};
@@ -14,11 +14,11 @@ use std::time::{Duration, Instant};
 use firmware_common_new::flight_data_record::{
     FlightDataRecord, PYRO_DROGUE_CONTINUITY, PYRO_DROGUE_FIRE, PYRO_MAIN_CONTINUITY,
     PYRO_MAIN_FIRE, PYRO_SHORT_CIRCUIT, VALID_BARO, VALID_BATTERY, VALID_GPS_ALT, VALID_GPS_FIX,
-    VALID_IMU, VALID_MAG,
+    VALID_IMU, VALID_MAG, merge_log_records,
 };
 use firmware_common_new::flight_storage::{
-    BLOCK_SIZE, HEADER_LEN, RECORD_LEN, RECORDS_PER_BLOCK, decode_response_header,
-    deserialize_record, verify_data_block,
+    BLOCK_SIZE, HEADER_LEN, RECORD_LEN_TAGGED, RECORD_LEN_V1, RECORDS_PER_BLOCK_V1,
+    decode_response_header, parse_log_records_v2, parse_records_v1, verify_data_block,
 };
 use firmware_common_new::vlp::usb::CliRequest;
 
@@ -39,7 +39,6 @@ fn find_and_open() -> Result<DeviceHandle<Context>> {
             let handle = device.open().context(
                 "opening the VLF5 (on Linux you may need a udev rule or to run with sudo)",
             )?;
-            // Linux may have a kernel driver bound to the interface.
             #[cfg(target_os = "linux")]
             let _ = handle.set_auto_detach_kernel_driver(true);
             handle
@@ -69,9 +68,6 @@ fn send_request(handle: &DeviceHandle<Context>, request: CliRequest) -> Result<(
 /// download) `block_count` raw 512-byte data blocks.
 fn read_response(handle: &DeviceHandle<Context>) -> Result<Vec<u8>> {
     let mut data: Vec<u8> = Vec::new();
-    // One block per read: the firmware writes each 512-byte block atomically, so
-    // a read either gets a whole block (fast) or times out with nothing — never
-    // a partial block that rusb would discard on timeout.
     let mut buf = vec![0u8; BLOCK_SIZE];
     let mut expected: Option<usize> = None;
     let overall_deadline = Instant::now() + Duration::from_secs(300);
@@ -83,8 +79,6 @@ fn read_response(handle: &DeviceHandle<Context>) -> Result<Vec<u8>> {
                 data.extend_from_slice(&buf[..n]);
                 idle_since = None;
             }
-            // A gap is normal while the 1 MHz SD card is read block-by-block;
-            // only give up after a sustained stall.
             Err(rusb::Error::Timeout) => {
                 if expected.is_some_and(|e| data.len() >= e) {
                     break;
@@ -105,12 +99,10 @@ fn read_response(handle: &DeviceHandle<Context>) -> Result<Vec<u8>> {
             let (_record_count, record_len, block_count) =
                 decode_response_header(&data[..HEADER_LEN])
                     .ok_or_else(|| anyhow!("device sent an invalid response header"))?;
-            if record_len as usize != RECORD_LEN {
+            if record_len != RECORD_LEN_TAGGED && record_len as usize != RECORD_LEN_V1 {
                 bail!(
-                    "record layout mismatch: device uses {} bytes, this CLI expects {}. \
-                     Rebuild the firmware and CLI from the same source.",
-                    record_len,
-                    RECORD_LEN
+                    "unsupported record layout: device reports record_len={record_len}. \
+                     Rebuild rocket-cli from the same source as the firmware."
                 );
             }
             expected = Some(HEADER_LEN + block_count as usize * BLOCK_SIZE);
@@ -128,9 +120,7 @@ fn read_response(handle: &DeviceHandle<Context>) -> Result<Vec<u8>> {
 }
 
 /// Read just the response header. Used by `List`/`Clear`, which reply with
-/// metadata only (no data blocks follow), so we must not wait for the
-/// `block_count` blocks that `read_response` expects. Skips leading
-/// zero-length packets left over from a prior command's terminator.
+/// metadata only (no data blocks follow).
 fn read_header(handle: &DeviceHandle<Context>) -> Result<[u8; HEADER_LEN]> {
     let mut data: Vec<u8> = Vec::new();
     let mut buf = vec![0u8; 64];
@@ -152,16 +142,13 @@ fn read_header(handle: &DeviceHandle<Context>) -> Result<[u8; HEADER_LEN]> {
     Ok(header)
 }
 
-/// Split the raw block stream into decoded records.
+/// Split the raw block stream into merged CSV rows.
 fn parse_records(data: &[u8]) -> Result<(u32, Vec<FlightDataRecord>)> {
-    let (record_count, _record_len, block_count) = decode_response_header(data)
+    let (log_record_count, record_len, block_count) = decode_response_header(data)
         .ok_or_else(|| anyhow!("device sent an invalid response header"))?;
     let blocks = &data[HEADER_LEN..];
 
-    let mut records = Vec::with_capacity(record_count as usize);
-    let mut read = 0u32;
     let mut crc_errors = 0u32;
-
     for i in 0..block_count as usize {
         let start = i * BLOCK_SIZE;
         let block: &[u8; BLOCK_SIZE] = blocks
@@ -172,24 +159,24 @@ fn parse_records(data: &[u8]) -> Result<(u32, Vec<FlightDataRecord>)> {
         if !verify_data_block(block) {
             crc_errors += 1;
         }
-        // Only the final block is partial; cap by the records still owed.
-        let in_block = (RECORDS_PER_BLOCK as u32).min(record_count - read);
-        for j in 0..in_block as usize {
-            let off = j * RECORD_LEN;
-            let record = deserialize_record(&block[off..off + RECORD_LEN])
-                .ok_or_else(|| anyhow!("failed to decode record {} in block {}", j, i))?;
-            records.push(record);
-            read += 1;
-        }
     }
-
     if crc_errors > 0 {
         eprintln!(
             "warning: {} block(s) failed their CRC check — data may be corrupt",
             crc_errors
         );
     }
-    Ok((record_count, records))
+
+    let merged = if record_len == RECORD_LEN_TAGGED {
+        let log = parse_log_records_v2(log_record_count, blocks, block_count)
+            .ok_or_else(|| anyhow!("failed to decode tagged v2 log stream"))?;
+        merge_log_records(&log)
+    } else {
+        parse_records_v1(blocks, log_record_count, block_count)
+            .ok_or_else(|| anyhow!("failed to decode v1 log stream"))?
+    };
+
+    Ok((log_record_count, merged))
 }
 
 fn bit(mask: u8, flag: u8) -> String {
@@ -293,10 +280,14 @@ pub fn list_files() -> Result<()> {
         block_count,
         block_count as usize * BLOCK_SIZE
     );
-    println!(
-        "  record size  : {} bytes ({} records/block)",
-        record_len, RECORDS_PER_BLOCK
-    );
+    if record_len == RECORD_LEN_TAGGED {
+        println!("  format       : tagged v2 (IMU + SLOW stream)");
+    } else {
+        println!(
+            "  format       : v1 fixed ({} bytes, {} records/block)",
+            record_len, RECORDS_PER_BLOCK_V1
+        );
+    }
     if record_count == 0 {
         println!("  (empty — nothing has been logged yet)");
     }
@@ -308,12 +299,12 @@ pub fn download_file(output: &str) -> Result<()> {
     let handle = find_and_open()?;
     send_request(&handle, CliRequest::Download)?;
     let data = read_response(&handle)?;
-    let (record_count, records) = parse_records(&data)?;
+    let (log_record_count, records) = parse_records(&data)?;
     write_csv(output, &records)?;
     println!(
-        "Wrote {} of {} record(s) to {}",
+        "Wrote {} IMU row(s) from {} on-card record(s) to {}",
         records.len(),
-        record_count,
+        log_record_count,
         output
     );
     Ok(())

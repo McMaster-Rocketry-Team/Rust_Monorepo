@@ -1,32 +1,25 @@
 //! On-SD-card and over-USB storage format for flight data records.
 //!
-//! This module is the single source of truth shared by the **VLF5 firmware**
-//! (which writes records to the SD card and streams them over USB) and the
-//! **rocket-cli** host tool (which reads them back and writes CSV). Keeping the
-//! layout here guarantees the two sides can never silently disagree.
-//!
-//! ## Layout on the SD card (raw 512-byte blocks, no filesystem)
+//! ## v2 layout (tagged stream)
 //!
 //! ```text
 //! block 0            : superblock (see [`encode_superblock`])
-//! block 1 .. 1+N     : N data blocks, each holding floor(508 / RECORD_LEN)
-//!                      rkyv-serialised [`FlightDataRecord`]s, zero-padded, with
-//!                      a CRC32 in the last 4 bytes.
+//! block 1 .. 1+N     : tagged records packed back-to-back:
+//!                      [tag:1][rkyv body] [tag:1][rkyv body] ...
+//!                      zero-padded, CRC32 in the last 4 bytes.
 //! ```
 //!
-//! Records never straddle a block boundary, so every block except the last one
-//! is completely full. The superblock records how many records and how many
-//! data blocks are live, so the log survives a power cycle.
+//! Tags: [`RECORD_TAG_IMU`], [`RECORD_TAG_SLOW`] (see `flight_data_record`).
 //!
-//! ## USB download protocol
+//! ## v1 layout (legacy)
 //!
-//! The host issues a vendor control transfer ([`crate::vlp::usb::CliRequest`]),
-//! then reads the bulk-IN endpoint. The device replies with a
-//! [`HEADER_LEN`]-byte response header (see [`encode_response_header`]) followed
-//! by `block_count` raw 512-byte data blocks (for `Download`; `List`/`Clear`
-//! send the header only), terminated by a zero-length packet.
+//! Fixed-size rkyv [`FlightDataRecord`] blobs (112 bytes each). Still readable by
+//! rocket-cli; new firmware writes v2 only.
 
-use crate::flight_data_record::FlightDataRecord;
+use crate::flight_data_record::{
+    FlightDataImuRecord, FlightDataRecord, FlightDataSlowRecord, LogRecord, RECORD_TAG_IMU,
+    RECORD_TAG_SLOW, RECORD_TAG_V1,
+};
 
 use rkyv::{
     api::low::{from_bytes_unchecked, to_bytes_in_with_alloc},
@@ -51,7 +44,10 @@ pub const DATA_START_BLOCK: u32 = 1;
 pub const SUPERBLOCK_MAGIC: [u8; 4] = *b"VLF5";
 
 /// On-disk format version. Bump when the record or superblock layout changes.
-pub const STORAGE_VERSION: u32 = 1;
+pub const STORAGE_VERSION: u32 = 2;
+
+/// Legacy v1 format version.
+pub const STORAGE_VERSION_V1: u32 = 1;
 
 /// Identifies a valid USB download response header.
 pub const RESPONSE_MAGIC: [u8; 4] = *b"VLDR";
@@ -59,26 +55,166 @@ pub const RESPONSE_MAGIC: [u8; 4] = *b"VLDR";
 /// Length of the USB download response header in bytes.
 pub const HEADER_LEN: usize = 16;
 
-/// Serialised length of one [`FlightDataRecord`]. Computed from the rkyv
-/// archived layout so the firmware and host always agree (both compile rkyv
-/// with the same `pointer_width_32` feature).
-pub const RECORD_LEN: usize = size_of::<<FlightDataRecord as rkyv::Archive>::Archived>();
+/// v1 serialised length of one [`FlightDataRecord`].
+pub const RECORD_LEN_V1: usize = size_of::<<FlightDataRecord as rkyv::Archive>::Archived>();
 
-/// Number of whole records that fit in one data block.
-pub const RECORDS_PER_BLOCK: usize = USABLE_PER_BLOCK / RECORD_LEN;
+/// v1 records per block.
+pub const RECORDS_PER_BLOCK_V1: usize = USABLE_PER_BLOCK / RECORD_LEN_V1;
 
-/// rkyv needs its scratch/working buffer aligned; 16 covers every primitive in
-/// [`FlightDataRecord`].
+/// USB/superblock `record_len` field for the v2 tagged stream (variable per record).
+pub const RECORD_LEN_TAGGED: u32 = 0;
+
+/// rkyv body sizes for v2 record types.
+pub const IMU_BODY_LEN: usize = size_of::<<FlightDataImuRecord as rkyv::Archive>::Archived>();
+pub const SLOW_BODY_LEN: usize = size_of::<<FlightDataSlowRecord as rkyv::Archive>::Archived>();
+
+pub const IMU_WIRE_LEN: usize = 1 + IMU_BODY_LEN;
+pub const SLOW_WIRE_LEN: usize = 1 + SLOW_BODY_LEN;
+
+/// Largest tagged record on the wire.
+pub const MAX_WIRE_LEN: usize = if IMU_WIRE_LEN > SLOW_WIRE_LEN {
+    IMU_WIRE_LEN
+} else {
+    SLOW_WIRE_LEN
+};
+
 #[repr(C, align(16))]
-struct AlignedRecord([u8; RECORD_LEN]);
+struct AlignedBuf<const N: usize>([u8; N]);
 
 fn crc32(data: &[u8]) -> u32 {
     crc::Crc::<u32>::new(&crc::CRC_32_ISO_HDLC).checksum(data)
 }
 
-/// Serialise one record into an aligned `RECORD_LEN`-byte buffer.
-pub fn serialize_record(record: &FlightDataRecord) -> [u8; RECORD_LEN] {
-    let mut scratch = AlignedRecord([0u8; RECORD_LEN]);
+fn serialize_imu_body(imu: &FlightDataImuRecord) -> [u8; IMU_BODY_LEN] {
+    let mut scratch = AlignedBuf([0u8; IMU_BODY_LEN]);
+    to_bytes_in_with_alloc::<_, _, Failure>(
+        imu,
+        Buffer::from(&mut scratch.0[..]),
+        SubAllocator::empty(),
+    )
+    .expect("IMU serialization cannot fail");
+    scratch.0
+}
+
+fn serialize_slow_body(slow: &FlightDataSlowRecord) -> [u8; SLOW_BODY_LEN] {
+    let mut scratch = AlignedBuf([0u8; SLOW_BODY_LEN]);
+    to_bytes_in_with_alloc::<_, _, Failure>(
+        slow,
+        Buffer::from(&mut scratch.0[..]),
+        SubAllocator::empty(),
+    )
+    .expect("SLOW serialization cannot fail");
+    scratch.0
+}
+
+fn deserialize_imu_body(bytes: &[u8]) -> Option<FlightDataImuRecord> {
+    if bytes.len() < IMU_BODY_LEN {
+        return None;
+    }
+    let mut aligned = AlignedBuf([0u8; IMU_BODY_LEN]);
+    aligned.0.copy_from_slice(&bytes[..IMU_BODY_LEN]);
+    unsafe { from_bytes_unchecked::<FlightDataImuRecord, Failure>(&aligned.0) }.ok()
+}
+
+fn deserialize_slow_body(bytes: &[u8]) -> Option<FlightDataSlowRecord> {
+    if bytes.len() < SLOW_BODY_LEN {
+        return None;
+    }
+    let mut aligned = AlignedBuf([0u8; SLOW_BODY_LEN]);
+    aligned.0.copy_from_slice(&bytes[..SLOW_BODY_LEN]);
+    unsafe { from_bytes_unchecked::<FlightDataSlowRecord, Failure>(&aligned.0) }.ok()
+}
+
+/// Serialise a tagged v2 record. Returns the wire bytes and their length.
+pub fn serialize_log_record(record: &LogRecord) -> ([u8; MAX_WIRE_LEN], usize) {
+    let mut buf = [0u8; MAX_WIRE_LEN];
+    let len = match record {
+        LogRecord::Imu(imu) => {
+            buf[0] = RECORD_TAG_IMU;
+            let body = serialize_imu_body(imu);
+            buf[1..1 + IMU_BODY_LEN].copy_from_slice(&body);
+            IMU_WIRE_LEN
+        }
+        LogRecord::Slow(slow) => {
+            buf[0] = RECORD_TAG_SLOW;
+            let body = serialize_slow_body(slow);
+            buf[1..1 + SLOW_BODY_LEN].copy_from_slice(&body);
+            SLOW_WIRE_LEN
+        }
+    };
+    (buf, len)
+}
+
+/// Wire length of the tagged record starting at `bytes`, or `None` if unknown tag.
+pub fn log_record_wire_len(bytes: &[u8]) -> Option<usize> {
+    match *bytes.first()? {
+        RECORD_TAG_IMU => Some(IMU_WIRE_LEN),
+        RECORD_TAG_SLOW => Some(SLOW_WIRE_LEN),
+        RECORD_TAG_V1 => Some(RECORD_LEN_V1),
+        _ => None,
+    }
+}
+
+/// Deserialise one tagged record from a block slice at `offset`.
+pub fn deserialize_log_record_at(block: &[u8], offset: usize) -> Option<(LogRecord, usize)> {
+    let wire_len = log_record_wire_len(&block[offset..])?;
+    let end = offset + wire_len;
+    if end > block.len() {
+        return None;
+    }
+    let record = match block[offset] {
+        RECORD_TAG_IMU => LogRecord::Imu(deserialize_imu_body(&block[offset + 1..end])?),
+        RECORD_TAG_SLOW => LogRecord::Slow(deserialize_slow_body(&block[offset + 1..end])?),
+        RECORD_TAG_V1 => {
+            let full = deserialize_record_v1(&block[offset..offset + RECORD_LEN_V1])?;
+            return Some((
+                LogRecord::Imu(flight_data_record_v1_to_imu(&full)),
+                RECORD_LEN_V1,
+            ));
+        }
+        _ => return None,
+    };
+    Some((record, wire_len))
+}
+
+fn flight_data_record_v1_to_imu(r: &FlightDataRecord) -> FlightDataImuRecord {
+    FlightDataImuRecord {
+        sequence: r.record_count,
+        timestamp_us: r.timestamp_us,
+        acc: r.acc,
+        gyro: r.gyro,
+        temperature: r.temperature,
+        pressure: r.pressure,
+        mag: r.mag,
+        valid: r.valid & (crate::flight_data_record::VALID_IMU
+            | crate::flight_data_record::VALID_BARO
+            | crate::flight_data_record::VALID_MAG),
+    }
+}
+
+/// Count tagged records whose wire image fits in `data[..used_bytes]`.
+pub fn count_records_in_bytes(data: &[u8], used_bytes: usize) -> u32 {
+    let mut off = 0usize;
+    let mut count = 0u32;
+    let end = used_bytes.min(data.len());
+    while off < end {
+        let Some(wire_len) = log_record_wire_len(&data[off..end]) else {
+            break;
+        };
+        if off + wire_len > end {
+            break;
+        }
+        off += wire_len;
+        count += 1;
+    }
+    count
+}
+
+// --- v1 helpers (read-only compat) ---
+
+/// Serialise one v1 [`FlightDataRecord`].
+pub fn serialize_record_v1(record: &FlightDataRecord) -> [u8; RECORD_LEN_V1] {
+    let mut scratch = AlignedBuf([0u8; RECORD_LEN_V1]);
     to_bytes_in_with_alloc::<_, _, Failure>(
         record,
         Buffer::from(&mut scratch.0[..]),
@@ -88,20 +224,13 @@ pub fn serialize_record(record: &FlightDataRecord) -> [u8; RECORD_LEN] {
     scratch.0
 }
 
-/// Deserialise one record from its `RECORD_LEN` leading bytes. Returns `None`
-/// if the slice is too short.
-///
-/// # Safety note
-/// Uses rkyv's unchecked path (matching the firmware's serialiser). The bytes
-/// must have been produced by [`serialize_record`] for the same record layout.
-pub fn deserialize_record(bytes: &[u8]) -> Option<FlightDataRecord> {
-    if bytes.len() < RECORD_LEN {
+/// Deserialise one v1 record.
+pub fn deserialize_record_v1(bytes: &[u8]) -> Option<FlightDataRecord> {
+    if bytes.len() < RECORD_LEN_V1 {
         return None;
     }
-    let mut aligned = AlignedRecord([0u8; RECORD_LEN]);
-    aligned.0.copy_from_slice(&bytes[..RECORD_LEN]);
-    // SAFETY: `aligned` is 16-byte aligned and contains a record produced by
-    // `serialize_record`; FlightDataRecord is plain-old-data (no pointers).
+    let mut aligned = AlignedBuf([0u8; RECORD_LEN_V1]);
+    aligned.0.copy_from_slice(&bytes[..RECORD_LEN_V1]);
     unsafe { from_bytes_unchecked::<FlightDataRecord, Failure>(&aligned.0) }.ok()
 }
 
@@ -126,31 +255,32 @@ pub fn verify_data_block(block: &[u8; BLOCK_SIZE]) -> bool {
 /// Decoded contents of a valid superblock.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SuperblockInfo {
+    pub storage_version: u32,
     /// Total number of records in the log.
     pub record_count: u32,
     /// Number of live data blocks (starting at [`DATA_START_BLOCK`]).
     pub block_count: u32,
+    /// Bytes used in the last data block (v2). Zero for v1.
+    pub last_block_offset: u32,
 }
 
-/// Build a 512-byte superblock describing the current log state.
+/// Build a 512-byte superblock describing the current log state (v2).
 ///
 /// Layout: magic(4) | version(4) | record_count(4) | block_count(4) |
-/// record_len(4) | reserved | crc32(4, last 4 bytes).
-pub fn encode_superblock(record_count: u32, block_count: u32) -> [u8; BLOCK_SIZE] {
+/// last_block_offset(4) | reserved(4) | crc32(4, last 4 bytes).
+pub fn encode_superblock(record_count: u32, block_count: u32, last_block_offset: u32) -> [u8; BLOCK_SIZE] {
     let mut b = [0u8; BLOCK_SIZE];
     b[0..4].copy_from_slice(&SUPERBLOCK_MAGIC);
     b[4..8].copy_from_slice(&STORAGE_VERSION.to_le_bytes());
     b[8..12].copy_from_slice(&record_count.to_le_bytes());
     b[12..16].copy_from_slice(&block_count.to_le_bytes());
-    b[16..20].copy_from_slice(&(RECORD_LEN as u32).to_le_bytes());
+    b[16..20].copy_from_slice(&last_block_offset.to_le_bytes());
     let crc = crc32(&b[..USABLE_PER_BLOCK]);
     b[USABLE_PER_BLOCK..].copy_from_slice(&crc.to_le_bytes());
     b
 }
 
-/// Parse a superblock. Returns `None` if the magic, version, record length, or
-/// CRC don't match what this build expects (e.g. an uninitialised or
-/// incompatible card).
+/// Parse a superblock (v1 or v2).
 pub fn decode_superblock(block: &[u8; BLOCK_SIZE]) -> Option<SuperblockInfo> {
     if block[0..4] != SUPERBLOCK_MAGIC {
         return None;
@@ -159,24 +289,39 @@ pub fn decode_superblock(block: &[u8; BLOCK_SIZE]) -> Option<SuperblockInfo> {
         return None;
     }
     let version = u32::from_le_bytes(block[4..8].try_into().ok()?);
-    let record_len = u32::from_le_bytes(block[16..20].try_into().ok()?);
-    if version != STORAGE_VERSION || record_len as usize != RECORD_LEN {
-        return None;
+    let record_count = u32::from_le_bytes(block[8..12].try_into().ok()?);
+    let block_count = u32::from_le_bytes(block[12..16].try_into().ok()?);
+    match version {
+        STORAGE_VERSION => Some(SuperblockInfo {
+            storage_version: version,
+            record_count,
+            block_count,
+            last_block_offset: u32::from_le_bytes(block[16..20].try_into().ok()?),
+        }),
+        STORAGE_VERSION_V1 => {
+            let record_len = u32::from_le_bytes(block[16..20].try_into().ok()?);
+            if record_len as usize != RECORD_LEN_V1 {
+                return None;
+            }
+            Some(SuperblockInfo {
+                storage_version: version,
+                record_count,
+                block_count,
+                last_block_offset: 0,
+            })
+        }
+        _ => None,
     }
-    Some(SuperblockInfo {
-        record_count: u32::from_le_bytes(block[8..12].try_into().ok()?),
-        block_count: u32::from_le_bytes(block[12..16].try_into().ok()?),
-    })
 }
 
 /// Build the 16-byte USB download response header.
 ///
-/// Layout: magic(4) | record_count(4) | record_len(4) | block_count(4).
+/// `record_len` is [`RECORD_LEN_TAGGED`] (0) for v2.
 pub fn encode_response_header(record_count: u32, block_count: u32) -> [u8; HEADER_LEN] {
     let mut h = [0u8; HEADER_LEN];
     h[0..4].copy_from_slice(&RESPONSE_MAGIC);
     h[4..8].copy_from_slice(&record_count.to_le_bytes());
-    h[8..12].copy_from_slice(&(RECORD_LEN as u32).to_le_bytes());
+    h[8..12].copy_from_slice(&RECORD_LEN_TAGGED.to_le_bytes());
     h[12..16].copy_from_slice(&block_count.to_le_bytes());
     h
 }
@@ -192,23 +337,86 @@ pub fn decode_response_header(buf: &[u8]) -> Option<(u32, u32, u32)> {
     Some((record_count, record_len, block_count))
 }
 
+/// Parse v1 fixed records (legacy). Host only.
+#[cfg(any(feature = "std", test))]
+pub fn parse_records_v1(
+    data: &[u8],
+    record_count: u32,
+    block_count: u32,
+) -> Option<std::vec::Vec<FlightDataRecord>> {
+    let blocks = data;
+    let mut records = std::vec::Vec::with_capacity(record_count as usize);
+    let mut read = 0u32;
+    for i in 0..block_count as usize {
+        let start = i * BLOCK_SIZE;
+        let block: &[u8; BLOCK_SIZE] = blocks.get(start..start + BLOCK_SIZE)?.try_into().ok()?;
+        let in_block = (RECORDS_PER_BLOCK_V1 as u32).min(record_count - read);
+        for j in 0..in_block as usize {
+            let off = j * RECORD_LEN_V1;
+            records.push(deserialize_record_v1(&block[off..off + RECORD_LEN_V1])?);
+            read += 1;
+        }
+    }
+    Some(records)
+}
+
+/// Parse v2 tagged records from block bytes. Host only.
+#[cfg(any(feature = "std", test))]
+pub fn parse_log_records_v2(
+    record_count: u32,
+    blocks: &[u8],
+    block_count: u32,
+) -> Option<std::vec::Vec<LogRecord>> {
+    let mut records = std::vec::Vec::with_capacity(record_count as usize);
+    let mut read = 0u32;
+    for i in 0..block_count as usize {
+        let start = i * BLOCK_SIZE;
+        let block = blocks.get(start..start + BLOCK_SIZE)?;
+        let mut off = 0usize;
+        while read < record_count {
+            let Some((rec, wire_len)) = deserialize_log_record_at(block, off) else {
+                break;
+            };
+            if off + wire_len > USABLE_PER_BLOCK {
+                break;
+            }
+            records.push(rec);
+            off += wire_len;
+            read += 1;
+        }
+    }
+    if records.len() as u32 == record_count {
+        Some(records)
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::can_bus::messages::vl_status::FlightStage;
-    use crate::flight_data_record::{VALID_BARO, VALID_GPS_FIX, VALID_IMU};
+    use crate::flight_data_record::{
+        VALID_BARO, VALID_BATTERY, VALID_GPS_FIX, VALID_IMU, merge_log_records,
+    };
 
-    fn sample(i: u32) -> FlightDataRecord {
-        FlightDataRecord {
-            record_count: i,
+    fn sample_imu(i: u32) -> FlightDataImuRecord {
+        FlightDataImuRecord {
+            sequence: i,
             timestamp_us: i as u64 * 2400,
             acc: [i as f32, -1.5, 9.81],
             gyro: [0.1, 0.2, 0.3],
             temperature: 21.5,
             pressure: 101325.0 - i as f32,
             mag: [12.0, -34.0, 56.0],
+            valid: VALID_IMU | VALID_BARO,
+        }
+    }
+
+    fn sample_slow(i: u32) -> FlightDataSlowRecord {
+        FlightDataSlowRecord {
+            timestamp_us: i as u64 * 1_000_000,
             battery_voltage: 7.4,
-            valid: VALID_IMU | VALID_BARO | VALID_GPS_FIX,
             lat_lon: (37.421998, -122.084),
             altitude: 100.0 + i as f32,
             num_of_fixed_satalites: 9,
@@ -217,100 +425,94 @@ mod tests {
             pdop: 3.3,
             flight_stage: FlightStage::Armed,
             pyro_flags: 0b0000_0101,
+            valid: VALID_BATTERY | VALID_GPS_FIX,
         }
     }
 
-    /// One record must survive serialize -> deserialize unchanged.
-    #[test]
-    fn record_round_trips() {
-        let r = sample(42);
-        let bytes = serialize_record(&r);
-        assert_eq!(bytes.len(), RECORD_LEN);
-        let back = deserialize_record(&bytes).expect("deserialize");
-        assert_eq!(r, back);
-    }
-
-    #[test]
-    fn data_block_crc() {
-        let mut block = [7u8; BLOCK_SIZE];
-        finalize_data_block(&mut block);
-        assert!(verify_data_block(&block));
-        block[10] ^= 0xFF;
-        assert!(!verify_data_block(&block));
-    }
-
-    #[test]
-    fn superblock_round_trips() {
-        let sb = encode_superblock(1234, 56);
-        let info = decode_superblock(&sb).expect("decode superblock");
-        assert_eq!(info.record_count, 1234);
-        assert_eq!(info.block_count, 56);
-        // A flipped byte must fail the CRC.
-        let mut bad = sb;
-        bad[100] ^= 1;
-        assert!(decode_superblock(&bad).is_none());
-    }
-
-    /// Full firmware-writer -> USB-stream -> host-parser round trip, including a
-    /// partial final block, exactly mirroring `FlightLogger::append` (firmware)
-    /// and `parse_records` (rocket-cli).
-    #[test]
-    fn full_download_round_trips() {
-        // Enough records to fill several blocks with a partial tail.
-        let n = RECORDS_PER_BLOCK as u32 * 3 + 2;
-        let records: Vec<FlightDataRecord> = (0..n).map(sample).collect();
-
-        // --- firmware side: pack records into 512-byte blocks ---
+    fn pack_log(records: &[LogRecord]) -> (Vec<[u8; BLOCK_SIZE]>, u32) {
         let mut blocks: Vec<[u8; BLOCK_SIZE]> = Vec::new();
         let mut cur = [0u8; BLOCK_SIZE];
         let mut off = 0usize;
-        for r in &records {
-            let bytes = serialize_record(r);
-            if off + bytes.len() > USABLE_PER_BLOCK {
+        for r in records {
+            let (bytes, len) = serialize_log_record(r);
+            if off + len > USABLE_PER_BLOCK {
                 let mut full = cur;
                 finalize_data_block(&mut full);
                 blocks.push(full);
                 cur = [0u8; BLOCK_SIZE];
                 off = 0;
             }
-            cur[off..off + bytes.len()].copy_from_slice(&bytes);
-            off += bytes.len();
+            cur[off..off + len].copy_from_slice(&bytes[..len]);
+            off += len;
         }
         if off > 0 {
             let mut last = cur;
             finalize_data_block(&mut last);
             blocks.push(last);
         }
+        (blocks, off as u32)
+    }
 
-        // --- the wire: header followed by raw blocks ---
+    #[test]
+    fn imu_record_round_trips() {
+        let r = LogRecord::Imu(sample_imu(7));
+        let (bytes, len) = serialize_log_record(&r);
+        assert_eq!(len, IMU_WIRE_LEN);
+        let (back, wire) = deserialize_log_record_at(&bytes[..len], 0).unwrap();
+        assert_eq!(wire, IMU_WIRE_LEN);
+        assert_eq!(back, r);
+    }
+
+    #[test]
+    fn slow_record_round_trips() {
+        let r = LogRecord::Slow(sample_slow(3));
+        let (bytes, len) = serialize_log_record(&r);
+        assert_eq!(len, SLOW_WIRE_LEN);
+        let (back, _) = deserialize_log_record_at(&bytes[..len], 0).unwrap();
+        assert_eq!(back, r);
+    }
+
+    #[test]
+    fn superblock_v2_round_trips() {
+        let sb = encode_superblock(99, 5, 123);
+        let info = decode_superblock(&sb).expect("decode");
+        assert_eq!(info.storage_version, STORAGE_VERSION);
+        assert_eq!(info.record_count, 99);
+        assert_eq!(info.block_count, 5);
+        assert_eq!(info.last_block_offset, 123);
+    }
+
+    #[test]
+    fn tagged_download_round_trips() {
+        let mut log: Vec<LogRecord> = Vec::new();
+        for i in 0..20 {
+            if i % 5 == 0 {
+                log.push(LogRecord::Slow(sample_slow(i)));
+            }
+            log.push(LogRecord::Imu(sample_imu(i)));
+        }
+        let n = log.len() as u32;
+        let (blocks, last_off) = pack_log(&log);
+
         let mut wire = Vec::new();
         wire.extend_from_slice(&encode_response_header(n, blocks.len() as u32));
         for b in &blocks {
             wire.extend_from_slice(b);
         }
 
-        // --- host side: parse the stream back into records ---
-        let (record_count, record_len, block_count) = decode_response_header(&wire).unwrap();
+        let (record_count, record_len, block_count) =
+            decode_response_header(&wire).unwrap();
         assert_eq!(record_count, n);
-        assert_eq!(record_len as usize, RECORD_LEN);
-        assert_eq!(block_count as usize, blocks.len());
+        assert_eq!(record_len, RECORD_LEN_TAGGED);
+        let recovered = parse_log_records_v2(record_count, &wire[HEADER_LEN..], block_count).unwrap();
+        assert_eq!(recovered, log);
 
-        let body = &wire[HEADER_LEN..];
-        let mut recovered = Vec::new();
-        let mut read = 0u32;
-        for i in 0..block_count as usize {
-            let block: &[u8; BLOCK_SIZE] =
-                body[i * BLOCK_SIZE..(i + 1) * BLOCK_SIZE].try_into().unwrap();
-            assert!(verify_data_block(block), "block {} failed CRC", i);
-            let in_block = (RECORDS_PER_BLOCK as u32).min(record_count - read);
-            for j in 0..in_block as usize {
-                let o = j * RECORD_LEN;
-                recovered.push(deserialize_record(&block[o..o + RECORD_LEN]).unwrap());
-                read += 1;
-            }
-        }
+        let merged = merge_log_records(&recovered);
+        assert_eq!(merged.len(), 20);
+        assert_eq!(merged[0].record_count, 0);
 
-        assert_eq!(recovered.len(), records.len());
-        assert_eq!(recovered, records);
+        let sb = encode_superblock(n, blocks.len() as u32, last_off);
+        let info = decode_superblock(&sb).unwrap();
+        assert_eq!(info.last_block_offset, last_off);
     }
 }
