@@ -8,13 +8,13 @@ mod monitor;
 mod probe;
 mod serial_can;
 mod testing;
+mod usb_storage;
 
 use std::fs::File;
 use std::io;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
-use anyhow::Ok;
 use anyhow::{Result, anyhow};
 use args::Cli;
 use args::ModeSelect;
@@ -91,6 +91,9 @@ async fn main() -> Result<()> {
         ModeSelect::Testing(TestingModeSelect::SendVLPTelemetry(args)) => {
             send_fake_vlp_telemetry(args).await
         }
+        ModeSelect::ListFlightLog => usb_storage::list_files(),
+        ModeSelect::DownloadFlightLog(args) => usb_storage::download_file(&args.output),
+        ModeSelect::ClearFlightLog => usb_storage::clear_storage(),
     }
 }
 

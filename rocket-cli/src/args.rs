@@ -36,9 +36,24 @@ pub enum ModeSelect {
     #[command(about = "generate private and public keys for ota")]
     GenOtaKey(GenOtaKeyCli),
 
+    #[command(about = "show SD flight log summary from a connected VLF5")]
+    ListFlightLog,
+
+    #[command(about = "download SD flight log from a connected VLF5 to CSV")]
+    DownloadFlightLog(DownloadFlightLogArgs),
+
+    #[command(about = "erase the SD flight log on a connected VLF5")]
+    ClearFlightLog,
+
     #[clap(subcommand)]
     #[command(about = "functions used for testing")]
     Testing(TestingModeSelect),
+}
+
+#[derive(Parser, Debug)]
+pub struct DownloadFlightLogArgs {
+    #[arg(default_value = "flight_log.csv")]
+    pub output: String,
 }
 
 #[derive(Parser, Debug)]
