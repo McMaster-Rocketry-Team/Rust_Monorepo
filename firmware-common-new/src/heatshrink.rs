@@ -63,7 +63,7 @@ impl<'a, T: HSEncoderDecoder> HeatshrinkWrapper<'a, T> {
     /// returns free space avaliable in output buffer
     pub fn sink(&mut self, mut data: &[u8]) -> Result<(), HeatshrinkError> {
         self.in_len += data.len();
-        while data.len() > 0 {
+        while !data.is_empty() {
             if let (HSsinkRes::SinkOK, consumed_len) = self.enc.sink(data) {
                 data = &data[consumed_len..];
             } else {
