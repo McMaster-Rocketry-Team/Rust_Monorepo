@@ -108,6 +108,18 @@ impl<M: RawMutex> VLPGroundStation<M> {
         self.tx_result_signal.try_take()
     }
 
+    /// If an uplink queued by `send`/`send_nb` has NOT yet been taken by the daemon,
+    /// remove it (so it will not be transmitted) and return `true`. Return `false` if
+    /// the daemon has already taken the packet — at that point the transmit is committed
+    /// and cannot be retracted; the caller should wait for the send result instead.
+    ///
+    /// Callers that reclaim a queued send this way must check the return synchronously
+    /// (no `.await` between observing "no result yet" and calling this), so a daemon
+    /// running as a sibling task cannot take the packet in the gap.
+    pub fn take_pending_uplink(&self) -> bool {
+        self.tx_signal.try_take().is_some()
+    }
+
     pub async fn receive(&self) -> (VLPDownlinkPacket, PacketStatus) {
         self.rx_signal.wait().await
     }

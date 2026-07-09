@@ -130,6 +130,12 @@ fn parse_command(line: &str) -> Result<Command> {
                 .ok_or_else(|| anyhow!("target-apogee requires a value in meters"))?
                 .parse::<f32>()
                 .map_err(|_| anyhow!("target-apogee must be a number"))?;
+            // Reject NaN/inf/negative before building the packet: NaN slips past the
+            // fixed-point clamp and panics `num_traits::cast(...).unwrap()`, which in a
+            // live `control` session would abort and tear down the daemon mid-flight.
+            if !v.is_finite() || v < 0.0 {
+                bail!("target-apogee must be a finite, non-negative number of meters");
+            }
             uplink(
                 VLPUplinkPacket::SetTargetApogee(SetTargetApogeePacket::new(v)),
                 format!("target-apogee {v}"),
@@ -189,8 +195,17 @@ fn parse_command(line: &str) -> Result<Command> {
 // ---------------------------------------------------------------------------
 
 fn emit(value: Value) {
-    println!("{value}");
-    let _ = std::io::stdout().flush();
+    let mut out = std::io::stdout().lock();
+    match writeln!(out, "{value}") {
+        Ok(()) => {
+            let _ = out.flush();
+        }
+        // stdout consumer went away: exit cleanly instead of panicking (`println!` would),
+        // which would otherwise tear down the daemon mid-flight on the next telemetry emit.
+        Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => std::process::exit(0),
+        // Other transient write error: drop this line, keep the session alive.
+        Err(_) => {}
+    }
 }
 
 /// Serialize a downlink packet + link status to a JSON object (one line).
@@ -258,14 +273,73 @@ fn downlink_json(packet: &VLPDownlinkPacket, status: &PacketStatus) -> Value {
     }
 }
 
-fn send_result_json(name: &str, result: &Result<PacketStatus, VLPTXError>) -> Value {
-    match result {
-        Ok(status) => json!({
+/// Result of a single uplink attempt.
+enum SendOutcome {
+    /// Transmitted and acknowledged.
+    Ack(PacketStatus),
+    /// Not acknowledged: the daemon attempted the uplink but got no valid ack (e.g. wrong
+    /// key), or the GCM/radio reported a transmit failure. The packet may or may not have
+    /// gone out over the air, but it was not confirmed.
+    Nack(VLPTXError),
+    /// No downlink arrived within the deadline; the queued packet was retracted and is
+    /// guaranteed NOT to have been transmitted.
+    TimedOut,
+}
+
+fn send_outcome_json(name: &str, outcome: &SendOutcome) -> Value {
+    match outcome {
+        SendOutcome::Ack(status) => json!({
             "type": "ack", "command": name, "rssi": status.rssi, "snr": status.snr,
         }),
-        Err(e) => json!({
+        SendOutcome::Nack(e) => json!({
             "type": "nack", "command": name, "error": format!("{:?}", e),
         }),
+        SendOutcome::TimedOut => json!({
+            "type": "timeout", "command": name,
+            "message": "no ack within timeout (no downlink? wrong frequency/key?)",
+        }),
+    }
+}
+
+/// Queue an uplink and wait for its result, up to `deadline`.
+///
+/// Cancel-safe by construction. `VLPGroundStation::send()` is not cancel-safe (it leaves
+/// the packet queued if its future is dropped), so instead of `timeout(send())` we queue
+/// with `send_nb` and poll. The retract-vs-committed decision is made SYNCHRONOUSLY — no
+/// `.await` between observing "no result yet" and calling `take_pending_uplink()` — so in
+/// the cooperative single-task `select!` the sibling daemon cannot take the packet in the
+/// gap. Therefore:
+///   * still queued at the deadline  -> retracted, guaranteed un-transmitted (`TimedOut`).
+///   * already taken by the daemon   -> transmit committed; we always wait for the real
+///     Ack/Nack (a sent packet is never misreported as a timeout). The daemon's own 500 ms
+///     ack window bounds this wait, so a committed send always resolves shortly.
+///
+/// The daemon must be driven concurrently (a sibling branch of the same `select!`).
+async fn send_uplink(
+    vlp: &VLPGroundStation<MultiThreadRawMutex>,
+    packet: VLPUplinkPacket,
+    deadline: Duration,
+) -> SendOutcome {
+    let _ = vlp.try_get_send_result(); // drop any stale result from a prior send
+    vlp.send_nb(packet);
+    let start = std::time::Instant::now();
+    let mut committed = false;
+    loop {
+        if let Some(result) = vlp.try_get_send_result() {
+            return match result {
+                Ok(status) => SendOutcome::Ack(status),
+                Err(e) => SendOutcome::Nack(e),
+            };
+        }
+        if !committed && start.elapsed() >= deadline {
+            // Synchronous with the poll above (no await in between): a false return means
+            // the daemon already took the packet, so the transmit is committed.
+            if vlp.take_pending_uplink() {
+                return SendOutcome::TimedOut;
+            }
+            committed = true;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
     }
 }
 
@@ -402,7 +476,13 @@ async fn handle_commands(
     loop {
         let line = match rx.recv().await {
             Some(l) => l,
-            None => return SessionEnd::Quit,
+            None => {
+                // stdin closed. Stop accepting commands but keep the daemon and the
+                // telemetry drain alive, so a piped one-shot (`echo cmd | control > log`)
+                // still streams telemetry. The session ends on `quit`, SIGINT, or kill.
+                std::future::pending::<()>().await;
+                unreachable!();
+            }
         };
         let line = line.trim();
         if line.is_empty() {
@@ -424,18 +504,9 @@ async fn handle_commands(
             }
             Ok(Command::Uplink { packet, name }) => {
                 emit(json!({"type": "sending", "command": name}));
-                let result =
-                    match tokio::time::timeout(Duration::from_secs(SEND_TIMEOUT_SECS), vlp.send(packet))
-                        .await
-                    {
-                        Ok(r) => r,
-                        Err(_) => {
-                            emit(json!({"type": "timeout", "command": name,
-                                "message": "no ack within timeout (no downlink? wrong frequency/key?)"}));
-                            continue;
-                        }
-                    };
-                emit(send_result_json(&name, &result));
+                let outcome =
+                    send_uplink(vlp, packet, Duration::from_secs(SEND_TIMEOUT_SECS)).await;
+                emit(send_outcome_json(&name, &outcome));
             }
             Err(e) => emit(json!({"type": "error", "message": format!("{e}")})),
         }
@@ -467,21 +538,18 @@ pub async fn send_uplink_oneshot(
     let vlp = VLPGroundStation::<MultiThreadRawMutex>::new();
     let mut daemon = vlp.daemon(&mut rpc_radio, &params.vlp_key);
 
-    let result = tokio::select! {
-        _ = daemon.run() => Err(VLPTXError::AckNotReceived), // daemon never returns; placeholder
-        r = tokio::time::timeout(Duration::from_secs(SEND_TIMEOUT_SECS), vlp.send(packet)) => match r {
-            Ok(r) => r,
-            Err(_) => {
-                emit(json!({"type": "timeout", "command": name,
-                    "message": "no ack within timeout (no downlink? wrong frequency/key?)"}));
-                bail!("timed out waiting for ack from {name}");
-            }
-        },
+    // daemon.run() never returns; it drives the radio while send_uplink polls the result.
+    let outcome = tokio::select! {
+        _ = daemon.run() => SendOutcome::TimedOut,
+        o = send_uplink(&vlp, packet, Duration::from_secs(SEND_TIMEOUT_SECS)) => o,
     };
 
-    emit(send_result_json(&name, &result));
-    match result {
-        Ok(_) => Ok(()),
-        Err(e) => bail!("uplink '{name}' not acked: {e:?}"),
+    emit(send_outcome_json(&name, &outcome));
+    match outcome {
+        SendOutcome::Ack(_) => Ok(()),
+        SendOutcome::Nack(e) => bail!("uplink '{name}' not acked: {e:?}"),
+        SendOutcome::TimedOut => {
+            bail!("timed out waiting for ack from '{name}' (no downlink? wrong frequency/key?)")
+        }
     }
 }
