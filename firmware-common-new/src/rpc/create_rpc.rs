@@ -216,8 +216,10 @@ macro_rules! create_rpc {
                     self.serial.write_all(&[255; REQUEST_STRUCT_MAX_SIZE]).await.map_err(RpcClientError::Serial)?;
                     self.serial.clear_read_buffer().await.map_err(RpcClientError::Serial)?;
 
-                    // send reset command
-                    self.serial.write_all(&[255, 0x42]).await.map_err(RpcClientError::Serial)?;
+                    // send reset command: wire order is [crc, id] (as the server reads
+                    // buf[0]=crc, buf[1]=id and matches id==255 && crc==0x42), matching the
+                    // normal-command [crc, id, payload] framing.
+                    self.serial.write_all(&[0x42, 255]).await.map_err(RpcClientError::Serial)?;
 
                     let mut buffer = [0u8; 2];
                     self.serial.read_exact(&mut buffer).await?;
