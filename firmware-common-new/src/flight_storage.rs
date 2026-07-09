@@ -43,6 +43,15 @@ pub const DATA_START_BLOCK: u32 = 1;
 /// Identifies a valid superblock written by this firmware.
 pub const SUPERBLOCK_MAGIC: [u8; 4] = *b"VLF5";
 
+/// Identifies the avionics config block (last SD block; independent of the flight log).
+pub const CONFIG_BLOCK_MAGIC: [u8; 4] = *b"VLFC";
+
+/// On-disk config block format version.
+pub const CONFIG_BLOCK_VERSION: u32 = 1;
+
+/// Default target apogee AGL (m) when no config is stored.
+pub const DEFAULT_TARGET_APOGEE_AGL: f32 = 4000.0;
+
 /// On-disk format version. Bump when the record or superblock layout changes.
 pub const STORAGE_VERSION: u32 = 3;
 
@@ -313,6 +322,50 @@ pub struct SuperblockInfo {
     pub last_block_offset: u32,
 }
 
+/// Decoded contents of a valid avionics config block.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AvionicsConfig {
+    pub target_apogee_agl: f32,
+}
+
+impl Default for AvionicsConfig {
+    fn default() -> Self {
+        Self {
+            target_apogee_agl: DEFAULT_TARGET_APOGEE_AGL,
+        }
+    }
+}
+
+/// Build a 512-byte config block (stored at the last SD block index).
+///
+/// Layout: magic(4) | version(4) | target_apogee_agl f32 LE(4) | reserved... | crc32(4).
+pub fn encode_config_block(config: &AvionicsConfig) -> [u8; BLOCK_SIZE] {
+    let mut b = [0u8; BLOCK_SIZE];
+    b[0..4].copy_from_slice(&CONFIG_BLOCK_MAGIC);
+    b[4..8].copy_from_slice(&CONFIG_BLOCK_VERSION.to_le_bytes());
+    b[8..12].copy_from_slice(&config.target_apogee_agl.to_le_bytes());
+    let crc = crc32(&b[..USABLE_PER_BLOCK]);
+    b[USABLE_PER_BLOCK..].copy_from_slice(&crc.to_le_bytes());
+    b
+}
+
+/// Parse an avionics config block. Returns `None` if magic/CRC/version are invalid.
+pub fn decode_config_block(block: &[u8; BLOCK_SIZE]) -> Option<AvionicsConfig> {
+    if block[0..4] != CONFIG_BLOCK_MAGIC {
+        return None;
+    }
+    if !verify_data_block(block) {
+        return None;
+    }
+    let version = u32::from_le_bytes(block[4..8].try_into().ok()?);
+    if version != CONFIG_BLOCK_VERSION {
+        return None;
+    }
+    Some(AvionicsConfig {
+        target_apogee_agl: f32::from_le_bytes(block[8..12].try_into().ok()?),
+    })
+}
+
 /// Build a 512-byte superblock describing the current log state (v2).
 ///
 /// Layout: magic(4) | version(4) | record_count(4) | block_count(4) |
@@ -544,6 +597,23 @@ mod tests {
         assert_eq!(info.record_count, 99);
         assert_eq!(info.block_count, 5);
         assert_eq!(info.last_block_offset, 123);
+    }
+
+    #[test]
+    fn config_block_round_trips() {
+        let cfg = AvionicsConfig {
+            target_apogee_agl: 3500.5,
+        };
+        let block = encode_config_block(&cfg);
+        let back = decode_config_block(&block).expect("decode");
+        assert_eq!(back.target_apogee_agl, 3500.5);
+    }
+
+    #[test]
+    fn config_block_rejects_bad_magic() {
+        let mut block = encode_config_block(&AvionicsConfig::default());
+        block[0] = b'X';
+        assert!(decode_config_block(&block).is_none());
     }
 
     #[test]

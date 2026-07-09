@@ -298,8 +298,8 @@ impl TelemetryPacket {
             pyro_main_continuity,
             pyro_drogue_continuity,
 
-            altitude_agl: AltitudeFac::to_fixed_point_capped(0.0),
-            max_altitude_agl: AltitudeFac::to_fixed_point_capped(0.0),
+            altitude_agl: AltitudeFac::to_fixed_point_capped(altitude_agl),
+            max_altitude_agl: AltitudeFac::to_fixed_point_capped(max_altitude_agl),
 
             air_speed: AirSpeedFac::to_fixed_point_capped(air_speed),
             max_air_speed: AirSpeedFac::to_fixed_point_capped(max_air_speed),

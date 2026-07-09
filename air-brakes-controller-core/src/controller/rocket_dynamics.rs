@@ -3,6 +3,7 @@ use crate::{
     utils::approximate_air_density,
 };
 
+/// Vertical-only dynamics: rocket assumed always upright.
 pub fn calculate_state_derivatives(
     air_brakes_drag_percentage: f32,
     state: &State,
@@ -10,16 +11,22 @@ pub fn calculate_state_derivatives(
 ) -> Derivative<State> {
     let air_density = approximate_air_density(state.altitude_asl);
 
-    let speed_squared = state.velocity.magnitude_squared();
+    let speed_squared = state.vertical_velocity * state.vertical_velocity;
     let cd = rocket_param.get_cd_from_drag_percentage(air_brakes_drag_percentage);
     let drag_force = 0.5 * cd * air_density * speed_squared * rocket_param.reference_area;
-    let acceleration = drag_force / rocket_param.burnout_mass;
-    let mut acceleration = -state.velocity.normalize() * acceleration;
-    acceleration.y -= 9.81;
+    let drag_accel = drag_force / rocket_param.burnout_mass;
+
+    // Drag opposes vertical velocity; gravity always down.
+    let sign = if state.vertical_velocity >= 0.0 {
+        1.0
+    } else {
+        -1.0
+    };
+    let vertical_acceleration = -sign * drag_accel - 9.81;
 
     Derivative(State {
-        altitude_asl: state.velocity.y,
-        velocity: acceleration,
+        altitude_asl: state.vertical_velocity,
+        vertical_velocity: vertical_acceleration,
     })
 }
 
@@ -33,7 +40,7 @@ pub fn simulate_apogee_rk2(
     rocket_param: &RocketParameters,
 ) -> f32 {
     // If we are already descending or stationary, return current altitude
-    if initial_state.velocity.y <= 0.0 {
+    if initial_state.vertical_velocity <= 0.0 {
         return initial_state.altitude_asl;
     }
 
@@ -53,7 +60,7 @@ pub fn simulate_apogee_rk2(
 
         let mid_state = State {
             altitude_asl: state.altitude_asl + k1.altitude_asl * (0.5 * DT),
-            velocity: state.velocity + k1.velocity * (0.5 * DT),
+            vertical_velocity: state.vertical_velocity + k1.vertical_velocity * (0.5 * DT),
         };
 
         let Derivative(k2) =
@@ -61,12 +68,12 @@ pub fn simulate_apogee_rk2(
 
         let next_state = State {
             altitude_asl: state.altitude_asl + k2.altitude_asl * DT,
-            velocity: state.velocity + k2.velocity * DT,
+            vertical_velocity: state.vertical_velocity + k2.vertical_velocity * DT,
         };
 
         // Check for apogee crossing within this step
-        let vy0 = state.velocity.y;
-        let vy1 = next_state.velocity.y;
+        let vy0 = state.vertical_velocity;
+        let vy1 = next_state.vertical_velocity;
         if vy1 <= 0.0 {
             // Linearly interpolate vertical velocity over the step to estimate
             // the exact time t_zero where v_y crosses zero, then integrate
@@ -87,8 +94,6 @@ pub fn simulate_apogee_rk2(
 
 #[cfg(test)]
 mod test {
-    use nalgebra::Vector2;
-
     use crate::tests::init_logger;
 
     use super::*;
@@ -97,9 +102,10 @@ mod test {
     fn test_simulate_apogee() {
         init_logger();
 
+        // Vertical-only: use previous vertical component as speed (ignore horizontal).
         let initial_state = State {
             altitude_asl: 1032.0 + 251.0,
-            velocity: Vector2::new(66.8630616, 308.7624),
+            vertical_velocity: 308.7624,
         };
 
         let rocket_param = RocketParameters {
@@ -122,7 +128,7 @@ mod test {
 
         let initial_state = State {
             altitude_asl: 1032.0 + 251.0,
-            velocity: Vector2::new(66.8630616, 308.7624),
+            vertical_velocity: 308.7624,
         };
 
         let rocket_param = RocketParameters {

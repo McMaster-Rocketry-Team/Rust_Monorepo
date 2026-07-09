@@ -5,12 +5,13 @@
 
 mod fmt;
 
+pub mod baro_state_estimator;
 mod controller;
 mod state_estimator;
 mod state_estimator2;
 mod utils;
 
-pub use state_estimator2::{FlightProfile, Measurement, RocketState, RocketStateEstimator};
+pub use baro_state_estimator::{FlightProfile, RocketState, RocketStateEstimator};
 pub use controller::{AirBrakesMPC, RocketParameters};
 pub use utils::{approximate_air_density, approximate_speed_of_sound, lerp};
 

@@ -272,6 +272,16 @@ impl<M: RawMutex> VLPAvionics<M> {
         self.rx_signal.wait().await
     }
 
+    /// HIL / tests: deliver an uplink as if the radio received and verified it.
+    pub fn inject_uplink(&self, packet: VLPUplinkPacket) {
+        self.rx_signal.signal((packet, PacketStatus { rssi: 0, snr: 0 }));
+    }
+
+    /// HIL / tests: wait for the next downlink the app tried to send.
+    pub async fn wait_downlink(&self) -> VLPDownlinkPacket {
+        self.tx_signal.wait().await
+    }
+
     pub fn daemon<'a, 'b, 'c>(
         &'a self,
         radio: &'b mut impl Radio,

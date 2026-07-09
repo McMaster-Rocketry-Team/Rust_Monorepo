@@ -113,14 +113,14 @@ fn integration_test() {
                 0.0,
                 &State {
                     altitude_asl: estimator.altitude_asl().unwrap_or(0.0),
-                    velocity,
+                    vertical_velocity: velocity.y,
                 },
                 &ROCKET_PARAMETERS,
             );
             GlobalPlot::add_value("Predicted Apogee", predicted_apogee);
 
             let airbrake_extension_percentage =
-                airbrakes_mpc.update(estimator.altitude_asl().unwrap_or(0.0), velocity);
+                airbrakes_mpc.update(estimator.altitude_asl().unwrap_or(0.0), velocity.y);
             GlobalPlot::add_value(
                 "Airbrake extension percentage",
                 airbrake_extension_percentage,
