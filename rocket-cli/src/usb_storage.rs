@@ -13,12 +13,14 @@ use std::time::{Duration, Instant};
 
 use firmware_common_new::flight_data_record::{
     FlightDataRecord, PYRO_DROGUE_CONTINUITY, PYRO_DROGUE_FIRE, PYRO_MAIN_CONTINUITY,
-    PYRO_MAIN_FIRE, PYRO_SHORT_CIRCUIT, VALID_BARO, VALID_BATTERY, VALID_GPS_ALT, VALID_GPS_FIX,
-    VALID_IMU, VALID_MAG, merge_log_records,
+    PYRO_MAIN_FIRE, PYRO_SHORT_CIRCUIT, VALID_AIRBRAKES_ACTUAL, VALID_AIRBRAKES_COMMANDED,
+    VALID_BARO, VALID_BATTERY, VALID_GPS_ALT, VALID_GPS_FIX, VALID_IMU, VALID_MAG,
+    merge_log_records,
 };
 use firmware_common_new::flight_storage::{
     BLOCK_SIZE, HEADER_LEN, RECORD_LEN_TAGGED, RECORD_LEN_V1, RECORDS_PER_BLOCK_V1,
-    decode_response_header, parse_log_records_v2, parse_records_v1, verify_data_block,
+    STORAGE_VERSION, STORAGE_VERSION_V2, decode_response_header, parse_log_records_tagged,
+    parse_records_v1, verify_data_block,
 };
 use firmware_common_new::vlp::usb::CliRequest;
 
@@ -168,8 +170,8 @@ fn parse_records(data: &[u8]) -> Result<(u32, Vec<FlightDataRecord>)> {
     }
 
     let merged = if record_len == RECORD_LEN_TAGGED {
-        let log = parse_log_records_v2(log_record_count, blocks, block_count)
-            .ok_or_else(|| anyhow!("failed to decode tagged v2 log stream"))?;
+        let log = parse_tagged_log(log_record_count, blocks, block_count)
+            .ok_or_else(|| anyhow!("failed to decode tagged log stream"))?;
         merge_log_records(&log)
     } else {
         parse_records_v1(blocks, log_record_count, block_count)
@@ -177,6 +179,21 @@ fn parse_records(data: &[u8]) -> Result<(u32, Vec<FlightDataRecord>)> {
     };
 
     Ok((log_record_count, merged))
+}
+
+fn parse_tagged_log(
+    record_count: u32,
+    blocks: &[u8],
+    block_count: u32,
+) -> Option<Vec<firmware_common_new::flight_data_record::LogRecord>> {
+    for version in [STORAGE_VERSION, STORAGE_VERSION_V2] {
+        if let Some(log) = parse_log_records_tagged(record_count, blocks, block_count, version) {
+            if log.len() == record_count as usize {
+                return Some(log);
+            }
+        }
+    }
+    None
 }
 
 fn bit(mask: u8, flag: u8) -> String {
@@ -219,6 +236,10 @@ fn write_csv(path: &str, records: &[FlightDataRecord]) -> Result<()> {
         "pyro_drogue_continuity",
         "pyro_drogue_fire",
         "pyro_short_circuit",
+        "air_brakes_commanded_extension",
+        "air_brakes_actual_extension",
+        "air_brakes_commanded_valid",
+        "air_brakes_actual_valid",
     ])?;
 
     for r in records {
@@ -258,6 +279,10 @@ fn write_csv(path: &str, records: &[FlightDataRecord]) -> Result<()> {
             bit(p, PYRO_DROGUE_CONTINUITY),
             bit(p, PYRO_DROGUE_FIRE),
             bit(p, PYRO_SHORT_CIRCUIT),
+            r.air_brakes_commanded_extension.to_string(),
+            r.air_brakes_actual_extension.to_string(),
+            bit(v, VALID_AIRBRAKES_COMMANDED),
+            bit(v, VALID_AIRBRAKES_ACTUAL),
         ])?;
     }
 

@@ -17,8 +17,8 @@
 //! rocket-cli; new firmware writes v2 only.
 
 use crate::flight_data_record::{
-    FlightDataImuRecord, FlightDataRecord, FlightDataSlowRecord, LogRecord, RECORD_TAG_IMU,
-    RECORD_TAG_SLOW, RECORD_TAG_V1,
+    FlightDataImuRecord, FlightDataRecord, FlightDataSlowRecord, FlightDataSlowRecordV2,
+    LogRecord, RECORD_TAG_IMU, RECORD_TAG_SLOW, RECORD_TAG_V1,
 };
 
 use rkyv::{
@@ -44,7 +44,10 @@ pub const DATA_START_BLOCK: u32 = 1;
 pub const SUPERBLOCK_MAGIC: [u8; 4] = *b"VLF5";
 
 /// On-disk format version. Bump when the record or superblock layout changes.
-pub const STORAGE_VERSION: u32 = 2;
+pub const STORAGE_VERSION: u32 = 3;
+
+/// v2 tagged stream (SLOW records without airbrakes fields).
+pub const STORAGE_VERSION_V2: u32 = 2;
 
 /// Legacy v1 format version.
 pub const STORAGE_VERSION_V1: u32 = 1;
@@ -67,9 +70,12 @@ pub const RECORD_LEN_TAGGED: u32 = 0;
 /// rkyv body sizes for v2 record types.
 pub const IMU_BODY_LEN: usize = size_of::<<FlightDataImuRecord as rkyv::Archive>::Archived>();
 pub const SLOW_BODY_LEN: usize = size_of::<<FlightDataSlowRecord as rkyv::Archive>::Archived>();
+pub const SLOW_BODY_LEN_V2: usize =
+    size_of::<<FlightDataSlowRecordV2 as rkyv::Archive>::Archived>();
 
 pub const IMU_WIRE_LEN: usize = 1 + IMU_BODY_LEN;
 pub const SLOW_WIRE_LEN: usize = 1 + SLOW_BODY_LEN;
+pub const SLOW_WIRE_LEN_V2: usize = 1 + SLOW_BODY_LEN_V2;
 
 /// Largest tagged record on the wire.
 pub const MAX_WIRE_LEN: usize = if IMU_WIRE_LEN > SLOW_WIRE_LEN {
@@ -117,12 +123,38 @@ fn deserialize_imu_body(bytes: &[u8]) -> Option<FlightDataImuRecord> {
 }
 
 fn deserialize_slow_body(bytes: &[u8]) -> Option<FlightDataSlowRecord> {
+    deserialize_slow_body_at_version(bytes, STORAGE_VERSION)
+}
+
+fn deserialize_slow_body_v2(bytes: &[u8]) -> Option<FlightDataSlowRecord> {
+    if bytes.len() < SLOW_BODY_LEN_V2 {
+        return None;
+    }
+    let mut aligned = AlignedBuf([0u8; SLOW_BODY_LEN_V2]);
+    aligned.0.copy_from_slice(&bytes[..SLOW_BODY_LEN_V2]);
+    let v2: FlightDataSlowRecordV2 =
+        unsafe { from_bytes_unchecked::<FlightDataSlowRecordV2, Failure>(&aligned.0) }.ok()?;
+    Some(v2.into())
+}
+
+fn deserialize_slow_body_at_version(bytes: &[u8], storage_version: u32) -> Option<FlightDataSlowRecord> {
+    if storage_version == STORAGE_VERSION_V2 {
+        return deserialize_slow_body_v2(bytes);
+    }
     if bytes.len() < SLOW_BODY_LEN {
         return None;
     }
     let mut aligned = AlignedBuf([0u8; SLOW_BODY_LEN]);
     aligned.0.copy_from_slice(&bytes[..SLOW_BODY_LEN]);
     unsafe { from_bytes_unchecked::<FlightDataSlowRecord, Failure>(&aligned.0) }.ok()
+}
+
+fn slow_wire_len_for_version(storage_version: u32) -> usize {
+    if storage_version == STORAGE_VERSION_V2 {
+        SLOW_WIRE_LEN_V2
+    } else {
+        SLOW_WIRE_LEN
+    }
 }
 
 /// Serialise a tagged v2 record. Returns the wire bytes and their length.
@@ -147,9 +179,14 @@ pub fn serialize_log_record(record: &LogRecord) -> ([u8; MAX_WIRE_LEN], usize) {
 
 /// Wire length of the tagged record starting at `bytes`, or `None` if unknown tag.
 pub fn log_record_wire_len(bytes: &[u8]) -> Option<usize> {
+    log_record_wire_len_for_version(bytes, STORAGE_VERSION)
+}
+
+/// Wire length for a tagged record at `storage_version` (v2 vs v3 SLOW bodies differ).
+pub fn log_record_wire_len_for_version(bytes: &[u8], storage_version: u32) -> Option<usize> {
     match *bytes.first()? {
         RECORD_TAG_IMU => Some(IMU_WIRE_LEN),
-        RECORD_TAG_SLOW => Some(SLOW_WIRE_LEN),
+        RECORD_TAG_SLOW => Some(slow_wire_len_for_version(storage_version)),
         RECORD_TAG_V1 => Some(RECORD_LEN_V1),
         _ => None,
     }
@@ -157,14 +194,26 @@ pub fn log_record_wire_len(bytes: &[u8]) -> Option<usize> {
 
 /// Deserialise one tagged record from a block slice at `offset`.
 pub fn deserialize_log_record_at(block: &[u8], offset: usize) -> Option<(LogRecord, usize)> {
-    let wire_len = log_record_wire_len(&block[offset..])?;
+    deserialize_log_record_at_version(block, offset, STORAGE_VERSION)
+}
+
+/// Deserialise one tagged record using the on-card storage version.
+pub fn deserialize_log_record_at_version(
+    block: &[u8],
+    offset: usize,
+    storage_version: u32,
+) -> Option<(LogRecord, usize)> {
+    let wire_len = log_record_wire_len_for_version(&block[offset..], storage_version)?;
     let end = offset + wire_len;
     if end > block.len() {
         return None;
     }
     let record = match block[offset] {
         RECORD_TAG_IMU => LogRecord::Imu(deserialize_imu_body(&block[offset + 1..end])?),
-        RECORD_TAG_SLOW => LogRecord::Slow(deserialize_slow_body(&block[offset + 1..end])?),
+        RECORD_TAG_SLOW => LogRecord::Slow(deserialize_slow_body_at_version(
+            &block[offset + 1..end],
+            storage_version,
+        )?),
         RECORD_TAG_V1 => {
             let full = deserialize_record_v1(&block[offset..offset + RECORD_LEN_V1])?;
             return Some((
@@ -292,7 +341,7 @@ pub fn decode_superblock(block: &[u8; BLOCK_SIZE]) -> Option<SuperblockInfo> {
     let record_count = u32::from_le_bytes(block[8..12].try_into().ok()?);
     let block_count = u32::from_le_bytes(block[12..16].try_into().ok()?);
     match version {
-        STORAGE_VERSION => Some(SuperblockInfo {
+        STORAGE_VERSION | STORAGE_VERSION_V2 => Some(SuperblockInfo {
             storage_version: version,
             record_count,
             block_count,
@@ -360,12 +409,23 @@ pub fn parse_records_v1(
     Some(records)
 }
 
-/// Parse v2 tagged records from block bytes. Host only.
+/// Parse v2/v3 tagged records from block bytes. Host only.
 #[cfg(any(feature = "std", test))]
 pub fn parse_log_records_v2(
     record_count: u32,
     blocks: &[u8],
     block_count: u32,
+) -> Option<std::vec::Vec<LogRecord>> {
+    parse_log_records_tagged(record_count, blocks, block_count, STORAGE_VERSION)
+}
+
+/// Parse tagged records for a specific on-card storage version. Host only.
+#[cfg(any(feature = "std", test))]
+pub fn parse_log_records_tagged(
+    record_count: u32,
+    blocks: &[u8],
+    block_count: u32,
+    storage_version: u32,
 ) -> Option<std::vec::Vec<LogRecord>> {
     let mut records = std::vec::Vec::with_capacity(record_count as usize);
     let mut read = 0u32;
@@ -374,7 +434,9 @@ pub fn parse_log_records_v2(
         let block = blocks.get(start..start + BLOCK_SIZE)?;
         let mut off = 0usize;
         while read < record_count {
-            let Some((rec, wire_len)) = deserialize_log_record_at(block, off) else {
+            let Some((rec, wire_len)) =
+                deserialize_log_record_at_version(block, off, storage_version)
+            else {
                 break;
             };
             if off + wire_len > USABLE_PER_BLOCK {
@@ -425,6 +487,8 @@ mod tests {
             pdop: 3.3,
             flight_stage: FlightStage::Armed,
             pyro_flags: 0b0000_0101,
+            air_brakes_commanded_extension: 0.25,
+            air_brakes_actual_extension: 0.2,
             valid: VALID_BATTERY | VALID_GPS_FIX,
         }
     }

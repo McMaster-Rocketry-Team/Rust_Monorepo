@@ -19,6 +19,42 @@ pub struct FlightDataImuRecord {
     pub valid: u8,
 }
 
+/// v2 on-disk slow record (before airbrakes fields were added).
+#[derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive, Debug, Clone, PartialEq)]
+pub struct FlightDataSlowRecordV2 {
+    pub timestamp_us: u64,
+    pub battery_voltage: f32,
+    pub lat_lon: (f64, f64),
+    pub altitude: f32,
+    pub num_of_fixed_satalites: u8,
+    pub hdop: f32,
+    pub vdop: f32,
+    pub pdop: f32,
+    pub flight_stage: FlightStage,
+    pub pyro_flags: u8,
+    pub valid: u8,
+}
+
+impl From<FlightDataSlowRecordV2> for FlightDataSlowRecord {
+    fn from(v2: FlightDataSlowRecordV2) -> Self {
+        Self {
+            timestamp_us: v2.timestamp_us,
+            battery_voltage: v2.battery_voltage,
+            lat_lon: v2.lat_lon,
+            altitude: v2.altitude,
+            num_of_fixed_satalites: v2.num_of_fixed_satalites,
+            hdop: v2.hdop,
+            vdop: v2.vdop,
+            pdop: v2.pdop,
+            flight_stage: v2.flight_stage,
+            pyro_flags: v2.pyro_flags,
+            air_brakes_commanded_extension: 0.0,
+            air_brakes_actual_extension: 0.0,
+            valid: v2.valid,
+        }
+    }
+}
+
 #[derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive, Debug, Clone, PartialEq)]
 pub struct FlightDataSlowRecord {
     pub timestamp_us: u64,
@@ -31,6 +67,10 @@ pub struct FlightDataSlowRecord {
     pub pdop: f32,
     pub flight_stage: FlightStage,
     pub pyro_flags: u8,
+    /// Commanded extension, 0.0 = retracted, 1.0 = fully extended.
+    pub air_brakes_commanded_extension: f32,
+    /// Reported extension from Icarus, 0.0 = retracted, 1.0 = fully extended.
+    pub air_brakes_actual_extension: f32,
     pub valid: u8,
 }
 
@@ -47,6 +87,8 @@ impl Default for FlightDataSlowRecord {
             pdop: 0.0,
             flight_stage: FlightStage::LowPower,
             pyro_flags: 0,
+            air_brakes_commanded_extension: 0.0,
+            air_brakes_actual_extension: 0.0,
             valid: 0,
         }
     }
@@ -88,6 +130,9 @@ pub struct FlightDataRecord {
 
     /// Bitmask for pyro continuity/fire state (see firmware `ContinuityUpdate`).
     pub pyro_flags: u8,
+
+    pub air_brakes_commanded_extension: f32,
+    pub air_brakes_actual_extension: f32,
 }
 
 impl FlightDataRecord {
@@ -111,6 +156,8 @@ impl FlightDataRecord {
             pdop: slow.pdop,
             flight_stage: slow.flight_stage,
             pyro_flags: slow.pyro_flags,
+            air_brakes_commanded_extension: slow.air_brakes_commanded_extension,
+            air_brakes_actual_extension: slow.air_brakes_actual_extension,
         }
     }
 }
@@ -135,6 +182,8 @@ pub const VALID_MAG: u8 = 1 << 2;
 pub const VALID_GPS_FIX: u8 = 1 << 3;
 pub const VALID_GPS_ALT: u8 = 1 << 4;
 pub const VALID_BATTERY: u8 = 1 << 5;
+pub const VALID_AIRBRAKES_COMMANDED: u8 = 1 << 6;
+pub const VALID_AIRBRAKES_ACTUAL: u8 = 1 << 7;
 
 pub const PYRO_MAIN_CONTINUITY: u8 = 1 << 0;
 pub const PYRO_MAIN_FIRE: u8 = 1 << 1;
