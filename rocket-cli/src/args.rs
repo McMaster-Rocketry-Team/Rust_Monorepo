@@ -30,6 +30,14 @@ pub enum ModeSelect {
     #[command(about = "connect to ground station")]
     GroundStation,
 
+    #[command(
+        about = "non-interactive ground station: stream downlink JSON to stdout, read commands from stdin"
+    )]
+    Control(ControlArgs),
+
+    #[command(about = "non-interactive ground station: send a single uplink and exit")]
+    SendUplink(SendUplinkArgs),
+
     #[command(about = "generate vlp key")]
     GenVlpKey(GenVlpKeyCli),
 
@@ -54,6 +62,33 @@ pub enum ModeSelect {
 pub struct DownloadFlightLogArgs {
     #[arg(default_value = "flight_log.csv")]
     pub output: String,
+}
+
+#[derive(Parser, Debug)]
+pub struct ControlArgs {
+    #[arg(long, help = "LoRa frequency in Hz (default: ground-station.toml)")]
+    pub frequency: Option<u32>,
+    #[arg(long, help = "LoRa TX power in dBm (default: ground-station.toml)")]
+    pub power: Option<i32>,
+    #[arg(long, help = "base64 32-byte VLP key (default: ground-station.toml)")]
+    pub vlp_key: Option<String>,
+}
+
+#[derive(Parser, Debug)]
+pub struct SendUplinkArgs {
+    #[arg(long, help = "LoRa frequency in Hz (default: ground-station.toml)")]
+    pub frequency: Option<u32>,
+    #[arg(long, help = "LoRa TX power in dBm (default: ground-station.toml)")]
+    pub power: Option<i32>,
+    #[arg(long, help = "base64 32-byte VLP key (default: ground-station.toml)")]
+    pub vlp_key: Option<String>,
+    #[arg(
+        trailing_var_arg = true,
+        allow_hyphen_values = true,
+        required = true,
+        help = "uplink command, e.g. `arm`, `mode armed`, `target-apogee 3000`, `fire-pyro drogue`, `reset all`"
+    )]
+    pub command: Vec<String>,
 }
 
 #[derive(Parser, Debug)]

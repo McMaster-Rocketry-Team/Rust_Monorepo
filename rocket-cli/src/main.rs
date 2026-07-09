@@ -36,6 +36,7 @@ use crate::connection_method::get_esp_connection_method;
 use crate::gen_key::gen_vlp_key;
 use crate::gs::find_ground_station::find_ground_station;
 use crate::gs::ground_station_tui;
+use crate::gs::headless::{LinkParams, control_session, send_uplink_oneshot};
 use crate::testing::mock_ground_station::mock_ground_station_tui;
 use crate::testing::send_fake_vlp_telemetry::send_fake_vlp_telemetry;
 
@@ -74,6 +75,16 @@ async fn main() -> Result<()> {
         ModeSelect::GroundStation => {
             let serial_path = find_ground_station().await?;
             ground_station_tui(&serial_path).await
+        }
+        ModeSelect::Control(args) => {
+            let serial_path = find_ground_station().await?;
+            let params = LinkParams::resolve(args.frequency, args.power, args.vlp_key)?;
+            control_session(&serial_path, params).await
+        }
+        ModeSelect::SendUplink(args) => {
+            let serial_path = find_ground_station().await?;
+            let params = LinkParams::resolve(args.frequency, args.power, args.vlp_key)?;
+            send_uplink_oneshot(&serial_path, params, &args.command.join(" ")).await
         }
         ModeSelect::GenVlpKey(args) => gen_vlp_key(args),
         ModeSelect::GenOtaKey(args) => gen_ota_key(args),

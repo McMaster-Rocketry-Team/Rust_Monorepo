@@ -46,11 +46,12 @@ use crate::{
 pub mod config;
 mod downlink_packet_display;
 pub mod find_ground_station;
+pub mod headless;
 pub mod rpc_radio;
 pub mod serial_wrapper;
 pub mod vlp_client;
 
-struct MultiThreadRawMutex {
+pub struct MultiThreadRawMutex {
     mutex: std::sync::Mutex<()>,
 }
 
