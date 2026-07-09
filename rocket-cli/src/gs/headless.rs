@@ -10,9 +10,10 @@
 //! pure JSON, one object per line, flushed immediately.
 
 use std::io::{BufRead, Write};
+use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Context as _, Result, anyhow, bail};
 use base64::Engine as _;
 use firmware_common_new::{
     rpc::lora_rpc::LoraRpcClient,
@@ -20,17 +21,26 @@ use firmware_common_new::{
         client::{VLPGroundStation, VLPTXError},
         lora_config::LoraConfig,
         packets::{
-            VLPDownlinkPacket, VLPUplinkPacket,
+            MAX_VLP_PACKET_SIZE, VLPDownlinkPacket, VLPUplinkPacket,
             change_mode::{ChangeModePacket, Mode},
             fire_pyro::{FirePyroPacket, PyroSelect},
             reset::{DeviceToReset, ResetPacket},
             set_target_apogee::SetTargetApogeePacket,
         },
+        usb::CliRequest,
     },
 };
 use lora_phy::mod_params::PacketStatus;
+use rusb::{Context, DeviceHandle, Direction, Recipient, RequestType, UsbContext};
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
+
+/// VLF5 WinUSB IDs (same vendor interface as flight-log).
+const VLF5_USB_VID: u16 = 0xc0de;
+const VLF5_USB_PID: u16 = 0xcafe;
+const VLF5_USB_INTERFACE: u8 = 0;
+/// Bulk-IN endpoint the HIL firmware streams VLP downlink frames on (EP 2 IN).
+const EP_VLP_IN: u8 = 0x82;
 
 use crate::{
     enable_stdout_logging,
@@ -552,4 +562,165 @@ pub async fn send_uplink_oneshot(
             bail!("timed out waiting for ack from '{name}' (no downlink? wrong frequency/key?)")
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// USB-direct transport (HIL): talk to the VLF5 over its own USB, no GCM/LoRa
+// ---------------------------------------------------------------------------
+
+/// Open and claim the VLF5's WinUSB vendor interface.
+fn open_vlf5_usb() -> Result<DeviceHandle<Context>> {
+    let ctx = Context::new().context("creating libusb context")?;
+    for device in ctx.devices().context("listing USB devices")?.iter() {
+        let desc = device.device_descriptor()?;
+        if desc.vendor_id() == VLF5_USB_VID && desc.product_id() == VLF5_USB_PID {
+            let handle = device
+                .open()
+                .context("opening the VLF5 (on Linux you may need a udev rule)")?;
+            #[cfg(target_os = "linux")]
+            let _ = handle.set_auto_detach_kernel_driver(true);
+            handle
+                .claim_interface(VLF5_USB_INTERFACE)
+                .context("claiming the VLF5 interface")?;
+            return Ok(handle);
+        }
+    }
+    bail!(
+        "VLF5 not found over USB (VID={VLF5_USB_VID:#06x} PID={VLF5_USB_PID:#06x}). \
+         Is it plugged in via USB-C, powered, and running a HIL build?"
+    )
+}
+
+/// Send one uplink to the VLF5 as a vendor control-OUT transfer (`CliRequest::Uplink`
+/// in wValue, the serialized packet in the data stage).
+fn usb_send_uplink(handle: &DeviceHandle<Context>, packet: &VLPUplinkPacket) -> Result<()> {
+    let mut buf = [0u8; MAX_VLP_PACKET_SIZE];
+    let len = packet.serialize(&mut buf);
+    handle
+        .write_control(
+            rusb::request_type(Direction::Out, RequestType::Vendor, Recipient::Interface),
+            0,
+            CliRequest::Uplink as u16,
+            VLF5_USB_INTERFACE as u16,
+            &buf[..len],
+            Duration::from_secs(2),
+        )
+        .context("sending uplink over USB")?;
+    Ok(())
+}
+
+/// Blocking reader thread: pull `[len][payload]` VLP downlink frames off EP2 and
+/// forward decoded packets to the async session. Exits when the device disappears or
+/// the receiver is dropped.
+fn usb_downlink_reader(
+    handle: &DeviceHandle<Context>,
+    tx: mpsc::UnboundedSender<VLPDownlinkPacket>,
+) {
+    let mut buf = [0u8; MAX_VLP_PACKET_SIZE + 8];
+    loop {
+        match handle.read_bulk(EP_VLP_IN, &mut buf, Duration::from_millis(500)) {
+            Ok(n) if n >= 1 => {
+                let len = buf[0] as usize;
+                if len + 1 <= n {
+                    if let Some(packet) = VLPDownlinkPacket::deserialize(&buf[1..1 + len]) {
+                        if tx.send(packet).is_err() {
+                            return;
+                        }
+                    }
+                }
+            }
+            Ok(_) => {}
+            Err(rusb::Error::Timeout) => continue,
+            Err(rusb::Error::NoDevice) | Err(rusb::Error::Pipe) => return,
+            Err(_) => continue,
+        }
+    }
+}
+
+/// Persistent USB session: stream VLP downlinks from the VLF5 to stdout as JSON and
+/// send stdin commands as USB uplinks. There is no ack over USB (delivery is reliable),
+/// so a sent uplink is reported as `{"type":"sent",...}`.
+pub async fn control_session_usb() -> Result<()> {
+    enable_stdout_logging(false);
+    let handle = Arc::new(open_vlf5_usb()?);
+    emit(json!({"type": "link", "event": "usb_connected"}));
+
+    // downlink reader thread -> channel
+    let (dl_tx, mut dl_rx) = mpsc::unbounded_channel::<VLPDownlinkPacket>();
+    {
+        let handle = handle.clone();
+        std::thread::spawn(move || usb_downlink_reader(&handle, dl_tx));
+    }
+
+    // stdin reader thread -> channel (only ships raw lines)
+    let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel::<String>();
+    std::thread::spawn(move || {
+        let stdin = std::io::stdin();
+        for line in stdin.lock().lines() {
+            match line {
+                Ok(l) => {
+                    if cmd_tx.send(l).is_err() {
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    // USB downlink status is synthetic (lossless local link).
+    let status = PacketStatus { rssi: 0, snr: 0 };
+    let mut stdin_open = true;
+    loop {
+        tokio::select! {
+            packet = dl_rx.recv() => match packet {
+                Some(p) => emit(downlink_json(&p, &status)),
+                None => {
+                    emit(json!({"type": "link", "event": "usb_disconnected"}));
+                    return Ok(());
+                }
+            },
+            line = cmd_rx.recv(), if stdin_open => match line {
+                Some(l) => {
+                    let l = l.trim();
+                    if l.is_empty() {
+                        continue;
+                    }
+                    match parse_command(l) {
+                        Ok(Command::Quit) => {
+                            emit(json!({"type": "link", "event": "closed"}));
+                            return Ok(());
+                        }
+                        Ok(Command::Uplink { packet, name }) => match usb_send_uplink(&handle, &packet) {
+                            Ok(()) => emit(json!({"type": "sent", "command": name})),
+                            Err(e) => emit(json!({"type": "error", "command": name,
+                                "message": format!("{e}")})),
+                        },
+                        Ok(Command::SetFrequency(_)) | Ok(Command::SetPower(_)) => {
+                            emit(json!({"type": "error",
+                                "message": "set-frequency/set-power not applicable over USB"}));
+                        }
+                        Err(e) => emit(json!({"type": "error", "message": format!("{e}")})),
+                    }
+                }
+                // stdin closed: keep streaming telemetry until the device or process ends.
+                None => stdin_open = false,
+            },
+        }
+    }
+}
+
+/// One-shot: send a single uplink to the VLF5 over USB and exit.
+pub async fn send_uplink_usb(command: &str) -> Result<()> {
+    enable_stdout_logging(false);
+    let (packet, name) = match parse_command(command)? {
+        Command::Uplink { packet, name } => (packet, name),
+        _ => bail!(
+            "send-uplink only accepts uplink commands (arm, mode, target-apogee, fire-pyro, reset)"
+        ),
+    };
+    let handle = open_vlf5_usb()?;
+    usb_send_uplink(&handle, &packet)?;
+    emit(json!({"type": "sent", "command": name}));
+    Ok(())
 }

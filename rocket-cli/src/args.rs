@@ -66,6 +66,11 @@ pub struct DownloadFlightLogArgs {
 
 #[derive(Parser, Debug)]
 pub struct ControlArgs {
+    #[arg(
+        long,
+        help = "talk to a HIL VLF5 directly over USB instead of the GCM/LoRa (no ack)"
+    )]
+    pub usb: bool,
     #[arg(long, help = "LoRa frequency in Hz (default: ground-station.toml)")]
     pub frequency: Option<u32>,
     #[arg(long, help = "LoRa TX power in dBm (default: ground-station.toml)")]
@@ -76,6 +81,11 @@ pub struct ControlArgs {
 
 #[derive(Parser, Debug)]
 pub struct SendUplinkArgs {
+    #[arg(
+        long,
+        help = "talk to a HIL VLF5 directly over USB instead of the GCM/LoRa (no ack)"
+    )]
+    pub usb: bool,
     #[arg(long, help = "LoRa frequency in Hz (default: ground-station.toml)")]
     pub frequency: Option<u32>,
     #[arg(long, help = "LoRa TX power in dBm (default: ground-station.toml)")]

@@ -99,7 +99,7 @@ pub enum VLPUplinkPacket {
 }
 
 impl VLPUplinkPacket {
-    pub(super) fn deserialize(data: &[u8]) -> Option<Self> {
+    pub fn deserialize(data: &[u8]) -> Option<Self> {
         if data.is_empty() {
             return None;
         }
@@ -119,7 +119,7 @@ impl VLPUplinkPacket {
         }
     }
 
-    pub(super) fn serialize(&self, mut buffer: &mut [u8]) -> usize {
+    pub fn serialize(&self, mut buffer: &mut [u8]) -> usize {
         buffer[0] = match self {
             VLPUplinkPacket::ChangeMode(_) => 0,
             VLPUplinkPacket::Reset(_) => 1,

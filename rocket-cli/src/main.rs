@@ -36,7 +36,9 @@ use crate::connection_method::get_esp_connection_method;
 use crate::gen_key::gen_vlp_key;
 use crate::gs::find_ground_station::find_ground_station;
 use crate::gs::ground_station_tui;
-use crate::gs::headless::{LinkParams, control_session, send_uplink_oneshot};
+use crate::gs::headless::{
+    LinkParams, control_session, control_session_usb, send_uplink_oneshot, send_uplink_usb,
+};
 use crate::testing::mock_ground_station::mock_ground_station_tui;
 use crate::testing::send_fake_vlp_telemetry::send_fake_vlp_telemetry;
 
@@ -77,14 +79,23 @@ async fn main() -> Result<()> {
             ground_station_tui(&serial_path).await
         }
         ModeSelect::Control(args) => {
-            let serial_path = find_ground_station().await?;
-            let params = LinkParams::resolve(args.frequency, args.power, args.vlp_key)?;
-            control_session(&serial_path, params).await
+            if args.usb {
+                control_session_usb().await
+            } else {
+                let serial_path = find_ground_station().await?;
+                let params = LinkParams::resolve(args.frequency, args.power, args.vlp_key)?;
+                control_session(&serial_path, params).await
+            }
         }
         ModeSelect::SendUplink(args) => {
-            let serial_path = find_ground_station().await?;
-            let params = LinkParams::resolve(args.frequency, args.power, args.vlp_key)?;
-            send_uplink_oneshot(&serial_path, params, &args.command.join(" ")).await
+            let command = args.command.join(" ");
+            if args.usb {
+                send_uplink_usb(&command).await
+            } else {
+                let serial_path = find_ground_station().await?;
+                let params = LinkParams::resolve(args.frequency, args.power, args.vlp_key)?;
+                send_uplink_oneshot(&serial_path, params, &command).await
+            }
         }
         ModeSelect::GenVlpKey(args) => gen_vlp_key(args),
         ModeSelect::GenOtaKey(args) => gen_ota_key(args),

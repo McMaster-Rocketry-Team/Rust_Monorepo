@@ -4,6 +4,8 @@ pub enum CliRequest {
     List = 1,
     Clear = 2,
     Download = 3,
+    /// VLP uplink: the control-OUT data stage carries a serialized `VLPUplinkPacket`.
+    Uplink = 4,
 }
 
 impl From<u16> for CliRequest {
@@ -12,6 +14,7 @@ impl From<u16> for CliRequest {
             1 => CliRequest::List,
             2 => CliRequest::Clear,
             3 => CliRequest::Download,
+            4 => CliRequest::Uplink,
             _ => CliRequest::Invalid,
         }
     }
