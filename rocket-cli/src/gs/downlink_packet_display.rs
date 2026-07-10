@@ -37,6 +37,14 @@ impl DownlinkPacketDisplay {
     }
 
     pub fn update(&mut self, packet: VLPDownlinkPacket, status: PacketStatus) {
+        // Acks are consumed by the uplink `tx()` path, not shown as telemetry. One can
+        // still reach here if it arrives after the ack-listen window closed and the
+        // daemon picks it up in continuous rx. Ignore it so it neither panics `draw`
+        // (its match arm is `unreachable!`) nor clobbers the live telemetry panel.
+        if matches!(packet, VLPDownlinkPacket::Ack(_)) {
+            return;
+        }
+
         if let Some(Packet {
             packet: old_packet, ..
         }) = &self.packet
@@ -777,7 +785,9 @@ impl View for DownlinkPacketDisplay {
                         ],
                     ],
                 ),
-                VLPDownlinkPacket::Ack(p) => unreachable!(),
+                // Filtered out in `update`; handle defensively so a stray ack can
+                // never panic the TUI.
+                VLPDownlinkPacket::Ack(_) => {}
             }
         }
     }

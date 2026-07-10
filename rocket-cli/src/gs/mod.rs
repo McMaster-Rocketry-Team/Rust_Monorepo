@@ -80,12 +80,16 @@ pub async fn ground_station_tui(serial_path: &str) -> Result<()> {
     let serial = serialport::new(serial_path, 115200)
         .timeout(Duration::from_secs(5))
         .open()
-        .unwrap();
+        .map_err(|e| {
+            anyhow::anyhow!("failed to open the ground station serial port {serial_path}: {e} (is exactly one GCM plugged in?)")
+        })?;
     let mut serial = SerialWrapper::new(serial);
 
     let config = Arc::new(RwLock::new(GroundStationConfig::load()?));
     let mut client = LoraRpcClient::new(&mut serial);
-    client.reset().await.unwrap();
+    client.reset().await.map_err(|e| {
+        anyhow::anyhow!("ground station did not respond to the reset handshake: {e:?} (check the GCM connection and try again)")
+    })?;
     client
         .configure(LoraConfig {
             frequency: config.read().unwrap().frequency,
@@ -95,7 +99,7 @@ pub async fn ground_station_tui(serial_path: &str) -> Result<()> {
             power: config.read().unwrap().power,
         })
         .await
-        .unwrap();
+        .map_err(|e| anyhow::anyhow!("failed to configure the ground station radio: {e:?}"))?;
     let mut rpc_radio = RpcRadio::new(client, None);
     let vlp_gcm_client = Box::leak(Box::new(VLPGroundStation::<MultiThreadRawMutex>::new()));
     let vlp_key = config.read().unwrap().vlp_key.clone();

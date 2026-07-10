@@ -18,7 +18,7 @@ use firmware_common_new::flight_data_record::{
     merge_log_records,
 };
 use firmware_common_new::flight_storage::{
-    BLOCK_SIZE, HEADER_LEN, RECORD_LEN_TAGGED, RECORD_LEN_V1, RECORDS_PER_BLOCK_V1,
+    BLOCK_SIZE, HEADER_LEN, RECORD_LEN_TAGGED, RECORD_LEN_V1, RECORDS_PER_BLOCK_V1, RESPONSE_MAGIC,
     STORAGE_VERSION, STORAGE_VERSION_V2, decode_response_header, parse_log_records_tagged,
     parse_records_v1, verify_data_block,
 };
@@ -66,6 +66,36 @@ fn send_request(handle: &DeviceHandle<Context>, request: CliRequest) -> Result<(
     Ok(())
 }
 
+/// First offset of `needle` within `haystack`, if any.
+fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() || haystack.len() < needle.len() {
+        return None;
+    }
+    haystack.windows(needle.len()).position(|w| w == needle)
+}
+
+/// Discard any bulk-IN bytes still queued from a previously interrupted transfer so
+/// a fresh command reads its own response, not stale block data.
+///
+/// A `download` the host stopped reading early (its own timeout, a Ctrl-C, an error)
+/// leaves unread bytes in the device endpoint / kernel URB buffer. Without flushing
+/// them the next command reads that stale data as its header and fails with "device
+/// sent an invalid response header" — and stays broken for every later command until
+/// the VLF5 is power-cycled. Reading the endpoint to idle here resyncs the pipe
+/// without a device reset. Bounded so a truly-idle endpoint returns promptly.
+fn drain_stale(handle: &DeviceHandle<Context>) {
+    let mut buf = vec![0u8; BLOCK_SIZE];
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let mut idle = 0u8;
+    while idle < 2 && Instant::now() < deadline {
+        match handle.read_bulk(EP_IN, &mut buf, Duration::from_millis(100)) {
+            Ok(0) | Err(rusb::Error::Timeout) => idle += 1,
+            Ok(_) => idle = 0,
+            Err(_) => break,
+        }
+    }
+}
+
 /// Read a full framed response: a [`HEADER_LEN`]-byte header, then (for a
 /// download) `block_count` raw 512-byte data blocks.
 fn read_response(handle: &DeviceHandle<Context>) -> Result<Vec<u8>> {
@@ -77,16 +107,16 @@ fn read_response(handle: &DeviceHandle<Context>) -> Result<Vec<u8>> {
 
     loop {
         match handle.read_bulk(EP_IN, &mut buf, Duration::from_millis(500)) {
-            Ok(n) => {
+            Ok(n) if n > 0 => {
                 data.extend_from_slice(&buf[..n]);
                 idle_since = None;
             }
-            Err(rusb::Error::Timeout) => {
+            Ok(_) | Err(rusb::Error::Timeout) => {
                 if expected.is_some_and(|e| data.len() >= e) {
                     break;
                 }
                 let since = *idle_since.get_or_insert_with(Instant::now);
-                if since.elapsed() > Duration::from_secs(10) {
+                if since.elapsed() > Duration::from_secs(15) {
                     bail!(
                         "device stopped sending (got {} of {} expected bytes)",
                         data.len(),
@@ -97,17 +127,33 @@ fn read_response(handle: &DeviceHandle<Context>) -> Result<Vec<u8>> {
             Err(e) => return Err(e).context("reading from the VLF5 bulk endpoint"),
         }
 
-        if expected.is_none() && data.len() >= HEADER_LEN {
-            let (_record_count, record_len, block_count) =
-                decode_response_header(&data[..HEADER_LEN])
-                    .ok_or_else(|| anyhow!("device sent an invalid response header"))?;
-            if record_len != RECORD_LEN_TAGGED && record_len as usize != RECORD_LEN_V1 {
-                bail!(
-                    "unsupported record layout: device reports record_len={record_len}. \
-                     Rebuild rocket-cli from the same source as the firmware."
-                );
+        // Lock onto the response header, resyncing past any stale leading bytes: a
+        // previously interrupted transfer can leave block data queued ahead of this
+        // response, and treating that as the header is what used to wedge the protocol
+        // until a power cycle. Skip everything before the response magic instead.
+        if expected.is_none() {
+            if let Some(off) = find_subsequence(&data, &RESPONSE_MAGIC) {
+                if off > 0 {
+                    data.drain(..off);
+                }
+                if data.len() >= HEADER_LEN {
+                    let (_record_count, record_len, block_count) =
+                        decode_response_header(&data[..HEADER_LEN])
+                            .ok_or_else(|| anyhow!("device sent an invalid response header"))?;
+                    if record_len != RECORD_LEN_TAGGED && record_len as usize != RECORD_LEN_V1 {
+                        bail!(
+                            "unsupported record layout: device reports record_len={record_len}. \
+                             Rebuild rocket-cli from the same source as the firmware."
+                        );
+                    }
+                    expected = Some(HEADER_LEN + block_count as usize * BLOCK_SIZE);
+                }
+            } else if data.len() >= RESPONSE_MAGIC.len() {
+                // No magic yet: keep only a possible partial-magic tail so a long run
+                // of stale bytes cannot grow `data` without bound.
+                let drop = data.len() - (RESPONSE_MAGIC.len() - 1);
+                data.drain(..drop);
             }
-            expected = Some(HEADER_LEN + block_count as usize * BLOCK_SIZE);
         }
 
         if expected.is_some_and(|e| data.len() >= e) {
@@ -126,22 +172,35 @@ fn read_response(handle: &DeviceHandle<Context>) -> Result<Vec<u8>> {
 fn read_header(handle: &DeviceHandle<Context>) -> Result<[u8; HEADER_LEN]> {
     let mut data: Vec<u8> = Vec::new();
     let mut buf = vec![0u8; 64];
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while data.len() < HEADER_LEN {
-        match handle.read_bulk(EP_IN, &mut buf, Duration::from_secs(2)) {
-            Ok(n) => data.extend_from_slice(&buf[..n]),
-            Err(rusb::Error::Timeout) => {
-                bail!("timed out waiting for a response from the VLF5")
+    // Generous deadline: after an interrupted download the device may still be
+    // finishing that transfer before it answers this command.
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        // Resync past any stale leading bytes, then lock onto the response magic.
+        if let Some(off) = find_subsequence(&data, &RESPONSE_MAGIC) {
+            if off > 0 {
+                data.drain(..off);
             }
-            Err(e) => return Err(e).context("reading from the VLF5 bulk endpoint"),
+            if data.len() >= HEADER_LEN {
+                let mut header = [0u8; HEADER_LEN];
+                header.copy_from_slice(&data[..HEADER_LEN]);
+                return Ok(header);
+            }
+        } else if data.len() >= RESPONSE_MAGIC.len() {
+            let drop = data.len() - (RESPONSE_MAGIC.len() - 1);
+            data.drain(..drop);
         }
+
         if Instant::now() > deadline {
             bail!("timed out waiting for a response from the VLF5");
         }
+
+        match handle.read_bulk(EP_IN, &mut buf, Duration::from_secs(2)) {
+            Ok(n) => data.extend_from_slice(&buf[..n]),
+            Err(rusb::Error::Timeout) => {}
+            Err(e) => return Err(e).context("reading from the VLF5 bulk endpoint"),
+        }
     }
-    let mut header = [0u8; HEADER_LEN];
-    header.copy_from_slice(&data[..HEADER_LEN]);
-    Ok(header)
 }
 
 /// Split the raw block stream into merged CSV rows.
@@ -293,6 +352,7 @@ fn write_csv(path: &str, records: &[FlightDataRecord]) -> Result<()> {
 /// `list-files`: print a summary of what's stored on the VLF5.
 pub fn list_files() -> Result<()> {
     let handle = find_and_open()?;
+    drain_stale(&handle);
     send_request(&handle, CliRequest::List)?;
     let header = read_header(&handle)?;
     let (record_count, record_len, block_count) = decode_response_header(&header)
@@ -322,6 +382,7 @@ pub fn list_files() -> Result<()> {
 /// `download-file <out.csv>`: pull the whole log and write it as CSV.
 pub fn download_file(output: &str) -> Result<()> {
     let handle = find_and_open()?;
+    drain_stale(&handle);
     send_request(&handle, CliRequest::Download)?;
     let data = read_response(&handle)?;
     let (log_record_count, records) = parse_records(&data)?;
@@ -338,6 +399,7 @@ pub fn download_file(output: &str) -> Result<()> {
 /// `clear-storage`: erase the log on the VLF5.
 pub fn clear_storage() -> Result<()> {
     let handle = find_and_open()?;
+    drain_stale(&handle);
     send_request(&handle, CliRequest::Clear)?;
     let _ack = read_header(&handle)?;
     println!("VLF5 storage cleared.");

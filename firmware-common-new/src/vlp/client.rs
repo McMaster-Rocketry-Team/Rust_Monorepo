@@ -217,9 +217,17 @@ impl<'a, 'b, 'c, M: RawMutex, R: Radio> VLPGroundStationDaemon<'a, 'b, 'c, M, R>
         offset = vlp_encode_ecc(&mut self.buffer, offset);
 
         // send the packet and receive ack
+        //
+        // Listen window for the ack. This only bounds ack *preamble detection* (the
+        // sx126x stops the rx symbol timer on preamble, then receives the whole
+        // packet), so a longer window costs nothing on success and only lengthens the
+        // wait on a genuinely missing ack. 500 ms was too tight to absorb avionics
+        // turnaround jitter (shared executor), which dropped acks for uplinks that
+        // were actually applied; give it comfortable margin without colliding with the
+        // next scheduled downlink.
         match self
             .radio
-            .tx_then_rx(&mut self.buffer, offset, RxMode::Single { timeout_ms: 500 })
+            .tx_then_rx(&mut self.buffer, offset, RxMode::Single { timeout_ms: 1000 })
             .await
         {
             Ok((rx_len, packet_status)) => {
@@ -387,12 +395,24 @@ impl<'a, 'b, 'c, M: RawMutex, R: Radio> VLPAvionicsDaemon<'a, 'b, 'c, M, R> {
         // deserialize the packet
         let packet =
             VLPUplinkPacket::deserialize(packet).ok_or(VLPDaemonError::DeserializeError)?;
+
+        // Transmit the ack BEFORE handing the uplink to the application.
+        //
+        // On the avionics the VLP daemon shares one cooperative executor with the
+        // uplink handler (`receive_vlp_task`) and the SD-card task. If we dispatched
+        // the command first, the handler could run at `send_ack`'s first await point
+        // and kick off slow work — e.g. the SD write for `SetTargetApogee`, or a mode
+        // transition's setup — which delays the ack transmit past the ground station's
+        // ack-listen window. The uplink still gets applied, but the ground station
+        // sees "no ack" and reports a *successful* command as failed. Acking first
+        // keeps the radio turnaround tight and independent of the command handler.
+        //
+        // The ack means "received + verified" (not "applied"); the verified command
+        // is still dispatched below regardless of the ack tx result, exactly as before.
+        let ack_result = self.send_ack(&expected_signature).await;
         self.client.rx_signal.signal((packet, packet_status));
 
-        // send ack
-        self.send_ack(&expected_signature).await?;
-
-        Ok(())
+        ack_result
     }
 
     async fn send_ack(&mut self, full_expected_signature: &[u8]) -> Result<(), VLPDaemonError> {
