@@ -138,8 +138,7 @@ fn dual_deploys_drogue_near_apogee_and_main_at_altitude() {
 fn single_deploys_both_near_apogee() {
     let mut estimator = RocketStateEstimator::new(FlightProfile::Single {
         minimum_deployment_altitude_agl: 500.0,
-        drogue_delay_us: 0,
-        main_delay_us: 0,
+        delay_us: 0,
     });
 
     let result = simulate_flight(&mut estimator, 200.0, 80.0, 3.0);

@@ -36,11 +36,11 @@ const PAD_ALTITUDE_FILTER_TIME_CONSTANT: f32 = 10.0; // s
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, PartialEq)]
 pub enum FlightProfile {
-    /// Both pyros at apogee (drogue then main back-to-back).
+    /// Both pyros at apogee: after a single `delay_us` past descent detection, fire
+    /// drogue then main back-to-back (main on the very next sample).
     Single {
         minimum_deployment_altitude_agl: f32,
-        drogue_delay_us: u32,
-        main_delay_us: u32,
+        delay_us: u32,
     },
     /// Drogue at apogee, main at altitude.
     Dual {
@@ -67,7 +67,8 @@ impl FlightProfile {
 
     fn drogue_delay_us(&self) -> u32 {
         match self {
-            Self::Single { drogue_delay_us, .. } => *drogue_delay_us,
+            // Single: the one delay applies to the drogue (first) fire.
+            Self::Single { delay_us, .. } => *delay_us,
             Self::Dual {
                 drogue_chute_delay_us,
                 ..
@@ -77,7 +78,8 @@ impl FlightProfile {
 
     fn main_delay_us(&self) -> u32 {
         match self {
-            Self::Single { main_delay_us, .. } => *main_delay_us,
+            // Single: main fires back-to-back with drogue (no extra delay).
+            Self::Single { .. } => 0,
             Self::Dual {
                 main_chute_delay_us,
                 ..
@@ -262,7 +264,8 @@ impl RocketStateEstimator {
                     deploy_pyro = Some(PyroSelect::PyroDrogue);
                     let pad = *launch_pad_altitude_asl;
                     if self.profile.is_single() {
-                        // Single: fire drogue then immediately start main delay.
+                        // Single: main follows drogue with no extra delay
+                        // (main_delay_us() == 0), so it fires on the next sample.
                         self.stage = Stage::MainDelay {
                             launch_pad_altitude_asl: pad,
                             samples_left: us_to_ticks(self.profile.main_delay_us()),
