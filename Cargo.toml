@@ -7,6 +7,7 @@ members = [
     "defmt-rtt-pipe",
 
     "dspower-servo",
+    "hiwonder-servo",
     "servo-debug-gui",
 
     "air-brakes-controller-core",
