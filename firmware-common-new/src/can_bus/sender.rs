@@ -1,4 +1,4 @@
-use core::cell::Cell;
+use core::sync::atomic::{AtomicBool, Ordering};
 
 use crc::Crc;
 use embassy_futures::{
@@ -125,7 +125,10 @@ pub struct CanSender<M: RawMutex, const N: usize = 20, const PN: usize = 1024> {
     node_id: u16,
     log_frame_id: u32,
     log_pipe: Option<&'static Pipe<CriticalSectionRawMutex, PN>>,
-    in_overflow: Cell<bool>,
+    // AtomicBool (not Cell) so `CanSender` is `Sync`: it is shared between
+    // executors at different priorities (e.g. a servo task on an
+    // InterruptExecutor feeding a tx daemon on the thread executor).
+    in_overflow: AtomicBool,
 }
 
 impl<M: RawMutex, const N: usize, const PN: usize> CanSender<M, N, PN> {
@@ -140,7 +143,7 @@ impl<M: RawMutex, const N: usize, const PN: usize> CanSender<M, N, PN> {
             node_id,
             log_frame_id: CanBusExtendedId::new(7, LOG_MESSAGE_TYPE, node_type, node_id).into(),
             log_pipe,
-            in_overflow: Cell::new(false),
+            in_overflow: AtomicBool::new(false),
         }
     }
 
@@ -178,14 +181,14 @@ impl<M: RawMutex, const N: usize, const PN: usize> CanSender<M, N, PN> {
         for data in multi_frame_encoder {
             let success = self.channel.try_send((id, data)).is_ok();
             if !success {
-                if !self.in_overflow.get() {
+                if !self.in_overflow.load(Ordering::Relaxed) {
                     log_warn!("can bus sender buffer overflow");
-                    self.in_overflow.set(true);
+                    self.in_overflow.store(true, Ordering::Relaxed);
                 }
                 break;
-            } else if self.in_overflow.get() {
+            } else if self.in_overflow.load(Ordering::Relaxed) {
                 log_info!("can bus sender recovered from overflow");
-                self.in_overflow.set(false);
+                self.in_overflow.store(false, Ordering::Relaxed);
             }
         }
         crc
