@@ -23,6 +23,11 @@ const IGNITION_VELOCITY_THRESHOLD: f32 = 10.0; // m/s
 const IGNITION_ALTITUDE_RISE: f32 = 15.0; // m
 /// Sustained vertical velocity below this value counts as descending
 const DESCENT_VELOCITY_THRESHOLD: f32 = -2.0; // m/s
+/// Low-passed vertical acceleration below this during ascent means the motor
+/// burned out and the rocket is coasting (gravity + drag only)
+const COAST_ACCEL_THRESHOLD: f32 = -4.0; // m/s^2
+/// Time constant of the burnout-detection acceleration low-pass filter
+const COAST_ACCEL_FILTER_TIME_CONSTANT: f32 = 0.3; // s
 /// How long the rocket has to descend before the descent is acted upon
 const DESCENT_DETECTION_SAMPLES: usize = SAMPLES_PER_S / 2; // 0.5 s
 /// Altitude has to stay within +- this value to count as standing still
@@ -137,6 +142,12 @@ enum Stage {
     Ascent {
         launch_pad_altitude_asl: f32,
         descending_samples: usize,
+        /// KF velocity at the previous sample, for the acceleration estimate
+        prev_velocity: f32,
+        /// low-passed d(velocity)/dt, negative once the motor burns out
+        accel_lp: f32,
+        /// latched burnout: motors don't relight, so coasting never clears
+        coasting: bool,
     },
     DrogueDelay {
         launch_pad_altitude_asl: f32,
@@ -224,13 +235,27 @@ impl RocketStateEstimator {
                     self.stage = Stage::Ascent {
                         launch_pad_altitude_asl: *pad_altitude_asl,
                         descending_samples: 0,
+                        prev_velocity: velocity,
+                        accel_lp: 0.0,
+                        coasting: false,
                     };
                 }
             }
             Stage::Ascent {
                 launch_pad_altitude_asl,
                 descending_samples,
+                prev_velocity,
+                accel_lp,
+                coasting,
             } => {
+                let accel = (velocity - *prev_velocity) / DT;
+                *prev_velocity = velocity;
+                *accel_lp += (DT / COAST_ACCEL_FILTER_TIME_CONSTANT) * (accel - *accel_lp);
+                if !*coasting && *accel_lp < COAST_ACCEL_THRESHOLD {
+                    log_info!("burnout detected: accel={}m/s^2, v={}m/s", *accel_lp, velocity);
+                    *coasting = true;
+                }
+
                 if velocity < DESCENT_VELOCITY_THRESHOLD {
                     *descending_samples += 1;
                 } else {
@@ -386,6 +411,12 @@ impl RocketStateEstimator {
             Stage::Landed { .. } => RocketState::Landed,
             Stage::FailedToReachMinApogee => RocketState::FailedToReachMinApogee,
         }
+    }
+
+    /// True during ascent once the motor has burned out (the low-passed vertical
+    /// acceleration turned negative), i.e. the rocket is coasting to apogee.
+    pub fn is_coasting(&self) -> bool {
+        matches!(self.stage, Stage::Ascent { coasting: true, .. })
     }
 
     pub fn altitude_asl(&self) -> f32 {

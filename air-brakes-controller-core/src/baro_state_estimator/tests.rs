@@ -179,3 +179,41 @@ fn below_min_apogee_does_not_deploy() {
         RocketState::FailedToReachMinApogee
     ));
 }
+
+#[test]
+fn detects_coasting_after_burnout() {
+    let mut estimator = RocketStateEstimator::new(FlightProfile::Single {
+        minimum_deployment_altitude_agl: 300.0,
+        delay_us: 0,
+    });
+    let mut noise = NoiseGen::new(0.5);
+    let pad_altitude_asl = 200.0f32;
+
+    for _ in 0..(30 * SAMPLES_PER_S) {
+        estimator.update(pad_altitude_asl + noise.next());
+    }
+    assert!(!estimator.is_coasting());
+
+    // 3 s burn at 80 m/s^2: never coasting while under thrust
+    let mut altitude = pad_altitude_asl;
+    let mut velocity = 0.0f32;
+    for _ in 0..(3 * SAMPLES_PER_S) {
+        velocity += 80.0 * DT;
+        altitude += velocity * DT;
+        estimator.update(altitude + noise.next());
+        assert!(!estimator.is_coasting(), "coasting during burn, v={}", velocity);
+    }
+    assert!(matches!(estimator.state(), RocketState::Ascent { .. }));
+
+    // burnout: within 2 s of gravity-only deceleration the estimator must latch
+    // coasting (the accel low-pass has to unwind from +80 m/s^2, plus KF lag)
+    for _ in 0..(2 * SAMPLES_PER_S) {
+        velocity -= 9.81 * DT;
+        altitude += velocity * DT;
+        estimator.update(altitude + noise.next());
+    }
+    assert!(matches!(estimator.state(), RocketState::Ascent { .. }));
+    assert!(estimator.is_coasting(), "burnout not detected 2 s after cutoff");
+}
+
+
