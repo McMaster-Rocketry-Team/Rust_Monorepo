@@ -1,8 +1,6 @@
 // only use std when feature = "std" is enabled or during testing
 #![cfg_attr(not(any(test, feature = "std")), no_std)]
 #![recursion_limit = "256"]
-#![feature(assert_matches)]
-#![feature(slice_as_array)]
 #![feature(try_blocks)]
 #![feature(associated_type_defaults)]
 
