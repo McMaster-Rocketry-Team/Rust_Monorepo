@@ -4,6 +4,7 @@ use packed_struct::prelude::*;
 use packed_struct::types::bits::ByteArray;
 
 pub mod ozys_custom_status;
+pub mod payload_activation_custom_status;
 pub mod vl_custom_status;
 
 pub trait NodeCustomStatus {}

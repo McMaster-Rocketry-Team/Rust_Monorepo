@@ -15,6 +15,8 @@ use baro_measurement::BaroMeasurementMessage;
 #[cfg(not(feature = "bootloader"))]
 use brightness_measurement::BrightnessMeasurementMessage;
 use core::fmt::Debug;
+#[cfg(not(feature = "bootloader"))]
+use custom_payload_status::CustomPayloadStatusMessage;
 use data_transfer::DataTransferMessage;
 #[cfg(not(feature = "bootloader"))]
 use icarus_status::IcarusStatusMessage;
@@ -55,6 +57,8 @@ pub mod amp_status;
 pub mod baro_measurement;
 #[cfg(not(feature = "bootloader"))]
 pub mod brightness_measurement;
+#[cfg(not(feature = "bootloader"))]
+pub mod custom_payload_status;
 pub mod data_transfer;
 #[cfg(not(feature = "bootloader"))]
 pub mod icarus_status;
@@ -227,6 +231,16 @@ pub const PAYLOAD_EPS_OUTPUT_OVERWRITE_MESSAGE_TYPE: u8 = create_can_bus_message
     },
     1,
 );
+pub const CUSTOM_PAYLOAD_STATUS_MESSAGE_TYPE: u8 = create_can_bus_message_type(
+    CanBusMessageTypeFlag {
+        is_measurement: false,
+        is_control: false,
+        is_status: true,
+        is_data: false,
+        is_misc: false,
+    },
+    3,
+);
 pub const VL_STATUS_MESSAGE_TYPE: u8 = create_can_bus_message_type(
     CanBusMessageTypeFlag {
         is_measurement: false,
@@ -338,6 +352,8 @@ pub enum CanBusMessageEnum {
     PayloadEPSStatus(PayloadEPSStatusMessage),
     #[cfg(not(feature = "bootloader"))]
     PayloadEPSOutputOverwrite(PayloadEPSOutputOverwriteMessage),
+    #[cfg(not(feature = "bootloader"))]
+    CustomPayloadStatus(CustomPayloadStatusMessage),
 
     #[cfg(not(feature = "bootloader"))]
     VLStatus(VLStatusMessage),
@@ -384,6 +400,8 @@ impl CanBusMessageEnum {
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::PayloadEPSOutputOverwrite(m) => m.priority(),
             #[cfg(not(feature = "bootloader"))]
+            CanBusMessageEnum::CustomPayloadStatus(m) => m.priority(),
+            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::VLStatus(m) => m.priority(),
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::RocketState(m) => m.priority(),
@@ -429,6 +447,8 @@ impl CanBusMessageEnum {
             CanBusMessageEnum::PayloadEPSOutputOverwrite(_) => {
                 PAYLOAD_EPS_OUTPUT_OVERWRITE_MESSAGE_TYPE
             }
+            #[cfg(not(feature = "bootloader"))]
+            CanBusMessageEnum::CustomPayloadStatus(_) => CUSTOM_PAYLOAD_STATUS_MESSAGE_TYPE,
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::VLStatus(_) => VL_STATUS_MESSAGE_TYPE,
             #[cfg(not(feature = "bootloader"))]
@@ -481,6 +501,10 @@ impl CanBusMessageEnum {
                 Some(PayloadEPSOutputOverwriteMessage::serialized_len())
             }
             #[cfg(not(feature = "bootloader"))]
+            CUSTOM_PAYLOAD_STATUS_MESSAGE_TYPE => {
+                Some(CustomPayloadStatusMessage::serialized_len())
+            }
+            #[cfg(not(feature = "bootloader"))]
             VL_STATUS_MESSAGE_TYPE => Some(VLStatusMessage::serialized_len()),
             #[cfg(not(feature = "bootloader"))]
             ROCKET_STATE_MESSAGE_TYPE => Some(RocketStateMessage::serialized_len()),
@@ -524,6 +548,8 @@ impl CanBusMessageEnum {
             CanBusMessageEnum::PayloadEPSStatus(m) => m.serialize(buffer),
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::PayloadEPSOutputOverwrite(m) => m.serialize(buffer),
+            #[cfg(not(feature = "bootloader"))]
+            CanBusMessageEnum::CustomPayloadStatus(m) => m.serialize(buffer),
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::VLStatus(m) => m.serialize(buffer),
             #[cfg(not(feature = "bootloader"))]
@@ -596,6 +622,9 @@ impl CanBusMessageEnum {
                 PayloadEPSOutputOverwriteMessage::deserialize(data)
                     .map(CanBusMessageEnum::PayloadEPSOutputOverwrite)
             }
+            #[cfg(not(feature = "bootloader"))]
+            CUSTOM_PAYLOAD_STATUS_MESSAGE_TYPE => CustomPayloadStatusMessage::deserialize(data)
+                .map(CanBusMessageEnum::CustomPayloadStatus),
 
             #[cfg(not(feature = "bootloader"))]
             VL_STATUS_MESSAGE_TYPE => {

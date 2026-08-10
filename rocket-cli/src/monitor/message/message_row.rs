@@ -12,6 +12,7 @@ use firmware_common_new::can_bus::{
         CanBusMessageEnum,
         amp_overwrite::PowerOutputOverwrite,
         amp_status::{AmpOutputStatus, PowerOutputStatus},
+        custom_payload_status::CustomPayloadStatusMessage,
     },
     telemetry::message_aggregator::DecodedMessage,
 };
@@ -138,6 +139,7 @@ impl MessageRow {
             CanBusMessageEnum::AmpResetOutput(_) => "AMP Reset Output",
             CanBusMessageEnum::PayloadEPSStatus(_) => "EPS Status",
             CanBusMessageEnum::PayloadEPSOutputOverwrite(_) => "EPS Output Overwrite",
+            CanBusMessageEnum::CustomPayloadStatus(_) => "Custom Payload Status",
             CanBusMessageEnum::VLStatus(_) => "VL Status",
             CanBusMessageEnum::RocketState(_) => "Rocket State",
             CanBusMessageEnum::IcarusStatus(_) => "Icarus Status",
@@ -226,6 +228,16 @@ impl MessageRow {
 
         s.append_plain("".pad_to_width(14 - s.width()));
         s
+    }
+
+    fn format_rail_mv(raw_mv: u16) -> StyledString {
+        match CustomPayloadStatusMessage::rail_mv(raw_mv) {
+            Some(mv) => format!("{:.2}V", mv as f32 / 1000.0).into(),
+            None => StyledString::single_span(
+                "n/a   ",
+                Style::from_color_style(ColorStyle::front(Color::Rgb(127, 127, 127))),
+            ),
+        }
     }
 
     pub fn draw(&self, printer: &Printer) {
@@ -500,6 +512,17 @@ impl MessageRow {
                         true,
                         Self::format_power_output_overwrite(m.out_9v),
                     ),
+                ],
+            ),
+            CanBusMessageEnum::CustomPayloadStatus(m) => self.draw_fields(
+                printer,
+                1,
+                &[
+                    ("epm batt", false, Self::format_rail_mv(m.epm_batt_mv)),
+                    ("sys 3v3", false, Self::format_rail_mv(m.epm_sys_3v3_mv)),
+                    ("sys 5v", false, Self::format_rail_mv(m.epm_sys_5v_mv)),
+                    ("per 5v", false, Self::format_rail_mv(m.epm_per_5v_mv)),
+                    ("per 9v", false, Self::format_rail_mv(m.epm_per_9v_mv)),
                 ],
             ),
             CanBusMessageEnum::VLStatus(m) => self.draw_fields(
