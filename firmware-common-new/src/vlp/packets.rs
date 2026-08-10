@@ -8,7 +8,6 @@ use fire_pyro::FirePyroPacket;
 use set_target_apogee::SetTargetApogeePacket;
 use gps_beacon::GPSBeaconPacket;
 use low_power_telemetry::LowPowerTelemetryPacket;
-use payload_eps_output_overwrite::PayloadEPSOutputOverwritePacket;
 use reset::ResetPacket;
 use self_test_result::SelfTestResultPacket;
 use telemetry::TelemetryPacket;
@@ -21,7 +20,6 @@ pub mod fire_pyro;
 pub mod gps_beacon;
 pub mod landed_telemetry;
 pub mod low_power_telemetry;
-pub mod payload_eps_output_overwrite;
 pub mod reset;
 pub mod self_test_result;
 pub mod telemetry;
@@ -92,7 +90,6 @@ impl VLPDownlinkPacket {
 pub enum VLPUplinkPacket {
     ChangeMode(ChangeModePacket),
     Reset(ResetPacket),
-    PayloadEPSOutputOverwrite(PayloadEPSOutputOverwritePacket),
     AMPOutputOverwrite(AMPOutputOverwritePacket),
     FirePyro(FirePyroPacket),
     SetTargetApogee(SetTargetApogeePacket)
@@ -108,13 +105,11 @@ impl VLPUplinkPacket {
         match packet_type {
             0 => ChangeModePacket::deserialize(data).map(VLPUplinkPacket::ChangeMode),
             1 => ResetPacket::deserialize(data).map(VLPUplinkPacket::Reset),
-            2 => PayloadEPSOutputOverwritePacket::deserialize(data)
-                .map(VLPUplinkPacket::PayloadEPSOutputOverwrite),
-            3 => {
+            2 => {
                 AMPOutputOverwritePacket::deserialize(data).map(VLPUplinkPacket::AMPOutputOverwrite)
             }
-            4 => FirePyroPacket::deserialize(data).map(VLPUplinkPacket::FirePyro),
-            5 => SetTargetApogeePacket::deserialize(data).map(VLPUplinkPacket::SetTargetApogee),
+            3 => FirePyroPacket::deserialize(data).map(VLPUplinkPacket::FirePyro),
+            4 => SetTargetApogeePacket::deserialize(data).map(VLPUplinkPacket::SetTargetApogee),
             _ => None,
         }
     }
@@ -123,17 +118,15 @@ impl VLPUplinkPacket {
         buffer[0] = match self {
             VLPUplinkPacket::ChangeMode(_) => 0,
             VLPUplinkPacket::Reset(_) => 1,
-            VLPUplinkPacket::PayloadEPSOutputOverwrite(_) => 2,
-            VLPUplinkPacket::AMPOutputOverwrite(_) => 3,
-            VLPUplinkPacket::FirePyro(_) => 4,
-            VLPUplinkPacket::SetTargetApogee(_) => 5,
+            VLPUplinkPacket::AMPOutputOverwrite(_) => 2,
+            VLPUplinkPacket::FirePyro(_) => 3,
+            VLPUplinkPacket::SetTargetApogee(_) => 4,
         };
         buffer = &mut buffer[1..];
 
         1 + match self {
             VLPUplinkPacket::ChangeMode(packet) => packet.serialize(buffer),
             VLPUplinkPacket::Reset(packet) => packet.serialize(buffer),
-            VLPUplinkPacket::PayloadEPSOutputOverwrite(packet) => packet.serialize(buffer),
             VLPUplinkPacket::AMPOutputOverwrite(packet) => packet.serialize(buffer),
             VLPUplinkPacket::FirePyro(packet) => packet.serialize(buffer),
             VLPUplinkPacket::SetTargetApogee(packet) => packet.serialize(buffer),

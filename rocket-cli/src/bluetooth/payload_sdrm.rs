@@ -17,7 +17,7 @@ use uuid::Uuid;
 
 use crate::args::NodeTypeEnum;
 
-pub struct PayloadActivationPCB {
+pub struct PayloadSDRM {
     peripheral: Peripheral,
     chunk_char: Characteristic,
     ctrl_char: Characteristic,
@@ -25,7 +25,7 @@ pub struct PayloadActivationPCB {
     pub log_rx: mpsc::Receiver<Vec<u8>>,
 }
 
-impl PayloadActivationPCB {
+impl PayloadSDRM {
     pub async fn new(peripheral: Peripheral) -> Result<Self> {
         peripheral.discover_services().await?;
 

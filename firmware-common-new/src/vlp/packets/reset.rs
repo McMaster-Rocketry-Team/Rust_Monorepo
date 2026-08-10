@@ -14,13 +14,10 @@ pub enum DeviceToReset {
     AMPOut3,
     AMPOut4,
     Icarus,
-    PayloadActivationPCB,
-    RocketWifi,
+    PayloadSDRM,
     OzysAll,
     MainBulkhead,
     DrogueBulkhead,
-    PayloadEPS1,
-    PayloadEPS2,
     AeroRust,
 }
 

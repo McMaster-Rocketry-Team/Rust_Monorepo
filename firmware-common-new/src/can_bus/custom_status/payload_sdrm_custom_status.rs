@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::can_bus::custom_status::NodeCustomStatus;
 
-/// Stack state of the payload activation node (SDRM), carried in
+/// Stack state of the payload SDRM node, carried in
 /// `NodeStatusMessage::custom_status_raw`.
 ///
 /// Uses all 11 available bits. Per-channel tare / home progress is not exposed
@@ -12,7 +12,7 @@ use crate::can_bus::custom_status::NodeCustomStatus;
 #[derive(PackedStruct, Clone, Debug, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize)]
 #[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "2")]
 #[repr(C)]
-pub struct PayloadActivationCustomStatus {
+pub struct PayloadSDRMCustomStatus {
     /// EPM responded on the intra-stack bus
     pub epm_alive: bool,
     /// SEM responded on the intra-stack bus
@@ -37,7 +37,7 @@ pub struct PayloadActivationCustomStatus {
     pub fault: bool,
 }
 
-impl PayloadActivationCustomStatus {
+impl PayloadSDRMCustomStatus {
     /// Nothing brought up yet, no fault.
     pub fn new() -> Self {
         Self {
@@ -79,13 +79,13 @@ impl PayloadActivationCustomStatus {
     }
 }
 
-impl Default for PayloadActivationCustomStatus {
+impl Default for PayloadSDRMCustomStatus {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl NodeCustomStatus for PayloadActivationCustomStatus {}
+impl NodeCustomStatus for PayloadSDRMCustomStatus {}
 
 #[cfg(test)]
 mod tests {
@@ -97,7 +97,7 @@ mod tests {
 
     #[test]
     fn test_serialize_deserialize() {
-        let status = PayloadActivationCustomStatus {
+        let status = PayloadSDRMCustomStatus {
             epm_alive: true,
             sem_alive: true,
             stack_powered: true,
@@ -114,19 +114,19 @@ mod tests {
         let status_u16 = status.to_u16();
         assert_eq!(status_u16, 0b11100000101);
 
-        let status2 = PayloadActivationCustomStatus::from_u16(status_u16);
+        let status2 = PayloadSDRMCustomStatus::from_u16(status_u16);
         assert_eq!(status, status2);
     }
 
     #[test]
     fn test_uses_all_11_bits() {
-        let mut status = PayloadActivationCustomStatus::new();
+        let mut status = PayloadSDRMCustomStatus::new();
         assert_eq!(status.to_u16(), 0);
 
         status.epm_alive = true;
         assert_eq!(status.to_u16(), 0b10000000000);
 
-        let mut status = PayloadActivationCustomStatus::new();
+        let mut status = PayloadSDRMCustomStatus::new();
         status.fault = true;
         assert_eq!(status.to_u16(), 0b00000000001);
     }
@@ -138,7 +138,7 @@ mod tests {
     /// matching `VLCustomStatus` and `OzysCustomStatus`.
     #[test]
     fn test_reference_node_status_frame() {
-        let status = PayloadActivationCustomStatus {
+        let status = PayloadSDRMCustomStatus {
             epm_alive: true,
             sem_alive: true,
             stack_powered: true,
@@ -163,7 +163,7 @@ mod tests {
 
     #[test]
     fn test_clear_flags() {
-        let all_set = PayloadActivationCustomStatus {
+        let all_set = PayloadSDRMCustomStatus {
             epm_alive: true,
             sem_alive: true,
             stack_powered: true,

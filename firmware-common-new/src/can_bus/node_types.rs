@@ -10,8 +10,8 @@ pub const AMP_NODE_TYPE: u8 = 10;
 /// Air brakes node
 pub const ICARUS_NODE_TYPE: u8 = 15;
 
-/// Payload activation node
-pub const PAYLOAD_ACTIVATION_NODE_TYPE: u8 = 20;
+/// Payload SDRM node
+pub const PAYLOAD_SDRM_NODE_TYPE: u8 = 20;
 
 /// Strain gauges node
 pub const OZYS_NODE_TYPE: u8 = 25;

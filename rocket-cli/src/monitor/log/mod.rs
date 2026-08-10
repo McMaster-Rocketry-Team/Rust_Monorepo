@@ -196,11 +196,11 @@ impl LogViewer {
                                 ),
                             )
                             .child(
-                                "Payload Activation",
+                                "Payload SDRM",
                                 Self::create_config_checkbox(
                                     config.clone(),
-                                    |c| c.devices.payload_activation,
-                                    |c, v| c.devices.payload_activation = v,
+                                    |c| c.devices.payload_sdrm,
+                                    |c, v| c.devices.payload_sdrm = v,
                                 ),
                             )
                             .child(

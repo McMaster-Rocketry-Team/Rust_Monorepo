@@ -5,7 +5,12 @@ use packed_struct::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    can_bus::messages::{amp_status::PowerOutputStatus, vl_status::FlightStage},
+    can_bus::{
+        custom_status::{
+            NodeCustomStatusExt, payload_sdrm_custom_status::PayloadSDRMCustomStatus,
+        },
+        messages::{amp_status::PowerOutputStatus, vl_status::FlightStage},
+    },
     fixed_point_factory,
     gps::GPSData,
 };
@@ -24,13 +29,14 @@ fixed_point_factory!(AirSpeedFac, f32, 0.0, 400.0, 2.0);
 fixed_point_factory!(AirBrakesExtensionPercentFac, f32, 0.0, 1.0, 0.04);
 fixed_point_factory!(TiltDegFac, f32, -90.0, 90.0, 1.0);
 
-fixed_point_factory!(PayloadVoltageFac, f32, 2.0, 4.5, 0.05);
-fixed_point_factory!(PayloadCurrentFac, f32, 0.0, 2.0, 0.1);
-fixed_point_factory!(PayloadTemperatureFac, f32, 10.0, 85.0, 1.0);
+// EPM battery bus, a 4S-ish pack sitting well above the regulated rails.
+fixed_point_factory!(EpmBattVFac, f32, 11.0, 17.0, 0.01);
+// The four regulated EPM rails: 3.3V, system 5V, peripheral 5V and peripheral 9V.
+fixed_point_factory!(EpmRailVFac, f32, 0.0, 10.0, 0.01);
 
 // 48 byte max size to achieve 0.5Hz with 250khz bandwidth + 12sf + 8cr lora
 #[derive(PackedStruct, Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "39")]
+#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "34")]
 pub struct TelemetryPacket {
     #[packed_field(bits = "0..4")]
     nonce: Integer<u8, packed_bits::Bits<4>>,
@@ -112,79 +118,36 @@ pub struct TelemetryPacket {
     ozys2_online: bool,
     ozys2_rebooted_in_last_5s: bool,
 
-    payload_activation_pcb_online: bool,
-    payload_activation_pcb_rebooted_in_last_5s: bool,
+    payload_sdrm_online: bool,
+    payload_sdrm_rebooted_in_last_5s: bool,
 
-    rocket_wifi_online: bool,
-    rocket_wifi_rebooted_in_last_5s: bool,
+    /// `PayloadSDRMCustomStatus`, relayed from
+    /// `NodeStatusMessage::custom_status_raw` of the payload SDRM node.
+    #[packed_field(element_size_bits = "11")]
+    payload_stack_status_raw: Integer<u16, packed_bits::Bits<11>>,
 
-    eps1_online: bool,
-    eps1_rebooted_in_last_5s: bool,
-    #[packed_field(element_size_bits = "6")]
-    eps1_battery1_v: Integer<PayloadVoltageFacBase, packed_bits::Bits<PAYLOAD_VOLTAGE_FAC_BITS>>,
-    #[packed_field(element_size_bits = "7")]
-    eps1_battery1_temperature:
-        Integer<PayloadTemperatureFacBase, packed_bits::Bits<PAYLOAD_TEMPERATURE_FAC_BITS>>,
-    #[packed_field(element_size_bits = "6")]
-    eps1_battery2_v: Integer<PayloadVoltageFacBase, packed_bits::Bits<PAYLOAD_VOLTAGE_FAC_BITS>>,
-    #[packed_field(element_size_bits = "7")]
-    eps1_battery2_temperature:
-        Integer<PayloadTemperatureFacBase, packed_bits::Bits<PAYLOAD_TEMPERATURE_FAC_BITS>>,
+    /// EPM rail voltages, relayed from `CustomPayloadStatusMessage`. Each rail
+    /// carries a validity bit; the payload reports `0xFFFF` when a reading is
+    /// unavailable, which arrives here as `false`.
+    epm_batt_v_valid: bool,
+    #[packed_field(element_size_bits = "10")]
+    epm_batt_v: Integer<EpmBattVFacBase, packed_bits::Bits<EPM_BATT_V_FAC_BITS>>,
 
-    #[packed_field(element_size_bits = "5")]
-    eps1_output_3v3_current:
-        Integer<PayloadCurrentFacBase, packed_bits::Bits<PAYLOAD_CURRENT_FAC_BITS>>,
-    eps1_output_3v3_overwrote: bool,
-    #[packed_field(element_size_bits = "2", ty = "enum")]
-    eps1_output_3v3_status: PowerOutputStatus,
+    epm_sys_3v3_v_valid: bool,
+    #[packed_field(element_size_bits = "10")]
+    epm_sys_3v3_v: Integer<EpmRailVFacBase, packed_bits::Bits<EPM_RAIL_V_FAC_BITS>>,
 
-    #[packed_field(element_size_bits = "5")]
-    eps1_output_5v_current:
-        Integer<PayloadCurrentFacBase, packed_bits::Bits<PAYLOAD_CURRENT_FAC_BITS>>,
-    eps1_output_5v_overwrote: bool,
-    #[packed_field(element_size_bits = "2", ty = "enum")]
-    eps1_output_5v_status: PowerOutputStatus,
+    epm_sys_5v_v_valid: bool,
+    #[packed_field(element_size_bits = "10")]
+    epm_sys_5v_v: Integer<EpmRailVFacBase, packed_bits::Bits<EPM_RAIL_V_FAC_BITS>>,
 
-    #[packed_field(element_size_bits = "5")]
-    eps1_output_9v_current:
-        Integer<PayloadCurrentFacBase, packed_bits::Bits<PAYLOAD_CURRENT_FAC_BITS>>,
-    eps1_output_9v_overwrote: bool,
-    #[packed_field(element_size_bits = "2", ty = "enum")]
-    eps1_output_9v_status: PowerOutputStatus,
+    epm_per_5v_v_valid: bool,
+    #[packed_field(element_size_bits = "10")]
+    epm_per_5v_v: Integer<EpmRailVFacBase, packed_bits::Bits<EPM_RAIL_V_FAC_BITS>>,
 
-    eps2_online: bool,
-    eps2_rebooted_in_last_5s: bool,
-    #[packed_field(element_size_bits = "6")]
-    eps2_battery1_v: Integer<PayloadVoltageFacBase, packed_bits::Bits<PAYLOAD_VOLTAGE_FAC_BITS>>,
-    #[packed_field(element_size_bits = "7")]
-    eps2_battery1_temperature:
-        Integer<PayloadTemperatureFacBase, packed_bits::Bits<PAYLOAD_TEMPERATURE_FAC_BITS>>,
-    #[packed_field(element_size_bits = "6")]
-    eps2_battery2_v: Integer<PayloadVoltageFacBase, packed_bits::Bits<PAYLOAD_VOLTAGE_FAC_BITS>>,
-    #[packed_field(element_size_bits = "7")]
-    eps2_battery2_temperature:
-        Integer<PayloadTemperatureFacBase, packed_bits::Bits<PAYLOAD_TEMPERATURE_FAC_BITS>>,
-
-    #[packed_field(element_size_bits = "5")]
-    eps2_output_3v3_current:
-        Integer<PayloadCurrentFacBase, packed_bits::Bits<PAYLOAD_CURRENT_FAC_BITS>>,
-    eps2_output_3v3_overwrote: bool,
-    #[packed_field(element_size_bits = "2", ty = "enum")]
-    eps2_output_3v3_status: PowerOutputStatus,
-
-    #[packed_field(element_size_bits = "5")]
-    eps2_output_5v_current:
-        Integer<PayloadCurrentFacBase, packed_bits::Bits<PAYLOAD_CURRENT_FAC_BITS>>,
-    eps2_output_5v_overwrote: bool,
-    #[packed_field(element_size_bits = "2", ty = "enum")]
-    eps2_output_5v_status: PowerOutputStatus,
-
-    #[packed_field(element_size_bits = "5")]
-    eps2_output_9v_current:
-        Integer<PayloadCurrentFacBase, packed_bits::Bits<PAYLOAD_CURRENT_FAC_BITS>>,
-    eps2_output_9v_overwrote: bool,
-    #[packed_field(element_size_bits = "2", ty = "enum")]
-    eps2_output_9v_status: PowerOutputStatus,
+    epm_per_9v_v_valid: bool,
+    #[packed_field(element_size_bits = "10")]
+    epm_per_9v_v: Integer<EpmRailVFacBase, packed_bits::Bits<EPM_RAIL_V_FAC_BITS>>,
 }
 
 impl TelemetryPacket {
@@ -243,43 +206,16 @@ impl TelemetryPacket {
         ozys2_online: bool,
         ozys2_rebooted_in_last_5s: bool,
 
-        payload_activation_pcb_online: bool,
-        payload_activation_pcb_rebooted_in_last_5s: bool,
+        payload_sdrm_online: bool,
+        payload_sdrm_rebooted_in_last_5s: bool,
 
-        rocket_wifi_online: bool,
-        rocket_wifi_rebooted_in_last_5s: bool,
+        payload_stack_status: PayloadSDRMCustomStatus,
 
-        eps1_online: bool,
-        eps1_rebooted_in_last_5s: bool,
-        eps1_battery1_v: f32,
-        eps1_battery1_temperature: f32,
-        eps1_battery2_v: f32,
-        eps1_battery2_temperature: f32,
-        eps1_output_3v3_current: f32,
-        eps1_output_3v3_overwrote: bool,
-        eps1_output_3v3_status: PowerOutputStatus,
-        eps1_output_5v_current: f32,
-        eps1_output_5v_overwrote: bool,
-        eps1_output_5v_status: PowerOutputStatus,
-        eps1_output_9v_current: f32,
-        eps1_output_9v_overwrote: bool,
-        eps1_output_9v_status: PowerOutputStatus,
-
-        eps2_online: bool,
-        eps2_rebooted_in_last_5s: bool,
-        eps2_battery1_v: f32,
-        eps2_battery1_temperature: f32,
-        eps2_battery2_v: f32,
-        eps2_battery2_temperature: f32,
-        eps2_output_3v3_current: f32,
-        eps2_output_3v3_overwrote: bool,
-        eps2_output_3v3_status: PowerOutputStatus,
-        eps2_output_5v_current: f32,
-        eps2_output_5v_overwrote: bool,
-        eps2_output_5v_status: PowerOutputStatus,
-        eps2_output_9v_current: f32,
-        eps2_output_9v_overwrote: bool,
-        eps2_output_9v_status: PowerOutputStatus,
+        epm_batt_v: Option<f32>,
+        epm_sys_3v3_v: Option<f32>,
+        epm_sys_5v_v: Option<f32>,
+        epm_per_5v_v: Option<f32>,
+        epm_per_9v_v: Option<f32>,
     ) -> Self {
         if altitude_agl.is_nan(){
             log_info!("altitude agl nan");
@@ -351,63 +287,36 @@ impl TelemetryPacket {
             ozys2_online,
             ozys2_rebooted_in_last_5s,
 
-            payload_activation_pcb_online,
-            payload_activation_pcb_rebooted_in_last_5s,
+            payload_sdrm_online,
+            payload_sdrm_rebooted_in_last_5s,
 
-            rocket_wifi_online,
-            rocket_wifi_rebooted_in_last_5s,
+            payload_stack_status_raw: payload_stack_status.to_u16().into(),
 
-            eps1_online,
-            eps1_rebooted_in_last_5s,
-            eps1_battery1_v: PayloadVoltageFac::to_fixed_point_capped(eps1_battery1_v),
-            eps1_battery1_temperature: PayloadTemperatureFac::to_fixed_point_capped(
-                eps1_battery1_temperature,
-            ),
-            eps1_battery2_v: PayloadVoltageFac::to_fixed_point_capped(eps1_battery2_v),
-            eps1_battery2_temperature: PayloadTemperatureFac::to_fixed_point_capped(
-                eps1_battery2_temperature,
-            ),
-            eps1_output_3v3_current: PayloadCurrentFac::to_fixed_point_capped(
-                eps1_output_3v3_current,
-            ),
-            eps1_output_3v3_overwrote,
-            eps1_output_3v3_status,
-            eps1_output_5v_current: PayloadCurrentFac::to_fixed_point_capped(
-                eps1_output_5v_current,
-            ),
-            eps1_output_5v_overwrote,
-            eps1_output_5v_status,
-            eps1_output_9v_current: PayloadCurrentFac::to_fixed_point_capped(
-                eps1_output_9v_current,
-            ),
-            eps1_output_9v_overwrote,
-            eps1_output_9v_status,
+            epm_batt_v_valid: epm_batt_v.is_some(),
+            epm_batt_v: EpmBattVFac::to_fixed_point_capped(epm_batt_v.unwrap_or(11.0)),
+            epm_sys_3v3_v_valid: epm_sys_3v3_v.is_some(),
+            epm_sys_3v3_v: Self::encode_rail_v(epm_sys_3v3_v),
+            epm_sys_5v_v_valid: epm_sys_5v_v.is_some(),
+            epm_sys_5v_v: Self::encode_rail_v(epm_sys_5v_v),
+            epm_per_5v_v_valid: epm_per_5v_v.is_some(),
+            epm_per_5v_v: Self::encode_rail_v(epm_per_5v_v),
+            epm_per_9v_v_valid: epm_per_9v_v.is_some(),
+            epm_per_9v_v: Self::encode_rail_v(epm_per_9v_v),
+        }
+    }
 
-            eps2_online,
-            eps2_rebooted_in_last_5s,
-            eps2_battery1_v: PayloadVoltageFac::to_fixed_point_capped(eps2_battery1_v),
-            eps2_battery1_temperature: PayloadTemperatureFac::to_fixed_point_capped(
-                eps2_battery1_temperature,
-            ),
-            eps2_battery2_v: PayloadVoltageFac::to_fixed_point_capped(eps2_battery2_v),
-            eps2_battery2_temperature: PayloadTemperatureFac::to_fixed_point_capped(
-                eps2_battery2_temperature,
-            ),
-            eps2_output_3v3_current: PayloadCurrentFac::to_fixed_point_capped(
-                eps2_output_3v3_current,
-            ),
-            eps2_output_3v3_overwrote,
-            eps2_output_3v3_status,
-            eps2_output_5v_current: PayloadCurrentFac::to_fixed_point_capped(
-                eps2_output_5v_current,
-            ),
-            eps2_output_5v_overwrote,
-            eps2_output_5v_status,
-            eps2_output_9v_current: PayloadCurrentFac::to_fixed_point_capped(
-                eps2_output_9v_current,
-            ),
-            eps2_output_9v_overwrote,
-            eps2_output_9v_status,
+    fn encode_rail_v(rail_v: Option<f32>) -> Integer<EpmRailVFacBase, packed_bits::Bits<EPM_RAIL_V_FAC_BITS>> {
+        EpmRailVFac::to_fixed_point_capped(rail_v.unwrap_or(0.0))
+    }
+
+    fn decode_rail_v(
+        valid: bool,
+        rail_v: Integer<EpmRailVFacBase, packed_bits::Bits<EPM_RAIL_V_FAC_BITS>>,
+    ) -> Option<f32> {
+        if valid {
+            Some(EpmRailVFac::to_float(rail_v))
+        } else {
+            None
         }
     }
 
@@ -579,144 +488,46 @@ impl TelemetryPacket {
         self.ozys2_rebooted_in_last_5s
     }
 
-    pub fn payload_activation_pcb_online(&self) -> bool {
-        self.payload_activation_pcb_online
+    pub fn payload_sdrm_online(&self) -> bool {
+        self.payload_sdrm_online
     }
 
-    pub fn payload_activation_pcb_rebooted_in_last_5s(&self) -> bool {
-        self.payload_activation_pcb_rebooted_in_last_5s
+    pub fn payload_sdrm_rebooted_in_last_5s(&self) -> bool {
+        self.payload_sdrm_rebooted_in_last_5s
     }
 
-    pub fn rocket_wifi_online(&self) -> bool {
-        self.rocket_wifi_online
+    pub fn payload_stack_status(&self) -> PayloadSDRMCustomStatus {
+        PayloadSDRMCustomStatus::from_u16(self.payload_stack_status_raw.into())
     }
 
-    pub fn rocket_wifi_rebooted_in_last_5s(&self) -> bool {
-        self.rocket_wifi_rebooted_in_last_5s
+    /// `None` when the payload reported the rail as unavailable.
+    pub fn epm_batt_v(&self) -> Option<f32> {
+        if self.epm_batt_v_valid {
+            Some(EpmBattVFac::to_float(self.epm_batt_v))
+        } else {
+            None
+        }
     }
 
-    pub fn eps1_online(&self) -> bool {
-        self.eps1_online
+    pub fn epm_sys_3v3_v(&self) -> Option<f32> {
+        Self::decode_rail_v(self.epm_sys_3v3_v_valid, self.epm_sys_3v3_v)
     }
 
-    pub fn eps1_rebooted_in_last_5s(&self) -> bool {
-        self.eps1_rebooted_in_last_5s
+    pub fn epm_sys_5v_v(&self) -> Option<f32> {
+        Self::decode_rail_v(self.epm_sys_5v_v_valid, self.epm_sys_5v_v)
     }
 
-    pub fn eps1_battery1_v(&self) -> f32 {
-        PayloadVoltageFac::to_float(self.eps1_battery1_v)
+    pub fn epm_per_5v_v(&self) -> Option<f32> {
+        Self::decode_rail_v(self.epm_per_5v_v_valid, self.epm_per_5v_v)
     }
 
-    pub fn eps1_battery1_temperature(&self) -> f32 {
-        PayloadTemperatureFac::to_float(self.eps1_battery1_temperature)
-    }
-
-    pub fn eps1_battery2_v(&self) -> f32 {
-        PayloadVoltageFac::to_float(self.eps1_battery2_v)
-    }
-
-    pub fn eps1_battery2_temperature(&self) -> f32 {
-        PayloadTemperatureFac::to_float(self.eps1_battery2_temperature)
-    }
-
-    pub fn eps1_output_3v3_current(&self) -> f32 {
-        PayloadCurrentFac::to_float(self.eps1_output_3v3_current)
-    }
-
-    pub fn eps1_output_3v3_overwrote(&self) -> bool {
-        self.eps1_output_3v3_overwrote
-    }
-
-    pub fn eps1_output_3v3_status(&self) -> PowerOutputStatus {
-        self.eps1_output_3v3_status
-    }
-
-    pub fn eps1_output_5v_current(&self) -> f32 {
-        PayloadCurrentFac::to_float(self.eps1_output_5v_current)
-    }
-
-    pub fn eps1_output_5v_overwrote(&self) -> bool {
-        self.eps1_output_5v_overwrote
-    }
-
-    pub fn eps1_output_5v_status(&self) -> PowerOutputStatus {
-        self.eps1_output_5v_status
-    }
-
-    pub fn eps1_output_9v_current(&self) -> f32 {
-        PayloadCurrentFac::to_float(self.eps1_output_9v_current)
-    }
-
-    pub fn eps1_output_9v_overwrote(&self) -> bool {
-        self.eps1_output_9v_overwrote
-    }
-
-    pub fn eps1_output_9v_status(&self) -> PowerOutputStatus {
-        self.eps1_output_9v_status
-    }
-
-    pub fn eps2_online(&self) -> bool {
-        self.eps2_online
-    }
-
-    pub fn eps2_rebooted_in_last_5s(&self) -> bool {
-        self.eps2_rebooted_in_last_5s
-    }
-
-    pub fn eps2_battery1_v(&self) -> f32 {
-        PayloadVoltageFac::to_float(self.eps2_battery1_v)
-    }
-
-    pub fn eps2_battery1_temperature(&self) -> f32 {
-        PayloadTemperatureFac::to_float(self.eps2_battery1_temperature)
-    }
-
-    pub fn eps2_battery2_v(&self) -> f32 {
-        PayloadVoltageFac::to_float(self.eps2_battery2_v)
-    }
-
-    pub fn eps2_battery2_temperature(&self) -> f32 {
-        PayloadTemperatureFac::to_float(self.eps2_battery2_temperature)
-    }
-
-    pub fn eps2_output_3v3_current(&self) -> f32 {
-        PayloadCurrentFac::to_float(self.eps2_output_3v3_current)
-    }
-
-    pub fn eps2_output_3v3_overwrote(&self) -> bool {
-        self.eps2_output_3v3_overwrote
-    }
-
-    pub fn eps2_output_3v3_status(&self) -> PowerOutputStatus {
-        self.eps2_output_3v3_status
-    }
-
-    pub fn eps2_output_5v_current(&self) -> f32 {
-        PayloadCurrentFac::to_float(self.eps2_output_5v_current)
-    }
-
-    pub fn eps2_output_5v_overwrote(&self) -> bool {
-        self.eps2_output_5v_overwrote
-    }
-
-    pub fn eps2_output_5v_status(&self) -> PowerOutputStatus {
-        self.eps2_output_5v_status
-    }
-
-    pub fn eps2_output_9v_current(&self) -> f32 {
-        PayloadCurrentFac::to_float(self.eps2_output_9v_current)
-    }
-
-    pub fn eps2_output_9v_overwrote(&self) -> bool {
-        self.eps2_output_9v_overwrote
-    }
-
-    pub fn eps2_output_9v_status(&self) -> PowerOutputStatus {
-        self.eps2_output_9v_status
+    pub fn epm_per_9v_v(&self) -> Option<f32> {
+        Self::decode_rail_v(self.epm_per_9v_v_valid, self.epm_per_9v_v)
     }
 
     #[cfg(feature = "json")]
     pub fn to_json(&self) -> json::JsonValue {
+        let payload_stack_status = self.payload_stack_status();
         json::object! {
             unix_clock_ready: self.unix_clock_ready(),
             num_of_fix_satellites: self.num_of_fix_satellites(),
@@ -765,43 +576,26 @@ impl TelemetryPacket {
             ozys2_online: self.ozys2_online(),
             ozys2_rebooted_in_last_5s: self.ozys2_rebooted_in_last_5s(),
 
-            payload_activation_pcb_online: self.payload_activation_pcb_online(),
-            payload_activation_pcb_rebooted_in_last_5s: self.payload_activation_pcb_rebooted_in_last_5s(),
+            payload_sdrm_online: self.payload_sdrm_online(),
+            payload_sdrm_rebooted_in_last_5s: self.payload_sdrm_rebooted_in_last_5s(),
 
-            rocket_wifi_online: self.rocket_wifi_online(),
-            rocket_wifi_rebooted_in_last_5s: self.rocket_wifi_rebooted_in_last_5s(),
+            payload_epm_alive: payload_stack_status.epm_alive,
+            payload_sem_alive: payload_stack_status.sem_alive,
+            payload_stack_powered: payload_stack_status.stack_powered,
+            payload_sdrm_sd_logging: payload_stack_status.sdrm_sd_logging,
+            payload_sem_sd_logging: payload_stack_status.sem_sd_logging,
+            payload_exp1_active: payload_stack_status.exp1_active,
+            payload_exp2_active: payload_stack_status.exp2_active,
+            payload_exp3_active: payload_stack_status.exp3_active,
+            payload_prep_complete: payload_stack_status.prep_complete,
+            payload_armed_bundle_complete: payload_stack_status.armed_bundle_complete,
+            payload_fault: payload_stack_status.fault,
 
-            eps1_online: self.eps1_online(),
-            eps1_rebooted_in_last_5s: self.eps1_rebooted_in_last_5s(),
-            eps1_battery1_v: self.eps1_battery1_v(),
-            eps1_battery1_temperature: self.eps1_battery1_temperature(),
-            eps1_battery2_v: self.eps1_battery2_v(),
-            eps1_battery2_temperature: self.eps1_battery2_temperature(),
-            eps1_output_3v3_current: self.eps1_output_3v3_current(),
-            eps1_output_3v3_overwrote: self.eps1_output_3v3_overwrote(),
-            eps1_output_3v3_status: format!("{:?}", self.eps1_output_3v3_status()),
-            eps1_output_5v_current: self.eps1_output_5v_current(),
-            eps1_output_5v_overwrote: self.eps1_output_5v_overwrote(),
-            eps1_output_5v_status: format!("{:?}", self.eps1_output_5v_status()),
-            eps1_output_9v_current: self.eps1_output_9v_current(),
-            eps1_output_9v_overwrote: self.eps1_output_9v_overwrote(),
-            eps1_output_9v_status: format!("{:?}", self.eps1_output_9v_status()),
-
-            eps2_online: self.eps2_online(),
-            eps2_rebooted_in_last_5s: self.eps2_rebooted_in_last_5s(),
-            eps2_battery1_v: self.eps2_battery1_v(),
-            eps2_battery1_temperature: self.eps2_battery1_temperature(),
-            eps2_battery2_v: self.eps2_battery2_v(),
-            eps2_battery2_temperature: self.eps2_battery2_temperature(),
-            eps2_output_3v3_current: self.eps2_output_3v3_current(),
-            eps2_output_3v3_overwrote: self.eps2_output_3v3_overwrote(),
-            eps2_output_3v3_status: format!("{:?}", self.eps2_output_3v3_status()),
-            eps2_output_5v_current: self.eps2_output_5v_current(),
-            eps2_output_5v_overwrote: self.eps2_output_5v_overwrote(),
-            eps2_output_5v_status: format!("{:?}", self.eps2_output_5v_status()),
-            eps2_output_9v_current: self.eps2_output_9v_current(),
-            eps2_output_9v_overwrote: self.eps2_output_9v_overwrote(),
-            eps2_output_9v_status: format!("{:?}", self.eps2_output_9v_status()),
+            epm_batt_v: self.epm_batt_v(),
+            epm_sys_3v3_v: self.epm_sys_3v3_v(),
+            epm_sys_5v_v: self.epm_sys_5v_v(),
+            epm_per_5v_v: self.epm_per_5v_v(),
+            epm_per_9v_v: self.epm_per_9v_v(),
         }
     }
 }
@@ -872,43 +666,19 @@ pub struct TelemetryPacketBuilderState {
     pub ozys2_online: bool,
     pub ozys2_uptime_s: u32,
 
-    pub payload_activation_pcb_online: bool,
-    pub payload_activation_pcb_uptime_s: u32,
+    pub payload_sdrm_online: bool,
+    pub payload_sdrm_uptime_s: u32,
 
-    pub rocket_wifi_online: bool,
-    pub rocket_wifi_uptime_s: u32,
+    /// Stack flags from the payload SDRM node's `NodeStatusMessage`.
+    pub payload_stack_status: PayloadSDRMCustomStatus,
 
-    pub eps1_online: bool,
-    pub eps1_uptime_s: u32,
-    pub eps1_battery1_v: f32,
-    pub eps1_battery1_temperature: f32,
-    pub eps1_battery2_v: f32,
-    pub eps1_battery2_temperature: f32,
-    pub eps1_output_3v3_current: f32,
-    pub eps1_output_3v3_overwrote: bool,
-    pub eps1_output_3v3_status: PowerOutputStatus,
-    pub eps1_output_5v_current: f32,
-    pub eps1_output_5v_overwrote: bool,
-    pub eps1_output_5v_status: PowerOutputStatus,
-    pub eps1_output_9v_current: f32,
-    pub eps1_output_9v_overwrote: bool,
-    pub eps1_output_9v_status: PowerOutputStatus,
-
-    pub eps2_online: bool,
-    pub eps2_uptime_s: u32,
-    pub eps2_battery1_v: f32,
-    pub eps2_battery1_temperature: f32,
-    pub eps2_battery2_v: f32,
-    pub eps2_battery2_temperature: f32,
-    pub eps2_output_3v3_current: f32,
-    pub eps2_output_3v3_overwrote: bool,
-    pub eps2_output_3v3_status: PowerOutputStatus,
-    pub eps2_output_5v_current: f32,
-    pub eps2_output_5v_overwrote: bool,
-    pub eps2_output_5v_status: PowerOutputStatus,
-    pub eps2_output_9v_current: f32,
-    pub eps2_output_9v_overwrote: bool,
-    pub eps2_output_9v_status: PowerOutputStatus,
+    /// EPM rails from `CustomPayloadStatusMessage`. `None` while the payload has
+    /// not reported, or when it reports a rail as unavailable.
+    pub epm_batt_v: Option<f32>,
+    pub epm_sys_3v3_v: Option<f32>,
+    pub epm_sys_5v_v: Option<f32>,
+    pub epm_per_5v_v: Option<f32>,
+    pub epm_per_9v_v: Option<f32>,
 }
 
 pub struct TelemetryPacketBuilder<M: RawMutex> {
@@ -971,43 +741,16 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 ozys2_online: false,
                 ozys2_uptime_s: 0,
 
-                payload_activation_pcb_online: false,
-                payload_activation_pcb_uptime_s: 0,
+                payload_sdrm_online: false,
+                payload_sdrm_uptime_s: 0,
 
-                rocket_wifi_online: false,
-                rocket_wifi_uptime_s: 0,
+                payload_stack_status: PayloadSDRMCustomStatus::new(),
 
-                eps1_online: false,
-                eps1_uptime_s: 0,
-                eps1_battery1_v: 0.0,
-                eps1_battery1_temperature: 0.0,
-                eps1_battery2_v: 0.0,
-                eps1_battery2_temperature: 0.0,
-                eps1_output_3v3_current: 0.0,
-                eps1_output_3v3_overwrote: false,
-                eps1_output_3v3_status: PowerOutputStatus::Disabled,
-                eps1_output_5v_current: 0.0,
-                eps1_output_5v_overwrote: false,
-                eps1_output_5v_status: PowerOutputStatus::Disabled,
-                eps1_output_9v_current: 0.0,
-                eps1_output_9v_overwrote: false,
-                eps1_output_9v_status: PowerOutputStatus::Disabled,
-
-                eps2_online: false,
-                eps2_uptime_s: 0,
-                eps2_battery1_v: 0.0,
-                eps2_battery1_temperature: 0.0,
-                eps2_battery2_v: 0.0,
-                eps2_battery2_temperature: 0.0,
-                eps2_output_3v3_current: 0.0,
-                eps2_output_3v3_overwrote: false,
-                eps2_output_3v3_status: PowerOutputStatus::Disabled,
-                eps2_output_5v_current: 0.0,
-                eps2_output_5v_overwrote: false,
-                eps2_output_5v_status: PowerOutputStatus::Disabled,
-                eps2_output_9v_current: 0.0,
-                eps2_output_9v_overwrote: false,
-                eps2_output_9v_status: PowerOutputStatus::Disabled,
+                epm_batt_v: None,
+                epm_sys_3v3_v: None,
+                epm_sys_5v_v: None,
+                epm_per_5v_v: None,
+                epm_per_9v_v: None,
             })),
         }
     }
@@ -1069,40 +812,14 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 state.ozys1_uptime_s < 5,
                 state.ozys2_online,
                 state.ozys2_uptime_s < 5,
-                state.payload_activation_pcb_online,
-                state.payload_activation_pcb_uptime_s < 5,
-                state.rocket_wifi_online,
-                state.rocket_wifi_uptime_s < 5,
-                state.eps1_online,
-                state.eps1_uptime_s < 5,
-                state.eps1_battery1_v,
-                state.eps1_battery1_temperature,
-                state.eps1_battery2_v,
-                state.eps1_battery2_temperature,
-                state.eps1_output_3v3_current,
-                state.eps1_output_3v3_overwrote,
-                state.eps1_output_3v3_status,
-                state.eps1_output_5v_current,
-                state.eps1_output_5v_overwrote,
-                state.eps1_output_5v_status,
-                state.eps1_output_9v_current,
-                state.eps1_output_9v_overwrote,
-                state.eps1_output_9v_status,
-                state.eps2_online,
-                state.eps2_uptime_s < 5,
-                state.eps2_battery1_v,
-                state.eps2_battery1_temperature,
-                state.eps2_battery2_v,
-                state.eps2_battery2_temperature,
-                state.eps2_output_3v3_current,
-                state.eps2_output_3v3_overwrote,
-                state.eps2_output_3v3_status,
-                state.eps2_output_5v_current,
-                state.eps2_output_5v_overwrote,
-                state.eps2_output_5v_status,
-                state.eps2_output_9v_current,
-                state.eps2_output_9v_overwrote,
-                state.eps2_output_9v_status,
+                state.payload_sdrm_online,
+                state.payload_sdrm_uptime_s < 5,
+                state.payload_stack_status.clone(),
+                state.epm_batt_v,
+                state.epm_sys_3v3_v,
+                state.epm_sys_5v_v,
+                state.epm_per_5v_v,
+                state.epm_per_9v_v,
             )
         })
     }

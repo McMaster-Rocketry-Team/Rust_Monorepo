@@ -26,7 +26,6 @@ use firmware_common_new::{
             amp_output_overwrite::AMPOutputOverwritePacket,
             change_mode::{ChangeModePacket, Mode},
             fire_pyro::{FirePyroPacket, PyroSelect},
-            payload_eps_output_overwrite::PayloadEPSOutputOverwritePacket,
             reset::{DeviceToReset, ResetPacket},
             set_target_apogee::SetTargetApogeePacket,
         },
@@ -268,13 +267,9 @@ pub fn tui_task(
                                     .button(DeviceToReset::Icarus, "ICARUS"),
                             )
                             .child(reset_device_selection_group.button(
-                                DeviceToReset::PayloadActivationPCB,
-                                "Payload Activation PCB",
+                                DeviceToReset::PayloadSDRM,
+                                "Payload SDRM",
                             ))
-                            .child(
-                                reset_device_selection_group
-                                    .button(DeviceToReset::RocketWifi, "Rocket WiFi"),
-                            )
                             .child(
                                 reset_device_selection_group
                                     .button(DeviceToReset::OzysAll, "OZYS (All)"),
@@ -286,14 +281,6 @@ pub fn tui_task(
                             .child(
                                 reset_device_selection_group
                                     .button(DeviceToReset::DrogueBulkhead, "Drogue Bulkhead PCB"),
-                            )
-                            .child(
-                                reset_device_selection_group
-                                    .button(DeviceToReset::PayloadEPS1, "EPS 1"),
-                            )
-                            .child(
-                                reset_device_selection_group
-                                    .button(DeviceToReset::PayloadEPS2, "EPS 2"),
                             )
                             .child(
                                 reset_device_selection_group
@@ -429,163 +416,6 @@ pub fn tui_task(
         .align_center_left()
     };
 
-    let create_overwrite_eps_button = || {
-        Button::new("Overwrite EPS", move |s| {
-            let mut eps1_3v3_selection_group: RadioGroup<PowerOutputOverwrite> = RadioGroup::new();
-            let mut eps1_5v_selection_group: RadioGroup<PowerOutputOverwrite> = RadioGroup::new();
-            let mut eps1_9v_selection_group: RadioGroup<PowerOutputOverwrite> = RadioGroup::new();
-            let mut eps2_3v3_selection_group: RadioGroup<PowerOutputOverwrite> = RadioGroup::new();
-            let mut eps2_5v_selection_group: RadioGroup<PowerOutputOverwrite> = RadioGroup::new();
-            let mut eps2_9v_selection_group: RadioGroup<PowerOutputOverwrite> = RadioGroup::new();
-
-            s.add_layer(
-                Dialog::new()
-                    .title("Overwrite EPS")
-                    .content(
-                        LinearLayout::vertical()
-                            .child(
-                                LinearLayout::horizontal()
-                                    .child(TextView::new("EPS 1 3.3V:  "))
-                                    .child(
-                                        eps1_3v3_selection_group.button(
-                                            PowerOutputOverwrite::NoOverwrite,
-                                            "No Overwrite",
-                                        ),
-                                    )
-                                    .child(TextView::new("  "))
-                                    .child(
-                                        eps1_3v3_selection_group
-                                            .button(PowerOutputOverwrite::ForceEnabled, "Enable"),
-                                    )
-                                    .child(TextView::new("  "))
-                                    .child(
-                                        eps1_3v3_selection_group
-                                            .button(PowerOutputOverwrite::ForceDisabled, "Disable"),
-                                    ),
-                            )
-                            .child(
-                                LinearLayout::horizontal()
-                                    .child(TextView::new("EPS 1   5V:  "))
-                                    .child(
-                                        eps1_5v_selection_group.button(
-                                            PowerOutputOverwrite::NoOverwrite,
-                                            "No Overwrite",
-                                        ),
-                                    )
-                                    .child(TextView::new("  "))
-                                    .child(
-                                        eps1_5v_selection_group
-                                            .button(PowerOutputOverwrite::ForceEnabled, "Enable"),
-                                    )
-                                    .child(TextView::new("  "))
-                                    .child(
-                                        eps1_5v_selection_group
-                                            .button(PowerOutputOverwrite::ForceDisabled, "Disable"),
-                                    ),
-                            )
-                            .child(
-                                LinearLayout::horizontal()
-                                    .child(TextView::new("EPS 1   9V:  "))
-                                    .child(
-                                        eps1_9v_selection_group.button(
-                                            PowerOutputOverwrite::NoOverwrite,
-                                            "No Overwrite",
-                                        ),
-                                    )
-                                    .child(TextView::new("  "))
-                                    .child(
-                                        eps1_9v_selection_group
-                                            .button(PowerOutputOverwrite::ForceEnabled, "Enable"),
-                                    )
-                                    .child(TextView::new("  "))
-                                    .child(
-                                        eps1_9v_selection_group
-                                            .button(PowerOutputOverwrite::ForceDisabled, "Disable"),
-                                    ),
-                            )
-                            .child(TextView::new(" "))
-                            .child(
-                                LinearLayout::horizontal()
-                                    .child(TextView::new("EPS 2 3.3V:  "))
-                                    .child(
-                                        eps2_3v3_selection_group.button(
-                                            PowerOutputOverwrite::NoOverwrite,
-                                            "No Overwrite",
-                                        ),
-                                    )
-                                    .child(TextView::new("  "))
-                                    .child(
-                                        eps2_3v3_selection_group
-                                            .button(PowerOutputOverwrite::ForceEnabled, "Enable"),
-                                    )
-                                    .child(TextView::new("  "))
-                                    .child(
-                                        eps2_3v3_selection_group
-                                            .button(PowerOutputOverwrite::ForceDisabled, "Disable"),
-                                    ),
-                            )
-                            .child(
-                                LinearLayout::horizontal()
-                                    .child(TextView::new("EPS 2   5V:  "))
-                                    .child(
-                                        eps2_5v_selection_group.button(
-                                            PowerOutputOverwrite::NoOverwrite,
-                                            "No Overwrite",
-                                        ),
-                                    )
-                                    .child(TextView::new("  "))
-                                    .child(
-                                        eps2_5v_selection_group
-                                            .button(PowerOutputOverwrite::ForceEnabled, "Enable"),
-                                    )
-                                    .child(TextView::new("  "))
-                                    .child(
-                                        eps2_5v_selection_group
-                                            .button(PowerOutputOverwrite::ForceDisabled, "Disable"),
-                                    ),
-                            )
-                            .child(
-                                LinearLayout::horizontal()
-                                    .child(TextView::new("EPS 2   9V:  "))
-                                    .child(
-                                        eps2_9v_selection_group.button(
-                                            PowerOutputOverwrite::NoOverwrite,
-                                            "No Overwrite",
-                                        ),
-                                    )
-                                    .child(TextView::new("  "))
-                                    .child(
-                                        eps2_9v_selection_group
-                                            .button(PowerOutputOverwrite::ForceEnabled, "Enable"),
-                                    )
-                                    .child(TextView::new("  "))
-                                    .child(
-                                        eps2_9v_selection_group
-                                            .button(PowerOutputOverwrite::ForceDisabled, "Disable"),
-                                    ),
-                            ),
-                    )
-                    .dismiss_button("Cancel")
-                    .button("Confirm", move |s| {
-                        send_packet(
-                            s,
-                            PayloadEPSOutputOverwritePacket {
-                                eps1_3v3: *eps1_3v3_selection_group.selection(),
-                                eps1_5v: *eps1_5v_selection_group.selection(),
-                                eps1_9v: *eps1_9v_selection_group.selection(),
-                                eps2_3v3: *eps2_3v3_selection_group.selection(),
-                                eps2_5v: *eps2_5v_selection_group.selection(),
-                                eps2_9v: *eps2_9v_selection_group.selection(),
-                            }
-                            .into(),
-                        );
-                        s.pop_layer().unwrap();
-                    }),
-            );
-        })
-        .align_center_left()
-    };
-
     let create_config_button = || {
         let config = config.clone();
         Button::new("Config", move |s| {
@@ -695,7 +525,6 @@ pub fn tui_task(
                                     ))
                                     .child(create_reset_device_button())
                                     .child(create_overwrite_amp_button())
-                                    .child(create_overwrite_eps_button())
                                     .child(create_simple_packet_button(
                                         "Fire Main Pyro",
                                         "Manually fire main pyro?",

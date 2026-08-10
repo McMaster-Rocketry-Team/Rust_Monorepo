@@ -81,6 +81,17 @@ impl DownlinkPacketDisplay {
         String::from(s).into()
     }
 
+    /// EPM rails arrive as `None` when the payload reports them unavailable.
+    fn format_optional_v(value: Option<f32>) -> StyledString {
+        match value {
+            Some(v) => format!("{:.2}V", v).into(),
+            None => StyledString::single_span(
+                "n/a   ",
+                Style::from_color_style(ColorStyle::front(Color::Rgb(127, 127, 127))),
+            ),
+        }
+    }
+
     fn format_node_status(value: &NodeStatus) -> StyledString {
         String::from(format!(
             "{:?}, {:?}{}",
@@ -335,7 +346,9 @@ impl View for DownlinkPacketDisplay {
                         ],
                     ],
                 ),
-                VLPDownlinkPacket::Telemetry(p) => self.draw_fields(
+                VLPDownlinkPacket::Telemetry(p) => {
+                    let stack = p.payload_stack_status();
+                    self.draw_fields(
                     &printer,
                     &[
                         &[
@@ -522,172 +535,61 @@ impl View for DownlinkPacketDisplay {
                         ],
                         &[
                             (
-                                "payload activation pcb online",
+                                "payload sdrm online",
                                 true,
-                                Self::format_bool(p.payload_activation_pcb_online()),
+                                Self::format_bool(p.payload_sdrm_online()),
                             ),
                             (
                                 "rebooted",
                                 true,
-                                Self::format_bool(p.payload_activation_pcb_rebooted_in_last_5s()),
-                            ),
-                            (
-                                "rocket wifi online",
-                                true,
-                                Self::format_bool(p.rocket_wifi_online()),
-                            ),
-                            (
-                                "rebooted",
-                                true,
-                                Self::format_bool(p.rocket_wifi_rebooted_in_last_5s()),
+                                Self::format_bool(p.payload_sdrm_rebooted_in_last_5s()),
                             ),
                         ],
                         &[
-                            ("eps 1 online", true, Self::format_bool(p.eps1_online())),
+                            ("epm alive", true, Self::format_bool(stack.epm_alive)),
+                            ("sem alive", true, Self::format_bool(stack.sem_alive)),
                             (
-                                "rebooted",
+                                "stack powered",
                                 true,
-                                Self::format_bool(p.eps1_rebooted_in_last_5s()),
+                                Self::format_bool(stack.stack_powered),
                             ),
                             (
-                                "batt 1 v",
-                                false,
-                                format!("{:.2}V", p.eps1_battery1_v()).into(),
+                                "sdrm sd log",
+                                true,
+                                Self::format_bool(stack.sdrm_sd_logging),
                             ),
-                            (
-                                "batt 1 temp",
-                                false,
-                                format!("{:.1}C", p.eps1_battery1_temperature()).into(),
-                            ),
-                            (
-                                "batt 2 v",
-                                false,
-                                format!("{:.2}V", p.eps1_battery2_v()).into(),
-                            ),
-                            (
-                                "batt 2 temp",
-                                false,
-                                format!("{:.1}C", p.eps1_battery2_temperature()).into(),
-                            ),
+                            ("sem sd log", true, Self::format_bool(stack.sem_sd_logging)),
                         ],
                         &[
+                            ("exp 1", true, Self::format_bool(stack.exp1_active)),
+                            ("exp 2", true, Self::format_bool(stack.exp2_active)),
+                            ("exp 3", true, Self::format_bool(stack.exp3_active)),
                             (
-                                "3v3 out current",
-                                false,
-                                format!("{}mA", (p.eps1_output_3v3_current() * 1000.0).round())
-                                    .into(),
-                            ),
-                            (
-                                "status",
+                                "prep complete",
                                 true,
-                                Self::format_amp_output_status(
-                                    p.eps1_output_3v3_overwrote(),
-                                    p.eps1_output_3v3_status(),
-                                ),
+                                Self::format_bool(stack.prep_complete),
                             ),
                             (
-                                "5v out current",
-                                false,
-                                format!("{}mA", (p.eps1_output_5v_current() * 1000.0).round())
-                                    .into(),
-                            ),
-                            (
-                                "status",
+                                "armed bundle",
                                 true,
-                                Self::format_amp_output_status(
-                                    p.eps1_output_5v_overwrote(),
-                                    p.eps1_output_5v_status(),
-                                ),
+                                Self::format_bool(stack.armed_bundle_complete),
                             ),
-                            (
-                                "9v out current",
-                                false,
-                                format!("{}mA", (p.eps1_output_9v_current() * 1000.0).round())
-                                    .into(),
-                            ),
-                            (
-                                "status",
-                                true,
-                                Self::format_amp_output_status(
-                                    p.eps1_output_9v_overwrote(),
-                                    p.eps1_output_9v_status(),
-                                ),
-                            ),
+                            ("fault", true, Self::format_bool(stack.fault)),
                         ],
                         &[
-                            ("eps 2 online", true, Self::format_bool(p.eps2_online())),
+                            ("epm batt", false, Self::format_optional_v(p.epm_batt_v())),
                             (
-                                "rebooted",
-                                true,
-                                Self::format_bool(p.eps2_rebooted_in_last_5s()),
-                            ),
-                            (
-                                "batt 1 v",
+                                "sys 3v3",
                                 false,
-                                format!("{:.2}V", p.eps2_battery1_v()).into(),
+                                Self::format_optional_v(p.epm_sys_3v3_v()),
                             ),
-                            (
-                                "batt 1 temp",
-                                false,
-                                format!("{:.1}C", p.eps2_battery1_temperature()).into(),
-                            ),
-                            (
-                                "batt 2 v",
-                                false,
-                                format!("{:.2}V", p.eps2_battery2_v()).into(),
-                            ),
-                            (
-                                "batt 2 temp",
-                                false,
-                                format!("{:.1}C", p.eps2_battery2_temperature()).into(),
-                            ),
-                        ],
-                        &[
-                            (
-                                "3v3 out current",
-                                false,
-                                format!("{}mA", (p.eps2_output_3v3_current() * 1000.0).round())
-                                    .into(),
-                            ),
-                            (
-                                "status",
-                                true,
-                                Self::format_amp_output_status(
-                                    p.eps2_output_3v3_overwrote(),
-                                    p.eps2_output_3v3_status(),
-                                ),
-                            ),
-                            (
-                                "5v out current",
-                                false,
-                                format!("{}mA", (p.eps2_output_5v_current() * 1000.0).round())
-                                    .into(),
-                            ),
-                            (
-                                "status",
-                                true,
-                                Self::format_amp_output_status(
-                                    p.eps2_output_5v_overwrote(),
-                                    p.eps2_output_5v_status(),
-                                ),
-                            ),
-                            (
-                                "9v out current",
-                                false,
-                                format!("{}mA", (p.eps2_output_9v_current() * 1000.0).round())
-                                    .into(),
-                            ),
-                            (
-                                "status",
-                                true,
-                                Self::format_amp_output_status(
-                                    p.eps2_output_9v_overwrote(),
-                                    p.eps2_output_9v_status(),
-                                ),
-                            ),
+                            ("sys 5v", false, Self::format_optional_v(p.epm_sys_5v_v())),
+                            ("per 5v", false, Self::format_optional_v(p.epm_per_5v_v())),
+                            ("per 9v", false, Self::format_optional_v(p.epm_per_9v_v())),
                         ],
                     ],
-                ),
+                    )
+                }
                 VLPDownlinkPacket::SelfTestResult(p) => self.draw_fields(
                     &printer,
                     &[
@@ -761,26 +663,9 @@ impl View for DownlinkPacketDisplay {
                         ],
                         &[
                             (
-                                "payload activation pcb",
+                                "payload sdrm",
                                 true,
-                                Self::format_node_status(&p.payload_activation_pcb),
-                            ),
-                            (
-                                "rocket wifi",
-                                true,
-                                Self::format_node_status(&p.rocket_wifi),
-                            ),
-                        ],
-                        &[
-                            (
-                                "payload eps 1",
-                                true,
-                                Self::format_node_status(&p.payload_eps1),
-                            ),
-                            (
-                                "payload eps 2",
-                                true,
-                                Self::format_node_status(&p.payload_eps2),
+                                Self::format_node_status(&p.payload_sdrm),
                             ),
                         ],
                     ],

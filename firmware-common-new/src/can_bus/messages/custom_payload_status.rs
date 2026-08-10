@@ -6,7 +6,7 @@ use super::{CanBusMessage, CanBusMessageEnum};
 /// Reported for a rail whose reading is invalid or unavailable.
 pub const RAIL_MV_UNAVAILABLE: u16 = 0xFFFF;
 
-/// Extended EPM telemetry from the payload activation node (SDRM), sent every 500ms.
+/// Extended EPM telemetry from the payload SDRM node, sent every 500ms.
 ///
 /// Supplementary to `NodeStatusMessage`, which stays the primary go/no-go source.
 /// Deliberately does not repeat `uptime_s`, `health`, `mode` or the stack flags, so

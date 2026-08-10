@@ -323,22 +323,22 @@ TEST(CustomPayloadStatusTest, RailUnavailable) {
     EXPECT_EQ(CustomPayloadStatusMessage::rail_mv(12600).value(), 12600);
 }
 
-// Mirrors payload_activation_custom_status.rs: the 11 bits are packed
+// Mirrors payload_sdrm_custom_status.rs: the 11 bits are packed
 // most-significant first, so epm_alive is bit 10 and fault is bit 0.
-TEST(PayloadActivationCustomStatusTest, PackedBitLayout) {
-    using firmware_common::can_bus::PayloadActivationCustomStatus;
+TEST(PayloadSDRMCustomStatusTest, PackedBitLayout) {
+    using firmware_common::can_bus::PayloadSDRMCustomStatus;
 
-    PayloadActivationCustomStatus status;
+    PayloadSDRMCustomStatus status;
     EXPECT_EQ(status.to_raw(), 0);
 
     status.epm_alive = true;
     EXPECT_EQ(status.to_raw(), 0b10000000000);
 
-    status = PayloadActivationCustomStatus{};
+    status = PayloadSDRMCustomStatus{};
     status.fault = true;
     EXPECT_EQ(status.to_raw(), 0b00000000001);
 
-    status = PayloadActivationCustomStatus{};
+    status = PayloadSDRMCustomStatus{};
     status.epm_alive = true;
     status.sem_alive = true;
     status.stack_powered = true;
@@ -346,7 +346,7 @@ TEST(PayloadActivationCustomStatusTest, PackedBitLayout) {
     status.fault = true;
     EXPECT_EQ(status.to_raw(), 0b11100000101);
 
-    auto round_tripped = PayloadActivationCustomStatus::from_raw(status.to_raw());
+    auto round_tripped = PayloadSDRMCustomStatus::from_raw(status.to_raw());
     EXPECT_EQ(round_tripped.to_raw(), status.to_raw());
     EXPECT_TRUE(round_tripped.epm_alive);
     EXPECT_TRUE(round_tripped.prep_complete);
@@ -356,10 +356,10 @@ TEST(PayloadActivationCustomStatusTest, PackedBitLayout) {
 
 // Reference frame shared with the payload team: armed bundle complete, all
 // experiments active, uptime 120s, no fault.
-TEST(PayloadActivationCustomStatusTest, ReferenceNodeStatusFrame) {
+TEST(PayloadSDRMCustomStatusTest, ReferenceNodeStatusFrame) {
     using namespace firmware_common::can_bus;
 
-    PayloadActivationCustomStatus status;
+    PayloadSDRMCustomStatus status;
     status.epm_alive = true;
     status.sem_alive = true;
     status.stack_powered = true;
@@ -380,10 +380,10 @@ TEST(PayloadActivationCustomStatusTest, ReferenceNodeStatusFrame) {
     for (size_t i = 0; i < sizeof(expected); ++i) EXPECT_EQ(buffer[i], expected[i]);
 }
 
-TEST(PayloadActivationCustomStatusTest, ClearFlags) {
-    using firmware_common::can_bus::PayloadActivationCustomStatus;
+TEST(PayloadSDRMCustomStatusTest, ClearFlags) {
+    using firmware_common::can_bus::PayloadSDRMCustomStatus;
 
-    PayloadActivationCustomStatus all_set;
+    PayloadSDRMCustomStatus all_set;
     all_set.epm_alive = true;
     all_set.sem_alive = true;
     all_set.stack_powered = true;

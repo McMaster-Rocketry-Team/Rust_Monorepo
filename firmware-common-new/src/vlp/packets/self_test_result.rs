@@ -59,7 +59,7 @@ impl NodeStatus {
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PackedStruct, Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "22")]
+#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "16")]
 pub struct SelfTestResultPacket {
     #[packed_field(bits = "0..4")]
     nonce: u8,
@@ -77,16 +77,7 @@ pub struct SelfTestResultPacket {
     pub ozys2: NodeStatus,
 
     #[packed_field(element_size_bytes = "2")]
-    pub payload_activation_pcb: NodeStatus,
-
-    #[packed_field(element_size_bytes = "2")]
-    pub rocket_wifi: NodeStatus,
-
-    #[packed_field(element_size_bytes = "2")]
-    pub payload_eps1: NodeStatus,
-
-    #[packed_field(element_size_bytes = "2")]
-    pub payload_eps2: NodeStatus,
+    pub payload_sdrm: NodeStatus,
 
     #[packed_field(element_size_bytes = "2")]
     pub main_bulkhead_pcb: NodeStatus,
@@ -130,10 +121,7 @@ impl SelfTestResultPacket {
             icarus: self.icarus.to_json(),
             ozys1: self.ozys1.to_json(),
             ozys2: self.ozys2.to_json(),
-            payload_activation_pcb: self.payload_activation_pcb.to_json(),
-            rocket_wifi: self.rocket_wifi.to_json(),
-            payload_eps1: self.payload_eps1.to_json(),
-            payload_eps2: self.payload_eps2.to_json(),
+            payload_sdrm: self.payload_sdrm.to_json(),
             main_bulkhead_pcb: self.main_bulkhead_pcb.to_json(),
             drogue_bulkhead_pcb: self.drogue_bulkhead_pcb.to_json(),
         }
@@ -152,10 +140,7 @@ pub struct SelfTestResultPacketBuilderState {
     pub icarus: NodeStatus,
     pub ozys1: NodeStatus,
     pub ozys2: NodeStatus,
-    pub payload_activation_pcb: NodeStatus,
-    pub rocket_wifi: NodeStatus,
-    pub payload_eps1: NodeStatus,
-    pub payload_eps2: NodeStatus,
+    pub payload_sdrm: NodeStatus,
     pub main_bulkhead_pcb: NodeStatus,
     pub drogue_bulkhead_pcb: NodeStatus,
     pub imu_ok: bool,
@@ -185,10 +170,7 @@ impl<M: RawMutex> SelfTestResultPacketBuilder<M> {
                 icarus: NodeStatus::offline(),
                 ozys1: NodeStatus::offline(),
                 ozys2: NodeStatus::offline(),
-                payload_activation_pcb: NodeStatus::offline(),
-                rocket_wifi: NodeStatus::offline(),
-                payload_eps1: NodeStatus::offline(),
-                payload_eps2: NodeStatus::offline(),
+                payload_sdrm: NodeStatus::offline(),
                 main_bulkhead_pcb: NodeStatus::offline(),
                 drogue_bulkhead_pcb: NodeStatus::offline(),
                 imu_ok: false,
@@ -220,10 +202,7 @@ impl<M: RawMutex> SelfTestResultPacketBuilder<M> {
                 icarus: state.icarus.clone(),
                 ozys1: state.ozys1.clone(),
                 ozys2: state.ozys2.clone(),
-                payload_activation_pcb: state.payload_activation_pcb.clone(),
-                rocket_wifi: state.rocket_wifi.clone(),
-                payload_eps1: state.payload_eps1.clone(),
-                payload_eps2: state.payload_eps2.clone(),
+                payload_sdrm: state.payload_sdrm.clone(),
                 main_bulkhead_pcb: state.main_bulkhead_pcb.clone(),
                 drogue_bulkhead_pcb: state.drogue_bulkhead_pcb.clone(),
                 imu_ok: state.imu_ok,

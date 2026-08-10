@@ -2,7 +2,7 @@ use std::{path::PathBuf, time::Duration};
 
 use crate::args::NodeTypeEnum;
 use crate::bluetooth::extract_bin::{extract_bin_from_elf, sign_firmware_binary};
-use crate::bluetooth::payload_activation_pcb::PayloadActivationPCB;
+use crate::bluetooth::payload_sdrm::PayloadSDRM;
 use crate::connection_method::{ConnectionMethodFactory, ConnectionOption};
 use crate::monitor::MonitorStatus;
 use crate::monitor::target_log::TargetLog;
@@ -24,7 +24,7 @@ use tokio::{
 
 pub mod demultiplex_log;
 mod extract_bin;
-mod payload_activation_pcb;
+mod payload_sdrm;
 
 struct BluetoothConnectionMethodFactory {
     adapter: Adapter,
@@ -59,7 +59,7 @@ impl ConnectionMethodFactory for BluetoothConnectionMethodFactory {
                         peripheral.connect().await?;
 
                         return Ok(Box::new(BluetoothConnectionMethod {
-                            pab: PayloadActivationPCB::new(peripheral).await?,
+                            sdrm: PayloadSDRM::new(peripheral).await?,
                             secret_path: self.secret_path.clone(),
                             firmware_path: self.firmware_path.clone(),
                             node_type: self.node_type,
@@ -79,7 +79,7 @@ impl ConnectionMethodFactory for BluetoothConnectionMethodFactory {
 }
 
 pub struct BluetoothConnectionMethod {
-    pab: PayloadActivationPCB,
+    sdrm: PayloadSDRM,
     secret_path: Option<PathBuf>,
     firmware_path: Option<BluetoothFirmwareType>,
     node_type: NodeTypeEnum,
@@ -170,7 +170,7 @@ impl ConnectionMethod for BluetoothConnectionMethod {
 
             sign_firmware_binary(&mut firmware_bin, &secret_path).await?;
 
-            self.pab.ota(&firmware_bin, self.node_type).await?;
+            self.sdrm.ota(&firmware_bin, self.node_type).await?;
         } else {
             warn!("Bluetooth connection method is not configured for download, skipping");
             sleep(Duration::from_secs(1)).await;
@@ -186,11 +186,11 @@ impl ConnectionMethod for BluetoothConnectionMethod {
         stop_rx: oneshot::Receiver<()>,
     ) -> Result<()> {
         // clear outdated data from log_rx
-        while let Ok(_) = self.pab.log_rx.try_recv() {}
+        while let Ok(_) = self.sdrm.log_rx.try_recv() {}
         info!("waiting for logs from bluetooth.....");
 
         let receive_future = async {
-            while let Some(chunk) = self.pab.log_rx.recv().await {
+            while let Some(chunk) = self.sdrm.log_rx.recv().await {
                 let status = match Self::process_chunk(
                     &chunk,
                     &mut self.log_demultiplexer,

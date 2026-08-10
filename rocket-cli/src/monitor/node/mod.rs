@@ -54,7 +54,7 @@ impl NodeStatusViewerChild {
                 NodeStatusRow::new(VOID_LAKE_NODE_TYPE),
                 NodeStatusRow::new(AMP_NODE_TYPE),
                 NodeStatusRow::new(ICARUS_NODE_TYPE),
-                NodeStatusRow::new(PAYLOAD_ACTIVATION_NODE_TYPE),
+                NodeStatusRow::new(PAYLOAD_SDRM_NODE_TYPE),
                 NodeStatusRow::new(OZYS_NODE_TYPE),
                 NodeStatusRow::new(OZYS_NODE_TYPE),
                 NodeStatusRow::new(BULKHEAD_NODE_TYPE),

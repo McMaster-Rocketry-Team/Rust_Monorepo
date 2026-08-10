@@ -341,7 +341,7 @@ namespace can_bus {
         }
     };
 
-    // Extended EPM telemetry from the payload activation node (SDRM), sent every 500ms.
+    // Extended EPM telemetry from the payload SDRM node, sent every 500ms.
     //
     // Supplementary to NodeStatusMessage, which stays the primary go/no-go source.
     // Deliberately does not repeat uptime_s, health, mode or the stack flags, so
@@ -645,18 +645,18 @@ namespace can_bus {
         }
     };
 
-    // Stack state of the payload activation node (SDRM), packed into
+    // Stack state of the payload SDRM node, packed into
     // NodeStatusMessage::custom_status_raw.
     //
     // Uses all 11 available bits, declaration order most-significant first:
     // epm_alive occupies bit 10 and fault occupies bit 0.
     //
-    //     PayloadActivationCustomStatus status;
+    //     PayloadSDRMCustomStatus status;
     //     status.epm_alive = true;
     //     status.stack_powered = true;
     //     NodeStatusMessage msg(uptime_s, NodeHealth::Healthy,
     //                          NodeMode::Operational, status.to_raw());
-    struct PayloadActivationCustomStatus {
+    struct PayloadSDRMCustomStatus {
         bool epm_alive = false;             // EPM responded on the intra-stack bus
         bool sem_alive = false;             // SEM responded on the intra-stack bus
         bool stack_powered = false;         // power_on complete
@@ -686,8 +686,8 @@ namespace can_bus {
             return raw;
         }
 
-        static PayloadActivationCustomStatus from_raw(uint16_t raw) noexcept {
-            PayloadActivationCustomStatus status;
+        static PayloadSDRMCustomStatus from_raw(uint16_t raw) noexcept {
+            PayloadSDRMCustomStatus status;
             status.epm_alive             = (raw & (1u << 10)) != 0;
             status.sem_alive             = (raw & (1u << 9)) != 0;
             status.stack_powered         = (raw & (1u << 8)) != 0;
