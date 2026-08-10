@@ -341,6 +341,64 @@ namespace can_bus {
         }
     };
 
+    // Extended EPM telemetry from the payload activation node (SDRM), sent every 500ms.
+    //
+    // Supplementary to NodeStatusMessage, which stays the primary go/no-go source.
+    // Deliberately does not repeat uptime_s, health, mode or the stack flags, so
+    // the two messages can not drift apart.
+    //
+    // Voltages are relayed from EPM on the intra-stack bus, not measured by SDRM.
+    struct CustomPayloadStatusMessage {
+        static constexpr uint32_t MESSAGE_TYPE = 35;
+        static constexpr size_t SIZE_BYTES = 10;
+
+        // Reported for a rail whose reading is invalid or unavailable.
+        static constexpr uint16_t RAIL_MV_UNAVAILABLE = 0xFFFF;
+
+        uint16_t epm_batt_mv;
+        uint16_t epm_sys_3v3_mv;
+        uint16_t epm_sys_5v_mv;
+        uint16_t epm_per_5v_mv;
+        uint16_t epm_per_9v_mv;
+
+        static constexpr uint8_t PRIORITY = 5;
+
+        // Every rail unavailable, e.g. before EPM has reported.
+        static CustomPayloadStatusMessage new_unavailable() noexcept {
+            CustomPayloadStatusMessage msg;
+            msg.epm_batt_mv = RAIL_MV_UNAVAILABLE;
+            msg.epm_sys_3v3_mv = RAIL_MV_UNAVAILABLE;
+            msg.epm_sys_5v_mv = RAIL_MV_UNAVAILABLE;
+            msg.epm_per_5v_mv = RAIL_MV_UNAVAILABLE;
+            msg.epm_per_9v_mv = RAIL_MV_UNAVAILABLE;
+            return msg;
+        }
+
+        // std::nullopt if the reading is invalid or unavailable.
+        static std::optional<uint16_t> rail_mv(uint16_t raw_mv) noexcept {
+            if (raw_mv == RAIL_MV_UNAVAILABLE) return std::nullopt;
+            return raw_mv;
+        }
+
+        void serialize(uint8_t* buffer) const noexcept {
+            write_u16_be(buffer, epm_batt_mv);
+            write_u16_be(buffer + 2, epm_sys_3v3_mv);
+            write_u16_be(buffer + 4, epm_sys_5v_mv);
+            write_u16_be(buffer + 6, epm_per_5v_mv);
+            write_u16_be(buffer + 8, epm_per_9v_mv);
+        }
+
+        static CustomPayloadStatusMessage deserialize(const uint8_t* buffer) noexcept {
+            CustomPayloadStatusMessage msg;
+            msg.epm_batt_mv = read_u16_be(buffer);
+            msg.epm_sys_3v3_mv = read_u16_be(buffer + 2);
+            msg.epm_sys_5v_mv = read_u16_be(buffer + 4);
+            msg.epm_per_5v_mv = read_u16_be(buffer + 6);
+            msg.epm_per_9v_mv = read_u16_be(buffer + 8);
+            return msg;
+        }
+    };
+
     enum class DataType : uint8_t {
         Firmware = 0,
         Data = 1
@@ -587,6 +645,87 @@ namespace can_bus {
         }
     };
 
+    // Stack state of the payload activation node (SDRM), packed into
+    // NodeStatusMessage::custom_status_raw.
+    //
+    // Uses all 11 available bits, declaration order most-significant first:
+    // epm_alive occupies bit 10 and fault occupies bit 0.
+    //
+    //     PayloadActivationCustomStatus status;
+    //     status.epm_alive = true;
+    //     status.stack_powered = true;
+    //     NodeStatusMessage msg(uptime_s, NodeHealth::Healthy,
+    //                          NodeMode::Operational, status.to_raw());
+    struct PayloadActivationCustomStatus {
+        bool epm_alive = false;             // EPM responded on the intra-stack bus
+        bool sem_alive = false;             // SEM responded on the intra-stack bus
+        bool stack_powered = false;         // power_on complete
+        bool sdrm_sd_logging = false;       // SDRM SD log active
+        bool sem_sd_logging = false;        // SEM SD log active
+        bool exp1_active = false;           // Experiment channel 1 active
+        bool exp2_active = false;           // Experiment channel 2 active
+        bool exp3_active = false;           // Experiment channel 3 active
+        bool prep_complete = false;         // Tare + home complete for channels 1..3
+        bool armed_bundle_complete = false; // Full Armed sequence finished OK
+        bool fault = false;                 // Last stack action failed
+
+        // Pack into the 11-bit value carried by NodeStatusMessage::custom_status_raw.
+        uint16_t to_raw() const noexcept {
+            uint16_t raw = 0;
+            if (epm_alive)             raw |= 1u << 10;
+            if (sem_alive)             raw |= 1u << 9;
+            if (stack_powered)         raw |= 1u << 8;
+            if (sdrm_sd_logging)       raw |= 1u << 7;
+            if (sem_sd_logging)        raw |= 1u << 6;
+            if (exp1_active)           raw |= 1u << 5;
+            if (exp2_active)           raw |= 1u << 4;
+            if (exp3_active)           raw |= 1u << 3;
+            if (prep_complete)         raw |= 1u << 2;
+            if (armed_bundle_complete) raw |= 1u << 1;
+            if (fault)                 raw |= 1u << 0;
+            return raw;
+        }
+
+        static PayloadActivationCustomStatus from_raw(uint16_t raw) noexcept {
+            PayloadActivationCustomStatus status;
+            status.epm_alive             = (raw & (1u << 10)) != 0;
+            status.sem_alive             = (raw & (1u << 9)) != 0;
+            status.stack_powered         = (raw & (1u << 8)) != 0;
+            status.sdrm_sd_logging       = (raw & (1u << 7)) != 0;
+            status.sem_sd_logging        = (raw & (1u << 6)) != 0;
+            status.exp1_active           = (raw & (1u << 5)) != 0;
+            status.exp2_active           = (raw & (1u << 4)) != 0;
+            status.exp3_active           = (raw & (1u << 3)) != 0;
+            status.prep_complete         = (raw & (1u << 2)) != 0;
+            status.armed_bundle_complete = (raw & (1u << 1)) != 0;
+            status.fault                 = (raw & (1u << 0)) != 0;
+            return status;
+        }
+
+        // Clears expN_active, prep_complete and armed_bundle_complete, leaving
+        // liveness, power, logging and fault untouched.
+        //
+        // Applied after the LowPower safe-reset completes.
+        void clear_experiment_flags() noexcept {
+            exp1_active = false;
+            exp2_active = false;
+            exp3_active = false;
+            prep_complete = false;
+            armed_bundle_complete = false;
+        }
+
+        // Clears clear_experiment_flags() plus stack_powered and both SD logging
+        // flags, leaving liveness and fault untouched.
+        //
+        // Applied after the Landed shutdown completes.
+        void clear_powered_flags() noexcept {
+            clear_experiment_flags();
+            stack_powered = false;
+            sdrm_sd_logging = false;
+            sem_sd_logging = false;
+        }
+    };
+
     struct OzysMeasurementMessage {
         static constexpr uint32_t MESSAGE_TYPE = 133;
         static constexpr size_t SIZE_BYTES = 16;
@@ -611,112 +750,6 @@ namespace can_bus {
             msg.sg_2_raw = read_u32_be(buffer + 4);
             msg.sg_3_raw = read_u32_be(buffer + 8);
             msg.sg_4_raw = read_u32_be(buffer + 12);
-            return msg;
-        }
-    };
-
-    struct PayloadEPSOutputOverwriteMessage {
-        static constexpr uint32_t MESSAGE_TYPE = 65;
-        static constexpr size_t SIZE_BYTES = 3;
-
-        PowerOutputOverwrite out_3v3;
-        PowerOutputOverwrite out_5v;
-        PowerOutputOverwrite out_9v;
-        uint16_t node_id; // 12 bits
-
-        static constexpr uint8_t PRIORITY = 2;
-
-        void serialize(uint8_t* buffer) const noexcept {
-            // Byte 0: 3v3(2), 5v(2), 9v(2), node_id_hi(2)
-            uint8_t b0 = 0;
-            b0 |= (static_cast<uint8_t>(out_3v3) & 0x03) << 6;
-            b0 |= (static_cast<uint8_t>(out_5v) & 0x03) << 4;
-            b0 |= (static_cast<uint8_t>(out_9v) & 0x03) << 2;
-            b0 |= (node_id >> 10) & 0x03;
-            buffer[0] = b0;
-            
-            // Byte 1: node_id_mid(8) -> bits 9..2 of node_id
-            buffer[1] = (node_id >> 2) & 0xFF;
-            
-            // Byte 2: node_id_lo(2) -> bits 1..0 of node_id in high bits
-            buffer[2] = (node_id & 0x03) << 6;
-        }
-
-        static PayloadEPSOutputOverwriteMessage deserialize(const uint8_t* buffer) noexcept {
-            PayloadEPSOutputOverwriteMessage msg;
-            uint8_t b0 = buffer[0];
-            msg.out_3v3 = static_cast<PowerOutputOverwrite>((b0 >> 6) & 0x03);
-            msg.out_5v = static_cast<PowerOutputOverwrite>((b0 >> 4) & 0x03);
-            msg.out_9v = static_cast<PowerOutputOverwrite>((b0 >> 2) & 0x03);
-            
-            uint16_t nid = (b0 & 0x03) << 10;
-            nid |= static_cast<uint16_t>(buffer[1]) << 2;
-            nid |= (buffer[2] >> 6) & 0x03;
-            msg.node_id = nid;
-            return msg;
-        }
-    };
-
-    struct PayloadEPSOutputStatus {
-        uint16_t current_ma; // 13 bits
-        bool overwrote;      // 1 bit
-        PowerOutputStatus status; // 2 bits
-        
-        void serialize(uint8_t* buffer) const noexcept {
-            // Byte 0: current_ma[12..5] (8 bits)
-            buffer[0] = (current_ma >> 5) & 0xFF;
-            
-            // Byte 1: current_ma[4..0] (5 bits), overwrote(1), status(2)
-            uint8_t b1 = 0;
-            b1 |= (current_ma & 0x1F) << 3;
-            if (overwrote) b1 |= 0x04;
-            b1 |= (static_cast<uint8_t>(status) & 0x03);
-            buffer[1] = b1;
-        }
-
-        static PayloadEPSOutputStatus deserialize(const uint8_t* buffer) noexcept {
-            PayloadEPSOutputStatus msg;
-            msg.current_ma = (static_cast<uint16_t>(buffer[0]) << 5) | ((buffer[1] >> 3) & 0x1F);
-            msg.overwrote = (buffer[1] & 0x04) != 0;
-            msg.status = static_cast<PowerOutputStatus>(buffer[1] & 0x03);
-            return msg;
-        }
-    };
-
-    struct PayloadEPSStatusMessage {
-        static constexpr uint32_t MESSAGE_TYPE = 34;
-        static constexpr size_t SIZE_BYTES = 14;
-
-        uint16_t battery1_mv;
-        uint16_t battery1_temperature_raw;
-        uint16_t battery2_mv;
-        uint16_t battery2_temperature_raw;
-        
-        PayloadEPSOutputStatus output_3v3;
-        PayloadEPSOutputStatus output_5v;
-        PayloadEPSOutputStatus output_9v;
-
-        static constexpr uint8_t PRIORITY = 5;
-
-        void serialize(uint8_t* buffer) const noexcept {
-            write_u16_be(buffer, battery1_mv);
-            write_u16_be(buffer + 2, battery1_temperature_raw);
-            write_u16_be(buffer + 4, battery2_mv);
-            write_u16_be(buffer + 6, battery2_temperature_raw);
-            output_3v3.serialize(buffer + 8);
-            output_5v.serialize(buffer + 10);
-            output_9v.serialize(buffer + 12);
-        }
-
-        static PayloadEPSStatusMessage deserialize(const uint8_t* buffer) noexcept {
-            PayloadEPSStatusMessage msg;
-            msg.battery1_mv = read_u16_be(buffer);
-            msg.battery1_temperature_raw = read_u16_be(buffer + 2);
-            msg.battery2_mv = read_u16_be(buffer + 4);
-            msg.battery2_temperature_raw = read_u16_be(buffer + 6);
-            msg.output_3v3 = PayloadEPSOutputStatus::deserialize(buffer + 8);
-            msg.output_5v = PayloadEPSOutputStatus::deserialize(buffer + 10);
-            msg.output_9v = PayloadEPSOutputStatus::deserialize(buffer + 12);
             return msg;
         }
     };
@@ -976,14 +1009,13 @@ namespace can_bus {
         AmpStatusMessage,
         BaroMeasurementMessage,
         BrightnessMeasurementMessage,
+        CustomPayloadStatusMessage,
         DataTransferMessage,
         IcarusStatusMessage,
         IMUMeasurementMessage,
         MagMeasurementMessage,
         NodeStatusMessage,
         OzysMeasurementMessage,
-        PayloadEPSOutputOverwriteMessage,
-        PayloadEPSStatusMessage,
         PreUnixTimeMessage,
         ResetMessage,
         RocketStateMessage,
@@ -1112,6 +1144,8 @@ namespace can_bus {
                 return CanBusMessage(BaroMeasurementMessage::deserialize(buffer));
             case BrightnessMeasurementMessage::MESSAGE_TYPE:
                 return CanBusMessage(BrightnessMeasurementMessage::deserialize(buffer));
+            case CustomPayloadStatusMessage::MESSAGE_TYPE:
+                return CanBusMessage(CustomPayloadStatusMessage::deserialize(buffer));
             case DataTransferMessage::MESSAGE_TYPE:
                 return CanBusMessage(DataTransferMessage::deserialize(buffer));
             case IcarusStatusMessage::MESSAGE_TYPE: 
@@ -1124,10 +1158,6 @@ namespace can_bus {
                 return CanBusMessage(NodeStatusMessage::deserialize(buffer));
             case OzysMeasurementMessage::MESSAGE_TYPE:
                 return CanBusMessage(OzysMeasurementMessage::deserialize(buffer));
-            case PayloadEPSOutputOverwriteMessage::MESSAGE_TYPE:
-                return CanBusMessage(PayloadEPSOutputOverwriteMessage::deserialize(buffer));
-            case PayloadEPSStatusMessage::MESSAGE_TYPE:
-                return CanBusMessage(PayloadEPSStatusMessage::deserialize(buffer));
             case PreUnixTimeMessage::MESSAGE_TYPE:
                 return CanBusMessage(PreUnixTimeMessage::deserialize(buffer));
             case ResetMessage::MESSAGE_TYPE:

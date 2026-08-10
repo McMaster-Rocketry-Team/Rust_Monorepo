@@ -282,6 +282,131 @@ TEST(BrightnessMeasurementTest, ReferenceData) {
     }
 }
 
+TEST(CustomPayloadStatusTest, ReferenceData) {
+    json data = read_json(resolve_path("custom_payload_status.json"));
+
+    for (const auto& item : data) {
+        auto serialized_data = get_bytes(item["serialized_data"]);
+        auto message_content = item["message"]["CustomPayloadStatus"];
+        uint32_t expected_id = item["frame_id"];
+
+        uint16_t expected_batt = message_content["epm_batt_mv"];
+        uint16_t expected_sys_3v3 = message_content["epm_sys_3v3_mv"];
+        uint16_t expected_sys_5v = message_content["epm_sys_5v_mv"];
+        uint16_t expected_per_5v = message_content["epm_per_5v_mv"];
+        uint16_t expected_per_9v = message_content["epm_per_9v_mv"];
+
+        auto msg = firmware_common::can_bus::CustomPayloadStatusMessage::deserialize(serialized_data.data());
+        EXPECT_EQ(msg.epm_batt_mv, expected_batt);
+        EXPECT_EQ(msg.epm_sys_3v3_mv, expected_sys_3v3);
+        EXPECT_EQ(msg.epm_sys_5v_mv, expected_sys_5v);
+        EXPECT_EQ(msg.epm_per_5v_mv, expected_per_5v);
+        EXPECT_EQ(msg.epm_per_9v_mv, expected_per_9v);
+        EXPECT_EQ(firmware_common::can_bus::get_frame_id(msg, 10, 20), expected_id);
+
+        uint8_t buffer[firmware_common::can_bus::CustomPayloadStatusMessage::SIZE_BYTES];
+        msg.serialize(buffer);
+        for (size_t i = 0; i < serialized_data.size(); ++i) EXPECT_EQ(buffer[i], serialized_data[i]);
+
+        check_encoder(msg, item, "CustomPayloadStatus");
+    }
+}
+
+TEST(CustomPayloadStatusTest, RailUnavailable) {
+    using firmware_common::can_bus::CustomPayloadStatusMessage;
+
+    auto msg = CustomPayloadStatusMessage::new_unavailable();
+    EXPECT_EQ(msg.epm_batt_mv, CustomPayloadStatusMessage::RAIL_MV_UNAVAILABLE);
+    EXPECT_FALSE(CustomPayloadStatusMessage::rail_mv(msg.epm_batt_mv).has_value());
+
+    EXPECT_EQ(CustomPayloadStatusMessage::rail_mv(0).value(), 0);
+    EXPECT_EQ(CustomPayloadStatusMessage::rail_mv(12600).value(), 12600);
+}
+
+// Mirrors payload_activation_custom_status.rs: the 11 bits are packed
+// most-significant first, so epm_alive is bit 10 and fault is bit 0.
+TEST(PayloadActivationCustomStatusTest, PackedBitLayout) {
+    using firmware_common::can_bus::PayloadActivationCustomStatus;
+
+    PayloadActivationCustomStatus status;
+    EXPECT_EQ(status.to_raw(), 0);
+
+    status.epm_alive = true;
+    EXPECT_EQ(status.to_raw(), 0b10000000000);
+
+    status = PayloadActivationCustomStatus{};
+    status.fault = true;
+    EXPECT_EQ(status.to_raw(), 0b00000000001);
+
+    status = PayloadActivationCustomStatus{};
+    status.epm_alive = true;
+    status.sem_alive = true;
+    status.stack_powered = true;
+    status.prep_complete = true;
+    status.fault = true;
+    EXPECT_EQ(status.to_raw(), 0b11100000101);
+
+    auto round_tripped = PayloadActivationCustomStatus::from_raw(status.to_raw());
+    EXPECT_EQ(round_tripped.to_raw(), status.to_raw());
+    EXPECT_TRUE(round_tripped.epm_alive);
+    EXPECT_TRUE(round_tripped.prep_complete);
+    EXPECT_TRUE(round_tripped.fault);
+    EXPECT_FALSE(round_tripped.armed_bundle_complete);
+}
+
+// Reference frame shared with the payload team: armed bundle complete, all
+// experiments active, uptime 120s, no fault.
+TEST(PayloadActivationCustomStatusTest, ReferenceNodeStatusFrame) {
+    using namespace firmware_common::can_bus;
+
+    PayloadActivationCustomStatus status;
+    status.epm_alive = true;
+    status.sem_alive = true;
+    status.stack_powered = true;
+    status.sdrm_sd_logging = true;
+    status.sem_sd_logging = true;
+    status.exp1_active = true;
+    status.exp2_active = true;
+    status.exp3_active = true;
+    status.prep_complete = true;
+    status.armed_bundle_complete = true;
+    EXPECT_EQ(status.to_raw(), 0x7FE);
+
+    NodeStatusMessage msg(120, NodeHealth::Healthy, NodeMode::Operational, status.to_raw());
+
+    uint8_t buffer[NodeStatusMessage::SIZE_BYTES];
+    msg.serialize(buffer);
+    const uint8_t expected[] = {0x00, 0x00, 0x78, 0x0F, 0xFC};
+    for (size_t i = 0; i < sizeof(expected); ++i) EXPECT_EQ(buffer[i], expected[i]);
+}
+
+TEST(PayloadActivationCustomStatusTest, ClearFlags) {
+    using firmware_common::can_bus::PayloadActivationCustomStatus;
+
+    PayloadActivationCustomStatus all_set;
+    all_set.epm_alive = true;
+    all_set.sem_alive = true;
+    all_set.stack_powered = true;
+    all_set.sdrm_sd_logging = true;
+    all_set.sem_sd_logging = true;
+    all_set.exp1_active = true;
+    all_set.exp2_active = true;
+    all_set.exp3_active = true;
+    all_set.prep_complete = true;
+    all_set.armed_bundle_complete = true;
+    all_set.fault = true;
+
+    // LowPower safe-reset: experiment flags cleared, everything else kept
+    auto status = all_set;
+    status.clear_experiment_flags();
+    EXPECT_EQ(status.to_raw(), 0b11111000001);
+
+    // Landed shutdown: power and logging cleared too, liveness and fault kept
+    status = all_set;
+    status.clear_powered_flags();
+    EXPECT_EQ(status.to_raw(), 0b11000000001);
+}
+
 TEST(DataTransferTest, ReferenceData) {
     json data = read_json(resolve_path("data_transfer.json"));
 
@@ -471,85 +596,6 @@ TEST(OzysMeasurementTest, ReferenceData) {
     }
 }
 
-TEST(PayloadEPSOutputOverwriteTest, ReferenceData) {
-    json data = read_json(resolve_path("payload_eps_output_overwrite.json"));
-
-    for (const auto& item : data) {
-        auto serialized_data = get_bytes(item["serialized_data"]);
-        auto message_content = item["message"]["PayloadEPSOutputOverwrite"];
-        uint32_t expected_id = item["frame_id"];
-        
-        uint16_t expected_node_id = message_content["node_id"];
-        
-        auto parse_enum = [](const std::string& s) {
-            if (s == "NoOverwrite") return firmware_common::can_bus::PowerOutputOverwrite::NoOverwrite;
-            if (s == "ForceEnabled") return firmware_common::can_bus::PowerOutputOverwrite::ForceEnabled;
-            if (s == "ForceDisabled") return firmware_common::can_bus::PowerOutputOverwrite::ForceDisabled;
-            throw std::runtime_error("Unknown enum value: " + s);
-        };
-
-        auto msg = firmware_common::can_bus::PayloadEPSOutputOverwriteMessage::deserialize(serialized_data.data());
-        EXPECT_EQ(msg.node_id, expected_node_id);
-        EXPECT_EQ(msg.out_3v3, parse_enum(message_content["out_3v3"]));
-        EXPECT_EQ(msg.out_5v, parse_enum(message_content["out_5v"]));
-        EXPECT_EQ(msg.out_9v, parse_enum(message_content["out_9v"]));
-        EXPECT_EQ(firmware_common::can_bus::get_frame_id(msg, 10, 20), expected_id);
-
-        uint8_t buffer[firmware_common::can_bus::PayloadEPSOutputOverwriteMessage::SIZE_BYTES];
-        msg.serialize(buffer);
-        for (size_t i = 0; i < serialized_data.size(); ++i) EXPECT_EQ(buffer[i], serialized_data[i]);
-        
-        check_encoder(msg, item, "PayloadEPSOutputOverwrite");
-    }
-}
-
-TEST(PayloadEPSStatusTest, ReferenceData) {
-    json data = read_json(resolve_path("payload_eps_status.json"));
-
-    for (const auto& item : data) {
-        auto serialized_data = get_bytes(item["serialized_data"]);
-        auto message_content = item["message"]["PayloadEPSStatus"];
-        uint32_t expected_id = item["frame_id"];
-        
-        uint16_t b1_mv = message_content["battery1_mv"];
-        uint16_t b1_t = message_content["battery1_temperature_raw"];
-        uint16_t b2_mv = message_content["battery2_mv"];
-        uint16_t b2_t = message_content["battery2_temperature_raw"];
-        
-        auto check_output = [](const firmware_common::can_bus::PayloadEPSOutputStatus& status, const json& j) {
-            uint16_t expected_curr = j["current_ma"];
-            bool expected_overwrote = j["overwrote"];
-            std::string s = j["status"];
-            firmware_common::can_bus::PowerOutputStatus expected_status;
-            if (s == "Disabled") expected_status = firmware_common::can_bus::PowerOutputStatus::Disabled;
-            else if (s == "PowerGood") expected_status = firmware_common::can_bus::PowerOutputStatus::PowerGood;
-            else if (s == "PowerBad") expected_status = firmware_common::can_bus::PowerOutputStatus::PowerBad;
-            else throw std::runtime_error("Unknown status: " + s);
-            
-            EXPECT_EQ(status.current_ma, expected_curr);
-            EXPECT_EQ(status.overwrote, expected_overwrote);
-            EXPECT_EQ(status.status, expected_status);
-        };
-
-        auto msg = firmware_common::can_bus::PayloadEPSStatusMessage::deserialize(serialized_data.data());
-        EXPECT_EQ(msg.battery1_mv, b1_mv);
-        EXPECT_EQ(msg.battery1_temperature_raw, b1_t);
-        EXPECT_EQ(msg.battery2_mv, b2_mv);
-        EXPECT_EQ(msg.battery2_temperature_raw, b2_t);
-        
-        check_output(msg.output_3v3, message_content["output_3v3"]);
-        check_output(msg.output_5v, message_content["output_5v"]);
-        check_output(msg.output_9v, message_content["output_9v"]);
-        EXPECT_EQ(firmware_common::can_bus::get_frame_id(msg, 10, 20), expected_id);
-
-        uint8_t buffer[firmware_common::can_bus::PayloadEPSStatusMessage::SIZE_BYTES];
-        msg.serialize(buffer);
-        for (size_t i = 0; i < serialized_data.size(); ++i) EXPECT_EQ(buffer[i], serialized_data[i]);
-        
-        check_encoder(msg, item, "PayloadEPSStatus");
-    }
-}
-
 TEST(ResetTest, ReferenceData) {
     json data = read_json(resolve_path("reset.json"));
 
@@ -681,9 +727,9 @@ TEST(CanBusMultiFrameDecoderTest, SingleFrame) {
 }
 
 TEST(CanBusMultiFrameDecoderTest, MultiFrame) {
-    // PayloadEPSStatusMessage is 14 bytes, should be multi-frame
-    firmware_common::can_bus::PayloadEPSStatusMessage msg;
-    msg.battery1_mv = 7400;
+    // CustomPayloadStatusMessage is 10 bytes, should be multi-frame
+    auto msg = firmware_common::can_bus::CustomPayloadStatusMessage::new_unavailable();
+    msg.epm_batt_mv = 7400;
     uint32_t id = firmware_common::can_bus::get_frame_id(msg, 10, 20);
 
     firmware_common::can_bus::CanBusMultiFrameEncoder encoder(msg);
@@ -697,9 +743,9 @@ TEST(CanBusMultiFrameDecoderTest, MultiFrame) {
 
     ASSERT_TRUE(decoded.has_value());
     EXPECT_EQ(decoded->id, id);
-    EXPECT_TRUE(std::holds_alternative<firmware_common::can_bus::PayloadEPSStatusMessage>(decoded->message));
-    auto decoded_msg = std::get<firmware_common::can_bus::PayloadEPSStatusMessage>(decoded->message);
-    EXPECT_EQ(decoded_msg.battery1_mv, 7400);
+    EXPECT_TRUE(std::holds_alternative<firmware_common::can_bus::CustomPayloadStatusMessage>(decoded->message));
+    auto decoded_msg = std::get<firmware_common::can_bus::CustomPayloadStatusMessage>(decoded->message);
+    EXPECT_EQ(decoded_msg.epm_batt_mv, 7400);
 }
 
 TEST(CanBusMultiFrameDecoderTest, LRUDiscard) {
@@ -707,31 +753,34 @@ TEST(CanBusMultiFrameDecoderTest, LRUDiscard) {
     
     // Fill up all 8 state machines with first frames of different IDs
     for (int i = 0; i < 8; ++i) {
-        firmware_common::can_bus::PayloadEPSStatusMessage msg; // 14 bytes
+        auto msg = firmware_common::can_bus::CustomPayloadStatusMessage::new_unavailable(); // 10 bytes
         firmware_common::can_bus::CanBusMultiFrameEncoder encoder(msg);
         auto frame_data = encoder.next();
-        uint32_t id = firmware_common::can_bus::CanBusExtendedId::create(1, 34, 1, i);
+        uint32_t id = firmware_common::can_bus::CanBusExtendedId::create(
+            1, firmware_common::can_bus::CustomPayloadStatusMessage::MESSAGE_TYPE, 1, i);
         auto decoded = decoder.process_frame(id, frame_data.data, frame_data.len, static_cast<uint64_t>(1000 + i));
         EXPECT_FALSE(decoded.has_value());
     }
 
     // Now send a 9th ID, it should discard the one with timestamp 1000 (i=0)
     {
-        firmware_common::can_bus::PayloadEPSStatusMessage msg;
+        auto msg = firmware_common::can_bus::CustomPayloadStatusMessage::new_unavailable();
         firmware_common::can_bus::CanBusMultiFrameEncoder encoder(msg);
         auto frame_data = encoder.next();
-        uint32_t id = firmware_common::can_bus::CanBusExtendedId::create(1, 34, 1, 100);
+        uint32_t id = firmware_common::can_bus::CanBusExtendedId::create(
+            1, firmware_common::can_bus::CustomPayloadStatusMessage::MESSAGE_TYPE, 1, 100);
         auto decoded = decoder.process_frame(id, frame_data.data, frame_data.len, 2000);
         EXPECT_FALSE(decoded.has_value());
     }
 
     // If we now send the second frame for ID 0, it should fail/restart because it was discarded
     {
-        firmware_common::can_bus::PayloadEPSStatusMessage msg;
+        auto msg = firmware_common::can_bus::CustomPayloadStatusMessage::new_unavailable();
         firmware_common::can_bus::CanBusMultiFrameEncoder encoder(msg);
         encoder.next(); // skip first
         auto frame_data = encoder.next();
-        uint32_t id = firmware_common::can_bus::CanBusExtendedId::create(1, 34, 1, 0);
+        uint32_t id = firmware_common::can_bus::CanBusExtendedId::create(
+            1, firmware_common::can_bus::CustomPayloadStatusMessage::MESSAGE_TYPE, 1, 0);
         auto decoded = decoder.process_frame(id, frame_data.data, frame_data.len, 3000);
         EXPECT_FALSE(decoded.has_value());
     }
