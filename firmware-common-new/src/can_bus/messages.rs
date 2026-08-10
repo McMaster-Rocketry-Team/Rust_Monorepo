@@ -27,10 +27,6 @@ use mag_measurement::MagMeasurementMessage;
 use node_status::NodeStatusMessage;
 #[cfg(not(feature = "bootloader"))]
 use ozys_measurement::OzysMeasurementMessage;
-#[cfg(not(feature = "bootloader"))]
-use payload_eps_output_overwrite::PayloadEPSOutputOverwriteMessage;
-#[cfg(not(feature = "bootloader"))]
-use payload_eps_status::PayloadEPSStatusMessage;
 use reset::ResetMessage;
 #[cfg(not(feature = "bootloader"))]
 use rocket_state::RocketStateMessage;
@@ -69,10 +65,6 @@ pub mod mag_measurement;
 pub mod node_status;
 #[cfg(not(feature = "bootloader"))]
 pub mod ozys_measurement;
-#[cfg(not(feature = "bootloader"))]
-pub mod payload_eps_output_overwrite;
-#[cfg(not(feature = "bootloader"))]
-pub mod payload_eps_status;
 pub mod reset;
 #[cfg(not(feature = "bootloader"))]
 pub mod rocket_state;
@@ -211,26 +203,6 @@ pub const AMP_RESET_OUTPUT_MESSAGE_TYPE: u8 = create_can_bus_message_type(
     },
     4,
 );
-pub const PAYLOAD_EPS_STATUS_MESSAGE_TYPE: u8 = create_can_bus_message_type(
-    CanBusMessageTypeFlag {
-        is_measurement: false,
-        is_control: false,
-        is_status: true,
-        is_data: false,
-        is_misc: false,
-    },
-    2,
-);
-pub const PAYLOAD_EPS_OUTPUT_OVERWRITE_MESSAGE_TYPE: u8 = create_can_bus_message_type(
-    CanBusMessageTypeFlag {
-        is_measurement: false,
-        is_control: true,
-        is_status: false,
-        is_data: false,
-        is_misc: false,
-    },
-    1,
-);
 pub const CUSTOM_PAYLOAD_STATUS_MESSAGE_TYPE: u8 = create_can_bus_message_type(
     CanBusMessageTypeFlag {
         is_measurement: false,
@@ -349,10 +321,6 @@ pub enum CanBusMessageEnum {
     AmpResetOutput(AmpResetOutputMessage),
 
     #[cfg(not(feature = "bootloader"))]
-    PayloadEPSStatus(PayloadEPSStatusMessage),
-    #[cfg(not(feature = "bootloader"))]
-    PayloadEPSOutputOverwrite(PayloadEPSOutputOverwriteMessage),
-    #[cfg(not(feature = "bootloader"))]
     CustomPayloadStatus(CustomPayloadStatusMessage),
 
     #[cfg(not(feature = "bootloader"))]
@@ -396,10 +364,6 @@ impl CanBusMessageEnum {
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::AmpResetOutput(m) => m.priority(),
             #[cfg(not(feature = "bootloader"))]
-            CanBusMessageEnum::PayloadEPSStatus(m) => m.priority(),
-            #[cfg(not(feature = "bootloader"))]
-            CanBusMessageEnum::PayloadEPSOutputOverwrite(m) => m.priority(),
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::CustomPayloadStatus(m) => m.priority(),
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::VLStatus(m) => m.priority(),
@@ -441,12 +405,6 @@ impl CanBusMessageEnum {
             CanBusMessageEnum::AmpControl(_) => AMP_CONTROL_MESSAGE_TYPE,
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::AmpResetOutput(_) => AMP_RESET_OUTPUT_MESSAGE_TYPE,
-            #[cfg(not(feature = "bootloader"))]
-            CanBusMessageEnum::PayloadEPSStatus(_) => PAYLOAD_EPS_STATUS_MESSAGE_TYPE,
-            #[cfg(not(feature = "bootloader"))]
-            CanBusMessageEnum::PayloadEPSOutputOverwrite(_) => {
-                PAYLOAD_EPS_OUTPUT_OVERWRITE_MESSAGE_TYPE
-            }
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::CustomPayloadStatus(_) => CUSTOM_PAYLOAD_STATUS_MESSAGE_TYPE,
             #[cfg(not(feature = "bootloader"))]
@@ -495,12 +453,6 @@ impl CanBusMessageEnum {
             #[cfg(not(feature = "bootloader"))]
             AMP_RESET_OUTPUT_MESSAGE_TYPE => Some(AmpResetOutputMessage::serialized_len()),
             #[cfg(not(feature = "bootloader"))]
-            PAYLOAD_EPS_STATUS_MESSAGE_TYPE => Some(PayloadEPSStatusMessage::serialized_len()),
-            #[cfg(not(feature = "bootloader"))]
-            PAYLOAD_EPS_OUTPUT_OVERWRITE_MESSAGE_TYPE => {
-                Some(PayloadEPSOutputOverwriteMessage::serialized_len())
-            }
-            #[cfg(not(feature = "bootloader"))]
             CUSTOM_PAYLOAD_STATUS_MESSAGE_TYPE => {
                 Some(CustomPayloadStatusMessage::serialized_len())
             }
@@ -544,10 +496,6 @@ impl CanBusMessageEnum {
             CanBusMessageEnum::AmpControl(m) => m.serialize(buffer),
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::AmpResetOutput(m) => m.serialize(buffer),
-            #[cfg(not(feature = "bootloader"))]
-            CanBusMessageEnum::PayloadEPSStatus(m) => m.serialize(buffer),
-            #[cfg(not(feature = "bootloader"))]
-            CanBusMessageEnum::PayloadEPSOutputOverwrite(m) => m.serialize(buffer),
             #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::CustomPayloadStatus(m) => m.serialize(buffer),
             #[cfg(not(feature = "bootloader"))]
@@ -613,15 +561,6 @@ impl CanBusMessageEnum {
                 AmpResetOutputMessage::deserialize(data).map(CanBusMessageEnum::AmpResetOutput)
             }
 
-            #[cfg(not(feature = "bootloader"))]
-            PAYLOAD_EPS_STATUS_MESSAGE_TYPE => {
-                PayloadEPSStatusMessage::deserialize(data).map(CanBusMessageEnum::PayloadEPSStatus)
-            }
-            #[cfg(not(feature = "bootloader"))]
-            PAYLOAD_EPS_OUTPUT_OVERWRITE_MESSAGE_TYPE => {
-                PayloadEPSOutputOverwriteMessage::deserialize(data)
-                    .map(CanBusMessageEnum::PayloadEPSOutputOverwrite)
-            }
             #[cfg(not(feature = "bootloader"))]
             CUSTOM_PAYLOAD_STATUS_MESSAGE_TYPE => CustomPayloadStatusMessage::deserialize(data)
                 .map(CanBusMessageEnum::CustomPayloadStatus),

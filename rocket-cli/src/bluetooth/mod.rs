@@ -100,12 +100,7 @@ impl BluetoothConnectionMethod {
     ) -> Result<Vec<ConnectionOption>> {
         let manager = Manager::new().await?;
         let adapters = manager.adapters().await?;
-        let bluetooth_name = match node_type {
-            NodeTypeEnum::RocketWifi => "RocketWifi",
-            NodeTypeEnum::EPS1 => "RocketWifi",
-            NodeTypeEnum::EPS2 => "RocketWifi",
-            _ => "RocketOTA",
-        };
+        let bluetooth_name = "RocketOTA";
 
         let mut options = vec![];
 

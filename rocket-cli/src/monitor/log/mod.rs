@@ -204,14 +204,6 @@ impl LogViewer {
                                 ),
                             )
                             .child(
-                                "Rocket WiFi",
-                                Self::create_config_checkbox(
-                                    config.clone(),
-                                    |c| c.devices.rocket_wifi,
-                                    |c, v| c.devices.rocket_wifi = v,
-                                ),
-                            )
-                            .child(
                                 "OZYS",
                                 Self::create_config_checkbox(
                                     config.clone(),
@@ -225,22 +217,6 @@ impl LogViewer {
                                     config.clone(),
                                     |c| c.devices.bulkhead,
                                     |c, v| c.devices.bulkhead = v,
-                                ),
-                            )
-                            .child(
-                                "EPS 1",
-                                Self::create_config_checkbox(
-                                    config.clone(),
-                                    |c| c.devices.eps1,
-                                    |c, v| c.devices.eps1 = v,
-                                ),
-                            )
-                            .child(
-                                "EPS 2",
-                                Self::create_config_checkbox(
-                                    config.clone(),
-                                    |c| c.devices.eps2,
-                                    |c, v| c.devices.eps2 = v,
                                 ),
                             )
                             .child(

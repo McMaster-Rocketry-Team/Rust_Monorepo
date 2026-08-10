@@ -13,18 +13,11 @@ pub const ICARUS_NODE_TYPE: u8 = 15;
 /// Payload activation node
 pub const PAYLOAD_ACTIVATION_NODE_TYPE: u8 = 20;
 
-/// Rocket WiFi node in payload bay
-pub const PAYLOAD_ROCKET_WIFI_NODE_TYPE: u8 = 21;
-
 /// Strain gauges node
 pub const OZYS_NODE_TYPE: u8 = 25;
 
 /// Bulkhead node
 pub const BULKHEAD_NODE_TYPE: u8 = 30;
-
-/// EPS node in payload bay
-pub const PAYLOAD_EPS1_NODE_TYPE: u8 = 40;
-pub const PAYLOAD_EPS2_NODE_TYPE: u8 = 41;
 
 /// Aero rust node
 pub const AERO_RUST_NODE_TYPE: u8 = 50;

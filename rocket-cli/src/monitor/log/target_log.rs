@@ -11,11 +11,8 @@ impl NodeTypeEnum {
             NodeTypeEnum::AMP => "AMP",
             NodeTypeEnum::ICARUS => "ICA",
             NodeTypeEnum::PayloadActivation => "PA",
-            NodeTypeEnum::RocketWifi => "RW",
             NodeTypeEnum::OZYS => "OZY",
             NodeTypeEnum::Bulkhead => "BKH",
-            NodeTypeEnum::EPS1 => "EP1",
-            NodeTypeEnum::EPS2 => "EP2",
             NodeTypeEnum::AeroRust => "AR",
             NodeTypeEnum::Other => "??",
         }
@@ -27,11 +24,8 @@ impl NodeTypeEnum {
             NodeTypeEnum::AMP => Color::Rgb(235, 235, 219),
             NodeTypeEnum::ICARUS => Color::Rgb(234, 232, 248),
             NodeTypeEnum::PayloadActivation => Color::Rgb(252, 237, 224),
-            NodeTypeEnum::RocketWifi => Color::Rgb(244, 248, 244),
             NodeTypeEnum::OZYS => Color::Rgb(250, 242, 226),
             NodeTypeEnum::Bulkhead => Color::Rgb(230, 244, 255),
-            NodeTypeEnum::EPS1 => Color::Rgb(242, 245, 241),
-            NodeTypeEnum::EPS2 => Color::Rgb(228, 236, 228),
             NodeTypeEnum::AeroRust => Color::Rgb(254, 236, 250),
             NodeTypeEnum::Other => Color::Rgb(255, 255, 255),
         }

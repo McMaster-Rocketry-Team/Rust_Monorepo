@@ -55,13 +55,10 @@ impl NodeStatusViewerChild {
                 NodeStatusRow::new(AMP_NODE_TYPE),
                 NodeStatusRow::new(ICARUS_NODE_TYPE),
                 NodeStatusRow::new(PAYLOAD_ACTIVATION_NODE_TYPE),
-                NodeStatusRow::new(PAYLOAD_ROCKET_WIFI_NODE_TYPE),
                 NodeStatusRow::new(OZYS_NODE_TYPE),
                 NodeStatusRow::new(OZYS_NODE_TYPE),
                 NodeStatusRow::new(BULKHEAD_NODE_TYPE),
                 NodeStatusRow::new(BULKHEAD_NODE_TYPE),
-                NodeStatusRow::new(PAYLOAD_EPS1_NODE_TYPE),
-                NodeStatusRow::new(PAYLOAD_EPS2_NODE_TYPE),
                 NodeStatusRow::new(AERO_RUST_NODE_TYPE),
             ],
         }

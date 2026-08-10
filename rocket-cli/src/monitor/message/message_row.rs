@@ -3,7 +3,7 @@ use std::{sync::RwLock, time::Instant};
 
 use convert_case::{Case, Casing};
 use cursive::{
-    Printer, Rect, Vec2,
+    Printer,
     theme::{BaseColor, Color, ColorStyle, Style},
     utils::markup::StyledString,
 };
@@ -116,10 +116,7 @@ impl MessageRow {
     }
 
     pub fn height(&self) -> usize {
-        match self.message {
-            CanBusMessageEnum::PayloadEPSStatus(_) => 2,
-            _ => 1,
-        }
+        1
     }
 
     fn message_name(&self) -> &'static str {
@@ -137,8 +134,6 @@ impl MessageRow {
             CanBusMessageEnum::AmpOverwrite(_) => "AMP Overwrite",
             CanBusMessageEnum::AmpControl(_) => "AMP Control",
             CanBusMessageEnum::AmpResetOutput(_) => "AMP Reset Output",
-            CanBusMessageEnum::PayloadEPSStatus(_) => "EPS Status",
-            CanBusMessageEnum::PayloadEPSOutputOverwrite(_) => "EPS Output Overwrite",
             CanBusMessageEnum::CustomPayloadStatus(_) => "Custom Payload Status",
             CanBusMessageEnum::VLStatus(_) => "VL Status",
             CanBusMessageEnum::RocketState(_) => "Rocket State",
@@ -418,101 +413,6 @@ impl MessageRow {
                 printer,
                 1,
                 &[("output to reset", true, format!("{}", m.output).into())],
-            ),
-            CanBusMessageEnum::PayloadEPSStatus(m) => {
-                self.draw_fields(
-                    printer,
-                    1,
-                    &[
-                        (
-                            "bat 1",
-                            false,
-                            format!(
-                                "{:.2}V, {:.1}C",
-                                m.battery1_mv as f32 / 1000.0,
-                                m.battery1_temperature()
-                            )
-                            .into(),
-                        ),
-                        (
-                            "bat 2",
-                            false,
-                            format!(
-                                "{:.2}V, {:.1}C",
-                                m.battery2_mv as f32 / 1000.0,
-                                m.battery2_temperature()
-                            )
-                            .into(),
-                        ),
-                    ],
-                );
-                let printer = printer.windowed(Rect::from_corners(Vec2::new(0, 1), printer.size));
-                self.draw_fields(
-                    &printer,
-                    2,
-                    &[
-                        (
-                            "3v3 out current",
-                            false,
-                            format!("{:>4}mA", m.output_3v3.current_ma).into(),
-                        ),
-                        (
-                            "status",
-                            true,
-                            Self::format_amp_output_status(&AmpOutputStatus {
-                                overwrote: m.output_3v3.overwrote,
-                                status: m.output_3v3.status,
-                            }),
-                        ),
-                        (
-                            "5v out current",
-                            false,
-                            format!("{:>4}mA", m.output_5v.current_ma).into(),
-                        ),
-                        (
-                            "status",
-                            true,
-                            Self::format_amp_output_status(&AmpOutputStatus {
-                                overwrote: m.output_5v.overwrote,
-                                status: m.output_5v.status,
-                            }),
-                        ),
-                        (
-                            "9v out current",
-                            false,
-                            format!("{:>4}mA", m.output_9v.current_ma).into(),
-                        ),
-                        (
-                            "status",
-                            true,
-                            Self::format_amp_output_status(&AmpOutputStatus {
-                                overwrote: m.output_9v.overwrote,
-                                status: m.output_9v.status,
-                            }),
-                        ),
-                    ],
-                );
-            }
-            CanBusMessageEnum::PayloadEPSOutputOverwrite(m) => self.draw_fields(
-                printer,
-                1,
-                &[
-                    (
-                        "3v3 out",
-                        true,
-                        Self::format_power_output_overwrite(m.out_3v3),
-                    ),
-                    (
-                        "5v out",
-                        true,
-                        Self::format_power_output_overwrite(m.out_5v),
-                    ),
-                    (
-                        "9v out",
-                        true,
-                        Self::format_power_output_overwrite(m.out_9v),
-                    ),
-                ],
             ),
             CanBusMessageEnum::CustomPayloadStatus(m) => self.draw_fields(
                 printer,

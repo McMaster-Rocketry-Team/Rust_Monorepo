@@ -280,9 +280,8 @@ mod tests {
         can_bus::{
             custom_status::ozys_custom_status::OzysCustomStatus,
             messages::{
-                amp_status::PowerOutputStatus,
+                custom_payload_status::CustomPayloadStatusMessage,
                 node_status::{NodeHealth, NodeMode, NodeStatusMessage},
-                payload_eps_status::*,
             },
             sender::CanBusMultiFrameEncoder,
         },
@@ -323,27 +322,13 @@ mod tests {
     fn multi_frame_encode_and_decode() {
         init_logger();
 
-        let message = CanBusMessageEnum::PayloadEPSStatus(PayloadEPSStatusMessage::new(
-            1,
-            2.0,
-            3,
-            4.0,
-            PayloadEPSOutputStatus {
-                current_ma: 5,
-                overwrote: false,
-                status: PowerOutputStatus::Disabled,
-            },
-            PayloadEPSOutputStatus {
-                current_ma: 6,
-                overwrote: false,
-                status: PowerOutputStatus::PowerGood,
-            },
-            PayloadEPSOutputStatus {
-                current_ma: 7,
-                overwrote: false,
-                status: PowerOutputStatus::PowerBad,
-            },
-        ));
+        let message = CanBusMessageEnum::CustomPayloadStatus(CustomPayloadStatusMessage {
+            epm_batt_mv: 12600,
+            epm_sys_3v3_mv: 3300,
+            epm_sys_5v_mv: 5000,
+            epm_per_5v_mv: 5000,
+            epm_per_9v_mv: 9000,
+        });
 
         let id = message.get_id(0, 1);
         let id: u32 = id.into();
