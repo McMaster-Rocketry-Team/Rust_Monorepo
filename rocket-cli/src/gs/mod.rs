@@ -152,8 +152,7 @@ pub fn tui_task(
 
     let send_packet = |s: &mut Cursive, packet: VLPUplinkPacket| {
         client.send_nb(packet.clone());
-        let mut last_uplink_packet = last_uplink_packet.write().unwrap();
-        *last_uplink_packet = Some(packet.clone());
+        *last_uplink_packet.write().unwrap() = Some(packet.clone());
 
         s.find_name::<HideableView<LinearLayout>>("uplink_buttons_hideable")
             .unwrap()
@@ -595,7 +594,16 @@ pub fn tui_task(
                             .title("Uplink Error")
                             .content(TextView::new(format!("{:?}", e)))
                             .button("retry", move |s| {
-                                send_packet(s, last_uplink_packet.read().unwrap().clone().unwrap())
+                                // Bind in its own statement so the read guard is released
+                                // before `send_packet` takes the write lock; passing the
+                                // `read()` temporary inline keeps it alive across the call
+                                // and self-deadlocks the UI thread.
+                                let packet = last_uplink_packet.read().unwrap().clone();
+                                let Some(packet) = packet else {
+                                    return;
+                                };
+                                s.pop_layer();
+                                send_packet(s, packet);
                             })
                             .dismiss_button("OK"),
                     );
