@@ -40,7 +40,7 @@
         "sequence_number": 0,
         "start_of_transfer": false,
         "end_of_transfer": false,
-        "data_type": "Firmware",
+        "data_type": "Data",
         "destination_node_id": 0
       }
     },
@@ -80,14 +80,14 @@
       0,
       0,
       0,
-      0,
+      16,
       0
     ],
     "frame_id": 406888468,
     "encoded_data": [
       [
-        53,
-        129,
+        70,
+        130,
         0,
         0,
         0,
@@ -137,7 +137,7 @@
       ],
       [
         0,
-        0,
+        16,
         0,
         96
       ]

@@ -31,7 +31,7 @@ pub enum NodeMode {
     Operational = 0,
     /// Initialization is in progress; this mode is entered immediately after startup.
     Initialization = 1,
-    /// E.g. calibration, the bootloader is running, etc.
+    /// E.g. calibration, a firmware update is being applied, etc.
     Maintenance = 2,
     /// Mode Offline can be reported by the node to explicitly inform other nodes in
     /// the network that it is shutting down.

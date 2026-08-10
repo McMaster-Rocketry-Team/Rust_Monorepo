@@ -195,7 +195,6 @@ impl<M: RawMutex, const N: usize, const PN: usize> CanSender<M, N, PN> {
     }
 }
 
-#[cfg(not(feature = "bootloader"))]
 pub fn create_unix_time_frame_data(timestamp_us: u64) -> [u8; 8] {
     let message: CanBusMessageEnum =
         super::messages::unix_time::UnixTimeMessage { timestamp_us }.into();

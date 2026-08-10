@@ -5,7 +5,6 @@ use clap::Subcommand;
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::testing::decode_bluetooth_chunk::DecodeBluetoothChunkArgs;
 use firmware_common_new::can_bus::node_types::*;
 
 #[derive(Parser, Debug)]
@@ -18,13 +17,10 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum ModeSelect {
-    #[command(about = "download firmware to stm32 via probe or ota")]
+    #[command(about = "download firmware to stm32 via probe")]
     Download(DownloadCli),
 
-    #[command(about = "download firmware to esp32 via probe or ota")]
-    DownloadEsp(DownloadEspCli),
-
-    #[command(about = "attach to target via probe or ota")]
+    #[command(about = "attach to target via probe or serial")]
     Attach(AttachCli),
 
     #[command(about = "connect to ground station")]
@@ -40,9 +36,6 @@ pub enum ModeSelect {
 
     #[command(about = "generate vlp key")]
     GenVlpKey(GenVlpKeyCli),
-
-    #[command(about = "generate private and public keys for ota")]
-    GenOtaKey(GenOtaKeyCli),
 
     #[command(about = "show SD flight log summary from a connected VLF5")]
     ListFlightLog,
@@ -94,16 +87,8 @@ pub struct SendUplinkArgs {
 #[derive(Parser, Debug)]
 pub struct DownloadCli {
     pub chip: String,
-    pub secret_path: std::path::PathBuf,
     pub node_type: NodeTypeEnum,
     pub firmware_elf_path: std::path::PathBuf,
-}
-
-#[derive(Parser, Debug)]
-pub struct DownloadEspCli {
-    pub secret_path: std::path::PathBuf,
-    pub node_type: NodeTypeEnum,
-    pub firmware_bin_path: std::path::PathBuf,
 }
 
 #[derive(Parser, Debug)]
@@ -119,14 +104,8 @@ pub struct GenVlpKeyCli {
     pub key_path: std::path::PathBuf,
 }
 
-#[derive(Parser, Debug)]
-pub struct GenOtaKeyCli {
-    pub key_directory: std::path::PathBuf,
-}
-
 #[derive(Subcommand, Debug)]
 pub enum TestingModeSelect {
-    DecodeBluetoothChunk(DecodeBluetoothChunkArgs),
     MockConnection,
     MockGroundStation,
     SendVLPTelemetry(SendVLPTelemetryArgs),

@@ -246,11 +246,6 @@ impl MessageRow {
                 1,
                 &[
                     ("reset node id", true, format!("{:0>3X}", m.node_id).into()),
-                    (
-                        "into bootloader",
-                        true,
-                        Self::format_bool(m.into_bootloader),
-                    ),
                     ("reset all", true, Self::format_bool(m.reset_all)),
                 ],
             ),

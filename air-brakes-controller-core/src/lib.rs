@@ -8,7 +8,7 @@ mod fmt;
 pub mod baro_state_estimator;
 mod controller;
 mod state_estimator;
-mod state_estimator2;
+pub mod state_estimator2;
 mod utils;
 
 pub use baro_state_estimator::{FlightProfile, RocketState, RocketStateEstimator};

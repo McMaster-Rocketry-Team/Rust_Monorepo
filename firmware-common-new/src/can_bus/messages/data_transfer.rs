@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 #[derive(PrimitiveEnum_u8, Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize)]
 #[repr(C)]
 pub enum DataType {
-    Firmware = 0,
     Data = 1,
 }
 
@@ -84,7 +83,7 @@ mod test {
         vec![
             DataTransferMessage::new(
                 heapless::Vec::new(),
-                DataType::Firmware,
+                DataType::Data,
                 0,
                 false,
                 false,

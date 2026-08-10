@@ -423,8 +423,8 @@ TEST(DataTransferTest, ReferenceData) {
         uint16_t expected_node_id = message_content["destination_node_id"];
         
         std::string dt_str = message_content["data_type"];
-        firmware_common::can_bus::DataType expected_type = 
-            (dt_str == "Firmware") ? firmware_common::can_bus::DataType::Firmware : firmware_common::can_bus::DataType::Data;
+        ASSERT_EQ(dt_str, "Data");
+        firmware_common::can_bus::DataType expected_type = firmware_common::can_bus::DataType::Data;
 
         auto msg = firmware_common::can_bus::DataTransferMessage::deserialize(serialized_data.data());
         
@@ -606,12 +606,10 @@ TEST(ResetTest, ReferenceData) {
         
         uint16_t expected_node_id = message_content["node_id"];
         bool expected_reset = message_content["reset_all"];
-        bool expected_boot = message_content["into_bootloader"];
 
         auto msg = firmware_common::can_bus::ResetMessage::deserialize(serialized_data.data());
         EXPECT_EQ(msg.node_id, expected_node_id);
         EXPECT_EQ(msg.reset_all, expected_reset);
-        EXPECT_EQ(msg.into_bootloader, expected_boot);
         EXPECT_EQ(firmware_common::can_bus::get_frame_id(msg, 10, 20), expected_id);
 
         uint8_t buffer[firmware_common::can_bus::ResetMessage::SIZE_BYTES];

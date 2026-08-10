@@ -400,7 +400,6 @@ namespace can_bus {
     };
 
     enum class DataType : uint8_t {
-        Firmware = 0,
         Data = 1
     };
 
@@ -418,7 +417,7 @@ namespace can_bus {
         uint16_t destination_node_id; // 12 bits
 
         DataTransferMessage() noexcept : data{0}, data_len(0), sequence_number(0), 
-            start_of_transfer(false), end_of_transfer(false), data_type(DataType::Firmware), destination_node_id(0) {}
+            start_of_transfer(false), end_of_transfer(false), data_type(DataType::Data), destination_node_id(0) {}
 
         static constexpr uint8_t PRIORITY = 6;
 
@@ -760,19 +759,17 @@ namespace can_bus {
 
         uint16_t node_id; // 12 bits
         bool reset_all;
-        bool into_bootloader;
 
         static constexpr uint8_t PRIORITY = 0;
 
         void serialize(uint8_t* buffer) const noexcept {
             // Byte 0: node_id[11..4]
             buffer[0] = (node_id >> 4) & 0xFF;
-            
-            // Byte 1: node_id[3..0], reset_all, into_bootloader, padding(2)
+
+            // Byte 1: node_id[3..0], reset_all, padding(3)
             uint8_t b1 = 0;
             b1 |= (node_id & 0x0F) << 4;
             if (reset_all) b1 |= 0x08;
-            if (into_bootloader) b1 |= 0x04;
             buffer[1] = b1;
         }
 
@@ -780,7 +777,6 @@ namespace can_bus {
             ResetMessage msg;
             msg.node_id = (static_cast<uint16_t>(buffer[0]) << 4) | ((buffer[1] >> 4) & 0x0F);
             msg.reset_all = (buffer[1] & 0x08) != 0;
-            msg.into_bootloader = (buffer[1] & 0x04) != 0;
             return msg;
         }
     };

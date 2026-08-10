@@ -1,5 +1,4 @@
 mod args;
-mod bluetooth;
 mod connection_method;
 mod elf_locator;
 mod gen_key;
@@ -15,7 +14,7 @@ use std::io;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use args::Cli;
 use args::ModeSelect;
 use args::TestingModeSelect;
@@ -26,13 +25,10 @@ use connection_method::get_connection_method;
 use fern::Dispatch;
 use fern::colors::Color;
 use fern::colors::ColoredLevelConfig;
-use gen_key::gen_ota_key;
 use log::LevelFilter;
 use monitor::monitor_tui;
-use testing::decode_bluetooth_chunk::test_decode_bluetooth_chunk;
 use testing::mock_connection_method::MockConnectionMethod;
 
-use crate::connection_method::get_esp_connection_method;
 use crate::gen_key::gen_vlp_key;
 use crate::gs::find_ground_station::find_ground_station;
 use crate::gs::ground_station_tui;
@@ -54,23 +50,15 @@ async fn main() -> Result<()> {
                 Some(args.chip),
                 Some(args.firmware_elf_path.clone()),
                 Some(args.node_type),
-                Some(args.secret_path),
             )
             .await?;
 
             connection_method.download().await?;
             monitor_tui(&mut connection_method, Some(&args.firmware_elf_path)).await
         }
-        ModeSelect::DownloadEsp(args) => {
-            let mut connection_method =
-                get_esp_connection_method(args.firmware_bin_path, args.node_type, args.secret_path)
-                    .await?;
-
-            connection_method.download().await
-        }
         ModeSelect::Attach(args) => {
             let mut connection_method =
-                get_connection_method(false, args.chip, args.elf, None, None).await?;
+                get_connection_method(false, args.chip, args.elf, None).await?;
 
             monitor_tui(&mut connection_method, None).await
         }
@@ -90,10 +78,6 @@ async fn main() -> Result<()> {
             send_uplink_oneshot(&serial_path, params, &command).await
         }
         ModeSelect::GenVlpKey(args) => gen_vlp_key(args),
-        ModeSelect::GenOtaKey(args) => gen_ota_key(args),
-        ModeSelect::Testing(TestingModeSelect::DecodeBluetoothChunk(args)) => {
-            test_decode_bluetooth_chunk(args).map_err(|e| anyhow!("{:?}", e))
-        }
         ModeSelect::Testing(TestingModeSelect::MockConnection) => {
             let mut connection_method: Box<dyn ConnectionMethod> = Box::new(MockConnectionMethod);
 

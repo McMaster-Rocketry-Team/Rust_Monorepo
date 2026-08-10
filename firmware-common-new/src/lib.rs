@@ -10,12 +10,9 @@ pub(crate) mod utils;
 #[cfg(test)]
 mod tests;
 
-#[cfg(not(feature = "bootloader"))]
 pub mod flight_data_record;
-#[cfg(not(feature = "bootloader"))]
 pub mod flight_storage;
 
-pub mod bootloader;
 pub mod can_bus;
 pub(crate) mod fixed_point;
 pub mod gps;
@@ -24,8 +21,6 @@ pub mod sensor_reading;
 pub mod signal_with_ack;
 pub mod time;
 pub mod variance;
-#[cfg(not(feature = "bootloader"))]
 pub mod vlp;
 pub mod heatshrink;
-#[cfg(not(feature = "bootloader"))]
 pub mod rpc;

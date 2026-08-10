@@ -1,9 +1,7 @@
 use std::{io::ErrorKind, time::Duration};
 
 use crate::{
-    bluetooth::demultiplex_log::LogDemultiplexer,
     connection_method::{ConnectionMethod, ConnectionMethodFactory, ConnectionOption},
-    elf_locator::locate_elf_files,
     gs::serial_wrapper::SerialWrapper,
     monitor::{MonitorStatus, target_log::TargetLog},
 };
@@ -14,7 +12,7 @@ use firmware_common_new::{
         id::CanBusExtendedId,
         messages::LOG_MESSAGE_TYPE,
         receiver::CanBusMultiFrameDecoder,
-        telemetry::{log_multiplexer::DecodedLogFrame, message_aggregator::DecodedMessage},
+        telemetry::message_aggregator::DecodedMessage,
         usb_can_bus_frame::UsbCanBusFrame,
     },
     rpc::half_duplex_serial::HalfDuplexSerial,
@@ -35,11 +33,6 @@ struct SerialConnectionMethodFactory {
 #[async_trait(?Send)]
 impl ConnectionMethodFactory for SerialConnectionMethodFactory {
     async fn initialize(&mut self) -> Result<Box<dyn ConnectionMethod>> {
-        let elf_info_map = locate_elf_files(None)
-            .map_err(|e| warn!("{:?}", e))
-            .unwrap_or_default();
-        let log_demultiplexer = LogDemultiplexer::new(elf_info_map);
-
         info!("Opening serial port: {}", self.port_name);
         let serial = serialport::new(self.port_name.clone(), 115200)
             .timeout(Duration::from_secs(5))
@@ -48,7 +41,6 @@ impl ConnectionMethodFactory for SerialConnectionMethodFactory {
 
         Ok(Box::new(SerialConnectionMethod {
             serial: SerialWrapper::new(serial),
-            log_demultiplexer,
             name: self.name.clone(),
         }))
     }
@@ -56,7 +48,6 @@ impl ConnectionMethodFactory for SerialConnectionMethodFactory {
 
 pub struct SerialConnectionMethod {
     serial: SerialWrapper,
-    log_demultiplexer: LogDemultiplexer,
     name: String,
 }
 
@@ -123,7 +114,7 @@ impl ConnectionMethod for SerialConnectionMethod {
     async fn attach(
         &mut self,
         status_tx: watch::Sender<MonitorStatus>,
-        logs_tx: broadcast::Sender<TargetLog>,
+        _logs_tx: broadcast::Sender<TargetLog>,
         messages_tx: broadcast::Sender<DecodedMessage>,
         stop_rx: oneshot::Receiver<()>,
     ) -> Result<()> {
@@ -158,17 +149,7 @@ impl ConnectionMethod for SerialConnectionMethod {
 
                     let parsed_id = CanBusExtendedId::from_raw(frame.id);
                     if parsed_id.message_type == LOG_MESSAGE_TYPE {
-                        // FIXME sometimes panics
-                        // let mut data = heapless::Vec::<u8, 8>::new();
-                        // data.extend_from_slice(frame.data()).unwrap();
-                        // self.log_demultiplexer.process_frame(
-                        //     DecodedLogFrame {
-                        //         node_type: parsed_id.node_type,
-                        //         node_id: parsed_id.node_id,
-                        //         data,
-                        //     },
-                        //     &logs_tx,
-                        // );
+                        // defmt log frames are not decoded over this transport
                     } else {
                         let timestamp = std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)

@@ -77,20 +77,6 @@ impl View for StatusBar {
                     color: ColorStyle::new(BaseColor::Green.dark(), PaletteColor::Background),
                 },
             ),
-            MonitorStatus::ChunkError => StyledString::single_span(
-                "Malformed",
-                Style {
-                    effects: Effects::only(Effect::Underline),
-                    color: ColorStyle::new(BaseColor::Red.dark(), PaletteColor::Background),
-                },
-            ),
-            MonitorStatus::Overrun => StyledString::single_span(
-                "Overrun",
-                Style {
-                    effects: Effects::only(Effect::Underline),
-                    color: ColorStyle::new(BaseColor::Yellow.dark(), PaletteColor::Background),
-                },
-            ),
         };
         printer.print_styled((self.connection_method_name.len() + 1, 0), &status_text);
 

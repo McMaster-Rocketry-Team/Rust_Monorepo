@@ -37,8 +37,6 @@ use self::target_log::TargetLog;
 pub enum MonitorStatus {
     Initialize,
     Normal,
-    ChunkError,
-    Overrun,
 }
 
 pub async fn monitor_tui(

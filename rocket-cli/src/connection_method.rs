@@ -2,7 +2,6 @@ use std::{fs, path::PathBuf};
 
 use crate::{
     args::NodeTypeEnum,
-    bluetooth::{BluetoothConnectionMethod, BluetoothFirmwareType},
     elf_locator::{ElfInfo, find_newest_elf},
     monitor::{MonitorStatus, target_log::TargetLog},
     probe::ProbeConnectionMethod,
@@ -39,7 +38,6 @@ pub async fn get_connection_method(
     chip: Option<String>,
     firmware_elf_path: Option<PathBuf>,
     node_type: Option<NodeTypeEnum>,
-    secret_path: Option<PathBuf>,
 ) -> Result<Box<dyn ConnectionMethod>> {
     // try to auto detect chip
     let chip = if let Some(chip) = chip {
@@ -130,46 +128,6 @@ pub async fn get_connection_method(
             );
         }
     }
-
-    if download {
-        if options.is_empty() {
-            options.append(
-                &mut BluetoothConnectionMethod::list_options(
-                    secret_path,
-                    firmware_elf_path.map(BluetoothFirmwareType::Elf),
-                    node_type,
-                )
-                .await?,
-            );
-        } else {
-            info!("other connection options exist, skipping bluetooth");
-        }
-    } else {
-        options.append(
-            &mut BluetoothConnectionMethod::list_options(
-                secret_path,
-                firmware_elf_path.map(BluetoothFirmwareType::Elf),
-                node_type,
-            )
-            .await?,
-        );
-    }
-
-    let mut option = select_connection_method_prompt(options)?;
-    option.factory.initialize().await
-}
-
-pub async fn get_esp_connection_method(
-    firmware_bin_path: PathBuf,
-    node_type: NodeTypeEnum,
-    secret_path: PathBuf,
-) -> Result<Box<dyn ConnectionMethod>> {
-    let options = BluetoothConnectionMethod::list_options(
-        Some(secret_path),
-        Some(BluetoothFirmwareType::Bin(firmware_bin_path)),
-        node_type,
-    )
-    .await?;
 
     let mut option = select_connection_method_prompt(options)?;
     option.factory.initialize().await

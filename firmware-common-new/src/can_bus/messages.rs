@@ -1,76 +1,46 @@
 use crate::utils::FixedLenSerializable;
 use ack::AckMessage;
-#[cfg(not(feature = "bootloader"))]
 use airbrakes_control::AirBrakesControlMessage;
-#[cfg(not(feature = "bootloader"))]
 use amp_control::AmpControlMessage;
-#[cfg(not(feature = "bootloader"))]
 use amp_overwrite::AmpOverwriteMessage;
-#[cfg(not(feature = "bootloader"))]
 use amp_reset_output::AmpResetOutputMessage;
-#[cfg(not(feature = "bootloader"))]
 use amp_status::AmpStatusMessage;
-#[cfg(not(feature = "bootloader"))]
 use baro_measurement::BaroMeasurementMessage;
-#[cfg(not(feature = "bootloader"))]
 use brightness_measurement::BrightnessMeasurementMessage;
 use core::fmt::Debug;
-#[cfg(not(feature = "bootloader"))]
 use custom_payload_status::CustomPayloadStatusMessage;
 use data_transfer::DataTransferMessage;
-#[cfg(not(feature = "bootloader"))]
 use icarus_status::IcarusStatusMessage;
-#[cfg(not(feature = "bootloader"))]
 use imu_measurement::IMUMeasurementMessage;
-#[cfg(not(feature = "bootloader"))]
 use mag_measurement::MagMeasurementMessage;
 use node_status::NodeStatusMessage;
-#[cfg(not(feature = "bootloader"))]
 use ozys_measurement::OzysMeasurementMessage;
 use reset::ResetMessage;
-#[cfg(not(feature = "bootloader"))]
 use rocket_state::RocketStateMessage;
 use static_assertions::const_assert;
-#[cfg(not(feature = "bootloader"))]
 use unix_time::UnixTimeMessage;
-#[cfg(not(feature = "bootloader"))]
 use vl_status::VLStatusMessage;
 
 use super::id::{CanBusExtendedId, CanBusMessageTypeFlag, create_can_bus_message_type};
 
 pub mod ack;
-#[cfg(not(feature = "bootloader"))]
 pub mod airbrakes_control;
-#[cfg(not(feature = "bootloader"))]
 pub mod amp_control;
-#[cfg(not(feature = "bootloader"))]
 pub mod amp_overwrite;
-#[cfg(not(feature = "bootloader"))]
 pub mod amp_reset_output;
-#[cfg(not(feature = "bootloader"))]
 pub mod amp_status;
-#[cfg(not(feature = "bootloader"))]
 pub mod baro_measurement;
-#[cfg(not(feature = "bootloader"))]
 pub mod brightness_measurement;
-#[cfg(not(feature = "bootloader"))]
 pub mod custom_payload_status;
 pub mod data_transfer;
-#[cfg(not(feature = "bootloader"))]
 pub mod icarus_status;
-#[cfg(not(feature = "bootloader"))]
 pub mod imu_measurement;
-#[cfg(not(feature = "bootloader"))]
 pub mod mag_measurement;
 pub mod node_status;
-#[cfg(not(feature = "bootloader"))]
 pub mod ozys_measurement;
 pub mod reset;
-#[cfg(not(feature = "bootloader"))]
 pub mod rocket_state;
-#[cfg(not(feature = "bootloader"))]
 pub mod unix_time;
-#[cfg(not(feature = "bootloader"))]
 pub mod vl_status;
 
 pub const RESET_MESSAGE_TYPE: u8 = create_can_bus_message_type(
@@ -294,42 +264,26 @@ const_assert!(size_of::<CanBusMessageEnum>() <= MAX_CAN_MESSAGE_SIZE);
 pub enum CanBusMessageEnum {
     Reset(ResetMessage),
     // the usize does nothing here, it just makes firmware-common-ffi not complain about unsafe zero size type
-    #[cfg(not(feature = "bootloader"))]
     PreUnixTime(usize),
-    #[cfg(not(feature = "bootloader"))]
     UnixTime(UnixTimeMessage),
     NodeStatus(NodeStatusMessage),
 
-    #[cfg(not(feature = "bootloader"))]
     BaroMeasurement(BaroMeasurementMessage),
-    #[cfg(not(feature = "bootloader"))]
     IMUMeasurement(IMUMeasurementMessage),
-    #[cfg(not(feature = "bootloader"))]
     MagMeasurement(MagMeasurementMessage),
-    #[cfg(not(feature = "bootloader"))]
     BrightnessMeasurement(BrightnessMeasurementMessage),
-    #[cfg(not(feature = "bootloader"))]
     OzysMeasurement(OzysMeasurementMessage),
 
-    #[cfg(not(feature = "bootloader"))]
     AmpStatus(AmpStatusMessage),
-    #[cfg(not(feature = "bootloader"))]
     AmpOverwrite(AmpOverwriteMessage),
-    #[cfg(not(feature = "bootloader"))]
     AmpControl(AmpControlMessage),
-    #[cfg(not(feature = "bootloader"))]
     AmpResetOutput(AmpResetOutputMessage),
 
-    #[cfg(not(feature = "bootloader"))]
     CustomPayloadStatus(CustomPayloadStatusMessage),
 
-    #[cfg(not(feature = "bootloader"))]
     VLStatus(VLStatusMessage),
-    #[cfg(not(feature = "bootloader"))]
     RocketState(RocketStateMessage),
-    #[cfg(not(feature = "bootloader"))]
     IcarusStatus(IcarusStatusMessage),
-    #[cfg(not(feature = "bootloader"))]
     AirBrakesControl(AirBrakesControlMessage),
 
     DataTransfer(DataTransferMessage),
@@ -339,39 +293,23 @@ pub enum CanBusMessageEnum {
 impl CanBusMessageEnum {
     pub fn priority(&self) -> u8 {
         match self {
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::UnixTime(m) => m.priority(),
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::PreUnixTime(_) => 1,
             CanBusMessageEnum::NodeStatus(m) => m.priority(),
             CanBusMessageEnum::Reset(m) => m.priority(),
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::BaroMeasurement(m) => m.priority(),
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::IMUMeasurement(m) => m.priority(),
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::MagMeasurement(m) => m.priority(),
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::BrightnessMeasurement(m) => m.priority(),
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::OzysMeasurement(m) => m.priority(),
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::AmpStatus(m) => m.priority(),
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::AmpOverwrite(m) => m.priority(),
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::AmpControl(m) => m.priority(),
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::AmpResetOutput(m) => m.priority(),
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::CustomPayloadStatus(m) => m.priority(),
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::VLStatus(m) => m.priority(),
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::RocketState(m) => m.priority(),
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::IcarusStatus(m) => m.priority(),
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::AirBrakesControl(m) => m.priority(),
             CanBusMessageEnum::DataTransfer(m) => m.priority(),
             CanBusMessageEnum::Ack(m) => m.priority(),
@@ -380,40 +318,24 @@ impl CanBusMessageEnum {
 
     pub fn get_message_type(&self) -> u8 {
         match self {
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::UnixTime(_) => UNIX_TIME_MESSAGE_TYPE,
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::PreUnixTime(_) => PRE_UNIX_TIME_MESSAGE_TYPE,
             CanBusMessageEnum::NodeStatus(_) => NODE_STATUS_MESSAGE_TYPE,
             CanBusMessageEnum::Reset(_) => RESET_MESSAGE_TYPE,
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::BaroMeasurement(_) => BARO_MEASUREMENT_MESSAGE_TYPE,
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::IMUMeasurement(_) => IMU_MEASUREMENT_MESSAGE_TYPE,
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::MagMeasurement(_) => MAG_MEASUREMENT_MESSAGE_TYPE,
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::BrightnessMeasurement(_) => BRIGHTNESS_MEASUREMENT_MESSAGE_TYPE,
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::OzysMeasurement(_) => OZYS_MEASUREMENT_MESSAGE_TYPE,
 
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::AmpStatus(_) => AMP_STATUS_MESSAGE_TYPE,
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::AmpOverwrite(_) => AMP_OVERWRITE_MESSAGE_TYPE,
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::AmpControl(_) => AMP_CONTROL_MESSAGE_TYPE,
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::AmpResetOutput(_) => AMP_RESET_OUTPUT_MESSAGE_TYPE,
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::CustomPayloadStatus(_) => CUSTOM_PAYLOAD_STATUS_MESSAGE_TYPE,
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::VLStatus(_) => VL_STATUS_MESSAGE_TYPE,
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::RocketState(_) => ROCKET_STATE_MESSAGE_TYPE,
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::IcarusStatus(_) => ICARUS_STATUS_MESSAGE_TYPE,
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::AirBrakesControl(_) => AIRBRAKES_CONTROL_MESSAGE_TYPE,
             CanBusMessageEnum::DataTransfer(_) => DATA_TRANSFER_MESSAGE_TYPE,
             CanBusMessageEnum::Ack(_) => ACK_MESSAGE_TYPE,
@@ -426,43 +348,27 @@ impl CanBusMessageEnum {
 
     pub fn serialized_len(message_type: u8) -> Option<usize> {
         match message_type {
-            #[cfg(not(feature = "bootloader"))]
             UNIX_TIME_MESSAGE_TYPE => Some(UnixTimeMessage::serialized_len()),
-            #[cfg(not(feature = "bootloader"))]
             PRE_UNIX_TIME_MESSAGE_TYPE => Some(0),
             NODE_STATUS_MESSAGE_TYPE => Some(NodeStatusMessage::serialized_len()),
             RESET_MESSAGE_TYPE => Some(ResetMessage::serialized_len()),
-            #[cfg(not(feature = "bootloader"))]
             BARO_MEASUREMENT_MESSAGE_TYPE => Some(BaroMeasurementMessage::serialized_len()),
-            #[cfg(not(feature = "bootloader"))]
             IMU_MEASUREMENT_MESSAGE_TYPE => Some(IMUMeasurementMessage::serialized_len()),
-            #[cfg(not(feature = "bootloader"))]
             MAG_MEASUREMENT_MESSAGE_TYPE => Some(MagMeasurementMessage::serialized_len()),
-            #[cfg(not(feature = "bootloader"))]
             BRIGHTNESS_MEASUREMENT_MESSAGE_TYPE => {
                 Some(BrightnessMeasurementMessage::serialized_len())
             }
-            #[cfg(not(feature = "bootloader"))]
             OZYS_MEASUREMENT_MESSAGE_TYPE => Some(OzysMeasurementMessage::serialized_len()),
-            #[cfg(not(feature = "bootloader"))]
             AMP_STATUS_MESSAGE_TYPE => Some(AmpStatusMessage::serialized_len()),
-            #[cfg(not(feature = "bootloader"))]
             AMP_OVERWRITE_MESSAGE_TYPE => Some(AmpOverwriteMessage::serialized_len()),
-            #[cfg(not(feature = "bootloader"))]
             AMP_CONTROL_MESSAGE_TYPE => Some(AmpControlMessage::serialized_len()),
-            #[cfg(not(feature = "bootloader"))]
             AMP_RESET_OUTPUT_MESSAGE_TYPE => Some(AmpResetOutputMessage::serialized_len()),
-            #[cfg(not(feature = "bootloader"))]
             CUSTOM_PAYLOAD_STATUS_MESSAGE_TYPE => {
                 Some(CustomPayloadStatusMessage::serialized_len())
             }
-            #[cfg(not(feature = "bootloader"))]
             VL_STATUS_MESSAGE_TYPE => Some(VLStatusMessage::serialized_len()),
-            #[cfg(not(feature = "bootloader"))]
             ROCKET_STATE_MESSAGE_TYPE => Some(RocketStateMessage::serialized_len()),
-            #[cfg(not(feature = "bootloader"))]
             ICARUS_STATUS_MESSAGE_TYPE => Some(IcarusStatusMessage::serialized_len()),
-            #[cfg(not(feature = "bootloader"))]
             AIRBRAKES_CONTROL_MESSAGE_TYPE => Some(AirBrakesControlMessage::serialized_len()),
             DATA_TRANSFER_MESSAGE_TYPE => Some(DataTransferMessage::serialized_len()),
             ACK_MESSAGE_TYPE => Some(AckMessage::serialized_len()),
@@ -472,39 +378,23 @@ impl CanBusMessageEnum {
 
     pub fn serialize(&self, buffer: &mut [u8]) -> usize {
         match self {
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::UnixTime(m) => m.serialize(buffer),
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::PreUnixTime(_) => 0,
             CanBusMessageEnum::NodeStatus(m) => m.serialize(buffer),
             CanBusMessageEnum::Reset(m) => m.serialize(buffer),
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::BaroMeasurement(m) => m.serialize(buffer),
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::IMUMeasurement(m) => m.serialize(buffer),
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::MagMeasurement(m) => m.serialize(buffer),
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::BrightnessMeasurement(m) => m.serialize(buffer),
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::OzysMeasurement(m) => m.serialize(buffer),
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::AmpStatus(m) => m.serialize(buffer),
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::AmpOverwrite(m) => m.serialize(buffer),
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::AmpControl(m) => m.serialize(buffer),
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::AmpResetOutput(m) => m.serialize(buffer),
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::CustomPayloadStatus(m) => m.serialize(buffer),
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::VLStatus(m) => m.serialize(buffer),
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::RocketState(m) => m.serialize(buffer),
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::IcarusStatus(m) => m.serialize(buffer),
-            #[cfg(not(feature = "bootloader"))]
             CanBusMessageEnum::AirBrakesControl(m) => m.serialize(buffer),
             CanBusMessageEnum::DataTransfer(m) => m.serialize(buffer),
             CanBusMessageEnum::Ack(m) => m.serialize(buffer),
@@ -514,9 +404,7 @@ impl CanBusMessageEnum {
     pub fn deserialize(message_type: u8, data: &[u8]) -> Option<Self> {
         match message_type {
             RESET_MESSAGE_TYPE => ResetMessage::deserialize(data).map(CanBusMessageEnum::Reset),
-            #[cfg(not(feature = "bootloader"))]
             PRE_UNIX_TIME_MESSAGE_TYPE => Some(CanBusMessageEnum::PreUnixTime(0)),
-            #[cfg(not(feature = "bootloader"))]
             UNIX_TIME_MESSAGE_TYPE => {
                 UnixTimeMessage::deserialize(data).map(CanBusMessageEnum::UnixTime)
             }
@@ -524,60 +412,46 @@ impl CanBusMessageEnum {
                 NodeStatusMessage::deserialize(data).map(CanBusMessageEnum::NodeStatus)
             }
 
-            #[cfg(not(feature = "bootloader"))]
             BARO_MEASUREMENT_MESSAGE_TYPE => {
                 BaroMeasurementMessage::deserialize(data).map(CanBusMessageEnum::BaroMeasurement)
             }
-            #[cfg(not(feature = "bootloader"))]
             IMU_MEASUREMENT_MESSAGE_TYPE => {
                 IMUMeasurementMessage::deserialize(data).map(CanBusMessageEnum::IMUMeasurement)
             }
-            #[cfg(not(feature = "bootloader"))]
             MAG_MEASUREMENT_MESSAGE_TYPE => {
                 MagMeasurementMessage::deserialize(data).map(CanBusMessageEnum::MagMeasurement)
             }
-            #[cfg(not(feature = "bootloader"))]
             BRIGHTNESS_MEASUREMENT_MESSAGE_TYPE => BrightnessMeasurementMessage::deserialize(data)
                 .map(CanBusMessageEnum::BrightnessMeasurement),
-            #[cfg(not(feature = "bootloader"))]
             OZYS_MEASUREMENT_MESSAGE_TYPE => {
                 OzysMeasurementMessage::deserialize(data).map(CanBusMessageEnum::OzysMeasurement)
             }
 
-            #[cfg(not(feature = "bootloader"))]
             AMP_STATUS_MESSAGE_TYPE => {
                 AmpStatusMessage::deserialize(data).map(CanBusMessageEnum::AmpStatus)
             }
-            #[cfg(not(feature = "bootloader"))]
             AMP_OVERWRITE_MESSAGE_TYPE => {
                 AmpOverwriteMessage::deserialize(data).map(CanBusMessageEnum::AmpOverwrite)
             }
-            #[cfg(not(feature = "bootloader"))]
             AMP_CONTROL_MESSAGE_TYPE => {
                 AmpControlMessage::deserialize(data).map(CanBusMessageEnum::AmpControl)
             }
-            #[cfg(not(feature = "bootloader"))]
             AMP_RESET_OUTPUT_MESSAGE_TYPE => {
                 AmpResetOutputMessage::deserialize(data).map(CanBusMessageEnum::AmpResetOutput)
             }
 
-            #[cfg(not(feature = "bootloader"))]
             CUSTOM_PAYLOAD_STATUS_MESSAGE_TYPE => CustomPayloadStatusMessage::deserialize(data)
                 .map(CanBusMessageEnum::CustomPayloadStatus),
 
-            #[cfg(not(feature = "bootloader"))]
             VL_STATUS_MESSAGE_TYPE => {
                 VLStatusMessage::deserialize(data).map(CanBusMessageEnum::VLStatus)
             }
-            #[cfg(not(feature = "bootloader"))]
             ICARUS_STATUS_MESSAGE_TYPE => {
                 IcarusStatusMessage::deserialize(data).map(CanBusMessageEnum::IcarusStatus)
             }
-            #[cfg(not(feature = "bootloader"))]
             AIRBRAKES_CONTROL_MESSAGE_TYPE => {
                 AirBrakesControlMessage::deserialize(data).map(CanBusMessageEnum::AirBrakesControl)
             }
-            #[cfg(not(feature = "bootloader"))]
             ROCKET_STATE_MESSAGE_TYPE => {
                 RocketStateMessage::deserialize(data).map(CanBusMessageEnum::RocketState)
             }

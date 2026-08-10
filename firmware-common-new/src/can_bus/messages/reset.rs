@@ -11,7 +11,6 @@ pub struct ResetMessage {
     #[packed_field(element_size_bits = "12")]
     pub node_id: u16,
     pub reset_all: bool,
-    pub into_bootloader: bool,
 }
 
 impl CanBusMessage for ResetMessage {
@@ -36,13 +35,11 @@ mod test {
             ResetMessage {
                 node_id: 0,
                 reset_all: false,
-                into_bootloader: false,
             }
             .into(),
             ResetMessage {
                 node_id: 0xFFF,
                 reset_all: true,
-                into_bootloader: true,
             }
             .into(),
         ]
