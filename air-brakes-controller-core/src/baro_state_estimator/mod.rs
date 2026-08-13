@@ -28,6 +28,20 @@ const DESCENT_VELOCITY_THRESHOLD: f32 = -2.0; // m/s
 const COAST_ACCEL_THRESHOLD: f32 = -4.0; // m/s^2
 /// Time constant of the burnout-detection acceleration low-pass filter
 const COAST_ACCEL_FILTER_TIME_CONSTANT: f32 = 0.3; // s
+/// Net samples of low-passed acceleration below the threshold before coasting
+/// is latched. The counter is leaky (drains 1:1 while above threshold) rather
+/// than resetting: the KF's re-convergence after a dropped-sample gap shows up
+/// as a brief positive-acceleration burst that would reset a strict
+/// consecutive counter on every 1 Hz logger stall, deferring the latch by ~10 s
+/// on the Void Lake data. The Void Lake liftoff pressure transient (plume/rail
+/// disturbance on the baro) only accrues ~0.5 s before the rest of the burn
+/// drains it back to zero; real burnout accrues continuously to the latch.
+const COAST_DETECTION_SAMPLES: usize = SAMPLES_PER_S; // 1 s net
+/// Per-sample acceleration clamp before the low-pass. A baro sample arriving
+/// after a dropped-sample gap carries a huge innovation whose single-sample
+/// d(velocity)/dt spike would otherwise punch through the filter and reset the
+/// coasting persistence counter.
+const COAST_ACCEL_CLAMP: f32 = 100.0; // m/s^2
 /// How long the rocket has to descend before the descent is acted upon
 const DESCENT_DETECTION_SAMPLES: usize = SAMPLES_PER_S / 2; // 0.5 s
 /// Altitude has to stay within +- this value to count as standing still
@@ -146,6 +160,8 @@ enum Stage {
         prev_velocity: f32,
         /// low-passed d(velocity)/dt, negative once the motor burns out
         accel_lp: f32,
+        /// consecutive samples with `accel_lp` below the coasting threshold
+        coast_samples: usize,
         /// latched burnout: motors don't relight, so coasting never clears
         coasting: bool,
     },
@@ -237,6 +253,7 @@ impl RocketStateEstimator {
                         descending_samples: 0,
                         prev_velocity: velocity,
                         accel_lp: 0.0,
+                        coast_samples: 0,
                         coasting: false,
                     };
                 }
@@ -246,14 +263,27 @@ impl RocketStateEstimator {
                 descending_samples,
                 prev_velocity,
                 accel_lp,
+                coast_samples,
                 coasting,
             } => {
-                let accel = (velocity - *prev_velocity) / DT;
+                let accel = ((velocity - *prev_velocity) / DT)
+                    .clamp(-COAST_ACCEL_CLAMP, COAST_ACCEL_CLAMP);
                 *prev_velocity = velocity;
                 *accel_lp += (DT / COAST_ACCEL_FILTER_TIME_CONSTANT) * (accel - *accel_lp);
-                if !*coasting && *accel_lp < COAST_ACCEL_THRESHOLD {
-                    log_info!("burnout detected: accel={}m/s^2, v={}m/s", *accel_lp, velocity);
-                    *coasting = true;
+                if !*coasting {
+                    if *accel_lp < COAST_ACCEL_THRESHOLD {
+                        *coast_samples += 1;
+                        if *coast_samples >= COAST_DETECTION_SAMPLES {
+                            log_info!(
+                                "burnout detected: accel={}m/s^2, v={}m/s",
+                                *accel_lp,
+                                velocity
+                            );
+                            *coasting = true;
+                        }
+                    } else {
+                        *coast_samples = coast_samples.saturating_sub(1);
+                    }
                 }
 
                 if velocity < DESCENT_VELOCITY_THRESHOLD {

@@ -205,15 +205,65 @@ fn detects_coasting_after_burnout() {
     }
     assert!(matches!(estimator.state(), RocketState::Ascent { .. }));
 
-    // burnout: within 2 s of gravity-only deceleration the estimator must latch
-    // coasting (the accel low-pass has to unwind from +80 m/s^2, plus KF lag)
-    for _ in 0..(2 * SAMPLES_PER_S) {
+    // burnout: within 3 s of gravity-only deceleration the estimator must latch
+    // coasting (accel low-pass unwind from +80 m/s^2 + KF lag + the 1 s
+    // sustained-below-threshold persistence requirement)
+    for _ in 0..(3 * SAMPLES_PER_S) {
         velocity -= 9.81 * DT;
         altitude += velocity * DT;
         estimator.update(altitude + noise.next());
     }
     assert!(matches!(estimator.state(), RocketState::Ascent { .. }));
-    assert!(estimator.is_coasting(), "burnout not detected 2 s after cutoff");
+    assert!(estimator.is_coasting(), "burnout not detected 3 s after cutoff");
+}
+
+
+
+#[test]
+fn innovation_gate_rejects_pyro_transient() {
+    let mut kf = BaroAltitudeKF::new(200.0);
+    let mut noise = NoiseGen::new(0.5);
+    for _ in 0..(2 * SAMPLES_PER_S) {
+        kf.predict();
+        assert!(kf.update(200.0 + noise.next()));
+    }
+
+    // ejection-charge overpressure: ~60 ms of readings up to 1400 m low
+    for _ in 0..25 {
+        kf.predict();
+        assert!(!kf.update(-1200.0), "transient sample must be rejected");
+    }
+    assert!((kf.altitude() - 200.0).abs() < 1.0, "altitude held through transient");
+    assert!(kf.vertical_velocity().abs() < 1.0, "velocity held through transient");
+
+    // clean data is accepted again immediately, no recovery period
+    kf.predict();
+    assert!(kf.update(200.0));
+}
+
+#[test]
+fn innovation_gate_force_accepts_persistent_offset() {
+    let mut kf = BaroAltitudeKF::new(200.0);
+    for _ in 0..SAMPLES_PER_S {
+        kf.predict();
+        kf.update(200.0);
+    }
+
+    // a persistent 500 m offset is a diverged filter, not a transient: after
+    // 1 s of rejections the gate must give up and snap to the measurement
+    let mut accepted = 0u32;
+    for _ in 0..(2 * SAMPLES_PER_S) {
+        kf.predict();
+        if kf.update(700.0) {
+            accepted += 1;
+        }
+    }
+    assert!(accepted > 0, "gate never re-accepted");
+    assert!(
+        (kf.altitude() - 700.0).abs() < 5.0,
+        "filter did not re-converge, altitude={}",
+        kf.altitude()
+    );
 }
 
 
