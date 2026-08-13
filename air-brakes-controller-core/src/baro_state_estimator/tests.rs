@@ -106,12 +106,15 @@ fn simulate_flight(
 #[test]
 fn dual_deploys_drogue_near_apogee_and_main_at_altitude() {
     let main_agl = 457.2;
-    let mut estimator = RocketStateEstimator::new(FlightProfile::Dual {
-        drogue_chute_minimum_altitude_agl: 500.0,
-        drogue_chute_delay_us: 0,
-        main_chute_altitude_agl: main_agl,
-        main_chute_delay_us: 0,
-    });
+    let mut estimator = RocketStateEstimator::new(
+        FlightProfile::Dual {
+            drogue_chute_minimum_altitude_agl: 500.0,
+            drogue_chute_delay_us: 0,
+            main_chute_altitude_agl: main_agl,
+            main_chute_delay_us: 0,
+        },
+        None,
+    );
 
     let result = simulate_flight(&mut estimator, 200.0, 80.0, 3.0);
     assert!(result.apogee_agl > 1000.0, "apogee={}", result.apogee_agl);
@@ -136,10 +139,13 @@ fn dual_deploys_drogue_near_apogee_and_main_at_altitude() {
 
 #[test]
 fn single_deploys_both_near_apogee() {
-    let mut estimator = RocketStateEstimator::new(FlightProfile::Single {
-        minimum_deployment_altitude_agl: 500.0,
-        delay_us: 0,
-    });
+    let mut estimator = RocketStateEstimator::new(
+        FlightProfile::Single {
+            minimum_deployment_altitude_agl: 500.0,
+            delay_us: 0,
+        },
+        None,
+    );
 
     let result = simulate_flight(&mut estimator, 200.0, 80.0, 3.0);
     assert!(result.apogee_agl > 1000.0);
@@ -164,12 +170,15 @@ fn single_deploys_both_near_apogee() {
 
 #[test]
 fn below_min_apogee_does_not_deploy() {
-    let mut estimator = RocketStateEstimator::new(FlightProfile::Dual {
-        drogue_chute_minimum_altitude_agl: 5000.0,
-        drogue_chute_delay_us: 0,
-        main_chute_altitude_agl: 457.2,
-        main_chute_delay_us: 0,
-    });
+    let mut estimator = RocketStateEstimator::new(
+        FlightProfile::Dual {
+            drogue_chute_minimum_altitude_agl: 5000.0,
+            drogue_chute_delay_us: 0,
+            main_chute_altitude_agl: 457.2,
+            main_chute_delay_us: 0,
+        },
+        None,
+    );
 
     let result = simulate_flight(&mut estimator, 200.0, 40.0, 1.5);
     assert!(result.drogue.is_none());
@@ -182,10 +191,13 @@ fn below_min_apogee_does_not_deploy() {
 
 #[test]
 fn detects_coasting_after_burnout() {
-    let mut estimator = RocketStateEstimator::new(FlightProfile::Single {
-        minimum_deployment_altitude_agl: 300.0,
-        delay_us: 0,
-    });
+    let mut estimator = RocketStateEstimator::new(
+        FlightProfile::Single {
+            minimum_deployment_altitude_agl: 300.0,
+            delay_us: 0,
+        },
+        None,
+    );
     let mut noise = NoiseGen::new(0.5);
     let pad_altitude_asl = 200.0f32;
 
@@ -218,6 +230,86 @@ fn detects_coasting_after_burnout() {
 }
 
 
+
+/// Mach 2 flight with shock-garbage baro while supersonic: the lockout must
+/// engage on the way up, freeze through the garbage, re-seed on exit, and the
+/// flight must still deploy at apogee and land normally.
+#[test]
+fn mach_lockout_survives_supersonic_garbage() {
+    // Sim profile: 4 s burn at 160 m/s^2 -> 640 m/s (~Mach 1.9), gravity-only
+    // coast. Time above Mach 0.75 (~255 m/s): ~2.4 s of burn + ~39 s of coast
+    // ~= 42 s; configured lockout = 45 s (~margin), apogee at ~69 s.
+    let mut estimator = RocketStateEstimator::new(
+        FlightProfile::Single {
+            minimum_deployment_altitude_agl: 1000.0,
+            delay_us: 0,
+        },
+        Some(45_000_000),
+    );
+    let mut noise = NoiseGen::new(0.5);
+    let pad = 200.0f32;
+
+    for _ in 0..(30 * SAMPLES_PER_S) {
+        estimator.update(pad + noise.next());
+    }
+    assert!(matches!(estimator.state(), RocketState::OnPad));
+
+    let mut altitude = pad;
+    let mut velocity = 0.0f32;
+    let mut t = 0.0f32;
+    let mut apogee_agl = 0.0f32;
+    let mut entered_lockout = false;
+    let mut fired_in_lockout = false;
+    let mut drogue_agl = None;
+    let descent_terminal_velocity = -25.0f32;
+    loop {
+        let acceleration = if t < 4.0 { 160.0 } else { -9.81 };
+        velocity += acceleration * DT;
+        if velocity < descent_terminal_velocity {
+            velocity = descent_terminal_velocity;
+        }
+        altitude += velocity * DT;
+        t += DT;
+        if altitude <= pad {
+            break;
+        }
+        apogee_agl = apogee_agl.max(altitude - pad);
+
+        // Above ~Mach 0.85 the static port reads shock garbage: a large
+        // offset plus 50x noise. An unprotected filter would track this.
+        let measured = if velocity.abs() > 0.85 * 340.0 {
+            altitude - 800.0 + noise.next() * 50.0
+        } else {
+            altitude + noise.next()
+        };
+        let pyro = estimator.update(measured);
+        if estimator.in_mach_lockout() {
+            entered_lockout = true;
+            fired_in_lockout |= pyro.is_some();
+        }
+        if matches!(pyro, Some(PyroSelect::PyroDrogue)) {
+            drogue_agl = Some(altitude - pad);
+        }
+    }
+
+    assert!(entered_lockout, "lockout never engaged");
+    assert!(!fired_in_lockout, "pyro fired during lockout");
+    assert!(!estimator.in_mach_lockout(), "lockout never exited");
+
+    let drogue_agl = drogue_agl.expect("expected drogue deploy");
+    assert!(
+        (drogue_agl - apogee_agl).abs() < 100.0,
+        "drogue agl={} apogee={}",
+        drogue_agl,
+        apogee_agl
+    );
+
+    // 10 s on the ground -> landed
+    for _ in 0..(10 * SAMPLES_PER_S) {
+        estimator.update(pad + noise.next());
+    }
+    assert!(matches!(estimator.state(), RocketState::Landed));
+}
 
 #[test]
 fn innovation_gate_rejects_pyro_transient() {

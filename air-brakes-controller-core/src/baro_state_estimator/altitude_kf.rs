@@ -8,8 +8,10 @@ use nalgebra::{Matrix2, SMatrix, SVector, Vector1, Vector2};
 /// State vector  x = [ altitude, vertical_speed ]ᵀ  (units: m, m s⁻¹)
 /// Measurement z = barometric altitude (m)
 ///
-///     xₖ₊₁ = F · xₖ + w,   w ~ 𝒩(0,Q)
-///     zₖ   = H · xₖ + v,   v ~ 𝒩(0,R)
+/// ```text
+/// xₖ₊₁ = F · xₖ + w,   w ~ 𝒩(0,Q)
+/// zₖ   = H · xₖ + v,   v ~ 𝒩(0,R)
+/// ```
 ///
 /// F = ⎡1  dt⎤ ,  H = ⎡1  0⎤
 #[derive(Debug, Clone)]
@@ -52,6 +54,12 @@ const INNOVATION_GATE_M: f32 = 75.0;
 /// long is not a pyro blast but a genuinely diverged filter, which must
 /// re-converge instead of flying blind.
 const MAX_REJECTED_SAMPLES: u32 = SAMPLES_PER_S as u32;
+
+/// Velocity variance used by [`BaroAltitudeKF::reseed`]: after a Mach lockout
+/// the velocity is unknown; (300 m/s)^2 covers any post-lockout speed and lets
+/// the filter pull the true velocity out of the altitude stream within a few
+/// hundred ms.
+const RESEED_VELOCITY_VARIANCE: f32 = 300.0 * 300.0;
 
 impl BaroAltitudeKF {
     pub fn new(initial_altitude: f32) -> Self {
@@ -130,6 +138,21 @@ impl BaroAltitudeKF {
         self.p = (i - k * self.h) * self.p;
         self.p = 0.5 * (self.p + self.p.transpose());
         true
+    }
+
+    /// Re-initialize after a Mach lockout: altitude from the current
+    /// measurement, velocity unknown (large variance). Cheaper and much
+    /// faster-converging than letting the stale pre-lockout state fight the
+    /// innovation gate.
+    pub fn reseed(&mut self, altitude: f32) {
+        self.x = Vector2::new(altitude, 0.0);
+        self.p = Matrix2::new(
+            BARO_ALTITUDE_MEASUREMENT_VARIANCE,
+            0.0,
+            0.0,
+            RESEED_VELOCITY_VARIANCE,
+        );
+        self.rejected_streak = 0;
     }
 
     pub fn altitude(&self) -> f32 {
