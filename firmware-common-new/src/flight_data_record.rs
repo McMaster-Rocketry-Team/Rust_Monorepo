@@ -1,14 +1,12 @@
 use crate::can_bus::messages::vl_status::FlightStage;
 
-/// Legacy v1 on-disk tag (fixed 112-byte [`FlightDataRecord`] blob).
-pub const RECORD_TAG_V1: u8 = 0x00;
-/// High-rate IMU / baro / mag sample.
-pub const RECORD_TAG_IMU: u8 = 0x01;
-/// Low-rate GPS / battery / pyro / flight-stage snapshot.
+/// High-rate IMU / baro / mag / estimator sample.
+pub const RECORD_TAG_FAST: u8 = 0x01;
+/// Low-rate GPS / battery / pyro / airbrakes snapshot.
 pub const RECORD_TAG_SLOW: u8 = 0x02;
 
 #[derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive, Debug, Clone, PartialEq)]
-pub struct FlightDataImuRecord {
+pub struct FlightDataFastRecord {
     pub sequence: u32,
     pub timestamp_us: u64,
     pub acc: [f32; 3],
@@ -16,43 +14,12 @@ pub struct FlightDataImuRecord {
     pub temperature: f32,
     pub pressure: f32,
     pub mag: [f32; 3],
-    pub valid: u8,
-}
-
-/// v2 on-disk slow record (before airbrakes fields were added).
-#[derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive, Debug, Clone, PartialEq)]
-pub struct FlightDataSlowRecordV2 {
-    pub timestamp_us: u64,
-    pub battery_voltage: f32,
-    pub lat_lon: (f64, f64),
-    pub altitude: f32,
-    pub num_of_fixed_satalites: u8,
-    pub hdop: f32,
-    pub vdop: f32,
-    pub pdop: f32,
+    /// State-estimator KF altitude ASL (m). NaN until the estimator has run.
+    pub kf_altitude_asl: f32,
+    /// State-estimator KF vertical velocity (m/s). NaN until the estimator has run.
+    pub kf_vertical_velocity: f32,
     pub flight_stage: FlightStage,
-    pub pyro_flags: u8,
     pub valid: u8,
-}
-
-impl From<FlightDataSlowRecordV2> for FlightDataSlowRecord {
-    fn from(v2: FlightDataSlowRecordV2) -> Self {
-        Self {
-            timestamp_us: v2.timestamp_us,
-            battery_voltage: v2.battery_voltage,
-            lat_lon: v2.lat_lon,
-            altitude: v2.altitude,
-            num_of_fixed_satalites: v2.num_of_fixed_satalites,
-            hdop: v2.hdop,
-            vdop: v2.vdop,
-            pdop: v2.pdop,
-            flight_stage: v2.flight_stage,
-            pyro_flags: v2.pyro_flags,
-            air_brakes_commanded_extension: 0.0,
-            air_brakes_actual_extension: 0.0,
-            valid: v2.valid,
-        }
-    }
 }
 
 #[derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive, Debug, Clone, PartialEq)]
@@ -96,12 +63,12 @@ impl Default for FlightDataSlowRecord {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum LogRecord {
-    Imu(FlightDataImuRecord),
+    Fast(FlightDataFastRecord),
     Slow(FlightDataSlowRecord),
 }
 
-/// Merged view used for CSV export and v1 compatibility.
-#[derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive, Debug, Clone, PartialEq)]
+/// Merged view used for CSV export (one row per fast record).
+#[derive(Debug, Clone, PartialEq)]
 pub struct FlightDataRecord {
     pub record_count: u32,
     pub timestamp_us: u64,
@@ -113,6 +80,9 @@ pub struct FlightDataRecord {
     pub pressure: f32,
 
     pub mag: [f32; 3],
+
+    pub kf_altitude_asl: f32,
+    pub kf_vertical_velocity: f32,
 
     pub battery_voltage: f32,
 
@@ -126,6 +96,7 @@ pub struct FlightDataRecord {
     pub vdop: f32,
     pub pdop: f32,
 
+    /// Full-rate stage from the fast record.
     pub flight_stage: FlightStage,
 
     /// Bitmask for pyro continuity/fire state (see firmware `ContinuityUpdate`).
@@ -136,25 +107,27 @@ pub struct FlightDataRecord {
 }
 
 impl FlightDataRecord {
-    /// Combine one IMU sample with the most recent slow snapshot.
-    pub fn from_imu_and_slow(imu: &FlightDataImuRecord, slow: &FlightDataSlowRecord) -> Self {
+    /// Combine one fast sample with the most recent slow snapshot.
+    pub fn from_fast_and_slow(fast: &FlightDataFastRecord, slow: &FlightDataSlowRecord) -> Self {
         Self {
-            record_count: imu.sequence,
-            timestamp_us: imu.timestamp_us,
-            acc: imu.acc,
-            gyro: imu.gyro,
-            temperature: imu.temperature,
-            pressure: imu.pressure,
-            mag: imu.mag,
+            record_count: fast.sequence,
+            timestamp_us: fast.timestamp_us,
+            acc: fast.acc,
+            gyro: fast.gyro,
+            temperature: fast.temperature,
+            pressure: fast.pressure,
+            mag: fast.mag,
+            kf_altitude_asl: fast.kf_altitude_asl,
+            kf_vertical_velocity: fast.kf_vertical_velocity,
             battery_voltage: slow.battery_voltage,
-            valid: imu.valid | slow.valid,
+            valid: fast.valid | slow.valid,
             lat_lon: slow.lat_lon,
             altitude: slow.altitude,
             num_of_fixed_satalites: slow.num_of_fixed_satalites,
             hdop: slow.hdop,
             vdop: slow.vdop,
             pdop: slow.pdop,
-            flight_stage: slow.flight_stage,
+            flight_stage: fast.flight_stage,
             pyro_flags: slow.pyro_flags,
             air_brakes_commanded_extension: slow.air_brakes_commanded_extension,
             air_brakes_actual_extension: slow.air_brakes_actual_extension,
@@ -162,7 +135,7 @@ impl FlightDataRecord {
     }
 }
 
-/// Expand a tagged v2 log into merged rows (one CSV row per IMU sample).
+/// Expand a tagged log into merged rows (one CSV row per fast sample).
 #[cfg(any(feature = "std", test))]
 pub fn merge_log_records(log: &[LogRecord]) -> std::vec::Vec<FlightDataRecord> {
     let mut slow = FlightDataSlowRecord::default();
@@ -170,7 +143,7 @@ pub fn merge_log_records(log: &[LogRecord]) -> std::vec::Vec<FlightDataRecord> {
     for rec in log {
         match rec {
             LogRecord::Slow(s) => slow = s.clone(),
-            LogRecord::Imu(imu) => out.push(FlightDataRecord::from_imu_and_slow(imu, &slow)),
+            LogRecord::Fast(fast) => out.push(FlightDataRecord::from_fast_and_slow(fast, &slow)),
         }
     }
     out

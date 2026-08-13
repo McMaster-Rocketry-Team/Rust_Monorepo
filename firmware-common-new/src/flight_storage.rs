@@ -1,7 +1,5 @@
 //! On-SD-card and over-USB storage format for flight data records.
 //!
-//! ## v2 layout (tagged stream)
-//!
 //! ```text
 //! block 0            : superblock (see [`encode_superblock`])
 //! block 1 .. 1+N     : tagged records packed back-to-back:
@@ -9,16 +7,14 @@
 //!                      zero-padded, CRC32 in the last 4 bytes.
 //! ```
 //!
-//! Tags: [`RECORD_TAG_IMU`], [`RECORD_TAG_SLOW`] (see `flight_data_record`).
+//! Tags: [`RECORD_TAG_FAST`], [`RECORD_TAG_SLOW`] (see `flight_data_record`).
 //!
-//! ## v1 layout (legacy)
-//!
-//! Fixed-size rkyv [`FlightDataRecord`] blobs (112 bytes each). Still readable by
-//! rocket-cli; new firmware writes v2 only.
+//! Older layouts (v1 fixed records, v2/v3 tagged streams) are NOT readable:
+//! the firmware starts a fresh log over them and rocket-cli reports a clean
+//! "unsupported format" error instead of decoding.
 
 use crate::flight_data_record::{
-    FlightDataImuRecord, FlightDataRecord, FlightDataSlowRecord, FlightDataSlowRecordV2,
-    LogRecord, RECORD_TAG_IMU, RECORD_TAG_SLOW, RECORD_TAG_V1,
+    FlightDataFastRecord, FlightDataSlowRecord, LogRecord, RECORD_TAG_FAST, RECORD_TAG_SLOW,
 };
 
 use rkyv::{
@@ -52,43 +48,23 @@ pub const CONFIG_BLOCK_VERSION: u32 = 1;
 /// Default target apogee AGL (m) when no config is stored.
 pub const DEFAULT_TARGET_APOGEE_AGL: f32 = 4000.0;
 
-/// On-disk format version. Bump when the record or superblock layout changes.
-pub const STORAGE_VERSION: u32 = 3;
+/// On-disk format version. Bump when the record or superblock layout changes;
+/// logs written at any other version are treated as absent.
+pub const STORAGE_VERSION: u32 = 4;
 
-/// v2 tagged stream (SLOW records without airbrakes fields).
-pub const STORAGE_VERSION_V2: u32 = 2;
-
-/// Legacy v1 format version.
-pub const STORAGE_VERSION_V1: u32 = 1;
-
-/// Identifies a valid USB download response header.
-pub const RESPONSE_MAGIC: [u8; 4] = *b"VLDR";
-
-/// Length of the USB download response header in bytes.
-pub const HEADER_LEN: usize = 16;
-
-/// v1 serialised length of one [`FlightDataRecord`].
-pub const RECORD_LEN_V1: usize = size_of::<<FlightDataRecord as rkyv::Archive>::Archived>();
-
-/// v1 records per block.
-pub const RECORDS_PER_BLOCK_V1: usize = USABLE_PER_BLOCK / RECORD_LEN_V1;
-
-/// USB/superblock `record_len` field for the v2 tagged stream (variable per record).
+/// USB/superblock `record_len` field for the tagged stream (variable per record).
 pub const RECORD_LEN_TAGGED: u32 = 0;
 
-/// rkyv body sizes for v2 record types.
-pub const IMU_BODY_LEN: usize = size_of::<<FlightDataImuRecord as rkyv::Archive>::Archived>();
+/// rkyv body sizes for tagged record types.
+pub const FAST_BODY_LEN: usize = size_of::<<FlightDataFastRecord as rkyv::Archive>::Archived>();
 pub const SLOW_BODY_LEN: usize = size_of::<<FlightDataSlowRecord as rkyv::Archive>::Archived>();
-pub const SLOW_BODY_LEN_V2: usize =
-    size_of::<<FlightDataSlowRecordV2 as rkyv::Archive>::Archived>();
 
-pub const IMU_WIRE_LEN: usize = 1 + IMU_BODY_LEN;
+pub const FAST_WIRE_LEN: usize = 1 + FAST_BODY_LEN;
 pub const SLOW_WIRE_LEN: usize = 1 + SLOW_BODY_LEN;
-pub const SLOW_WIRE_LEN_V2: usize = 1 + SLOW_BODY_LEN_V2;
 
 /// Largest tagged record on the wire.
-pub const MAX_WIRE_LEN: usize = if IMU_WIRE_LEN > SLOW_WIRE_LEN {
-    IMU_WIRE_LEN
+pub const MAX_WIRE_LEN: usize = if FAST_WIRE_LEN > SLOW_WIRE_LEN {
+    FAST_WIRE_LEN
 } else {
     SLOW_WIRE_LEN
 };
@@ -100,14 +76,14 @@ fn crc32(data: &[u8]) -> u32 {
     crc::Crc::<u32>::new(&crc::CRC_32_ISO_HDLC).checksum(data)
 }
 
-fn serialize_imu_body(imu: &FlightDataImuRecord) -> [u8; IMU_BODY_LEN] {
-    let mut scratch = AlignedBuf([0u8; IMU_BODY_LEN]);
+fn serialize_fast_body(fast: &FlightDataFastRecord) -> [u8; FAST_BODY_LEN] {
+    let mut scratch = AlignedBuf([0u8; FAST_BODY_LEN]);
     to_bytes_in_with_alloc::<_, _, Failure>(
-        imu,
+        fast,
         Buffer::from(&mut scratch.0[..]),
         SubAllocator::empty(),
     )
-    .expect("IMU serialization cannot fail");
+    .expect("FAST serialization cannot fail");
     scratch.0
 }
 
@@ -122,34 +98,16 @@ fn serialize_slow_body(slow: &FlightDataSlowRecord) -> [u8; SLOW_BODY_LEN] {
     scratch.0
 }
 
-fn deserialize_imu_body(bytes: &[u8]) -> Option<FlightDataImuRecord> {
-    if bytes.len() < IMU_BODY_LEN {
+fn deserialize_fast_body(bytes: &[u8]) -> Option<FlightDataFastRecord> {
+    if bytes.len() < FAST_BODY_LEN {
         return None;
     }
-    let mut aligned = AlignedBuf([0u8; IMU_BODY_LEN]);
-    aligned.0.copy_from_slice(&bytes[..IMU_BODY_LEN]);
-    unsafe { from_bytes_unchecked::<FlightDataImuRecord, Failure>(&aligned.0) }.ok()
+    let mut aligned = AlignedBuf([0u8; FAST_BODY_LEN]);
+    aligned.0.copy_from_slice(&bytes[..FAST_BODY_LEN]);
+    unsafe { from_bytes_unchecked::<FlightDataFastRecord, Failure>(&aligned.0) }.ok()
 }
 
 fn deserialize_slow_body(bytes: &[u8]) -> Option<FlightDataSlowRecord> {
-    deserialize_slow_body_at_version(bytes, STORAGE_VERSION)
-}
-
-fn deserialize_slow_body_v2(bytes: &[u8]) -> Option<FlightDataSlowRecord> {
-    if bytes.len() < SLOW_BODY_LEN_V2 {
-        return None;
-    }
-    let mut aligned = AlignedBuf([0u8; SLOW_BODY_LEN_V2]);
-    aligned.0.copy_from_slice(&bytes[..SLOW_BODY_LEN_V2]);
-    let v2: FlightDataSlowRecordV2 =
-        unsafe { from_bytes_unchecked::<FlightDataSlowRecordV2, Failure>(&aligned.0) }.ok()?;
-    Some(v2.into())
-}
-
-fn deserialize_slow_body_at_version(bytes: &[u8], storage_version: u32) -> Option<FlightDataSlowRecord> {
-    if storage_version == STORAGE_VERSION_V2 {
-        return deserialize_slow_body_v2(bytes);
-    }
     if bytes.len() < SLOW_BODY_LEN {
         return None;
     }
@@ -158,23 +116,15 @@ fn deserialize_slow_body_at_version(bytes: &[u8], storage_version: u32) -> Optio
     unsafe { from_bytes_unchecked::<FlightDataSlowRecord, Failure>(&aligned.0) }.ok()
 }
 
-fn slow_wire_len_for_version(storage_version: u32) -> usize {
-    if storage_version == STORAGE_VERSION_V2 {
-        SLOW_WIRE_LEN_V2
-    } else {
-        SLOW_WIRE_LEN
-    }
-}
-
-/// Serialise a tagged v2 record. Returns the wire bytes and their length.
+/// Serialise a tagged record. Returns the wire bytes and their length.
 pub fn serialize_log_record(record: &LogRecord) -> ([u8; MAX_WIRE_LEN], usize) {
     let mut buf = [0u8; MAX_WIRE_LEN];
     let len = match record {
-        LogRecord::Imu(imu) => {
-            buf[0] = RECORD_TAG_IMU;
-            let body = serialize_imu_body(imu);
-            buf[1..1 + IMU_BODY_LEN].copy_from_slice(&body);
-            IMU_WIRE_LEN
+        LogRecord::Fast(fast) => {
+            buf[0] = RECORD_TAG_FAST;
+            let body = serialize_fast_body(fast);
+            buf[1..1 + FAST_BODY_LEN].copy_from_slice(&body);
+            FAST_WIRE_LEN
         }
         LogRecord::Slow(slow) => {
             buf[0] = RECORD_TAG_SLOW;
@@ -188,66 +138,26 @@ pub fn serialize_log_record(record: &LogRecord) -> ([u8; MAX_WIRE_LEN], usize) {
 
 /// Wire length of the tagged record starting at `bytes`, or `None` if unknown tag.
 pub fn log_record_wire_len(bytes: &[u8]) -> Option<usize> {
-    log_record_wire_len_for_version(bytes, STORAGE_VERSION)
-}
-
-/// Wire length for a tagged record at `storage_version` (v2 vs v3 SLOW bodies differ).
-pub fn log_record_wire_len_for_version(bytes: &[u8], storage_version: u32) -> Option<usize> {
     match *bytes.first()? {
-        RECORD_TAG_IMU => Some(IMU_WIRE_LEN),
-        RECORD_TAG_SLOW => Some(slow_wire_len_for_version(storage_version)),
-        RECORD_TAG_V1 => Some(RECORD_LEN_V1),
+        RECORD_TAG_FAST => Some(FAST_WIRE_LEN),
+        RECORD_TAG_SLOW => Some(SLOW_WIRE_LEN),
         _ => None,
     }
 }
 
 /// Deserialise one tagged record from a block slice at `offset`.
 pub fn deserialize_log_record_at(block: &[u8], offset: usize) -> Option<(LogRecord, usize)> {
-    deserialize_log_record_at_version(block, offset, STORAGE_VERSION)
-}
-
-/// Deserialise one tagged record using the on-card storage version.
-pub fn deserialize_log_record_at_version(
-    block: &[u8],
-    offset: usize,
-    storage_version: u32,
-) -> Option<(LogRecord, usize)> {
-    let wire_len = log_record_wire_len_for_version(&block[offset..], storage_version)?;
+    let wire_len = log_record_wire_len(&block[offset..])?;
     let end = offset + wire_len;
     if end > block.len() {
         return None;
     }
     let record = match block[offset] {
-        RECORD_TAG_IMU => LogRecord::Imu(deserialize_imu_body(&block[offset + 1..end])?),
-        RECORD_TAG_SLOW => LogRecord::Slow(deserialize_slow_body_at_version(
-            &block[offset + 1..end],
-            storage_version,
-        )?),
-        RECORD_TAG_V1 => {
-            let full = deserialize_record_v1(&block[offset..offset + RECORD_LEN_V1])?;
-            return Some((
-                LogRecord::Imu(flight_data_record_v1_to_imu(&full)),
-                RECORD_LEN_V1,
-            ));
-        }
+        RECORD_TAG_FAST => LogRecord::Fast(deserialize_fast_body(&block[offset + 1..end])?),
+        RECORD_TAG_SLOW => LogRecord::Slow(deserialize_slow_body(&block[offset + 1..end])?),
         _ => return None,
     };
     Some((record, wire_len))
-}
-
-fn flight_data_record_v1_to_imu(r: &FlightDataRecord) -> FlightDataImuRecord {
-    FlightDataImuRecord {
-        sequence: r.record_count,
-        timestamp_us: r.timestamp_us,
-        acc: r.acc,
-        gyro: r.gyro,
-        temperature: r.temperature,
-        pressure: r.pressure,
-        mag: r.mag,
-        valid: r.valid & (crate::flight_data_record::VALID_IMU
-            | crate::flight_data_record::VALID_BARO
-            | crate::flight_data_record::VALID_MAG),
-    }
 }
 
 /// Count tagged records whose wire image fits in `data[..used_bytes]`.
@@ -266,30 +176,6 @@ pub fn count_records_in_bytes(data: &[u8], used_bytes: usize) -> u32 {
         count += 1;
     }
     count
-}
-
-// --- v1 helpers (read-only compat) ---
-
-/// Serialise one v1 [`FlightDataRecord`].
-pub fn serialize_record_v1(record: &FlightDataRecord) -> [u8; RECORD_LEN_V1] {
-    let mut scratch = AlignedBuf([0u8; RECORD_LEN_V1]);
-    to_bytes_in_with_alloc::<_, _, Failure>(
-        record,
-        Buffer::from(&mut scratch.0[..]),
-        SubAllocator::empty(),
-    )
-    .expect("record serialization cannot fail with a correctly-sized buffer");
-    scratch.0
-}
-
-/// Deserialise one v1 record.
-pub fn deserialize_record_v1(bytes: &[u8]) -> Option<FlightDataRecord> {
-    if bytes.len() < RECORD_LEN_V1 {
-        return None;
-    }
-    let mut aligned = AlignedBuf([0u8; RECORD_LEN_V1]);
-    aligned.0.copy_from_slice(&bytes[..RECORD_LEN_V1]);
-    unsafe { from_bytes_unchecked::<FlightDataRecord, Failure>(&aligned.0) }.ok()
 }
 
 /// Stamp the CRC32 of `block[0..508]` into `block[508..512]`.
@@ -318,7 +204,7 @@ pub struct SuperblockInfo {
     pub record_count: u32,
     /// Number of live data blocks (starting at [`DATA_START_BLOCK`]).
     pub block_count: u32,
-    /// Bytes used in the last data block (v2). Zero for v1.
+    /// Bytes used in the last data block.
     pub last_block_offset: u32,
 }
 
@@ -366,7 +252,7 @@ pub fn decode_config_block(block: &[u8; BLOCK_SIZE]) -> Option<AvionicsConfig> {
     })
 }
 
-/// Build a 512-byte superblock describing the current log state (v2).
+/// Build a 512-byte superblock describing the current log state.
 ///
 /// Layout: magic(4) | version(4) | record_count(4) | block_count(4) |
 /// last_block_offset(4) | reserved(4) | crc32(4, last 4 bytes).
@@ -382,7 +268,8 @@ pub fn encode_superblock(record_count: u32, block_count: u32, last_block_offset:
     b
 }
 
-/// Parse a superblock (v1 or v2).
+/// Parse a superblock. Superblocks from other storage versions decode to `None`
+/// (the firmware then starts a fresh log over the old data).
 pub fn decode_superblock(block: &[u8; BLOCK_SIZE]) -> Option<SuperblockInfo> {
     if block[0..4] != SUPERBLOCK_MAGIC {
         return None;
@@ -391,34 +278,20 @@ pub fn decode_superblock(block: &[u8; BLOCK_SIZE]) -> Option<SuperblockInfo> {
         return None;
     }
     let version = u32::from_le_bytes(block[4..8].try_into().ok()?);
-    let record_count = u32::from_le_bytes(block[8..12].try_into().ok()?);
-    let block_count = u32::from_le_bytes(block[12..16].try_into().ok()?);
-    match version {
-        STORAGE_VERSION | STORAGE_VERSION_V2 => Some(SuperblockInfo {
-            storage_version: version,
-            record_count,
-            block_count,
-            last_block_offset: u32::from_le_bytes(block[16..20].try_into().ok()?),
-        }),
-        STORAGE_VERSION_V1 => {
-            let record_len = u32::from_le_bytes(block[16..20].try_into().ok()?);
-            if record_len as usize != RECORD_LEN_V1 {
-                return None;
-            }
-            Some(SuperblockInfo {
-                storage_version: version,
-                record_count,
-                block_count,
-                last_block_offset: 0,
-            })
-        }
-        _ => None,
+    if version != STORAGE_VERSION {
+        return None;
     }
+    Some(SuperblockInfo {
+        storage_version: version,
+        record_count: u32::from_le_bytes(block[8..12].try_into().ok()?),
+        block_count: u32::from_le_bytes(block[12..16].try_into().ok()?),
+        last_block_offset: u32::from_le_bytes(block[16..20].try_into().ok()?),
+    })
 }
 
 /// Build the 16-byte USB download response header.
 ///
-/// `record_len` is [`RECORD_LEN_TAGGED`] (0) for v2.
+/// `record_len` is [`RECORD_LEN_TAGGED`] (0) for the tagged stream.
 pub fn encode_response_header(record_count: u32, block_count: u32) -> [u8; HEADER_LEN] {
     let mut h = [0u8; HEADER_LEN];
     h[0..4].copy_from_slice(&RESPONSE_MAGIC);
@@ -427,6 +300,12 @@ pub fn encode_response_header(record_count: u32, block_count: u32) -> [u8; HEADE
     h[12..16].copy_from_slice(&block_count.to_le_bytes());
     h
 }
+
+/// Identifies a valid USB download response header.
+pub const RESPONSE_MAGIC: [u8; 4] = *b"VLDR";
+
+/// Length of the USB download response header in bytes.
+pub const HEADER_LEN: usize = 16;
 
 /// Decoded USB download response header: `(record_count, record_len, block_count)`.
 pub fn decode_response_header(buf: &[u8]) -> Option<(u32, u32, u32)> {
@@ -439,46 +318,13 @@ pub fn decode_response_header(buf: &[u8]) -> Option<(u32, u32, u32)> {
     Some((record_count, record_len, block_count))
 }
 
-/// Parse v1 fixed records (legacy). Host only.
+/// Parse tagged records from block bytes. Host only. Returns `None` when the
+/// stream does not decode cleanly (e.g. a log written by older firmware).
 #[cfg(any(feature = "std", test))]
-pub fn parse_records_v1(
-    data: &[u8],
-    record_count: u32,
-    block_count: u32,
-) -> Option<std::vec::Vec<FlightDataRecord>> {
-    let blocks = data;
-    let mut records = std::vec::Vec::with_capacity(record_count as usize);
-    let mut read = 0u32;
-    for i in 0..block_count as usize {
-        let start = i * BLOCK_SIZE;
-        let block: &[u8; BLOCK_SIZE] = blocks.get(start..start + BLOCK_SIZE)?.try_into().ok()?;
-        let in_block = (RECORDS_PER_BLOCK_V1 as u32).min(record_count - read);
-        for j in 0..in_block as usize {
-            let off = j * RECORD_LEN_V1;
-            records.push(deserialize_record_v1(&block[off..off + RECORD_LEN_V1])?);
-            read += 1;
-        }
-    }
-    Some(records)
-}
-
-/// Parse v2/v3 tagged records from block bytes. Host only.
-#[cfg(any(feature = "std", test))]
-pub fn parse_log_records_v2(
+pub fn parse_log_records(
     record_count: u32,
     blocks: &[u8],
     block_count: u32,
-) -> Option<std::vec::Vec<LogRecord>> {
-    parse_log_records_tagged(record_count, blocks, block_count, STORAGE_VERSION)
-}
-
-/// Parse tagged records for a specific on-card storage version. Host only.
-#[cfg(any(feature = "std", test))]
-pub fn parse_log_records_tagged(
-    record_count: u32,
-    blocks: &[u8],
-    block_count: u32,
-    storage_version: u32,
 ) -> Option<std::vec::Vec<LogRecord>> {
     let mut records = std::vec::Vec::with_capacity(record_count as usize);
     let mut read = 0u32;
@@ -487,9 +333,7 @@ pub fn parse_log_records_tagged(
         let block = blocks.get(start..start + BLOCK_SIZE)?;
         let mut off = 0usize;
         while read < record_count {
-            let Some((rec, wire_len)) =
-                deserialize_log_record_at_version(block, off, storage_version)
-            else {
+            let Some((rec, wire_len)) = deserialize_log_record_at(block, off) else {
                 break;
             };
             if off + wire_len > USABLE_PER_BLOCK {
@@ -515,8 +359,8 @@ mod tests {
         VALID_BARO, VALID_BATTERY, VALID_GPS_FIX, VALID_IMU, merge_log_records,
     };
 
-    fn sample_imu(i: u32) -> FlightDataImuRecord {
-        FlightDataImuRecord {
+    fn sample_fast(i: u32) -> FlightDataFastRecord {
+        FlightDataFastRecord {
             sequence: i,
             timestamp_us: i as u64 * 2400,
             acc: [i as f32, -1.5, 9.81],
@@ -524,6 +368,9 @@ mod tests {
             temperature: 21.5,
             pressure: 101325.0 - i as f32,
             mag: [12.0, -34.0, 56.0],
+            kf_altitude_asl: 271.5 + i as f32,
+            kf_vertical_velocity: 0.25 * i as f32,
+            flight_stage: FlightStage::PoweredAscent,
             valid: VALID_IMU | VALID_BARO,
         }
     }
@@ -571,12 +418,12 @@ mod tests {
     }
 
     #[test]
-    fn imu_record_round_trips() {
-        let r = LogRecord::Imu(sample_imu(7));
+    fn fast_record_round_trips() {
+        let r = LogRecord::Fast(sample_fast(7));
         let (bytes, len) = serialize_log_record(&r);
-        assert_eq!(len, IMU_WIRE_LEN);
+        assert_eq!(len, FAST_WIRE_LEN);
         let (back, wire) = deserialize_log_record_at(&bytes[..len], 0).unwrap();
-        assert_eq!(wire, IMU_WIRE_LEN);
+        assert_eq!(wire, FAST_WIRE_LEN);
         assert_eq!(back, r);
     }
 
@@ -590,13 +437,22 @@ mod tests {
     }
 
     #[test]
-    fn superblock_v2_round_trips() {
+    fn superblock_round_trips() {
         let sb = encode_superblock(99, 5, 123);
         let info = decode_superblock(&sb).expect("decode");
         assert_eq!(info.storage_version, STORAGE_VERSION);
         assert_eq!(info.record_count, 99);
         assert_eq!(info.block_count, 5);
         assert_eq!(info.last_block_offset, 123);
+    }
+
+    #[test]
+    fn old_version_superblock_rejected() {
+        let mut sb = encode_superblock(99, 5, 123);
+        sb[4..8].copy_from_slice(&3u32.to_le_bytes());
+        let crc = super::crc32(&sb[..USABLE_PER_BLOCK]);
+        sb[USABLE_PER_BLOCK..].copy_from_slice(&crc.to_le_bytes());
+        assert!(decode_superblock(&sb).is_none());
     }
 
     #[test]
@@ -623,7 +479,7 @@ mod tests {
             if i % 5 == 0 {
                 log.push(LogRecord::Slow(sample_slow(i)));
             }
-            log.push(LogRecord::Imu(sample_imu(i)));
+            log.push(LogRecord::Fast(sample_fast(i)));
         }
         let n = log.len() as u32;
         let (blocks, last_off) = pack_log(&log);
@@ -638,12 +494,15 @@ mod tests {
             decode_response_header(&wire).unwrap();
         assert_eq!(record_count, n);
         assert_eq!(record_len, RECORD_LEN_TAGGED);
-        let recovered = parse_log_records_v2(record_count, &wire[HEADER_LEN..], block_count).unwrap();
+        let recovered = parse_log_records(record_count, &wire[HEADER_LEN..], block_count).unwrap();
         assert_eq!(recovered, log);
 
         let merged = merge_log_records(&recovered);
         assert_eq!(merged.len(), 20);
         assert_eq!(merged[0].record_count, 0);
+        // Stage comes from the fast record at full rate, not the slow snapshot.
+        assert_eq!(merged[0].flight_stage, FlightStage::PoweredAscent);
+        assert_eq!(merged[0].kf_altitude_asl, 271.5);
 
         let sb = encode_superblock(n, blocks.len() as u32, last_off);
         let info = decode_superblock(&sb).unwrap();

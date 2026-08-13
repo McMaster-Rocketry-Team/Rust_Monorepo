@@ -1,6 +1,6 @@
 //! Read flight-data records off a VLF5 over USB-C and write them as CSV.
 //!
-//! The VLF5 firmware logs tagged [`LogRecord`]s (IMU + SLOW) to its SD card.
+//! The VLF5 firmware logs tagged [`LogRecord`]s (FAST + SLOW) to its SD card.
 //! This module speaks the small vendor protocol in
 //! [`firmware_common_new::flight_storage`]: a vendor control transfer carries a
 //! [`CliRequest`] in `wValue`, and the device replies on the bulk-IN endpoint
@@ -18,9 +18,8 @@ use firmware_common_new::flight_data_record::{
     merge_log_records,
 };
 use firmware_common_new::flight_storage::{
-    BLOCK_SIZE, HEADER_LEN, RECORD_LEN_TAGGED, RECORD_LEN_V1, RECORDS_PER_BLOCK_V1, RESPONSE_MAGIC,
-    STORAGE_VERSION, STORAGE_VERSION_V2, decode_response_header, parse_log_records_tagged,
-    parse_records_v1, verify_data_block,
+    BLOCK_SIZE, HEADER_LEN, RECORD_LEN_TAGGED, RESPONSE_MAGIC, decode_response_header,
+    parse_log_records, verify_data_block,
 };
 use firmware_common_new::vlp::usb::CliRequest;
 
@@ -140,10 +139,11 @@ fn read_response(handle: &DeviceHandle<Context>) -> Result<Vec<u8>> {
                     let (_record_count, record_len, block_count) =
                         decode_response_header(&data[..HEADER_LEN])
                             .ok_or_else(|| anyhow!("device sent an invalid response header"))?;
-                    if record_len != RECORD_LEN_TAGGED && record_len as usize != RECORD_LEN_V1 {
+                    if record_len != RECORD_LEN_TAGGED {
                         bail!(
-                            "unsupported record layout: device reports record_len={record_len}. \
-                             Rebuild rocket-cli from the same source as the firmware."
+                            "unsupported record layout: device reports record_len={record_len} \
+                             (a legacy v1 log). Rebuild rocket-cli from the same source as the \
+                             firmware, or clear the storage."
                         );
                     }
                     expected = Some(HEADER_LEN + block_count as usize * BLOCK_SIZE);
@@ -228,31 +228,22 @@ fn parse_records(data: &[u8]) -> Result<(u32, Vec<FlightDataRecord>)> {
         );
     }
 
-    let merged = if record_len == RECORD_LEN_TAGGED {
-        let log = parse_tagged_log(log_record_count, blocks, block_count)
-            .ok_or_else(|| anyhow!("failed to decode tagged log stream"))?;
-        merge_log_records(&log)
-    } else {
-        parse_records_v1(blocks, log_record_count, block_count)
-            .ok_or_else(|| anyhow!("failed to decode v1 log stream"))?
-    };
+    if record_len != RECORD_LEN_TAGGED {
+        bail!(
+            "the log on this VLF5 uses a legacy v1 layout this rocket-cli no longer reads. \
+             Use an older rocket-cli to download it, or clear the storage."
+        );
+    }
+    let log = parse_log_records(log_record_count, blocks, block_count).ok_or_else(|| {
+        anyhow!(
+            "failed to decode the log stream — it was likely written by older firmware \
+             (storage format v3 or earlier). Use an older rocket-cli to download it, or \
+             clear the storage."
+        )
+    })?;
+    let merged = merge_log_records(&log);
 
     Ok((log_record_count, merged))
-}
-
-fn parse_tagged_log(
-    record_count: u32,
-    blocks: &[u8],
-    block_count: u32,
-) -> Option<Vec<firmware_common_new::flight_data_record::LogRecord>> {
-    for version in [STORAGE_VERSION, STORAGE_VERSION_V2] {
-        if let Some(log) = parse_log_records_tagged(record_count, blocks, block_count, version) {
-            if log.len() == record_count as usize {
-                return Some(log);
-            }
-        }
-    }
-    None
 }
 
 fn bit(mask: u8, flag: u8) -> String {
@@ -275,6 +266,8 @@ fn write_csv(path: &str, records: &[FlightDataRecord]) -> Result<()> {
         "mag_x",
         "mag_y",
         "mag_z",
+        "kf_altitude_asl",
+        "kf_vertical_velocity",
         "battery_voltage",
         "lat",
         "lon",
@@ -318,6 +311,8 @@ fn write_csv(path: &str, records: &[FlightDataRecord]) -> Result<()> {
             r.mag[0].to_string(),
             r.mag[1].to_string(),
             r.mag[2].to_string(),
+            r.kf_altitude_asl.to_string(),
+            r.kf_vertical_velocity.to_string(),
             r.battery_voltage.to_string(),
             r.lat_lon.0.to_string(),
             r.lat_lon.1.to_string(),
@@ -366,11 +361,11 @@ pub fn list_files() -> Result<()> {
         block_count as usize * BLOCK_SIZE
     );
     if record_len == RECORD_LEN_TAGGED {
-        println!("  format       : tagged v2 (IMU + SLOW stream)");
+        println!("  format       : tagged (FAST + SLOW stream)");
     } else {
         println!(
-            "  format       : v1 fixed ({} bytes, {} records/block)",
-            record_len, RECORDS_PER_BLOCK_V1
+            "  format       : legacy v1 fixed ({} bytes/record; not downloadable with this rocket-cli)",
+            record_len
         );
     }
     if record_count == 0 {
@@ -388,7 +383,7 @@ pub fn download_file(output: &str) -> Result<()> {
     let (log_record_count, records) = parse_records(&data)?;
     write_csv(output, &records)?;
     println!(
-        "Wrote {} IMU row(s) from {} on-card record(s) to {}",
+        "Wrote {} fast row(s) from {} on-card record(s) to {}",
         records.len(),
         log_record_count,
         output
