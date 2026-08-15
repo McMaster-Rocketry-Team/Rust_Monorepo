@@ -16,4 +16,5 @@
   "errorLens.messageEnabled": true,
   "errorLens.enabled": true,
   "window.title": "Monorepo ${separator} ${activeEditorShort}",
+  "cmake.sourceDirectory": "/Users/ilya/Desktop/Rocketry/controls/Rust_Monorepo/firmware-common-cpp",
 }

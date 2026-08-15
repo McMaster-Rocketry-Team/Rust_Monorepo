@@ -381,7 +381,7 @@ impl MessageRow {
                     ("out 1", true, Self::format_amp_output_status(&m.out1)),
                     ("out 2", true, Self::format_amp_output_status(&m.out2)),
                     ("out 3", true, Self::format_amp_output_status(&m.out3)),
-                    ("out 4", true, Self::format_amp_output_status(&m.out4)),
+                    // ("out 4", true, Self::format_amp_output_status(&m.out4)),
                 ],
             ),
             CanBusMessageEnum::AmpOverwrite(m) => self.draw_fields(
@@ -391,7 +391,7 @@ impl MessageRow {
                     ("out 1", true, Self::format_power_output_overwrite(m.out1)),
                     ("out 2", true, Self::format_power_output_overwrite(m.out2)),
                     ("out 3", true, Self::format_power_output_overwrite(m.out3)),
-                    ("out 4", true, Self::format_power_output_overwrite(m.out4)),
+                    // ("out 4", true, Self::format_power_output_overwrite(m.out4)),
                 ],
             ),
             CanBusMessageEnum::AmpControl(m) => self.draw_fields(
@@ -401,7 +401,7 @@ impl MessageRow {
                     ("out 1 enable", true, Self::format_bool(m.out1_enable)),
                     ("out 2 enable", true, Self::format_bool(m.out2_enable)),
                     ("out 3 enable", true, Self::format_bool(m.out3_enable)),
-                    ("out 4 enable", true, Self::format_bool(m.out4_enable)),
+                    // ("out 4 enable", true, Self::format_bool(m.out4_enable)),
                 ],
             ),
             CanBusMessageEnum::AmpResetOutput(m) => self.draw_fields(
