@@ -335,14 +335,14 @@ impl View for DownlinkPacketDisplay {
                                     p.amp_out3(),
                                 ),
                             ),
-                            (
-                                "amp out 4",
-                                true,
-                                Self::format_amp_output_status(
-                                    p.amp_out4_overwrote(),
-                                    p.amp_out4(),
-                                ),
-                            ),
+                            // (
+                            //     "amp out 4",
+                            //     true,
+                            //     Self::format_amp_output_status(
+                            //         p.amp_out4_overwrote(),
+                            //         p.amp_out4(),
+                            //     ),
+                            // ),
                         ],
                     ],
                 ),
@@ -478,14 +478,14 @@ impl View for DownlinkPacketDisplay {
                                     p.amp_out3(),
                                 ),
                             ),
-                            (
-                                "amp out 4",
-                                true,
-                                Self::format_amp_output_status(
-                                    p.amp_out4_overwrote(),
-                                    p.amp_out4(),
-                                ),
-                            ),
+                            // (
+                            //     "amp out 4",
+                            //     true,
+                            //     Self::format_amp_output_status(
+                            //         p.amp_out4_overwrote(),
+                            //         p.amp_out4(),
+                            //     ),
+                            // ),
                         ],
                         &[
                             (
@@ -618,7 +618,7 @@ impl View for DownlinkPacketDisplay {
                             ("out 1 good", true, Self::format_bool(p.amp_out1_power_good)),
                             ("out 2 good", true, Self::format_bool(p.amp_out2_power_good)),
                             ("out 3 good", true, Self::format_bool(p.amp_out3_power_good)),
-                            ("out 4 good", true, Self::format_bool(p.amp_out4_power_good)),
+                            // ("out 4 good", true, Self::format_bool(p.amp_out4_power_good)),
                         ],
                         &[
                             ("icarus", true, Self::format_node_status(&p.icarus)),
