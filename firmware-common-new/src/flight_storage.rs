@@ -50,7 +50,9 @@ pub const DEFAULT_TARGET_APOGEE_AGL: f32 = 4000.0;
 
 /// On-disk format version. Bump when the record or superblock layout changes;
 /// logs written at any other version are treated as absent.
-pub const STORAGE_VERSION: u32 = 4;
+/// v5: fast record gains the airbrakes estimator's altitude / vertical
+/// velocity / tilt and its status flags (lockout votes, born, clip).
+pub const STORAGE_VERSION: u32 = 5;
 
 /// USB/superblock `record_len` field for the tagged stream (variable per record).
 pub const RECORD_LEN_TAGGED: u32 = 0;
@@ -370,6 +372,10 @@ mod tests {
             mag: [12.0, -34.0, 56.0],
             kf_altitude_asl: 271.5 + i as f32,
             kf_vertical_velocity: 0.25 * i as f32,
+            ab_altitude_asl: 272.0 + i as f32,
+            ab_vertical_velocity: 0.3 * i as f32,
+            ab_tilt_deg: 5.0,
+            ab_flags: 0,
             flight_stage: FlightStage::PoweredAscent,
             valid: VALID_IMU | VALID_BARO,
         }

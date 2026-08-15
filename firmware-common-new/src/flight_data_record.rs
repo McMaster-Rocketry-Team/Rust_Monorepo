@@ -14,10 +14,22 @@ pub struct FlightDataFastRecord {
     pub temperature: f32,
     pub pressure: f32,
     pub mag: [f32; 3],
-    /// State-estimator KF altitude ASL (m). NaN until the estimator has run.
+    /// Deployment (slow baro) estimator altitude ASL (m). NaN until the
+    /// estimator has run.
     pub kf_altitude_asl: f32,
-    /// State-estimator KF vertical velocity (m/s). NaN until the estimator has run.
+    /// Deployment (slow baro) estimator vertical velocity (m/s). NaN until
+    /// the estimator has run.
     pub kf_vertical_velocity: f32,
+    /// Airbrakes estimator altitude ASL (m). NaN until it has a value.
+    pub ab_altitude_asl: f32,
+    /// Airbrakes estimator vertical velocity (m/s). NaN until its vertical
+    /// filter is born.
+    pub ab_vertical_velocity: f32,
+    /// Airbrakes estimator tilt from vertical (deg). NaN before ignition.
+    pub ab_tilt_deg: f32,
+    /// Airbrakes estimator status bits (`AB_*` consts): the three
+    /// lockout-exit votes, filter-born, apogee, accel-clip.
+    pub ab_flags: u8,
     pub flight_stage: FlightStage,
     pub valid: u8,
 }
@@ -84,6 +96,11 @@ pub struct FlightDataRecord {
     pub kf_altitude_asl: f32,
     pub kf_vertical_velocity: f32,
 
+    pub ab_altitude_asl: f32,
+    pub ab_vertical_velocity: f32,
+    pub ab_tilt_deg: f32,
+    pub ab_flags: u8,
+
     pub battery_voltage: f32,
 
     /// Bitmask for which fields held trustworthy data when logged.
@@ -119,6 +136,10 @@ impl FlightDataRecord {
             mag: fast.mag,
             kf_altitude_asl: fast.kf_altitude_asl,
             kf_vertical_velocity: fast.kf_vertical_velocity,
+            ab_altitude_asl: fast.ab_altitude_asl,
+            ab_vertical_velocity: fast.ab_vertical_velocity,
+            ab_tilt_deg: fast.ab_tilt_deg,
+            ab_flags: fast.ab_flags,
             battery_voltage: slow.battery_voltage,
             valid: fast.valid | slow.valid,
             lat_lon: slow.lat_lon,
@@ -157,6 +178,19 @@ pub const VALID_GPS_ALT: u8 = 1 << 4;
 pub const VALID_BATTERY: u8 = 1 << 5;
 pub const VALID_AIRBRAKES_COMMANDED: u8 = 1 << 6;
 pub const VALID_AIRBRAKES_ACTUAL: u8 = 1 << 7;
+
+/// `ab_flags` bits — the airbrakes estimator's status. The three vote bits
+/// are the lockout-exit votes (2-of-3 sustained opens the lockout); logging
+/// them per sample reconstructs the exit truth table post-flight.
+pub const AB_VOTE_INERTIAL: u8 = 1 << 0;
+pub const AB_VOTE_DEPLOYMENT: u8 = 1 << 1;
+pub const AB_VOTE_BARO_RATE: u8 = 1 << 2;
+/// The vertical filter is born (baro trusted; MPC state is live).
+pub const AB_BARO_TRUSTED: u8 = 1 << 3;
+pub const AB_APOGEE: u8 = 1 << 4;
+/// At least one accel sample hit the ±16 g rail since ignition — the
+/// dead-reckoned velocity (and the inertial vote) are degraded.
+pub const AB_ACCEL_CLIPPED: u8 = 1 << 5;
 
 pub const PYRO_MAIN_CONTINUITY: u8 = 1 << 0;
 pub const PYRO_MAIN_FIRE: u8 = 1 << 1;
