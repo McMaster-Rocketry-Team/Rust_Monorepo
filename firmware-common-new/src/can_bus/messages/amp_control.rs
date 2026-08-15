@@ -11,7 +11,7 @@ pub struct AmpControlMessage {
     pub out1_enable: bool,
     pub out2_enable: bool,
     pub out3_enable: bool,
-    pub out4_enable: bool,
+    // pub out4_enable: bool,
 }
 
 impl CanBusMessage for AmpControlMessage {

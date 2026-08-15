@@ -39,8 +39,8 @@ pub struct AmpStatusMessage {
     pub out2: AmpOutputStatus,
     #[packed_field(element_size_bytes = "1")]
     pub out3: AmpOutputStatus,
-    #[packed_field(element_size_bytes = "1")]
-    pub out4: AmpOutputStatus,
+    // #[packed_field(element_size_bytes = "1")]
+    // pub out4: AmpOutputStatus,
 }
 
 impl CanBusMessage for AmpStatusMessage {
