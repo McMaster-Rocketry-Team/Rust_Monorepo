@@ -8,7 +8,7 @@ use micromath::F32Ext;
 /// to avoid catastrophic cancellation.
 ///
 /// Example:
-/// ```
+/// ```text
 /// let mut stats = RunningStats::<6>::new();
 /// stats.update([ax, ay, az, gx, gy, gz]);
 /// let var = stats.variance();

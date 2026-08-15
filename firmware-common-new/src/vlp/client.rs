@@ -10,6 +10,7 @@ use lora_phy::mod_params::{PacketStatus, RadioError};
 use sha2::Digest;
 use sha2::Sha256;
 
+/// ```text
 /// @startuml
 /// scale 2
 ///
@@ -29,6 +30,7 @@ use sha2::Sha256;
 ///     end
 /// end
 /// @enduml
+/// ```
 
 /// buffer contains data without ecc and free space for ecc
 /// data_len is the length of data in the buffer
