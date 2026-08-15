@@ -1,8 +1,15 @@
-//! Baro-only flight state machine.
+//! Baro-only *deployment* state machine (see ESTIMATOR_REWORK_PLAN.md in the
+//! VLF5 repo).
 //!
-//! Detects ignition, ascent, descent, and landing from barometric altitude alone
-//! (2-state Kalman filter). Supports single (both pyros at apogee) and dual
-//! (drogue at apogee, main at altitude) deployment via [`FlightProfile`].
+//! Detects ignition, apogee, and landing from barometric altitude alone via a
+//! deliberately slow (~1 s bandwidth) 2-state Kalman filter whose output is
+//! trusted outright — the COTS-altimeter shape: innovation gate as bus input
+//! validation, a timed Mach lockout started at ignition detection, apogee by
+//! peak-drop on the filtered altitude, coasting by burn timer, and
+//! "condition holds for N samples" persistence on every transition. Accuracy
+//! is explicitly not a goal (boost lag is hundreds of metres); the airbrakes
+//! use a separate fast estimator. Supports single (both pyros at apogee) and
+//! dual (drogue at apogee, main at altitude) deployment via [`FlightProfile`].
 
 mod altitude_kf;
 
@@ -11,7 +18,6 @@ mod tests;
 
 pub use altitude_kf::BaroAltitudeKF;
 
-use crate::utils::approximate_speed_of_sound;
 use firmware_common_new::vlp::packets::fire_pyro::PyroSelect;
 
 /// Baro sample rate the estimator is designed for (matches IMU ODR).
@@ -22,41 +28,50 @@ pub const DT: f32 = 1f32 / (SAMPLES_PER_S as f32);
 const IGNITION_VELOCITY_THRESHOLD: f32 = 10.0; // m/s
 /// Altitude rise above launch pad required for ignition detection
 const IGNITION_ALTITUDE_RISE: f32 = 15.0; // m
-/// Sustained vertical velocity below this value counts as descending
-const DESCENT_VELOCITY_THRESHOLD: f32 = -2.0; // m/s
-/// Low-passed vertical acceleration below this during ascent means the motor
-/// burned out and the rocket is coasting (gravity + drag only)
-const COAST_ACCEL_THRESHOLD: f32 = -4.0; // m/s^2
-/// Time constant of the burnout-detection acceleration low-pass filter
-const COAST_ACCEL_FILTER_TIME_CONSTANT: f32 = 0.3; // s
-/// Consecutive samples of low-passed acceleration below the threshold before
-/// coasting is latched. Reset-on-violation: this assumes a stall-free sensor
-/// stream — the KF re-convergence burst after a dropped-sample gap reads as a
-/// brief positive-acceleration spike that resets the counter (on the Void Lake
-/// data, which had 1 Hz stalls, that deferred the latch by ~10 s).
-const COAST_DETECTION_SAMPLES: usize = SAMPLES_PER_S; // 1 s
-/// How long the rocket has to descend before the descent is acted upon
-const DESCENT_DETECTION_SAMPLES: usize = SAMPLES_PER_S / 2; // 0.5 s
-/// |KF vertical velocity| below this counts as standing still. Sized ~5 sigma
-/// above the stationary velocity-estimate noise (std 0.37 m/s, peaks ~1.6 m/s
-/// over minutes), so noise never resets the landed counter, while canopy
-/// descent (>= ~4.5 m/s) keeps it pinned at zero.
+/// Apogee detection: filtered altitude this far below its running maximum
+/// counts as descending. Must exceed the worst transient dip a gate-leaking
+/// blast can put on the slow filter (~30 m from a 25-sample 500 m offset,
+/// which then decays in ~1 s — too short for the persistence window below).
+const APOGEE_DROP_M: f32 = 30.0; // m
+/// How long the altitude has to stay below (peak - APOGEE_DROP_M) before
+/// descent is acted upon
+const APOGEE_DROP_SAMPLES: usize = SAMPLES_PER_S / 2; // 0.5 s
+/// |KF vertical velocity| below this counts as standing still. The slow
+/// filter's stationary velocity noise is ~0.012 m/s std (peaks ~0.05 m/s), so
+/// this is sized by canopy-swing and post-touchdown-drift rejection, not
+/// noise; descent under main (>= ~4.5 m/s) keeps the counter pinned at zero.
 const LANDED_VELOCITY_THRESHOLD: f32 = 2.0; // m/s
 /// How long the rocket has to stand still before it is considered landed
 const LANDED_DETECTION_SAMPLES: usize = SAMPLES_PER_S * 5; // 5 s
 /// Time constant of the launch pad altitude low-pass filter
 const PAD_ALTITUDE_FILTER_TIME_CONSTANT: f32 = 10.0; // s
-/// KF speed, as a fraction of the local speed of sound, above which the baro
-/// is locked out (see [`Stage::MachLockout`]). Transonic shock formation
-/// starts near Mach 0.8; entering at 0.75 leaves margin. Entry may trust the
-/// KF velocity because the subsonic static-port error only reads *fast* —
-/// it makes entry early, never late.
-const MACH_LOCKOUT_ENTER: f32 = 0.75;
 
-/// Flight deployment profile: single (both at apogee) or dual (drogue then main).
+/// Per-rocket flight configuration for the deployment estimator.
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, PartialEq)]
-pub enum FlightProfile {
+pub struct FlightProfile {
+    /// Baro Mach lockout: starting at ignition detection, the KF is frozen
+    /// (no predict, no update) for this long, then re-seeded — supersonic
+    /// static-port readings are garbage. Take (time from ignition detection
+    /// until decelerated back below Mach 0.75) from the flight sim with
+    /// ~1.4x margin; it must still end well (>5 s) before apogee. `None`
+    /// disables the lockout — use that for subsonic rockets.
+    pub mach_lockout_duration_us: Option<u32>,
+    /// Coasting is declared this long after ignition detection (burn timer:
+    /// motors don't relight, and a timer needs neither the KF nor a
+    /// stall-free sensor stream). Take the sim burn time with generous
+    /// (~1.3x+) margin: too long only delays airbrakes, but too short
+    /// declares coasting under thrust — the airbrakes gate's one "never
+    /// under thrust" input.
+    pub max_burn_time_us: u32,
+    pub deployment: DeploymentProfile,
+}
+
+/// Deployment scheme: single (both pyros at apogee) or dual (drogue at
+/// apogee, main at altitude).
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Debug, Clone, PartialEq)]
+pub enum DeploymentProfile {
     /// Both pyros at apogee: after a single `delay_us` past descent detection, fire
     /// drogue then main back-to-back (main on the very next sample).
     Single {
@@ -72,7 +87,7 @@ pub enum FlightProfile {
     },
 }
 
-impl FlightProfile {
+impl DeploymentProfile {
     fn minimum_deployment_agl(&self) -> f32 {
         match self {
             Self::Single {
@@ -157,32 +172,22 @@ enum Stage {
     },
     Ascent {
         launch_pad_altitude_asl: f32,
-        descending_samples: usize,
-        /// KF velocity at the previous sample, for the acceleration estimate
-        prev_velocity: f32,
-        /// low-passed d(velocity)/dt, negative once the motor burns out
-        accel_lp: f32,
-        /// consecutive samples with `accel_lp` below the coasting threshold
-        coast_samples: usize,
-        /// latched burnout: motors don't relight, so coasting never clears
-        coasting: bool,
-        /// the Mach lockout is one-shot: the speed profile of an ascent is
-        /// unimodal, so there is exactly one contiguous window above the
-        /// entry threshold and a post-exit glitch must not re-lock
-        lockout_done: bool,
+        /// running maximum of the filtered altitude; apogee is detected when
+        /// the altitude drops [`APOGEE_DROP_M`] below it
+        peak_altitude_asl: f32,
+        /// consecutive samples with altitude below (peak - APOGEE_DROP_M)
+        below_peak_samples: usize,
     },
     /// Baro readings are garbage around and above Mach 1 (shocks over the
     /// static port), and with baro as the only sensor there is no trustworthy
-    /// signal to exit on — so the KF is frozen (no predict, no update) for a
-    /// sim-derived duration, then re-seeded from fresh measurements. While
-    /// frozen, no state transition can trigger: velocity is stuck positive so
-    /// descent never accrues, and d(velocity)/dt reads zero so coasting never
-    /// latches.
+    /// signal to exit on — so this stage is entered directly at ignition
+    /// detection (the COTS "Mach delay") and the KF is frozen (no predict, no
+    /// update) for a sim-derived duration covering the whole fast regime,
+    /// then re-seeded from fresh measurements. While frozen, no state
+    /// transition can trigger.
     MachLockout {
         launch_pad_altitude_asl: f32,
         samples_left: usize,
-        /// carried through so a burnout latched before entry isn't lost
-        coasting: bool,
     },
     DrogueDelay {
         launch_pad_altitude_asl: f32,
@@ -212,10 +217,10 @@ enum Stage {
 #[derive(Debug, Clone)]
 pub struct RocketStateEstimator {
     profile: FlightProfile,
-    /// How long the baro is ignored after the KF speed first crosses
-    /// [`MACH_LOCKOUT_ENTER`] x speed of sound. `None` disables the lockout
-    /// (subsonic rockets).
-    mach_lockout_duration_us: Option<u32>,
+    /// [`FlightProfile::max_burn_time_us`] in samples.
+    burn_time_ticks: usize,
+    /// Samples since ignition detection; `None` until ignition.
+    samples_since_ignition: Option<usize>,
     kf: Option<BaroAltitudeKF>,
     stage: Stage,
 }
@@ -227,15 +232,11 @@ fn us_to_ticks(us: u32) -> usize {
 }
 
 impl RocketStateEstimator {
-    /// `mach_lockout_duration_us`: for flights exceeding ~Mach 0.75, how long
-    /// the baro is ignored after the KF speed first crosses the entry
-    /// threshold. Take (time above Mach 0.75) from the flight sim with ~1.4x
-    /// margin; it must still end well (>5 s) before apogee. `None` disables
-    /// the lockout — use that for subsonic rockets.
-    pub fn new(profile: FlightProfile, mach_lockout_duration_us: Option<u32>) -> Self {
+    pub fn new(profile: FlightProfile) -> Self {
         Self {
+            burn_time_ticks: us_to_ticks(profile.max_burn_time_us),
             profile,
-            mach_lockout_duration_us,
+            samples_since_ignition: None,
             kf: None,
             stage: Stage::OnPad {
                 pad_altitude_asl: 0.0,
@@ -246,6 +247,10 @@ impl RocketStateEstimator {
     /// Process one baro altitude ASL sample (m).
     /// Returns `Some(pyro)` when a pyro channel should be fired.
     pub fn update(&mut self, baro_altitude_asl: f32) -> Option<PyroSelect> {
+        if let Some(n) = &mut self.samples_since_ignition {
+            *n = n.saturating_add(1);
+        }
+
         let kf = match &mut self.kf {
             Some(kf) => {
                 // During Mach lockout the KF is frozen: predicting on the
@@ -282,86 +287,61 @@ impl RocketStateEstimator {
                         velocity,
                         *pad_altitude_asl
                     );
-                    self.stage = Stage::Ascent {
-                        launch_pad_altitude_asl: *pad_altitude_asl,
-                        descending_samples: 0,
-                        prev_velocity: velocity,
-                        accel_lp: 0.0,
-                        coast_samples: 0,
-                        coasting: false,
-                        lockout_done: false,
+                    self.samples_since_ignition = Some(0);
+                    let pad = *pad_altitude_asl;
+                    self.stage = match self.profile.mach_lockout_duration_us {
+                        Some(duration_us) => {
+                            log_info!("mach lockout for {}us", duration_us);
+                            Stage::MachLockout {
+                                launch_pad_altitude_asl: pad,
+                                samples_left: us_to_ticks(duration_us),
+                            }
+                        }
+                        None => Stage::Ascent {
+                            launch_pad_altitude_asl: pad,
+                            peak_altitude_asl: altitude,
+                            below_peak_samples: 0,
+                        },
                     };
                 }
             }
             Stage::Ascent {
                 launch_pad_altitude_asl,
-                descending_samples,
-                prev_velocity,
-                accel_lp,
-                coast_samples,
-                coasting,
-                lockout_done,
+                peak_altitude_asl,
+                below_peak_samples,
             } => {
-                let accel = (velocity - *prev_velocity) / DT;
-                *prev_velocity = velocity;
-                *accel_lp += (DT / COAST_ACCEL_FILTER_TIME_CONSTANT) * (accel - *accel_lp);
-                if !*coasting {
-                    if *accel_lp < COAST_ACCEL_THRESHOLD {
-                        *coast_samples += 1;
-                        if *coast_samples >= COAST_DETECTION_SAMPLES {
-                            log_info!(
-                                "burnout detected: accel={}m/s^2, v={}m/s",
-                                *accel_lp,
-                                velocity
-                            );
-                            *coasting = true;
-                        }
-                    } else {
-                        *coast_samples = 0;
-                    }
+                if altitude > *peak_altitude_asl {
+                    *peak_altitude_asl = altitude;
                 }
 
-                if !*lockout_done
-                    && let Some(duration_us) = self.mach_lockout_duration_us
-                    && velocity.abs() > MACH_LOCKOUT_ENTER * approximate_speed_of_sound(altitude)
-                {
-                    log_info!("mach lockout entered: v={}m/s", velocity);
-                    self.stage = Stage::MachLockout {
-                        launch_pad_altitude_asl: *launch_pad_altitude_asl,
-                        samples_left: us_to_ticks(duration_us),
-                        coasting: *coasting,
-                    };
+                if *peak_altitude_asl - altitude > APOGEE_DROP_M {
+                    *below_peak_samples += 1;
                 } else {
-                    if velocity < DESCENT_VELOCITY_THRESHOLD {
-                        *descending_samples += 1;
-                    } else {
-                        *descending_samples = 0;
-                    }
+                    *below_peak_samples = 0;
+                }
 
-                    if *descending_samples >= DESCENT_DETECTION_SAMPLES {
-                        let altitude_agl = altitude - *launch_pad_altitude_asl;
-                        let min_agl = self.profile.minimum_deployment_agl();
-                        if altitude_agl < min_agl {
-                            log_info!(
-                                "failed to reach min apogee: min={}, current={}",
-                                min_agl,
-                                altitude_agl
-                            );
-                            self.stage = Stage::FailedToReachMinApogee;
-                        } else {
-                            log_info!("descent detected: agl={}m", altitude_agl);
-                            self.stage = Stage::DrogueDelay {
-                                launch_pad_altitude_asl: *launch_pad_altitude_asl,
-                                samples_left: us_to_ticks(self.profile.drogue_delay_us()),
-                            };
-                        }
+                if *below_peak_samples >= APOGEE_DROP_SAMPLES {
+                    let apogee_agl = *peak_altitude_asl - *launch_pad_altitude_asl;
+                    let min_agl = self.profile.deployment.minimum_deployment_agl();
+                    if apogee_agl < min_agl {
+                        log_info!(
+                            "failed to reach min apogee: min={}, peak={}",
+                            min_agl,
+                            apogee_agl
+                        );
+                        self.stage = Stage::FailedToReachMinApogee;
+                    } else {
+                        log_info!("descent detected: peak agl={}m", apogee_agl);
+                        self.stage = Stage::DrogueDelay {
+                            launch_pad_altitude_asl: *launch_pad_altitude_asl,
+                            samples_left: us_to_ticks(self.profile.deployment.drogue_delay_us()),
+                        };
                     }
                 }
             }
             Stage::MachLockout {
                 launch_pad_altitude_asl,
                 samples_left,
-                coasting,
             } => {
                 *samples_left = samples_left.saturating_sub(1);
                 if *samples_left == 0 {
@@ -371,12 +351,8 @@ impl RocketStateEstimator {
                     }
                     self.stage = Stage::Ascent {
                         launch_pad_altitude_asl: *launch_pad_altitude_asl,
-                        descending_samples: 0,
-                        prev_velocity: 0.0,
-                        accel_lp: 0.0,
-                        coast_samples: 0,
-                        coasting: *coasting,
-                        lockout_done: true,
+                        peak_altitude_asl: baro_altitude_asl,
+                        below_peak_samples: 0,
                     };
                 }
             }
@@ -387,12 +363,12 @@ impl RocketStateEstimator {
                 if *samples_left == 0 {
                     deploy_pyro = Some(PyroSelect::PyroDrogue);
                     let pad = *launch_pad_altitude_asl;
-                    if self.profile.is_single() {
+                    if self.profile.deployment.is_single() {
                         // Single: main follows drogue with no extra delay
                         // (main_delay_us() == 0), so it fires on the next sample.
                         self.stage = Stage::MainDelay {
                             launch_pad_altitude_asl: pad,
-                            samples_left: us_to_ticks(self.profile.main_delay_us()),
+                            samples_left: us_to_ticks(self.profile.deployment.main_delay_us()),
                         };
                     } else {
                         self.stage = Stage::DrogueDeployed {
@@ -407,12 +383,12 @@ impl RocketStateEstimator {
                 launch_pad_altitude_asl,
             } => {
                 // Dual only: wait for main altitude.
-                if let Some(main_agl) = self.profile.main_chute_altitude_agl()
+                if let Some(main_agl) = self.profile.deployment.main_chute_altitude_agl()
                     && altitude < main_agl + *launch_pad_altitude_asl
                 {
                     self.stage = Stage::MainDelay {
                         launch_pad_altitude_asl: *launch_pad_altitude_asl,
-                        samples_left: us_to_ticks(self.profile.main_delay_us()),
+                        samples_left: us_to_ticks(self.profile.deployment.main_delay_us()),
                     };
                 }
             }
@@ -519,13 +495,18 @@ impl RocketStateEstimator {
         }
     }
 
-    /// True during ascent once the motor has burned out (the low-passed vertical
-    /// acceleration turned negative), i.e. the rocket is coasting to apogee.
+    /// True during ascent once the motor has burned out, i.e. the rocket is
+    /// coasting to apogee. Burn-timer based: latches `max_burn_time_us` after
+    /// ignition detection (motors don't relight), independent of the KF — so
+    /// it keeps working through the Mach lockout and through sensor stalls.
     pub fn is_coasting(&self) -> bool {
         matches!(
             self.stage,
-            Stage::Ascent { coasting: true, .. } | Stage::MachLockout { coasting: true, .. }
-        )
+            Stage::Ascent { .. } | Stage::MachLockout { .. }
+        ) && self
+            .samples_since_ignition
+            .map(|n| n > self.burn_time_ticks)
+            .unwrap_or(false)
     }
 
     /// True while the baro is locked out around/above Mach 1: the KF is

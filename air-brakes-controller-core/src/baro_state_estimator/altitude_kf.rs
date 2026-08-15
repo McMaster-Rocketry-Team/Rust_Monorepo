@@ -39,16 +39,26 @@ pub struct BaroAltitudeKF {
 /// OSR=512 to replace this estimate with a measurement.
 pub const BARO_ALTITUDE_MEASUREMENT_VARIANCE: f32 = 0.45;
 
-/// White-acceleration process noise driving the constant-velocity model
-const PROCESS_ACCELERATION_VARIANCE: f32 = 1150.0;
+/// White-acceleration process noise driving the constant-velocity model.
+/// Sets the filter bandwidth: 0.115 gives an altitude time constant of ~1.0 s
+/// (steady-state gains ~0.0024 alt / ~0.0012 vel per sample). This filter is
+/// the *deployment* estimator and is deliberately slow — its outputs are
+/// trusted by the flight state machine, and robustness comes from bandwidth
+/// rather than transient detectors. It lags badly during dynamics (boost lag
+/// ~100-330 m for 5-16 g motors, coast velocity reads ~12 m/s high) — that is
+/// accepted; nothing latency-sensitive consumes it. The airbrakes get their
+/// own fast estimator.
+const PROCESS_ACCELERATION_VARIANCE: f32 = 0.115;
 
-/// Innovation gate: reject a measurement whose innovation exceeds this. Nothing
-/// the airframe can do moves barometric altitude this far in one sample; only
-/// measurement faults do. On the Void Lake flight the redundant computer's
-/// ejection-charge overpressure produced 200-1465 m innovations, while the
-/// worst genuine dynamics mismatch (boost, at half sample rate) stayed under
-/// ~45 m.
-const INNOVATION_GATE_M: f32 = 75.0;
+/// Innovation gate: reject a measurement whose innovation exceeds this. Pure
+/// input validation for the raw bus (a bad SPI read decoding to pressure~0 is
+/// a ~30 km innovation) and for large blast transients (Void Lake ejection
+/// overpressure: 200-1465 m). Sized above the slow filter's worst *genuine*
+/// tracking lag — ~330 m during a 16 g subsonic boost with no Mach lockout —
+/// so it never rejects real flight data. Transients that slip under it barely
+/// move the slow filter (a 25-sample 500 m offset shifts altitude ~30 m and
+/// velocity ~15 m/s, and no deployment decision reads short-term velocity).
+const INNOVATION_GATE_M: f32 = 500.0;
 
 /// Force-accept after this many consecutive rejections (1 s). A transient this
 /// long is not a pyro blast but a genuinely diverged filter, which must
