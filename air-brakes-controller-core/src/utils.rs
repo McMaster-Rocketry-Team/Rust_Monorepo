@@ -1,12 +1,20 @@
-/// returns air density (kg/m^3) and speed of sound (m/s) at altitude (m)
-/// approximated using a linear function from 0m and 3000m data from standard atmosphere model
+use micromath::F32Ext as _;
+
+/// Air density (kg/m^3) at altitude ASL (m), ISA troposphere formula
+/// (valid to 11 km).
+///
+/// This used to be a straight-line fit to the 0-3000 m range, which
+/// under-reads density 8.7% at 5.7 km and worse above — under-predicted
+/// drag over-predicts apogee, which over-extends the airbrakes (a
+/// one-sided error in the harmful direction, found in review before
+/// LC'26, which simulates to 6+ km).
 pub fn approximate_air_density(altitude_asl: f32) -> f32 {
-    1.225 - altitude_asl * 0.0001053
+    1.225 * (1.0 - 2.25577e-5 * altitude_asl).max(0.0).powf(4.256)
 }
 
-
-/// returns air density (kg/m^3) and speed of sound (m/s) at altitude (m)
-/// approximated using a linear function from 0m and 3000m data from standard atmosphere model
+/// Speed of sound (m/s) at altitude ASL (m): linear fit to the standard
+/// atmosphere, within 0.3% of ISA up to 8 km (sound speed really is
+/// near-linear in the troposphere, unlike density).
 pub fn approximate_speed_of_sound(altitude_asl: f32) -> f32 {
     340.29 - altitude_asl * 0.003903
 }

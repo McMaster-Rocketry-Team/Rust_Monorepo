@@ -1,3 +1,5 @@
+use nalgebra::Vector2;
+
 use crate::{controller::rocket_dynamics::simulate_apogee_rk2, utils::lerp};
 
 const DT: f32 = 0.1;
@@ -19,11 +21,15 @@ impl AirBrakesMPC {
 
     /// returns air brakes extension percentage 0.0 - 1.0
     ///
-    /// Assumes the rocket is always vertical: `vertical_velocity` is positive up.
-    pub fn update(&mut self, current_altitude_asl: f32, vertical_velocity: f32) -> f32 {
+    /// `current_velocity` is (horizontal, vertical) m/s, vertical positive
+    /// up — the airbrakes estimator's `velocity()` output. The apogee
+    /// simulation flies the full 2D ballistic arc with drag on total
+    /// speed, so tilt (carried in the horizontal component) is accounted
+    /// for.
+    pub fn update(&self, current_altitude_asl: f32, current_velocity: Vector2<f32>) -> f32 {
         let initial_state = State {
             altitude_asl: current_altitude_asl,
-            vertical_velocity,
+            velocity: current_velocity,
         };
 
         // Search interval for drag percentage [-1.0, 1.0]
@@ -69,10 +75,11 @@ impl AirBrakesMPC {
 #[derive(Debug, Clone)]
 pub(crate) struct State {
     pub(crate) altitude_asl: f32,
-    pub(crate) vertical_velocity: f32,
+    /// (horizontal, vertical) m/s, vertical positive up
+    pub(crate) velocity: Vector2<f32>,
 }
 
-struct Derivative<T>(T);
+pub(crate) struct Derivative<T>(pub(crate) T);
 
 #[derive(Clone, Debug)]
 pub struct RocketParameters {
