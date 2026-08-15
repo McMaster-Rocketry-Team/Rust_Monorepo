@@ -77,10 +77,10 @@ mod tests {
                     overwrote: true,
                     status: PowerOutputStatus::PowerBad,
                 },
-                out4: AmpOutputStatus {
-                    overwrote: false,
-                    status: PowerOutputStatus::PowerBad,
-                },
+                // out4: AmpOutputStatus {
+                //     overwrote: false,
+                //     status: PowerOutputStatus::PowerBad,
+                // },
             }
             .into(),
             AmpStatusMessage {
@@ -97,10 +97,10 @@ mod tests {
                     overwrote: true,
                     status: PowerOutputStatus::PowerBad,
                 },
-                out4: AmpOutputStatus {
-                    overwrote: false,
-                    status: PowerOutputStatus::PowerBad,
-                },
+                // out4: AmpOutputStatus {
+                //     overwrote: false,
+                //     status: PowerOutputStatus::PowerBad,
+                // },
             }
             .into(),
         ]

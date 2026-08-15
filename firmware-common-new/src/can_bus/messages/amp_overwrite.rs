@@ -23,8 +23,8 @@ pub struct AmpOverwriteMessage {
     pub out2: PowerOutputOverwrite,
     #[packed_field(bits = "4..6", ty = "enum")]
     pub out3: PowerOutputOverwrite,
-    #[packed_field(bits = "6..8", ty = "enum")]
-    pub out4: PowerOutputOverwrite,
+    // #[packed_field(bits = "6..8", ty = "enum")]
+    // pub out4: PowerOutputOverwrite,
 }
 
 impl CanBusMessage for AmpOverwriteMessage {
@@ -50,14 +50,14 @@ mod test {
                 out1: PowerOutputOverwrite::NoOverwrite,
                 out2: PowerOutputOverwrite::ForceEnabled,
                 out3: PowerOutputOverwrite::ForceDisabled,
-                out4: PowerOutputOverwrite::NoOverwrite,
+                // out4: PowerOutputOverwrite::NoOverwrite,
             }
             .into(),
             AmpOverwriteMessage {
                 out1: PowerOutputOverwrite::ForceEnabled,
                 out2: PowerOutputOverwrite::ForceDisabled,
                 out3: PowerOutputOverwrite::NoOverwrite,
-                out4: PowerOutputOverwrite::ForceEnabled,
+                // out4: PowerOutputOverwrite::ForceEnabled,
             }
             .into(),
         ]
