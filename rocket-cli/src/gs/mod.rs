@@ -308,7 +308,7 @@ pub fn tui_task(
             let mut out1_selection_group: RadioGroup<PowerOutputOverwrite> = RadioGroup::new();
             let mut out2_selection_group: RadioGroup<PowerOutputOverwrite> = RadioGroup::new();
             let mut out3_selection_group: RadioGroup<PowerOutputOverwrite> = RadioGroup::new();
-            let mut out4_selection_group: RadioGroup<PowerOutputOverwrite> = RadioGroup::new();
+            // let mut out4_selection_group: RadioGroup<PowerOutputOverwrite> = RadioGroup::new();
 
             s.add_layer(
                 Dialog::new()
@@ -404,7 +404,7 @@ pub fn tui_task(
                                 out1: *out1_selection_group.selection(),
                                 out2: *out2_selection_group.selection(),
                                 out3: *out3_selection_group.selection(),
-                                out4: *out4_selection_group.selection(),
+                                // out4: *out4_selection_group.selection(),
                             }
                             .into(),
                         );

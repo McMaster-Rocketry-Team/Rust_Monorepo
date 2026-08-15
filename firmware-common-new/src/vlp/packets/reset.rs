@@ -12,7 +12,7 @@ pub enum DeviceToReset {
     AMPOut1,
     AMPOut2,
     AMPOut3,
-    AMPOut4,
+    // AMPOut4,
     Icarus,
     PayloadSDRM,
     OzysAll,

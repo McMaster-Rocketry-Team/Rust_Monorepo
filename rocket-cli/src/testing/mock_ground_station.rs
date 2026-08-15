@@ -66,8 +66,6 @@ impl MockVLPClient {
                     false,
                     PowerOutputStatus::Disabled,
                     false,
-                    PowerOutputStatus::Disabled,
-                    false,
                     false,
                     100.0,
                     false,

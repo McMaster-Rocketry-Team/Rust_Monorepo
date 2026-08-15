@@ -15,8 +15,8 @@ pub struct AMPOutputOverwritePacket {
     pub out2: PowerOutputOverwrite,
     #[packed_field(bits = "4..6", ty = "enum")]
     pub out3: PowerOutputOverwrite,
-    #[packed_field(bits = "6..8", ty = "enum")]
-    pub out4: PowerOutputOverwrite,
+    // #[packed_field(bits = "6..8", ty = "enum")]
+    // pub out4: PowerOutputOverwrite,
 }
 
 impl Into<VLPUplinkPacket> for AMPOutputOverwritePacket {

@@ -44,9 +44,9 @@ pub struct LandedTelemetryPacket {
     amp_out3_overwrote: bool,
     #[packed_field(element_size_bits = "2", ty = "enum")]
     amp_out3: PowerOutputStatus,
-    amp_out4_overwrote: bool,
-    #[packed_field(element_size_bits = "2", ty = "enum")]
-    amp_out4: PowerOutputStatus,
+    // amp_out4_overwrote: bool,
+    // #[packed_field(element_size_bits = "2", ty = "enum")]
+    // amp_out4: PowerOutputStatus,
 }
 
 impl LandedTelemetryPacket {
@@ -65,8 +65,8 @@ impl LandedTelemetryPacket {
         amp_out2: PowerOutputStatus,
         amp_out3_overwrote: bool,
         amp_out3: PowerOutputStatus,
-        amp_out4_overwrote: bool,
-        amp_out4: PowerOutputStatus,
+        // amp_out4_overwrote: bool,
+        // amp_out4: PowerOutputStatus,
     ) -> Self {
         Self {
             nonce: nonce.into(),
@@ -83,8 +83,8 @@ impl LandedTelemetryPacket {
             amp_out2,
             amp_out3_overwrote,
             amp_out3,
-            amp_out4_overwrote,
-            amp_out4,
+            // amp_out4_overwrote,
+            // amp_out4,
         }
     }
 
@@ -140,13 +140,13 @@ impl LandedTelemetryPacket {
         self.amp_out3
     }
 
-    pub fn amp_out4_overwrote(&self) -> bool {
-        self.amp_out4_overwrote
-    }
+    // pub fn amp_out4_overwrote(&self) -> bool {
+    //     self.amp_out4_overwrote
+    // }
 
-    pub fn amp_out4(&self) -> PowerOutputStatus {
-        self.amp_out4
-    }
+    // pub fn amp_out4(&self) -> PowerOutputStatus {
+    //     self.amp_out4
+    // }
 
     #[cfg(feature = "json")]
     pub fn to_json(&self) -> json::JsonValue {
@@ -164,8 +164,8 @@ impl LandedTelemetryPacket {
             amp_out2: format!("{:?}", self.amp_out2()),
             amp_out3_overwrote: self.amp_out3_overwrote(),
             amp_out3: format!("{:?}", self.amp_out3()),
-            amp_out4_overwrote: self.amp_out4_overwrote(),
-            amp_out4: format!("{:?}", self.amp_out4()),
+            // amp_out4_overwrote: self.amp_out4_overwrote(),
+            // amp_out4: format!("{:?}", self.amp_out4()),
         }
     }
 }
@@ -198,8 +198,8 @@ pub struct LandedTelemetryPacketBuilderState {
     pub amp_out2: PowerOutputStatus,
     pub amp_out3_overwrote: bool,
     pub amp_out3: PowerOutputStatus,
-    pub amp_out4_overwrote: bool,
-    pub amp_out4: PowerOutputStatus,
+    // pub amp_out4_overwrote: bool,
+    // pub amp_out4: PowerOutputStatus,
 }
 
 pub struct LandedTelemetryPacketBuilder<M: RawMutex> {
@@ -224,8 +224,8 @@ impl<M: RawMutex> LandedTelemetryPacketBuilder<M> {
                 amp_out2: PowerOutputStatus::Disabled,
                 amp_out3_overwrote: false,
                 amp_out3: PowerOutputStatus::Disabled,
-                amp_out4_overwrote: false,
-                amp_out4: PowerOutputStatus::Disabled,
+                // amp_out4_overwrote: false,
+                // amp_out4: PowerOutputStatus::Disabled,
             })),
         }
     }
@@ -252,8 +252,8 @@ impl<M: RawMutex> LandedTelemetryPacketBuilder<M> {
                 state.amp_out2,
                 state.amp_out3_overwrote,
                 state.amp_out3,
-                state.amp_out4_overwrote,
-                state.amp_out4,
+                // state.amp_out4_overwrote,
+                // state.amp_out4,
             )
         })
     }
