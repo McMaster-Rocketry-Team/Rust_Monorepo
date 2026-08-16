@@ -59,8 +59,8 @@ pub const DEFAULT_TARGET_APOGEE_AGL: f32 = 4000.0;
 ///     costs a discriminant plus padding — which is the price of a log that
 ///     cannot mistake a reading for its own absence.
 /// v11: the slow record stores the full `NodeStatusMessage` (uptime, health,
-///     mode, custom status) for AMP / Icarus / OzYS / payload SDRM, replacing
-///     the lone `amp_online` bool. One OzYS this year, addressed by node type.
+///     mode, custom status) for AMP / Icarus / OZYS / payload SDRM, replacing
+///     the lone `amp_online` bool. One OZYS this year, addressed by node type.
 /// v10: airbrakes commanded + actual extension moved from the fast record to
 ///     the slow one (both only ever update at 10 Hz);
 ///     `air_brakes_validation_deploy` added to the slow record.

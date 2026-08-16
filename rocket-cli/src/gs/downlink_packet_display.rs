@@ -542,7 +542,7 @@ impl DownlinkPacketDisplay {
                         ]],
                     ),
                     Section::new(
-                        "OzYS",
+                        "OZYS",
                         vec![vec![
                             ("online", true, Self::format_bool(p.ozys_online())),
                             (
@@ -777,7 +777,7 @@ impl DownlinkPacketDisplay {
                         )]],
                     ),
                     Section::new(
-                        "OzYS",
+                        "OZYS",
                         vec![vec![
                             ("status", true, Self::format_node_status(&p.ozys)),
                             (
