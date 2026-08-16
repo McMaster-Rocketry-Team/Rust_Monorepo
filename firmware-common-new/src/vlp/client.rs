@@ -234,16 +234,41 @@ impl<'a, 'b, 'c, M: RawMutex, R: Radio> VLPGroundStationDaemon<'a, 'b, 'c, M, R>
         {
             Ok((rx_len, packet_status)) => {
                 // decode ecc
-                let rx_len =
-                    vlp_decode_ecc(&mut self.buffer[..rx_len]).ok_or(VLPTXError::InvalidAck)?;
-
-                if let Some(VLPDownlinkPacket::Ack(ack_packet)) =
-                    VLPDownlinkPacket::deserialize(&self.buffer[..rx_len])
-                    && ack_packet.verification_code == expected_ack_verification_code
-                {
-                    return Ok(packet_status);
-                } else {
+                let Some(rx_len) = vlp_decode_ecc(&mut self.buffer[..rx_len]) else {
+                    log_warn!(
+                        "VLP ack ECC decode failed: len={} rssi={} snr={}",
+                        rx_len,
+                        packet_status.rssi,
+                        packet_status.snr
+                    );
                     return Err(VLPTXError::InvalidAck);
+                };
+
+                match VLPDownlinkPacket::deserialize(&self.buffer[..rx_len]) {
+                    Some(VLPDownlinkPacket::Ack(ack_packet)) => {
+                        if ack_packet.verification_code == expected_ack_verification_code {
+                            Ok(packet_status)
+                        } else {
+                            // A real ack that fails verification — wrong key, or a stale
+                            // ack for a previous uplink. This is the only case that
+                            // genuinely deserves `InvalidAck`.
+                            Err(VLPTXError::InvalidAck)
+                        }
+                    }
+                    // Not an ack at all: the avionics never acked (e.g. it failed to
+                    // decode the uplink) and our listen window caught its next scheduled
+                    // downlink instead.
+                    //
+                    // Two things were wrong here. The telemetry was dropped on the floor
+                    // instead of being delivered to the application, and the operator was
+                    // told "InvalidAck" — which reads as "the rocket answered, but wrong"
+                    // and sends you hunting for a key/signature mismatch. The honest
+                    // report is that no ack came back.
+                    Some(other) => {
+                        self.client.rx_signal.signal((other, packet_status));
+                        Err(VLPTXError::AckNotReceived)
+                    }
+                    None => Err(VLPTXError::InvalidAck),
                 }
             }
             Err(RadioError::ReceiveTimeout) => {
@@ -378,7 +403,29 @@ impl<'a, 'b, 'c, M: RawMutex, R: Radio> VLPAvionicsDaemon<'a, 'b, 'c, M, R> {
         mut hasher: impl Digest,
     ) -> Result<(), VLPDaemonError> {
         // decode ecc
-        let rx_len = vlp_decode_ecc(&mut self.buffer[..rx_len]).ok_or(VLPDaemonError::ECCError)?;
+        //
+        // A bare `ECCError` is not actionable — "too weak to hear" and "heard clearly but
+        // the bytes are wrong" look identical from here, and they have opposite fixes.
+        // Log the link stats and the raw payload so they can be told apart: a failure at
+        // healthy rssi/snr is on-air corruption or a transmit-side problem, not range.
+        //
+        // Measured on the bench (VLF5 <-> VLF6-as-GCM, ~30 cm): failures arrive at
+        // rssi -78 / snr +5, i.e. a perfectly healthy link, with ~9 of 22 bytes wrong.
+        // Reed-Solomon over 4 ecc bytes corrects 2, so these are correctly rejected —
+        // the ECC is doing its job, the bytes really are that damaged.
+        let rx_len = match vlp_decode_ecc(&mut self.buffer[..rx_len]) {
+            Some(len) => len,
+            None => {
+                log_warn!(
+                    "VLP uplink ECC decode failed: len={} rssi={} snr={} bytes={:?}",
+                    rx_len,
+                    packet_status.rssi,
+                    packet_status.snr,
+                    &self.buffer[..rx_len]
+                );
+                return Err(VLPDaemonError::ECCError);
+            }
+        };
 
         if rx_len < 16 {
             return Err(VLPDaemonError::DeserializeError);
@@ -493,6 +540,39 @@ mod tests {
             assert_eq!(len, 8);
             assert_eq!(&after_buffer[..len], &buffer[..len]);
         }
+    }
+
+    /// Encode/decode must agree on `ecc_len` for every data length the protocol can
+    /// actually produce, with no corruption at all. `test_ecc` only ever covered
+    /// data_len == 8, which sits in the `< 12` branch and hides any disagreement
+    /// between the encoder's `data_len / 4` and the decoder's `total_len / 5`.
+    #[test]
+    fn test_ecc_roundtrip_all_lengths() {
+        init_logger();
+
+        let mut failures: Vec<(usize, usize)> = Vec::new();
+        for data_len in 1..=80usize {
+            let mut buffer = vec![0u8; 200];
+            for i in 0..data_len {
+                buffer[i] = (i as u8).wrapping_mul(7).wrapping_add(13);
+            }
+            let original: Vec<u8> = buffer[..data_len].to_vec();
+
+            let total_len = vlp_encode_ecc(&mut buffer, data_len);
+
+            match vlp_decode_ecc(&mut buffer[..total_len]) {
+                Some(decoded_len) if decoded_len == data_len
+                    && buffer[..data_len] == original[..] => {}
+                Some(decoded_len) => failures.push((data_len, decoded_len)),
+                None => failures.push((data_len, usize::MAX)),
+            }
+        }
+
+        assert!(
+            failures.is_empty(),
+            "clean-channel ECC round-trip failed for (data_len, decoded_len): {:?}",
+            failures
+        );
     }
 
     struct MockRadioPair<M: RawMutex> {
