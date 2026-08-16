@@ -52,7 +52,8 @@ pub struct FlightDataSlowRecord {
     pub timestamp_us: u64,
     pub battery_voltage: f32,
     pub lat_lon: (f64, f64),
-    pub altitude: f32,
+    /// GPS-reported altitude, metres above mean sea level (≈ASL).
+    pub gps_altitude_asl: f32,
     pub num_of_fixed_satalites: u8,
     pub hdop: f32,
     pub vdop: f32,
@@ -76,7 +77,7 @@ impl Default for FlightDataSlowRecord {
             timestamp_us: 0,
             battery_voltage: 0.0,
             lat_lon: (0.0, 0.0),
-            altitude: 0.0,
+            gps_altitude_asl: 0.0,
             num_of_fixed_satalites: 0,
             hdop: 0.0,
             vdop: 0.0,
@@ -127,7 +128,8 @@ pub struct FlightDataRecord {
     pub valid: u8,
 
     pub lat_lon: (f64, f64),
-    pub altitude: f32,
+    /// GPS-reported altitude, metres above mean sea level (≈ASL).
+    pub gps_altitude_asl: f32,
     pub num_of_fixed_satalites: u8,
     pub hdop: f32,
     pub vdop: f32,
@@ -175,7 +177,7 @@ impl FlightDataRecord {
             battery_voltage: slow.battery_voltage,
             valid: fast.valid | slow.valid,
             lat_lon: slow.lat_lon,
-            altitude: slow.altitude,
+            gps_altitude_asl: slow.gps_altitude_asl,
             num_of_fixed_satalites: slow.num_of_fixed_satalites,
             hdop: slow.hdop,
             vdop: slow.vdop,
@@ -224,7 +226,7 @@ pub const AB_VOTE_BARO_RATE: u8 = 1 << 2;
 /// The vertical filter is born (baro trusted; MPC state is live).
 pub const AB_BARO_TRUSTED: u8 = 1 << 3;
 pub const AB_APOGEE: u8 = 1 << 4;
-// 1 << 5 is free (was AB_ACCEL_CLIPPED, removed in storage v6).
+// bits 5-7 unallocated.
 
 pub const PYRO_MAIN_CONTINUITY: u8 = 1 << 0;
 pub const PYRO_MAIN_FIRE: u8 = 1 << 1;

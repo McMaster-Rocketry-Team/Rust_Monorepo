@@ -269,15 +269,6 @@ fn downlink_json(packet: &VLPDownlinkPacket, status: &PacketStatus) -> Value {
             "shared_battery_v": p.shared_battery_v(),
             "amp_online": p.amp_online(),
         }),
-        VLPDownlinkPacket::GPSBeacon(p) => json!({
-            "type": "gps_beacon",
-            "rssi": status.rssi, "snr": status.snr,
-            "satellites": p.num_of_fix_satellites(),
-            "lat": p.lat(), "lon": p.lon(),
-            "altitude_asl": p.altitude_asl(),
-            "air_temperature": p.air_temperature(),
-            "battery_v": p.battery_v(),
-        }),
         VLPDownlinkPacket::Ack(_) => json!({
             "type": "ack_downlink", "rssi": status.rssi, "snr": status.snr,
         }),

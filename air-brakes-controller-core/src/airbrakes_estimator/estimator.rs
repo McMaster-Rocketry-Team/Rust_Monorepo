@@ -186,9 +186,8 @@ enum State {
     },
 }
 
-/// The Phase B v2 airbrakes estimator. See the module docs and
-/// ESTIMATOR_REWORK_PLAN.md for the design and the flight evidence behind
-/// it.
+/// The airbrakes estimator. See the module docs for the design and the
+/// flight evidence behind it.
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug)]
 pub struct AirbrakesEstimator {
@@ -501,13 +500,13 @@ impl AirbrakesEstimator {
 
                 // Birth ("born subsonic"): nothing from the garbage period
                 // survives into the filter except these two numbers.
-                let alt0 = match ring_median(baro_ring) {
+                let alt0_asl = match ring_median(baro_ring) {
                     Some(m) => m,
                     None => return, // no baro at all yet — wait
                 };
                 let vv0 = reckoner.velocity.z;
                 let kf = VerticalKF::born(
-                    alt0,
+                    alt0_asl,
                     vv0,
                     if forced {
                         FORCED_BORN_VELOCITY_STD
@@ -520,7 +519,7 @@ impl AirbrakesEstimator {
                 log_info!(
                     "vertical filter born (forced: {}): alt {}, vv {}",
                     forced,
-                    alt0,
+                    alt0_asl,
                     vv0
                 );
                 self.state = State::Tracking {
@@ -848,7 +847,12 @@ fn axis_tilt(q_av_to_rocket: &UnitQuaternion<f32>, reckoner: &DeadReckoner) -> f
 }
 
 /// returns a passive rotation quaternion that would rotate start vector to
-/// end vector
+/// end vector: the frame rotation under which coordinates `start` become
+/// `end`. Operationally (nalgebra active semantics) that means
+/// `q.transform_vector(end) == start` — e.g.
+/// `quaternion_from_start_and_end_vector(&UP, &gravity_av)` maps the
+/// device-frame gravity vector onto earth UP, which is exactly the
+/// device->earth attitude the `DeadReckoner` wants.
 fn quaternion_from_start_and_end_vector(
     start: &Vector3<f32>,
     end: &Vector3<f32>,

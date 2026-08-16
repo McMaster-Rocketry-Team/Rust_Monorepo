@@ -27,7 +27,7 @@ pub struct AmpOutputStatus {
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PackedStruct, Clone, Debug, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize)]
-#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "6")]
+#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "5")]
 #[repr(C)]
 pub struct AmpStatusMessage {
     pub shared_battery_mv: u16,
@@ -39,8 +39,6 @@ pub struct AmpStatusMessage {
     pub out2: AmpOutputStatus,
     #[packed_field(element_size_bytes = "1")]
     pub out3: AmpOutputStatus,
-    // #[packed_field(element_size_bytes = "1")]
-    // pub out4: AmpOutputStatus,
 }
 
 impl CanBusMessage for AmpStatusMessage {
@@ -77,10 +75,6 @@ mod tests {
                     overwrote: true,
                     status: PowerOutputStatus::PowerBad,
                 },
-                // out4: AmpOutputStatus {
-                //     overwrote: false,
-                //     status: PowerOutputStatus::PowerBad,
-                // },
             }
             .into(),
             AmpStatusMessage {
@@ -97,10 +91,6 @@ mod tests {
                     overwrote: true,
                     status: PowerOutputStatus::PowerBad,
                 },
-                // out4: AmpOutputStatus {
-                //     overwrote: false,
-                //     status: PowerOutputStatus::PowerBad,
-                // },
             }
             .into(),
         ]

@@ -109,9 +109,6 @@ pub struct TelemetryPacket {
     amp_out3_overwrote: bool,
     #[packed_field(element_size_bits = "2", ty = "enum")]
     amp_out3: PowerOutputStatus,
-    // amp_out4_overwrote: bool,
-    // #[packed_field(element_size_bits = "2", ty = "enum")]
-    // amp_out4: PowerOutputStatus,
 
     icarus_online: bool,
     icarus_rebooted_in_last_5s: bool,
@@ -210,8 +207,6 @@ impl TelemetryPacket {
         amp_out2: PowerOutputStatus,
         amp_out3_overwrote: bool,
         amp_out3: PowerOutputStatus,
-        // amp_out4_overwrote: bool,
-        // amp_out4: PowerOutputStatus,
 
         icarus_online: bool,
         icarus_rebooted_in_last_5s: bool,
@@ -284,8 +279,6 @@ impl TelemetryPacket {
             amp_out2,
             amp_out3_overwrote,
             amp_out3,
-            // amp_out4_overwrote,
-            // amp_out4,
 
             icarus_online,
             icarus_rebooted_in_last_5s,
@@ -474,14 +467,6 @@ impl TelemetryPacket {
         self.amp_out3
     }
 
-    // pub fn amp_out4_overwrote(&self) -> bool {
-    //     self.amp_out4_overwrote
-    // }
-
-    // pub fn amp_out4(&self) -> PowerOutputStatus {
-    //     self.amp_out4
-    // }
-
     pub fn icarus_online(&self) -> bool {
         self.icarus_online
     }
@@ -594,8 +579,6 @@ impl TelemetryPacket {
             amp_out2: format!("{:?}", self.amp_out2()),
             amp_out3_overwrote: self.amp_out3_overwrote(),
             amp_out3: format!("{:?}", self.amp_out3()),
-            // amp_out4_overwrote: self.amp_out4_overwrote(),
-            // amp_out4: format!("{:?}", self.amp_out4()),
 
             icarus_online: self.icarus_online(),
             icarus_rebooted_in_last_5s: self.icarus_rebooted_in_last_5s(),
@@ -693,8 +676,6 @@ pub struct TelemetryPacketBuilderState {
     pub amp_out2: PowerOutputStatus,
     pub amp_out3_overwrote: bool,
     pub amp_out3: PowerOutputStatus,
-    // pub amp_out4_overwrote: bool,
-    // pub amp_out4: PowerOutputStatus,
 
     pub icarus_online: bool,
     pub icarus_uptime_s: u32,
@@ -771,8 +752,6 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 amp_out2: PowerOutputStatus::Disabled,
                 amp_out3_overwrote: false,
                 amp_out3: PowerOutputStatus::Disabled,
-                // amp_out4_overwrote: false,
-                // amp_out4: PowerOutputStatus::Disabled,
 
                 icarus_online: false,
                 icarus_uptime_s: 0,
@@ -850,8 +829,6 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 state.amp_out2,
                 state.amp_out3_overwrote,
                 state.amp_out3,
-                // state.amp_out4_overwrote,
-                // state.amp_out4,
                 state.icarus_online,
                 state.icarus_uptime_s < 5,
                 state.air_brakes_commanded_extension_percentage,

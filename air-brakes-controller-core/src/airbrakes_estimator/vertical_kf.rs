@@ -140,15 +140,15 @@ mod tests {
         let mut kf = VerticalKF::born(1000.0, 200.0, 5.0, 0.5, 3.0);
         let dt = 1.0 / 416.0;
         let accel = -15.0f32; // drag + gravity, m/s^2 (linear accel, up +)
-        let mut true_alt = 1000.0f32;
+        let mut true_alt_asl = 1000.0f32;
         let mut true_vv = 200.0f32;
         for _ in 0..(416 * 5) {
-            true_alt += true_vv * dt + 0.5 * accel * dt * dt;
+            true_alt_asl += true_vv * dt + 0.5 * accel * dt * dt;
             true_vv += accel * dt;
             kf.predict(accel, dt);
-            kf.update(true_alt, dt);
+            kf.update(true_alt_asl, dt);
         }
-        assert!((kf.altitude_asl() - true_alt).abs() < 1.0);
+        assert!((kf.altitude_asl() - true_alt_asl).abs() < 1.0);
         assert!((kf.vertical_velocity() - true_vv).abs() < 0.5);
     }
 
@@ -160,13 +160,13 @@ mod tests {
         let mut kf = VerticalKF::born(1000.0, 250.0, 30.0, 0.5, 3.0);
         let dt = 1.0 / 416.0;
         let accel = -15.0f32;
-        let mut true_alt = 1000.0f32;
+        let mut true_alt_asl = 1000.0f32;
         let mut true_vv = 200.0f32; // filter thinks 250 — 50 m/s wrong
         for _ in 0..(416 * 2) {
-            true_alt += true_vv * dt + 0.5 * accel * dt * dt;
+            true_alt_asl += true_vv * dt + 0.5 * accel * dt * dt;
             true_vv += accel * dt;
             kf.predict(accel, dt);
-            kf.update(true_alt, dt);
+            kf.update(true_alt_asl, dt);
         }
         assert!(
             (kf.vertical_velocity() - true_vv).abs() < 10.0,
@@ -183,9 +183,9 @@ mod tests {
         let mut kf = VerticalKF::born(1000.0, 100.0, 5.0, 0.5, 3.0);
         let dt = 1.0 / 416.0;
         // transient: 2 samples of +500 m garbage — must be rejected
-        let alt_before = kf.altitude_asl();
+        let alt_before_asl = kf.altitude_asl();
         kf.predict(-15.0, dt);
-        assert!(!kf.update(alt_before + 500.0, dt));
+        assert!(!kf.update(alt_before_asl + 500.0, dt));
 
         // persistent offset: after 2 s of continuous disagreement the
         // filter re-anchors to the baro

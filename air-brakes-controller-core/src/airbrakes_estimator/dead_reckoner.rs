@@ -10,7 +10,10 @@ use nalgebra::{UnitQuaternion, Vector3};
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone)]
 pub struct DeadReckoner {
-    /// Rotation from earth (inertial) frame to device frame
+    /// Attitude: `transform_vector` maps device-frame vectors into the
+    /// earth (inertial) frame (i.e. the device->earth coordinate
+    /// transform; equivalently the rotation carrying the earth frame's
+    /// axes onto the device frame's axes).
     pub orientation: UnitQuaternion<f32>,
     /// Position in earth frame (meters); z is altitude ASL
     pub position: Vector3<f32>,
@@ -21,9 +24,10 @@ pub struct DeadReckoner {
 }
 
 impl DeadReckoner {
-    /// Initialize with a given orientation (earth -> device). Position and
-    /// velocity start at zero; set `position.z` to the pad altitude after
-    /// construction.
+    /// Initialize with a given attitude (see `orientation`: its
+    /// `transform_vector` must map device-frame vectors to the earth
+    /// frame). Position and velocity start at zero; set `position.z` to
+    /// the pad altitude after construction.
     pub fn new(initial_orientation: UnitQuaternion<f32>) -> Self {
         Self {
             orientation: initial_orientation,
@@ -38,7 +42,9 @@ impl DeadReckoner {
     /// * `accel` - specific force in device frame (m/s^2)
     /// * `gyro`  - angular rate in device frame (rad/s), bias already removed
     pub fn update(&mut self, accel: &Vector3<f32>, gyro: &Vector3<f32>, dt: f32) {
-        // 1) Orientation: quaternion exponential via small-angle approx
+        // 1) Orientation: exact quaternion exponential of the body rate
+        //    held constant over dt; right-multiply because the rate is
+        //    measured in the device frame
         let delta_orientation = UnitQuaternion::from_scaled_axis(gyro * dt);
         self.orientation = self.orientation * delta_orientation;
 

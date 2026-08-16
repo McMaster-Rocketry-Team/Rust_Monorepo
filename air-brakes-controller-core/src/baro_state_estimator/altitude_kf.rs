@@ -72,7 +72,7 @@ const MAX_REJECTED_SAMPLES: u32 = SAMPLES_PER_S as u32;
 const RESEED_VELOCITY_VARIANCE: f32 = 300.0 * 300.0;
 
 impl BaroAltitudeKF {
-    pub fn new(initial_altitude: f32) -> Self {
+    pub fn new(initial_altitude_asl: f32) -> Self {
         let f = Matrix2::new(1.0, DT, 0.0, 1.0);
 
         // Measurement matrix (altitude only)
@@ -92,7 +92,7 @@ impl BaroAltitudeKF {
         let p = SMatrix::<f32, 2, 2>::identity() * 0.1;
 
         Self {
-            x: Vector2::new(initial_altitude, 0.0),
+            x: Vector2::new(initial_altitude_asl, 0.0),
             p,
             f,
             h,
@@ -154,8 +154,8 @@ impl BaroAltitudeKF {
     /// measurement, velocity unknown (large variance). Cheaper and much
     /// faster-converging than letting the stale pre-lockout state fight the
     /// innovation gate.
-    pub fn reseed(&mut self, altitude: f32) {
-        self.x = Vector2::new(altitude, 0.0);
+    pub fn reseed(&mut self, altitude_asl: f32) {
+        self.x = Vector2::new(altitude_asl, 0.0);
         self.p = Matrix2::new(
             BARO_ALTITUDE_MEASUREMENT_VARIANCE,
             0.0,
@@ -165,7 +165,7 @@ impl BaroAltitudeKF {
         self.rejected_streak = 0;
     }
 
-    pub fn altitude(&self) -> f32 {
+    pub fn altitude_asl(&self) -> f32 {
         self.x[0]
     }
 

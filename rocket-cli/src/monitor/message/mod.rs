@@ -58,10 +58,6 @@ impl CanMessageViewerChild {
     }
 
     fn update(&mut self, message: &DecodedMessage) {
-        if let CanBusMessageEnum::PreUnixTime(_) = message.message {
-            return;
-        }
-
         if let Some(node) = self
             .nodes
             .iter_mut()

@@ -15,7 +15,9 @@ use crate::fmt::Debug2DefmtWrapper;
 pub struct GPSData {
     pub timestamp: Option<i64>, // in seconds
     pub lat_lon: Option<(f64, f64)>,
-    pub altitude: Option<f32>,
+    /// NMEA GGA/GNS field 9: antenna altitude in metres above mean sea level
+    /// (≈ASL) — NOT height above the WGS84 ellipsoid.
+    pub altitude_asl: Option<f32>,
     pub num_of_fix_satellites: u8,
     pub hdop: Option<f32>,
     pub vdop: Option<f32>,
@@ -42,7 +44,7 @@ impl From<&Nmea> for GPSData {
         Self {
             timestamp,
             lat_lon,
-            altitude: nmea.altitude,
+            altitude_asl: nmea.altitude,
             num_of_fix_satellites: nmea.num_of_fix_satellites.unwrap_or(0) as u8,
             hdop: nmea.hdop,
             vdop: nmea.vdop,

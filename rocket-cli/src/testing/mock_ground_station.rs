@@ -8,8 +8,7 @@ use firmware_common_new::{
     vlp::{
         client::VLPTXError,
         packets::{
-            VLPDownlinkPacket, VLPUplinkPacket, gps_beacon::GPSBeaconPacket,
-            telemetry::TelemetryPacket,
+            VLPDownlinkPacket, VLPUplinkPacket, telemetry::TelemetryPacket,
         },
     },
 };
@@ -23,23 +22,6 @@ struct MockVLPClient {
 impl MockVLPClient {
     pub fn new() -> Self {
         Self {
-            // mock_packet: RwLock::new(Some((
-            //     GPSBeaconPacket::new(
-            //         0,
-            //         Some((10.1, 20.2)),
-            //         12,
-            //         7.4,
-            //         20.5,
-            //         100.3,
-            //         true,
-            //         false,
-            //         false,
-            //         false,
-            //         false,
-            //     )
-            //     .into(),
-            //     PacketStatus { rssi: -40, snr: 6 },
-            // ))),
             mock_packet: RwLock::new(Some((
                 TelemetryPacket::new(
                     0,

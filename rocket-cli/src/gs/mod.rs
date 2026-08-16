@@ -169,7 +169,7 @@ pub fn tui_task(
                     .title("Target apogee")
                     .content(
                         LinearLayout::horizontal()
-                            .child(TextView::new("Target Altitude (Meters): "))
+                            .child(TextView::new("Target Apogee AGL (Meters): "))
                             .child(
                                 LinearLayout::vertical()
                                     .child(
@@ -202,7 +202,7 @@ pub fn tui_task(
                             send_packet(s, packet);
 
                             s.add_layer(Dialog::info(
-                                format!("Sending new target apogee of {} meters", target_apogee).as_str(),
+                                format!("Sending new target apogee of {} meters AGL", target_apogee).as_str(),
                             ));
                         }
                     }),

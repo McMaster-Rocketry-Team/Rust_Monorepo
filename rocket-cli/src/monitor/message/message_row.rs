@@ -123,7 +123,6 @@ impl MessageRow {
         match self.message {
             CanBusMessageEnum::NodeStatus(_) => "Node Status",
             CanBusMessageEnum::Reset(_) => "Reset",
-            CanBusMessageEnum::PreUnixTime(_) => "Pre Unix Time",
             CanBusMessageEnum::UnixTime(_) => "Unix Time",
             CanBusMessageEnum::BaroMeasurement(_) => "Baro Measurement",
             CanBusMessageEnum::IMUMeasurement(_) => "IMU Measurement",
@@ -504,7 +503,6 @@ impl MessageRow {
                 ],
             ),
             CanBusMessageEnum::NodeStatus(_) => unreachable!(),
-            CanBusMessageEnum::PreUnixTime(_) => unreachable!(),
         }
 
         let time_str = format!(

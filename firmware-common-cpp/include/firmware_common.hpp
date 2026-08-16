@@ -17,6 +17,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <initializer_list>
 #include <variant>
 #include <optional>
 #include <type_traits>
@@ -37,8 +38,10 @@ namespace can_bus {
     static constexpr size_t MAX_CAN_MESSAGE_SIZE = 64;
 
     // Log frames are a raw byte stream, not an encoded message. The decoder
-    // ignores them. Note this collides with PreUnixTimeMessage::MESSAGE_TYPE,
-    // exactly as it does in Rust: both are misc + sub type 0.
+    // ignores them. Note this type value is shared with Rust's
+    // PRE_UNIX_TIME_MESSAGE_TYPE (both misc + sub type 0): the sacrificial
+    // empty frame sent before each UnixTime frame, which is intentionally
+    // undecodable and likewise dropped.
     static constexpr uint8_t LOG_MESSAGE_TYPE = 8;
 
     // CAN Extended ID implementation based on Rust's packed_struct
@@ -155,6 +158,29 @@ namespace can_bus {
                read_u32_be(buffer + 4);
     }
 
+    // CRC-16/IBM-3740: poly=0x1021 init=0xFFFF refin=false refout=false xorout=0x0000
+    // Matches CAN_CRC in firmware-common-new/src/can_bus/sender.rs.
+    inline uint16_t can_crc16(const uint8_t* data, size_t len) noexcept {
+        uint16_t crc = 0xFFFF;
+        for (size_t i = 0; i < len; ++i) {
+            crc ^= (static_cast<uint16_t>(data[i]) << 8);
+            for (int j = 0; j < 8; ++j) {
+                if (crc & 0x8000) {
+                    crc = (crc << 1) ^ 0x1021;
+                } else {
+                    crc <<= 1;
+                }
+            }
+        }
+        return crc;
+    }
+
+    // Derives the 12 bit CAN node id from a device serial number (e.g. the STM32
+    // UID), same as can_node_id_from_serial_number in Rust.
+    inline uint16_t can_node_id_from_serial_number(const uint8_t* serial_number, size_t len) noexcept {
+        return can_crc16(serial_number, len) & 0xFFF;
+    }
+
     struct AckMessage {
         static constexpr uint32_t MESSAGE_TYPE = 66;
         // Message Type ID to be verified against JSON
@@ -269,10 +295,9 @@ namespace can_bus {
 
     struct AmpStatusMessage {
         static constexpr uint32_t MESSAGE_TYPE = 33;
-        static constexpr size_t SIZE_BYTES = 6;
+        static constexpr size_t SIZE_BYTES = 5;
         
         uint16_t shared_battery_mv;
-        // AMP has three power outputs; byte 5 is unused padding.
         AmpOutputStatus out1;
         AmpOutputStatus out2;
         AmpOutputStatus out3;
@@ -842,13 +867,13 @@ namespace can_bus {
         uint32_t altitude_agl_raw;
         uint64_t timestamp_us;
 
-        static RocketStateMessage new_msg(uint64_t ts, const float vel[2], float alt) noexcept {
+        static RocketStateMessage new_msg(uint64_t ts, const float vel[2], float altitude_agl) noexcept {
             RocketStateMessage msg;
             msg.timestamp_us = ts;
             for(int i=0; i<2; i++) {
                 msg.velocity_raw[i] = bit_cast<uint32_t>(vel[i]);
             }
-            msg.altitude_agl_raw = bit_cast<uint32_t>(alt);
+            msg.altitude_agl_raw = bit_cast<uint32_t>(altitude_agl);
             return msg;
         }
 
@@ -1028,20 +1053,31 @@ namespace can_bus {
         }
     };
 
-    struct PreUnixTimeMessage {
-        static constexpr uint32_t MESSAGE_TYPE = 8;
-        static constexpr uint8_t PRIORITY = 1;
-        static constexpr size_t SIZE_BYTES = 0;
-        
-        static PreUnixTimeMessage deserialize(const uint8_t* buffer) noexcept {
-            (void)buffer;
-            return PreUnixTimeMessage();
+    // Returns a mask for the CAN hardware's acceptance filter, mirroring
+    // create_can_bus_message_type_filter_mask in Rust. Declared here rather than
+    // next to CanBusExtendedId because it needs the message type constants.
+    //
+    // Filter logic: `frame_accepted = (incoming_id & mask) == 0`
+    //
+    // - a frame whose message type is in `accept_message_types` is always accepted
+    // - a frame whose message type is not in the list *MAY OR MAY NOT* be rejected,
+    //   so the receiver still has to check the type itself
+    // - ResetMessage and UnixTimeMessage are always accepted, even when absent
+    //   from the list
+    inline uint32_t create_can_bus_message_type_filter_mask(const uint8_t* accept_message_types, size_t count) noexcept {
+        uint8_t accept_message_type_ored = 0;
+        for (size_t i = 0; i < count; ++i) {
+            accept_message_type_ored |= accept_message_types[i];
         }
+        accept_message_type_ored |= static_cast<uint8_t>(ResetMessage::MESSAGE_TYPE);
+        accept_message_type_ored |= static_cast<uint8_t>(UnixTimeMessage::MESSAGE_TYPE);
 
-        void serialize(uint8_t* buffer) const noexcept {
-            (void)buffer;
-        }
-    };
+        return CanBusExtendedId::create(0, static_cast<uint8_t>(~accept_message_type_ored), 0, 0);
+    }
+
+    inline uint32_t create_can_bus_message_type_filter_mask(std::initializer_list<uint8_t> accept_message_types) noexcept {
+        return create_can_bus_message_type_filter_mask(accept_message_types.begin(), accept_message_types.size());
+    }
 
     using CanBusMessage = std::variant<
         std::monostate, // Represents no message or error
@@ -1060,7 +1096,6 @@ namespace can_bus {
         MagMeasurementMessage,
         NodeStatusMessage,
         OzysMeasurementMessage,
-        PreUnixTimeMessage,
         ResetMessage,
         RocketStateMessage,
         UnixTimeMessage,
@@ -1152,19 +1187,7 @@ namespace can_bus {
         uint16_t crc;
 
         static uint16_t calculate_crc(const uint8_t* data, size_t len) noexcept {
-            // CRC-16/IBM-3740: poly=0x1021 init=0xFFFF refin=false refout=false xorout=0x0000
-            uint16_t crc = 0xFFFF;
-            for (size_t i = 0; i < len; ++i) {
-                crc ^= (static_cast<uint16_t>(data[i]) << 8);
-                for (int j = 0; j < 8; ++j) {
-                    if (crc & 0x8000) {
-                        crc = (crc << 1) ^ 0x1021;
-                    } else {
-                        crc <<= 1;
-                    }
-                }
-            }
-            return crc;
+            return can_crc16(data, len);
         }
     };
 
@@ -1186,7 +1209,6 @@ namespace can_bus {
             case MagMeasurementMessage::MESSAGE_TYPE: return MagMeasurementMessage::SIZE_BYTES;
             case NodeStatusMessage::MESSAGE_TYPE: return NodeStatusMessage::SIZE_BYTES;
             case OzysMeasurementMessage::MESSAGE_TYPE: return OzysMeasurementMessage::SIZE_BYTES;
-            case PreUnixTimeMessage::MESSAGE_TYPE: return PreUnixTimeMessage::SIZE_BYTES;
             case ResetMessage::MESSAGE_TYPE: return ResetMessage::SIZE_BYTES;
             case RocketStateMessage::MESSAGE_TYPE: return RocketStateMessage::SIZE_BYTES;
             case UnixTimeMessage::MESSAGE_TYPE: return UnixTimeMessage::SIZE_BYTES;
@@ -1202,8 +1224,7 @@ namespace can_bus {
     inline std::optional<CanBusMessage> decode(uint8_t message_type, const uint8_t* buffer, size_t len) noexcept {
         auto expected_len = serialized_len(message_type);
         if (!expected_len) return std::nullopt;
-        // PreUnixTime carries no payload and ignores whatever the frame holds.
-        if (message_type != PreUnixTimeMessage::MESSAGE_TYPE && len != *expected_len) {
+        if (len != *expected_len) {
             return std::nullopt;
         }
 
@@ -1238,8 +1259,6 @@ namespace can_bus {
                 return CanBusMessage(NodeStatusMessage::deserialize(buffer));
             case OzysMeasurementMessage::MESSAGE_TYPE:
                 return CanBusMessage(OzysMeasurementMessage::deserialize(buffer));
-            case PreUnixTimeMessage::MESSAGE_TYPE:
-                return CanBusMessage(PreUnixTimeMessage::deserialize(buffer));
             case ResetMessage::MESSAGE_TYPE:
                 return CanBusMessage(ResetMessage::deserialize(buffer));
             case RocketStateMessage::MESSAGE_TYPE:
@@ -1359,18 +1378,7 @@ namespace can_bus {
             } multi_frame;
 
             static uint16_t calculate_crc(const uint8_t* data, size_t len) noexcept {
-                uint16_t crc = 0xFFFF;
-                for (size_t i = 0; i < len; ++i) {
-                    crc ^= (static_cast<uint16_t>(data[i]) << 8);
-                    for (int j = 0; j < 8; ++j) {
-                        if (crc & 0x8000) {
-                            crc = (crc << 1) ^ 0x1021;
-                        } else {
-                            crc <<= 1;
-                        }
-                    }
-                }
-                return crc;
+                return can_crc16(data, len);
             }
         };
     } // namespace detail

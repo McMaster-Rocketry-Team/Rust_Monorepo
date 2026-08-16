@@ -1,5 +1,4 @@
-//! Baro-only *deployment* state machine (see ESTIMATOR_REWORK_PLAN.md in the
-//! VLF5 repo).
+//! Baro-only *deployment* state machine.
 //!
 //! Detects ignition, apogee, and landing from barometric altitude alone via a
 //! deliberately slow (~1 s bandwidth) 2-state Kalman filter whose output is
@@ -285,7 +284,7 @@ impl RocketStateEstimator {
                 self.kf.insert(BaroAltitudeKF::new(baro_altitude_asl))
             }
         };
-        let altitude = kf.altitude();
+        let altitude_asl = kf.altitude_asl();
         let velocity = kf.vertical_velocity();
 
         let mut deploy_pyro = None;
@@ -293,10 +292,10 @@ impl RocketStateEstimator {
         match &mut self.stage {
             Stage::OnPad { pad_altitude_asl } => {
                 let alpha = DT / PAD_ALTITUDE_FILTER_TIME_CONSTANT;
-                *pad_altitude_asl += alpha * (altitude - *pad_altitude_asl);
+                *pad_altitude_asl += alpha * (altitude_asl - *pad_altitude_asl);
 
                 if velocity > IGNITION_VELOCITY_THRESHOLD
-                    && altitude - *pad_altitude_asl > IGNITION_ALTITUDE_RISE
+                    && altitude_asl - *pad_altitude_asl > IGNITION_ALTITUDE_RISE
                 {
                     log_info!(
                         "ignition detected: v={}m/s, pad asl={}m",
@@ -315,7 +314,7 @@ impl RocketStateEstimator {
                         }
                         None => Stage::Ascent {
                             launch_pad_altitude_asl: pad,
-                            peak_altitude_asl: altitude,
+                            peak_altitude_asl: altitude_asl,
                             below_peak_samples: 0,
                         },
                     };
@@ -326,11 +325,11 @@ impl RocketStateEstimator {
                 peak_altitude_asl,
                 below_peak_samples,
             } => {
-                if altitude > *peak_altitude_asl {
-                    *peak_altitude_asl = altitude;
+                if altitude_asl > *peak_altitude_asl {
+                    *peak_altitude_asl = altitude_asl;
                 }
 
-                if *peak_altitude_asl - altitude > APOGEE_DROP_M {
+                if *peak_altitude_asl - altitude_asl > APOGEE_DROP_M {
                     *below_peak_samples += 1;
                 } else {
                     *below_peak_samples = 0;
@@ -402,7 +401,7 @@ impl RocketStateEstimator {
             } => {
                 // Dual only: wait for main altitude.
                 if let Some(main_agl) = self.profile.deployment.main_chute_altitude_agl()
-                    && altitude < main_agl + *launch_pad_altitude_asl
+                    && altitude_asl < main_agl + *launch_pad_altitude_asl
                 {
                     self.stage = Stage::MainDelay {
                         launch_pad_altitude_asl: *launch_pad_altitude_asl,
@@ -448,8 +447,8 @@ impl RocketStateEstimator {
     }
 
     pub fn state(&self) -> RocketState {
-        let (altitude, velocity) = match &self.kf {
-            Some(kf) => (kf.altitude(), kf.vertical_velocity()),
+        let (altitude_asl, velocity) = match &self.kf {
+            Some(kf) => (kf.altitude_asl(), kf.vertical_velocity()),
             None => (0.0, 0.0),
         };
 
@@ -460,7 +459,7 @@ impl RocketStateEstimator {
                 ..
             } => RocketState::Ascent {
                 vertical_velocity: velocity,
-                altitude_asl: altitude,
+                altitude_asl,
                 launch_pad_altitude_asl: *launch_pad_altitude_asl,
             },
             // The frozen KF values are deliberately NOT reported here — the
@@ -477,7 +476,7 @@ impl RocketStateEstimator {
             } => RocketState::DrogueChute {
                 deployed: false,
                 vertical_velocity: velocity,
-                altitude_asl: altitude,
+                altitude_asl,
                 launch_pad_altitude_asl: *launch_pad_altitude_asl,
             },
             Stage::DrogueDeployed {
@@ -485,7 +484,7 @@ impl RocketStateEstimator {
             } => RocketState::DrogueChute {
                 deployed: true,
                 vertical_velocity: velocity,
-                altitude_asl: altitude,
+                altitude_asl,
                 launch_pad_altitude_asl: *launch_pad_altitude_asl,
             },
             Stage::MainDelay {
@@ -494,7 +493,7 @@ impl RocketStateEstimator {
             } => RocketState::MainChute {
                 deployed: false,
                 vertical_velocity: velocity,
-                altitude_asl: altitude,
+                altitude_asl,
                 launch_pad_altitude_asl: *launch_pad_altitude_asl,
             },
             Stage::MainDeployed {
@@ -503,7 +502,7 @@ impl RocketStateEstimator {
             } => RocketState::MainChute {
                 deployed: true,
                 vertical_velocity: velocity,
-                altitude_asl: altitude,
+                altitude_asl,
                 launch_pad_altitude_asl: *launch_pad_altitude_asl,
             },
             Stage::Landed { .. } => RocketState::Landed,
@@ -531,7 +530,7 @@ impl RocketStateEstimator {
     /// The honest interface is [`Self::state`], whose
     /// [`RocketState::MachLockout`] variant carries no altitude at all.
     pub fn kf_altitude_asl(&self) -> f32 {
-        self.kf.as_ref().map(|kf| kf.altitude()).unwrap_or(0.0)
+        self.kf.as_ref().map(|kf| kf.altitude_asl()).unwrap_or(0.0)
     }
 
     /// Raw KF vertical velocity (m/s) for the fast flight-log record ONLY.

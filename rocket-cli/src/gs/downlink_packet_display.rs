@@ -64,7 +64,6 @@ impl DownlinkPacketDisplay {
     fn packet_name(&self) -> &'static str {
         if let Some(Packet { packet, .. }) = &self.packet {
             match packet {
-                VLPDownlinkPacket::GPSBeacon(_) => "GPS Beacon",
                 VLPDownlinkPacket::Ack(_) => "Ack",
                 VLPDownlinkPacket::LowPowerTelemetry(_) => "Low Power Telemetry",
                 VLPDownlinkPacket::Telemetry(_) => "Telemetry",
@@ -203,54 +202,6 @@ impl View for DownlinkPacketDisplay {
 
             let printer = printer.windowed(Rect::from_corners(Vec2::new(0, 1), printer.size));
             match packet {
-                VLPDownlinkPacket::GPSBeacon(p) => self.draw_fields(
-                    &printer,
-                    &[
-                        &[
-                            (
-                                "satellites",
-                                false,
-                                p.num_of_fix_satellites().to_string().into(),
-                            ),
-                            ("lat", false, p.lat().to_string().into()),
-                            ("lon", false, p.lon().to_string().into()),
-                        ],
-                        &[
-                            (
-                                "altitude asl",
-                                false,
-                                format!("{:.1}m", p.altitude_asl()).into(),
-                            ),
-                            (
-                                "air temperature",
-                                false,
-                                format!("{:.1}C", p.air_temperature()).into(),
-                            ),
-                        ],
-                        &[("vl battery", false, format!("{:.2}V", p.battery_v()).into())],
-                        &[(
-                            "pyro short circuit",
-                            true,
-                            Self::format_bool(p.pyro_short_circuit),
-                        )],
-                        &[
-                            (
-                                "main continuity",
-                                true,
-                                Self::format_bool(p.pyro_main_continuity),
-                            ),
-                            ("main fire", true, Self::format_bool(p.pyro_main_fire)),
-                        ],
-                        &[
-                            (
-                                "drogue continuity",
-                                true,
-                                Self::format_bool(p.pyro_drogue_continuity),
-                            ),
-                            ("drogue fire", true, Self::format_bool(p.pyro_drogue_fire)),
-                        ],
-                    ],
-                ),
                 VLPDownlinkPacket::LowPowerTelemetry(p) => self.draw_fields(
                     &printer,
                     &[

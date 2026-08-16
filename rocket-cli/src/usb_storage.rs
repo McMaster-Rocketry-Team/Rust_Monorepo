@@ -21,7 +21,7 @@ use firmware_common_new::flight_data_record::{
 };
 use firmware_common_new::can_bus::messages::amp_status::PowerOutputStatus;
 use firmware_common_new::flight_storage::{
-    BLOCK_SIZE, HEADER_LEN, RECORD_LEN_TAGGED, RESPONSE_MAGIC, decode_response_header,
+    BLOCK_SIZE, HEADER_LEN, RESPONSE_MAGIC, STORAGE_VERSION, decode_response_header,
     parse_log_records, verify_data_block,
 };
 use firmware_common_new::vlp::usb::CliRequest;
@@ -140,14 +140,13 @@ fn read_response(handle: &DeviceHandle<Context>) -> Result<Vec<u8>> {
                     data.drain(..off);
                 }
                 if data.len() >= HEADER_LEN {
-                    let (_record_count, record_len, block_count) =
+                    let (_record_count, storage_version, block_count) =
                         decode_response_header(&data[..HEADER_LEN])
                             .ok_or_else(|| anyhow!("device sent an invalid response header"))?;
-                    if record_len != RECORD_LEN_TAGGED {
+                    if storage_version != STORAGE_VERSION {
                         bail!(
-                            "unsupported record layout: device reports record_len={record_len} \
-                             (a legacy v1 log). Rebuild rocket-cli from the same source as the \
-                             firmware, or clear the storage."
+                            "unsupported storage version {storage_version} (this rocket-cli \
+                             reads v{STORAGE_VERSION})"
                         );
                     }
                     expected = Some(HEADER_LEN + block_count as usize * BLOCK_SIZE);
@@ -209,8 +208,14 @@ fn read_header(handle: &DeviceHandle<Context>) -> Result<[u8; HEADER_LEN]> {
 
 /// Split the raw block stream into merged CSV rows.
 fn parse_records(data: &[u8]) -> Result<(u32, Vec<FlightDataRecord>)> {
-    let (log_record_count, record_len, block_count) = decode_response_header(data)
+    let (log_record_count, storage_version, block_count) = decode_response_header(data)
         .ok_or_else(|| anyhow!("device sent an invalid response header"))?;
+    if storage_version != STORAGE_VERSION {
+        bail!(
+            "unsupported storage version {storage_version} (this rocket-cli reads \
+             v{STORAGE_VERSION})"
+        );
+    }
     let blocks = &data[HEADER_LEN..];
 
     let mut crc_errors = 0u32;
@@ -232,20 +237,8 @@ fn parse_records(data: &[u8]) -> Result<(u32, Vec<FlightDataRecord>)> {
         );
     }
 
-    if record_len != RECORD_LEN_TAGGED {
-        bail!(
-            "the log on this VLF5 uses a legacy v1 layout this rocket-cli no longer reads. \
-             Use an older rocket-cli to download it, or clear the storage."
-        );
-    }
-    let log = parse_log_records(log_record_count, blocks, block_count).ok_or_else(|| {
-        anyhow!(
-            "failed to decode the log stream — this rocket-cli reads storage v{}, so the \
-             log was likely written by firmware using an older storage version. Use a \
-             matching rocket-cli to download it, or clear the storage.",
-            firmware_common_new::flight_storage::STORAGE_VERSION
-        )
-    })?;
+    let log = parse_log_records(log_record_count, blocks, block_count)
+        .ok_or_else(|| anyhow!("failed to decode the log stream — data may be corrupt"))?;
     let merged = merge_log_records(&log);
 
     Ok((log_record_count, merged))
@@ -297,7 +290,7 @@ fn write_csv(path: &str, records: &[FlightDataRecord]) -> Result<()> {
         "battery_voltage",
         "lat",
         "lon",
-        "altitude",
+        "gps_altitude_asl",
         "num_sats",
         "hdop",
         "vdop",
@@ -357,7 +350,7 @@ fn write_csv(path: &str, records: &[FlightDataRecord]) -> Result<()> {
             r.battery_voltage.to_string(),
             r.lat_lon.0.to_string(),
             r.lat_lon.1.to_string(),
-            r.altitude.to_string(),
+            r.gps_altitude_asl.to_string(),
             r.num_of_fixed_satalites.to_string(),
             r.hdop.to_string(),
             r.vdop.to_string(),
@@ -397,7 +390,7 @@ pub fn list_files() -> Result<()> {
     drain_stale(&handle);
     send_request(&handle, CliRequest::List)?;
     let header = read_header(&handle)?;
-    let (record_count, record_len, block_count) = decode_response_header(&header)
+    let (record_count, storage_version, block_count) = decode_response_header(&header)
         .ok_or_else(|| anyhow!("device sent an invalid response header"))?;
 
     println!("VLF5 flight log:");
@@ -407,12 +400,12 @@ pub fn list_files() -> Result<()> {
         block_count,
         block_count as usize * BLOCK_SIZE
     );
-    if record_len == RECORD_LEN_TAGGED {
-        println!("  format       : tagged (FAST + SLOW stream)");
+    if storage_version == STORAGE_VERSION {
+        println!("  storage ver  : {}", storage_version);
     } else {
         println!(
-            "  format       : legacy v1 fixed ({} bytes/record; not downloadable with this rocket-cli)",
-            record_len
+            "  storage ver  : {} (this rocket-cli reads v{}; download unsupported)",
+            storage_version, STORAGE_VERSION
         );
     }
     if record_count == 0 {

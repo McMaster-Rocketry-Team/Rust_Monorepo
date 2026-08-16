@@ -5,24 +5,24 @@ use crate::fixed_point_factory;
 
 use super::VLPUplinkPacket;
 
-fixed_point_factory!(TargetAltitudeFac, f32, 0.0, 10_000.0, 0.01);
+fixed_point_factory!(TargetApogeeAglFac, f32, 0.0, 10_000.0, 0.01);
 
 #[derive(PackedStruct, Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "3")]
 pub struct SetTargetApogeePacket {
     #[packed_field(element_size_bits = "20")]
-    pub altitude: Integer<TargetAltitudeFacBase, packed_bits::Bits<TARGET_ALTITUDE_FAC_BITS>>,
+    pub altitude_agl: Integer<TargetApogeeAglFacBase, packed_bits::Bits<TARGET_APOGEE_AGL_FAC_BITS>>,
 }
 
 impl SetTargetApogeePacket {
-    pub fn new(target_alt: f32) -> Self {
+    pub fn new(target_apogee_agl: f32) -> Self {
         Self {
-            altitude: TargetAltitudeFac::to_fixed_point_capped(target_alt),
+            altitude_agl: TargetApogeeAglFac::to_fixed_point_capped(target_apogee_agl),
         }
     }
 
-    pub fn get_altitude(&self) -> f32 {
-        TargetAltitudeFac::to_float(self.altitude)
+    pub fn get_altitude_agl(&self) -> f32 {
+        TargetApogeeAglFac::to_float(self.altitude_agl)
     }
 }
 

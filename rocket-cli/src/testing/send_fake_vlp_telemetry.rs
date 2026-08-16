@@ -18,7 +18,7 @@ use firmware_common_new::{
     vlp::{
         client::VLPAvionics,
         lora_config::LoraConfig,
-        packets::{VLPDownlinkPacket, gps_beacon::GPSBeaconPacket, telemetry::TelemetryPacket},
+        packets::{VLPDownlinkPacket, telemetry::TelemetryPacket},
     },
 };
 use log::info;
@@ -61,7 +61,8 @@ pub async fn send_fake_vlp_telemetry(args: SendVLPTelemetryArgs) -> Result<()> {
     let vlp_key = [0u8; 32];
     let mut daemon = vlp_avionics_client.daemon(&mut rpc_radio, &vlp_key);
 
-    let packet: VLPDownlinkPacket = if let Some(altitude_agl) = args.altitude_agl {
+    let altitude_agl = args.altitude_agl.unwrap_or(0.0);
+    let packet: VLPDownlinkPacket = {
         TelemetryPacket::new(
             0,
             true,
@@ -113,21 +114,6 @@ pub async fn send_fake_vlp_telemetry(args: SendVLPTelemetryArgs) -> Result<()> {
             Some(5.0),
             Some(5.0),
             None,
-        )
-        .into()
-    } else {
-        GPSBeaconPacket::new(
-            0,
-            Some((args.latitude, args.longitude)),
-            12,
-            7.4,
-            0.0,
-            0.0,
-            false,
-            false,
-            false,
-            false,
-            false,
         )
         .into()
     };

@@ -33,6 +33,7 @@ pub fn calculate_state_derivatives(
 // apogee is when the vertical velocity <= 0
 // in the first timestep, use first_tick_air_brakes_extension
 // in all the following timestep, use 0.0 as air brakes extension
+// returns the apogee altitude ASL (m)
 pub fn simulate_apogee_rk2(
     first_tick_air_brakes_drag_percentage: f32,
     initial_state: &State,

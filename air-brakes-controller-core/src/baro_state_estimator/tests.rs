@@ -67,7 +67,7 @@ fn simulate_flight(
     assert!(matches!(estimator.state(), RocketState::OnPad));
 
     // powered ascent + coast + free fall, simple point-mass integration
-    let mut altitude = pad_altitude_asl;
+    let mut altitude_asl = pad_altitude_asl;
     let mut velocity = 0.0f32;
     let mut t = 0.0f32;
     let mut apogee_agl = 0.0f32;
@@ -82,14 +82,14 @@ fn simulate_flight(
         if velocity < descent_terminal_velocity {
             velocity = descent_terminal_velocity;
         }
-        altitude += velocity * DT;
+        altitude_asl += velocity * DT;
         t += DT;
 
-        if altitude <= pad_altitude_asl {
+        if altitude_asl <= pad_altitude_asl {
             break;
         }
-        apogee_agl = apogee_agl.max(altitude - pad_altitude_asl);
-        feed(estimator, altitude);
+        apogee_agl = apogee_agl.max(altitude_asl - pad_altitude_asl);
+        feed(estimator, altitude_asl);
     }
 
     // 30 s sitting on the ground
@@ -235,12 +235,12 @@ fn coasting_latches_on_burn_timer() {
     assert!(!estimator.is_coasting());
 
     // 3 s burn at 80 m/s^2: the timer must not expire while under thrust
-    let mut altitude = pad_altitude_asl;
+    let mut altitude_asl = pad_altitude_asl;
     let mut velocity = 0.0f32;
     for _ in 0..(3 * SAMPLES_PER_S) {
         velocity += 80.0 * DT;
-        altitude += velocity * DT;
-        estimator.update(altitude + noise.next());
+        altitude_asl += velocity * DT;
+        estimator.update(altitude_asl + noise.next());
         assert!(!estimator.is_coasting(), "coasting during burn, v={}", velocity);
     }
     assert!(matches!(estimator.state(), RocketState::Ascent { .. }));
@@ -250,8 +250,8 @@ fn coasting_latches_on_burn_timer() {
     let mut latched = false;
     for _ in 0..(4 * SAMPLES_PER_S) {
         velocity -= 9.81 * DT;
-        altitude += velocity * DT;
-        estimator.update(altitude + noise.next());
+        altitude_asl += velocity * DT;
+        estimator.update(altitude_asl + noise.next());
         latched |= estimator.is_coasting();
     }
     assert!(latched, "burn timer never latched coasting during coast");
@@ -278,7 +278,7 @@ fn blast_transient_during_coast_does_not_deploy_early() {
     }
 
     // 2 s burn at 80 m/s^2 -> 160 m/s; apogee ~16.3 s after burnout
-    let mut altitude = pad;
+    let mut altitude_asl = pad;
     let mut velocity = 0.0f32;
     let mut t = 0.0f32;
     let mut apogee_i = 0usize;
@@ -292,25 +292,25 @@ fn blast_transient_during_coast_does_not_deploy_early() {
         if velocity < -25.0 {
             velocity = -25.0;
         }
-        altitude += velocity * DT;
+        altitude_asl += velocity * DT;
         t += DT;
-        if altitude <= pad {
+        if altitude_asl <= pad {
             break;
         }
-        if altitude - pad > apogee_agl {
-            apogee_agl = altitude - pad;
+        if altitude_asl - pad > apogee_agl {
+            apogee_agl = altitude_asl - pad;
             apogee_i = i;
         }
 
         let in_blast = t >= blast_start_t && t < blast_start_t + 0.06;
         let measured = if in_blast {
-            altitude - 1400.0
+            altitude_asl - 1400.0
         } else {
-            altitude + noise.next()
+            altitude_asl + noise.next()
         };
         if let Some(PyroSelect::PyroDrogue) = estimator.update(measured) {
             assert!(drogue_i.is_none());
-            drogue_i = Some((i, altitude - pad));
+            drogue_i = Some((i, altitude_asl - pad));
         }
         i += 1;
     }
@@ -356,7 +356,7 @@ fn mach_lockout_survives_supersonic_garbage() {
     }
     assert!(matches!(estimator.state(), RocketState::OnPad));
 
-    let mut altitude = pad;
+    let mut altitude_asl = pad;
     let mut velocity = 0.0f32;
     let mut t = 0.0f32;
     let mut apogee_agl = 0.0f32;
@@ -371,19 +371,19 @@ fn mach_lockout_survives_supersonic_garbage() {
         if velocity < descent_terminal_velocity {
             velocity = descent_terminal_velocity;
         }
-        altitude += velocity * DT;
+        altitude_asl += velocity * DT;
         t += DT;
-        if altitude <= pad {
+        if altitude_asl <= pad {
             break;
         }
-        apogee_agl = apogee_agl.max(altitude - pad);
+        apogee_agl = apogee_agl.max(altitude_asl - pad);
 
         // Above ~Mach 0.85 the static port reads shock garbage: a large
         // offset plus 50x noise. An unprotected filter would track this.
         let measured = if velocity.abs() > 0.85 * 340.0 {
-            altitude - 800.0 + noise.next() * 50.0
+            altitude_asl - 800.0 + noise.next() * 50.0
         } else {
-            altitude + noise.next()
+            altitude_asl + noise.next()
         };
         let pyro = estimator.update(measured);
         // While locked out the estimator must say so honestly: the reported
@@ -404,7 +404,7 @@ fn mach_lockout_survives_supersonic_garbage() {
             );
         }
         if matches!(pyro, Some(PyroSelect::PyroDrogue)) {
-            drogue_agl = Some(altitude - pad);
+            drogue_agl = Some(altitude_asl - pad);
         }
     }
 
@@ -615,7 +615,7 @@ fn innovation_gate_rejects_pyro_transient() {
         kf.predict();
         assert!(!kf.update(-1200.0), "transient sample must be rejected");
     }
-    assert!((kf.altitude() - 200.0).abs() < 1.0, "altitude held through transient");
+    assert!((kf.altitude_asl() - 200.0).abs() < 1.0, "altitude held through transient");
     assert!(kf.vertical_velocity().abs() < 1.0, "velocity held through transient");
 
     // clean data is accepted again immediately, no recovery period
@@ -642,8 +642,8 @@ fn innovation_gate_force_accepts_persistent_offset() {
     }
     assert!(accepted > 0, "gate never re-accepted");
     assert!(
-        (kf.altitude() - 1000.0).abs() < 5.0,
+        (kf.altitude_asl() - 1000.0).abs() < 5.0,
         "filter did not re-converge, altitude={}",
-        kf.altitude()
+        kf.altitude_asl()
     );
 }

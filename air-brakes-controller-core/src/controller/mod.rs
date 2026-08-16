@@ -36,33 +36,33 @@ impl AirBrakesMPC {
         let mut low_drag = -1.0f32;
         let mut high_drag = 1.0f32;
 
-        let mut ap_low = simulate_apogee_rk2(low_drag, &initial_state, &self.parameters);
-        let mut ap_high = simulate_apogee_rk2(high_drag, &initial_state, &self.parameters);
+        let mut ap_low_asl = simulate_apogee_rk2(low_drag, &initial_state, &self.parameters);
+        let mut ap_high_asl = simulate_apogee_rk2(high_drag, &initial_state, &self.parameters);
 
         // Perform up to 3 iterations of bisection
         for _ in 0..3 {
             let mid_drag = 0.5 * (low_drag + high_drag);
-            let ap_mid = simulate_apogee_rk2(mid_drag, &initial_state, &self.parameters);
+            let ap_mid_asl = simulate_apogee_rk2(mid_drag, &initial_state, &self.parameters);
 
             // Monotonic: higher drag -> lower apogee
-            if ap_mid > self.target_apogee_asl {
+            if ap_mid_asl > self.target_apogee_asl {
                 // Need more drag to reduce apogee
                 low_drag = mid_drag;
-                ap_low = ap_mid;
+                ap_low_asl = ap_mid_asl;
             } else {
                 // Too much drag, reduce it
                 high_drag = mid_drag;
-                ap_high = ap_mid;
+                ap_high_asl = ap_mid_asl;
             }
         }
 
         // After 3 iterations, linearly interpolate between the bracket endpoints
-        // ap_low corresponds to low_drag (higher apogee), ap_high to high_drag (lower apogee)
-        let denom = ap_low - ap_high;
+        // ap_low_asl corresponds to low_drag (higher apogee), ap_high_asl to high_drag (lower apogee)
+        let denom = ap_low_asl - ap_high_asl;
         let t = if denom.abs() < 1e-6 {
             0.5
         } else {
-            ((self.target_apogee_asl - ap_high) / denom).clamp(0.0, 1.0)
+            ((self.target_apogee_asl - ap_high_asl) / denom).clamp(0.0, 1.0)
         };
         let drag_percentage = high_drag + t * (low_drag - high_drag);
 
@@ -79,6 +79,8 @@ pub(crate) struct State {
     pub(crate) velocity: Vector2<f32>,
 }
 
+/// d/dt of a `State`: the `altitude_asl` slot holds d(altitude)/dt (m/s),
+/// `velocity` holds acceleration.
 pub(crate) struct Derivative<T>(pub(crate) T);
 
 #[derive(Clone, Debug)]

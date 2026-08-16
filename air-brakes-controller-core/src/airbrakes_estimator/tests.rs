@@ -226,7 +226,7 @@ fn lookup_speed(track: &[(u64, f32)], t: u64) -> Option<f32> {
 struct ReplayResult {
     birth: Option<(u64, bool)>,
     apogee_i: Option<usize>,
-    apogee_alt: Option<f32>,
+    apogee_alt_asl: Option<f32>,
     /// (row index, estimated vv) while the filter was alive
     vv_track: Vec<(usize, f32)>,
     /// wall time (s from log start) when vote 1 was first true
@@ -246,7 +246,7 @@ fn replay(
     let mut result = ReplayResult {
         birth: None,
         apogee_i: None,
-        apogee_alt: None,
+        apogee_alt_asl: None,
         vv_track: Vec::new(),
         first_v1: None,
         v3_spans: Vec::new(),
@@ -284,7 +284,7 @@ fn replay(
         }
         if estimator.is_apogee() && result.apogee_i.is_none() {
             result.apogee_i = Some(i);
-            result.apogee_alt = estimator.altitude_asl();
+            result.apogee_alt_asl = estimator.altitude_asl();
         }
     }
     result
@@ -316,7 +316,7 @@ fn void_lake_v2_replay() {
     // sway screen — exactly the calibration floor. Loop one extra copy of
     // the genuine pad so the test is not balanced on that knife edge.
     let rows = extend_pad(void_lake_rows(), 8.0);
-    let (apogee_ref_i, apogee_ref_alt) = baro_apogee(&rows);
+    let (apogee_ref_i, apogee_ref_alt_asl) = baro_apogee(&rows);
     let ign_s = t_s(&rows, find_ignition(&rows));
 
     let result = replay(
@@ -346,12 +346,12 @@ fn void_lake_v2_replay() {
 
     let apogee_i = result.apogee_i.expect("apogee never latched");
     let apogee_err_s = t_s(&rows, apogee_i) - t_s(&rows, apogee_ref_i);
-    let apogee_err_m = result.apogee_alt.unwrap() - apogee_ref_alt;
+    let apogee_err_m = result.apogee_alt_asl.unwrap() - apogee_ref_alt_asl;
     eprintln!(
         "void lake v2: apogee {:+.1}s / {:+.1}m vs baro ref (ref {:.1} m at t={:.1}s)",
         apogee_err_s,
         apogee_err_m,
-        apogee_ref_alt,
+        apogee_ref_alt_asl,
         t_s(&rows, apogee_ref_i)
     );
     assert!(apogee_err_s.abs() < 3.0, "apogee time err {apogee_err_s}");
@@ -413,7 +413,7 @@ fn lc25_deployment_profile() -> FlightProfile {
 fn lc25_v2_replay() {
     init_logger();
     let rows = extend_pad(lc25_rows(), 12.0);
-    let (apogee_ref_i, apogee_ref_alt) = baro_apogee(&rows);
+    let (apogee_ref_i, apogee_ref_alt_asl) = baro_apogee(&rows);
     let ign_s = t_s(&rows, find_ignition(&rows));
     let deployment = deployment_speed_track(&rows, lc25_deployment_profile());
 
@@ -472,7 +472,7 @@ fn lc25_v2_replay() {
 
     let apogee_i = result.apogee_i.expect("apogee never latched");
     let apogee_err_s = t_s(&rows, apogee_i) - t_s(&rows, apogee_ref_i);
-    let apogee_err_m = result.apogee_alt.unwrap() - apogee_ref_alt;
+    let apogee_err_m = result.apogee_alt_asl.unwrap() - apogee_ref_alt_asl;
     eprintln!("lc25 v2: apogee {apogee_err_s:+.1}s / {apogee_err_m:+.1}m vs baro ref");
     assert!(apogee_err_s.abs() < 3.0, "apogee time err {apogee_err_s}");
     assert!(apogee_err_m.abs() < 80.0, "apogee alt err {apogee_err_m}");

@@ -9,7 +9,6 @@ pub mod airbrakes_estimator;
 pub mod baro_state_estimator;
 mod controller;
 pub mod flight_estimators;
-mod state_estimator;
 mod utils;
 
 pub use baro_state_estimator::{

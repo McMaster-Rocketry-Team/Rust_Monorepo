@@ -274,23 +274,23 @@ mod tests {
         // Clean point-mass trajectory: 5 s pad hold, 3 s burn at
         // 80 m/s^2, ballistic coast over apogee, -25 m/s terminal
         // descent, 8 s on the ground (landed detection needs 5 s still).
-        let pad = 200.0f32;
+        let pad_altitude_asl = 200.0f32;
         let mut samples: Vec<f32> = Vec::new();
-        samples.extend(core::iter::repeat(pad).take(5 * SAMPLES_PER_S));
-        let mut altitude = pad;
+        samples.extend(core::iter::repeat(pad_altitude_asl).take(5 * SAMPLES_PER_S));
+        let mut altitude_asl = pad_altitude_asl;
         let mut velocity = 0.0f32;
         let mut t = 0.0f32;
         loop {
             let acceleration = if t < 3.0 { 80.0 } else { -9.81 };
             velocity = (velocity + acceleration * DT).max(-25.0);
-            altitude += velocity * DT;
+            altitude_asl += velocity * DT;
             t += DT;
-            if altitude <= pad {
+            if altitude_asl <= pad_altitude_asl {
                 break;
             }
-            samples.push(altitude);
+            samples.push(altitude_asl);
         }
-        samples.extend(core::iter::repeat(pad).take(8 * SAMPLES_PER_S));
+        samples.extend(core::iter::repeat(pad_altitude_asl).take(8 * SAMPLES_PER_S));
 
         // No IMU: the airbrakes half is skipped, the deployment half
         // (the one under test here) sees every sample either way.

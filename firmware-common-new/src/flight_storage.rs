@@ -50,19 +50,8 @@ pub const DEFAULT_TARGET_APOGEE_AGL: f32 = 4000.0;
 
 /// On-disk format version. Bump when the record or superblock layout changes;
 /// logs written at any other version are treated as absent.
-/// v5: fast record gains the airbrakes estimator's altitude / vertical
-/// velocity / tilt and its status flags (lockout votes, born, clip).
-/// v6: `FlightStage` mirrors `RocketState` 1:1 (`MachLockout` and
-/// `FailedToReachMinApogee` are their own values), the fast record gains the
-/// `coasting` burn-timer flag, and the `AB_ACCEL_CLIPPED` flag is removed.
-/// v7: `coasting` is dropped; the fast record gains the GPS-disciplined unix
-/// clock plus full-rate `pyro_flags` and both airbrakes extensions (moved
-/// from slow); the slow record instead carries the airbrakes servo
-/// temperature and the AMP snapshot (online, output status, shared battery).
+/// v7: tagged FAST/SLOW stream (see `flight_data_record`). Older formats: see git history.
 pub const STORAGE_VERSION: u32 = 7;
-
-/// USB/superblock `record_len` field for the tagged stream (variable per record).
-pub const RECORD_LEN_TAGGED: u32 = 0;
 
 /// rkyv body sizes for tagged record types.
 pub const FAST_BODY_LEN: usize = size_of::<<FlightDataFastRecord as rkyv::Archive>::Archived>();
@@ -300,12 +289,16 @@ pub fn decode_superblock(block: &[u8; BLOCK_SIZE]) -> Option<SuperblockInfo> {
 
 /// Build the 16-byte USB download response header.
 ///
-/// `record_len` is [`RECORD_LEN_TAGGED`] (0) for the tagged stream.
-pub fn encode_response_header(record_count: u32, block_count: u32) -> [u8; HEADER_LEN] {
+/// Layout: magic(4) | record_count(4) | storage_version(4) | block_count(4).
+pub fn encode_response_header(
+    record_count: u32,
+    storage_version: u32,
+    block_count: u32,
+) -> [u8; HEADER_LEN] {
     let mut h = [0u8; HEADER_LEN];
     h[0..4].copy_from_slice(&RESPONSE_MAGIC);
     h[4..8].copy_from_slice(&record_count.to_le_bytes());
-    h[8..12].copy_from_slice(&RECORD_LEN_TAGGED.to_le_bytes());
+    h[8..12].copy_from_slice(&storage_version.to_le_bytes());
     h[12..16].copy_from_slice(&block_count.to_le_bytes());
     h
 }
@@ -316,15 +309,15 @@ pub const RESPONSE_MAGIC: [u8; 4] = *b"VLDR";
 /// Length of the USB download response header in bytes.
 pub const HEADER_LEN: usize = 16;
 
-/// Decoded USB download response header: `(record_count, record_len, block_count)`.
+/// Decoded USB download response header: `(record_count, storage_version, block_count)`.
 pub fn decode_response_header(buf: &[u8]) -> Option<(u32, u32, u32)> {
     if buf.len() < HEADER_LEN || buf[0..4] != RESPONSE_MAGIC {
         return None;
     }
     let record_count = u32::from_le_bytes(buf[4..8].try_into().ok()?);
-    let record_len = u32::from_le_bytes(buf[8..12].try_into().ok()?);
+    let storage_version = u32::from_le_bytes(buf[8..12].try_into().ok()?);
     let block_count = u32::from_le_bytes(buf[12..16].try_into().ok()?);
-    Some((record_count, record_len, block_count))
+    Some((record_count, storage_version, block_count))
 }
 
 /// Parse tagged records from block bytes. Host only. Returns `None` when the
@@ -397,7 +390,7 @@ mod tests {
             timestamp_us: i as u64 * 1_000_000,
             battery_voltage: 7.4,
             lat_lon: (37.421998, -122.084),
-            altitude: 100.0 + i as f32,
+            gps_altitude_asl: 100.0 + i as f32,
             num_of_fixed_satalites: 9,
             hdop: 1.1,
             vdop: 2.2,
@@ -503,15 +496,15 @@ mod tests {
         let (blocks, last_off) = pack_log(&log);
 
         let mut wire = Vec::new();
-        wire.extend_from_slice(&encode_response_header(n, blocks.len() as u32));
+        wire.extend_from_slice(&encode_response_header(n, STORAGE_VERSION, blocks.len() as u32));
         for b in &blocks {
             wire.extend_from_slice(b);
         }
 
-        let (record_count, record_len, block_count) =
+        let (record_count, storage_version, block_count) =
             decode_response_header(&wire).unwrap();
         assert_eq!(record_count, n);
-        assert_eq!(record_len, RECORD_LEN_TAGGED);
+        assert_eq!(storage_version, STORAGE_VERSION);
         let recovered = parse_log_records(record_count, &wire[HEADER_LEN..], block_count).unwrap();
         assert_eq!(recovered, log);
 

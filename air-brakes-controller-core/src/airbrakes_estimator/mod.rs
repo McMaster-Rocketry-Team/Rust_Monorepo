@@ -1,5 +1,5 @@
-//! Phase B v2 airbrakes estimator (see ESTIMATOR_REWORK_PLAN.md in the VLF5
-//! repo). Gives the airbrakes MPC altitude, vertical velocity, and tilt.
+//! Airbrakes estimator.
+//! Gives the airbrakes MPC altitude, vertical velocity, and tilt.
 //! Only needs to be accurate after the rocket decelerates below Mach 0.8
 //! post-burnout, until apogee.
 //!

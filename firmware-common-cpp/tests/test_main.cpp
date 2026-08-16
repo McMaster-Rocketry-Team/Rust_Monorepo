@@ -781,6 +781,69 @@ TEST(CanBusExtendedIdTest, FromRawRoundTrip) {
 }
 
 // An absent strain gauge channel is carried as NaN, same as Rust's Option<f32>.
+TEST(CanBusFilterMaskTest, AcceptsListedAndAlwaysOnTypes) {
+    using namespace firmware_common::can_bus;
+
+    uint32_t mask = create_can_bus_message_type_filter_mask({
+        static_cast<uint8_t>(BaroMeasurementMessage::MESSAGE_TYPE),
+        static_cast<uint8_t>(DataTransferMessage::MESSAGE_TYPE),
+    });
+
+    // Listed types pass regardless of priority, node type and node id.
+    EXPECT_EQ(CanBusExtendedId::create(5, BaroMeasurementMessage::MESSAGE_TYPE, 10, 20) & mask, 0u);
+    EXPECT_EQ(CanBusExtendedId::create(1, DataTransferMessage::MESSAGE_TYPE, 20, 30) & mask, 0u);
+
+    // Reset and unix time are always accepted, even though they were not listed.
+    EXPECT_EQ(CanBusExtendedId::create(1, ResetMessage::MESSAGE_TYPE, 20, 30) & mask, 0u);
+    EXPECT_EQ(CanBusExtendedId::create(1, UnixTimeMessage::MESSAGE_TYPE, 20, 30) & mask, 0u);
+
+    // These two happen to be rejected by this particular mask.
+    EXPECT_NE(CanBusExtendedId::create(1, AckMessage::MESSAGE_TYPE, 20, 30) & mask, 0u);
+    EXPECT_NE(CanBusExtendedId::create(1, AmpStatusMessage::MESSAGE_TYPE, 20, 30) & mask, 0u);
+}
+
+TEST(CanBusFilterMaskTest, PointerAndInitializerListAgree) {
+    using namespace firmware_common::can_bus;
+
+    const uint8_t types[] = {
+        static_cast<uint8_t>(BaroMeasurementMessage::MESSAGE_TYPE),
+        static_cast<uint8_t>(DataTransferMessage::MESSAGE_TYPE),
+    };
+
+    EXPECT_EQ(create_can_bus_message_type_filter_mask(types, 2),
+              create_can_bus_message_type_filter_mask({
+                  static_cast<uint8_t>(BaroMeasurementMessage::MESSAGE_TYPE),
+                  static_cast<uint8_t>(DataTransferMessage::MESSAGE_TYPE),
+              }));
+
+    // An empty list still lets reset and unix time through.
+    uint32_t empty_mask = create_can_bus_message_type_filter_mask(nullptr, 0);
+    EXPECT_EQ(CanBusExtendedId::create(0, ResetMessage::MESSAGE_TYPE, 0, 0) & empty_mask, 0u);
+    EXPECT_EQ(CanBusExtendedId::create(0, UnixTimeMessage::MESSAGE_TYPE, 0, 0) & empty_mask, 0u);
+
+    // The mask only ever touches the message type field, so priority, node type
+    // and node id can never cause a rejection.
+    EXPECT_EQ(CanBusExtendedId::create(7, 0, 0x3F, 0xFFF) & empty_mask, 0u);
+}
+
+TEST(CanNodeIdTest, FromSerialNumber) {
+    using namespace firmware_common::can_bus;
+
+    // CRC-16/IBM-3740 check value, guards the shared can_crc16 helper.
+    const uint8_t check[] = {'1', '2', '3', '4', '5', '6', '7', '8', '9'};
+    EXPECT_EQ(can_crc16(check, sizeof(check)), 0x29B1);
+
+    // A 12 byte STM32 style UID: crc is 0x1577, so the node id is the low 12 bits.
+    const uint8_t uid[] = {0x53, 0x00, 0x36, 0x00, 0x0A, 0x50, 0x53, 0x53, 0x30, 0x39, 0x36, 0x37};
+    EXPECT_EQ(can_crc16(uid, sizeof(uid)), 0x1577);
+    EXPECT_EQ(can_node_id_from_serial_number(uid, sizeof(uid)), 0x577);
+
+    // Node ids always fit the 12 bit field of the extended id.
+    EXPECT_EQ(can_node_id_from_serial_number(uid, sizeof(uid)) & ~0xFFF, 0u);
+}
+
+// An absent strain gauge channel is carried as NaN, same as Rust's Option<f32>.
+
 TEST(OzysMeasurementTest, AbsentChannelsAreNaN) {
     using namespace firmware_common::can_bus;
 
