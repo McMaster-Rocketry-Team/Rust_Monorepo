@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::fixed_point_factory;
 
-use super::VLPDownlinkPacket;
+use super::{TEMPERATURE_FAC_BITS, TemperatureFac, TemperatureFacBase, VLPDownlinkPacket};
 
 // 23 bits for latitude, 24 bits for longitude
 // resolution of 2.4m at equator (same facs as `TelemetryPacket`)
@@ -14,7 +14,6 @@ fixed_point_factory!(LatFac, f64, -90.0, 90.0, 0.00002146);
 fixed_point_factory!(LonFac, f64, -180.0, 180.0, 0.00002146);
 
 fixed_point_factory!(BatteryVFac, f32, 2.5, 8.5, 0.01);
-fixed_point_factory!(TemperatureFac, f32, 0.0, 85.0, 0.2);
 
 // 87 bits = 11 bytes, 1 spare bit.
 #[derive(PackedStruct, Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]

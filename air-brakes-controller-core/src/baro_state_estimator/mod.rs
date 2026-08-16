@@ -19,6 +19,8 @@ pub use altitude_kf::BaroAltitudeKF;
 
 use firmware_common_new::vlp::packets::fire_pyro::PyroSelect;
 
+use crate::baro_gate::BaroGateOutcome;
+
 /// Baro sample rate the estimator is designed for (matches IMU ODR).
 pub const SAMPLES_PER_S: usize = 416;
 pub const DT: f32 = 1f32 / (SAMPLES_PER_S as f32);
@@ -240,6 +242,10 @@ pub struct RocketStateEstimator {
     profile: FlightProfile,
     kf: Option<BaroAltitudeKF>,
     stage: Stage,
+    /// What the innovation gate did with the sample this estimator last
+    /// processed. `Accepted` while the KF is frozen in Mach lockout —
+    /// nothing is fused there, so nothing is rejected either.
+    last_baro_gate: BaroGateOutcome,
 }
 
 fn us_to_ticks(us: u32) -> usize {
@@ -256,6 +262,7 @@ impl RocketStateEstimator {
             stage: Stage::OnPad {
                 pad_altitude_asl: 0.0,
             },
+            last_baro_gate: BaroGateOutcome::Accepted,
         }
     }
 
@@ -269,7 +276,9 @@ impl RocketStateEstimator {
                 // accumulate km of error, and the measurements are garbage.
                 if !matches!(self.stage, Stage::MachLockout { .. }) {
                     kf.predict();
-                    kf.update(baro_altitude_asl);
+                    self.last_baro_gate = kf.update(baro_altitude_asl);
+                } else {
+                    self.last_baro_gate = BaroGateOutcome::Accepted;
                 }
                 kf
             }
@@ -510,6 +519,13 @@ impl RocketStateEstimator {
     /// of seconds — for logging/diagnostics, never for control decisions.
     /// The honest interface is [`Self::state`], whose
     /// [`RocketState::MachLockout`] variant carries no altitude at all.
+    /// What the innovation gate did with the sample this estimator last
+    /// processed. Read it immediately after [`Self::update`]: it describes
+    /// that one sample and is overwritten by the next.
+    pub fn baro_gate(&self) -> BaroGateOutcome {
+        self.last_baro_gate
+    }
+
     pub fn kf_altitude_asl(&self) -> f32 {
         self.kf.as_ref().map(|kf| kf.altitude_asl()).unwrap_or(0.0)
     }

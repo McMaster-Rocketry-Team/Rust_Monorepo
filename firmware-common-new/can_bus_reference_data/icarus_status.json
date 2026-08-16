@@ -3,14 +3,11 @@
     "message": {
       "IcarusStatus": {
         "actual_extension_percentage": 0,
-        "servo_temperature_raw": 0,
-        "servo_current_raw": 0
+        "servo_temperature_raw": 0
       }
     },
     "message_type": 160,
     "serialized_data": [
-      0,
-      0,
       0,
       0,
       0,
@@ -23,8 +20,6 @@
         0,
         0,
         0,
-        0,
-        0,
         192
       ]
     ]
@@ -33,8 +28,7 @@
     "message": {
       "IcarusStatus": {
         "actual_extension_percentage": 65535,
-        "servo_temperature_raw": 65535,
-        "servo_current_raw": 65534
+        "servo_temperature_raw": 65535
       }
     },
     "message_type": 160,
@@ -42,9 +36,7 @@
       255,
       255,
       255,
-      255,
-      255,
-      254
+      255
     ],
     "frame_id": 377528340,
     "encoded_data": [
@@ -53,8 +45,6 @@
         255,
         255,
         255,
-        255,
-        254,
         192
       ]
     ]

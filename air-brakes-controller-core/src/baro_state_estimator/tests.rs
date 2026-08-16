@@ -536,20 +536,24 @@ fn innovation_gate_rejects_pyro_transient() {
     let mut noise = NoiseGen::new(0.5);
     for _ in 0..(2 * SAMPLES_PER_S) {
         kf.predict();
-        assert!(kf.update(200.0 + noise.next()));
+        assert_eq!(kf.update(200.0 + noise.next()), BaroGateOutcome::Accepted);
     }
 
     // ejection-charge overpressure: ~60 ms of readings up to 1400 m low
     for _ in 0..25 {
         kf.predict();
-        assert!(!kf.update(-1200.0), "transient sample must be rejected");
+        assert_eq!(
+            kf.update(-1200.0),
+            BaroGateOutcome::Rejected,
+            "transient sample must be rejected"
+        );
     }
     assert!((kf.altitude_asl() - 200.0).abs() < 1.0, "altitude held through transient");
     assert!(kf.vertical_velocity().abs() < 1.0, "velocity held through transient");
 
     // clean data is accepted again immediately, no recovery period
     kf.predict();
-    assert!(kf.update(200.0));
+    assert_eq!(kf.update(200.0), BaroGateOutcome::Accepted);
 }
 
 #[test]
@@ -563,13 +567,21 @@ fn innovation_gate_force_accepts_persistent_offset() {
     // a persistent 800 m offset is a diverged filter, not a transient: after
     // 1 s of rejections the gate must give up and snap to the measurement
     let mut accepted = 0u32;
+    let mut resyncs = 0u32;
     for _ in 0..(2 * SAMPLES_PER_S) {
         kf.predict();
-        if kf.update(1000.0) {
-            accepted += 1;
+        match kf.update(1000.0) {
+            BaroGateOutcome::Rejected => {}
+            BaroGateOutcome::Resynced => {
+                resyncs += 1;
+                accepted += 1;
+            }
+            BaroGateOutcome::Accepted => accepted += 1,
         }
     }
     assert!(accepted > 0, "gate never re-accepted");
+    // Reported on the single sample it happens on, not left for a poller.
+    assert_eq!(resyncs, 1, "the snap is reported exactly once");
     assert!(
         (kf.altitude_asl() - 1000.0).abs() < 5.0,
         "filter did not re-converge, altitude={}",

@@ -19,14 +19,15 @@ impl AirBrakesMPC {
         }
     }
 
-    /// returns air brakes extension percentage 0.0 - 1.0
+    /// Solve for the brake extension that lands the predicted apogee on the
+    /// target, and report the apogee that command is predicted to reach.
     ///
     /// `current_velocity` is (horizontal, vertical) m/s, vertical positive
     /// up — the airbrakes estimator's `velocity()` output. The apogee
     /// simulation flies the full 2D ballistic arc with drag on total
     /// speed, so tilt (carried in the horizontal component) is accounted
     /// for.
-    pub fn update(&self, current_altitude_asl: f32, current_velocity: Vector2<f32>) -> f32 {
+    pub fn update(&self, current_altitude_asl: f32, current_velocity: Vector2<f32>) -> MpcSolution {
         let initial_state = State {
             altitude_asl: current_altitude_asl,
             velocity: current_velocity,
@@ -67,9 +68,37 @@ impl AirBrakesMPC {
         let drag_percentage = high_drag + t * (low_drag - high_drag);
 
         // Convert to extension percentage and clamp to [0,1]
-        self.parameters
-            .drag_percentage_to_extension_percentage(drag_percentage)
+        let extension_percentage = self
+            .parameters
+            .drag_percentage_to_extension_percentage(drag_percentage);
+
+        // Predict at the drag the COMMANDED extension actually delivers, not
+        // at the bisection's ideal. The conversion above clamps to [0,1], and
+        // a clamped command is exactly the case worth seeing on the ground:
+        // it means the target is out of reach and by how much.
+        let predicted_apogee_asl = simulate_apogee_rk2(
+            drag_percentage.clamp(0.0, 1.0),
+            &initial_state,
+            &self.parameters,
+        );
+
+        MpcSolution {
+            extension_percentage,
+            predicted_apogee_asl,
+        }
     }
+}
+
+/// One MPC step's output.
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MpcSolution {
+    /// Brake extension to command, 0.0 (stowed) - 1.0 (full).
+    pub extension_percentage: f32,
+    /// Apogee ASL (m) predicted at `extension_percentage`. Equal to the
+    /// target while the target is reachable; above it on an overshoot the
+    /// brakes cannot fix, below it on an undershoot.
+    pub predicted_apogee_asl: f32,
 }
 
 #[derive(Debug, Clone)]

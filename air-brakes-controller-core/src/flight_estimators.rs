@@ -34,6 +34,7 @@ use firmware_common_new::vlp::packets::fire_pyro::PyroSelect;
 use nalgebra::{Vector2, Vector3};
 
 use crate::airbrakes_estimator::{AirbrakesConfig, AirbrakesEstimator, Measurement};
+use crate::baro_gate::BaroGateOutcome;
 use crate::baro_state_estimator::{FlightProfile, RocketState, RocketStateEstimator};
 use crate::utils::approximate_speed_of_sound;
 
@@ -253,6 +254,60 @@ impl FlightEstimators {
     pub fn airbrakes_estimator(&self) -> Option<&AirbrakesEstimator> {
         self.airbrakes.as_ref()
     }
+
+    /// Everything the SD log wants from one sample, in one read.
+    ///
+    /// Call this immediately after [`Self::update`], in the same critical
+    /// section: the gate outcomes it carries describe the sample that
+    /// `update` just processed and are overwritten by the next one. Sampling
+    /// from a loop that runs on its own clock would attribute them to the
+    /// wrong tick and miss any that fell between two reads — which is
+    /// exactly what a rejection run diagnosis cannot afford.
+    pub fn log_sample(&self) -> EstimatorLogSample {
+        EstimatorLogSample {
+            deployment_altitude_asl: self.deployment.kf_altitude_asl(),
+            deployment_vertical_velocity: self.deployment.kf_vertical_velocity(),
+            deployment_baro_gate: self.deployment.baro_gate(),
+            airbrakes: self.airbrakes.as_ref().map(|ab| AirbrakesLogSample {
+                altitude_asl: ab.altitude_asl(),
+                vertical_velocity: ab.velocity().map(|v| v.y),
+                tilt_rad: ab.tilt(),
+                subsonic_by_drag: ab.subsonic_by_drag(),
+                burnout_detected: ab.burnout_detected(),
+                baro_trusted: ab.baro_trusted(),
+                is_apogee: ab.is_apogee(),
+                baro_gate: ab.baro_gate(),
+            }),
+        }
+    }
+}
+
+/// One sample's worth of estimator state for the SD log, produced by
+/// [`FlightEstimators::log_sample`].
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Debug, Clone, Copy)]
+pub struct EstimatorLogSample {
+    /// Raw, possibly lockout-frozen deployment KF output.
+    pub deployment_altitude_asl: f32,
+    pub deployment_vertical_velocity: f32,
+    pub deployment_baro_gate: BaroGateOutcome,
+    /// `None` once the airbrakes half is retired at apogee — absent, not zero.
+    pub airbrakes: Option<AirbrakesLogSample>,
+}
+
+/// The airbrakes half of [`EstimatorLogSample`]. The `Option` fields are
+/// absent until the piece of the estimator that produces them is alive.
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Debug, Clone, Copy)]
+pub struct AirbrakesLogSample {
+    pub altitude_asl: Option<f32>,
+    pub vertical_velocity: Option<f32>,
+    pub tilt_rad: Option<f32>,
+    pub subsonic_by_drag: Option<bool>,
+    pub burnout_detected: bool,
+    pub baro_trusted: bool,
+    pub is_apogee: bool,
+    pub baro_gate: BaroGateOutcome,
 }
 
 #[cfg(test)]

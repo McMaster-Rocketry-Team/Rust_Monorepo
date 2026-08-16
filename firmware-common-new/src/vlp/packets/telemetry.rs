@@ -14,7 +14,7 @@ use crate::{
     gps::GPSData,
 };
 
-use super::VLPDownlinkPacket;
+use super::{TEMPERATURE_FAC_BITS, TemperatureFac, TemperatureFacBase, VLPDownlinkPacket};
 
 // 23 bits for latitude, 24 bits for longitude
 // resolution of 2.4m at equator
@@ -22,12 +22,14 @@ fixed_point_factory!(LatFac, f64, -90.0, 90.0, 0.00002146);
 fixed_point_factory!(LonFac, f64, -180.0, 180.0, 0.00002146);
 
 fixed_point_factory!(BatteryVFac, f32, 2.5, 8.5, 0.01);
-fixed_point_factory!(TemperatureFac, f32, -10.0, 85.0, 0.2);
-fixed_point_factory!(AltitudeFac, f32, -100.0, 7000.0, 1.0);
-fixed_point_factory!(AirSpeedFac, f32, 0.0, 400.0, 2.0);
-// 9 bits, signed: the airbrakes estimator's vertical velocity keeps its sign
-// (unlike `AirSpeedFac`, which is an unsigned magnitude). ~1.6m/s resolution.
-fixed_point_factory!(VerticalVelocityFac, f32, -400.0, 400.0, 2.0);
+// 14 bits, ~0.62m resolution. Shared by every altitude in the packet, so they
+// all clamp at the same ceiling rather than at four different ones.
+fixed_point_factory!(AltitudeFac, f32, -100.0, 10000.0, 1.0);
+// 10 bits, signed (negative = descending), ~1.42m/s resolution. Asymmetric on
+// purpose: the ceiling covers Mach 3 (~1021m/s at sea level, less higher up)
+// while the floor only has to cover a ballistic descent, so a symmetric range
+// would spend a bit on speeds the rocket cannot reach going down.
+fixed_point_factory!(VerticalVelocityFac, f32, -400.0, 1050.0, 2.0);
 fixed_point_factory!(AirBrakesExtensionPercentFac, f32, 0.0, 1.0, 0.04);
 fixed_point_factory!(TiltDegFac, f32, -90.0, 90.0, 1.0);
 
@@ -39,14 +41,14 @@ fixed_point_factory!(EpmRailMaFac, f32, 0.0, 10230.0, 10.0);
 // SEM's own step scale decides what that means in millimetres.
 fixed_point_factory!(ActuatorStepsFac, f32, 0.0, 65535.0, 64.0);
 
-// 341 bits = 42.625 bytes, so 43 bytes with three spare bits. With the 1 byte
-// packet type and reed-solomon ecc (len/4) that is 55 bytes on air, 1774ms at
-// 250khz bandwidth + 12sf + 8cr lora — still inside the 2s telemetry period.
-// Trimming the struct back to 39 bytes (50 on air) would drop that to 1642ms,
-// the same time-on-air as a 36 byte struct: the symbol count only steps at
-// 50 / 55 / 60 bytes.
+// 325 bits = 40.625 bytes, so 41 bytes with three spare bits. With the 1 byte
+// packet type and reed-solomon ecc (len/4) that is 52 bytes on air, 1642ms at
+// 250khz bandwidth + 12sf + 8cr lora, inside the 2s telemetry period. The
+// symbol count only steps at 50 / 55 / 60 bytes on air, so anything from 37
+// to 43 bytes costs exactly this much air time — there is no saving in
+// trimming further until 36.
 #[derive(PackedStruct, Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "43")]
+#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "41")]
 pub struct TelemetryPacket {
     #[packed_field(bits = "0..4")]
     nonce: Integer<u8, packed_bits::Bits<4>>,
@@ -66,41 +68,33 @@ pub struct TelemetryPacket {
     pyro_main_continuity: bool,
     pyro_drogue_continuity: bool,
 
-    #[packed_field(element_size_bits = "13")]
-    altitude_agl: Integer<AltitudeFacBase, packed_bits::Bits<ALTITUDE_FAC_BITS>>,
-    #[packed_field(element_size_bits = "13")]
-    max_altitude_agl: Integer<AltitudeFacBase, packed_bits::Bits<ALTITUDE_FAC_BITS>>,
-
-    #[packed_field(element_size_bits = "8")]
-    air_speed: Integer<AirSpeedFacBase, packed_bits::Bits<AIR_SPEED_FAC_BITS>>,
-    #[packed_field(element_size_bits = "8")]
-    max_air_speed: Integer<AirSpeedFacBase, packed_bits::Bits<AIR_SPEED_FAC_BITS>>,
-
-    #[packed_field(element_size_bits = "8")]
-    tilt_deg: Integer<TiltDegFacBase, packed_bits::Bits<TILT_DEG_FAC_BITS>>,
-
-    #[packed_field(element_size_bits = "4", ty = "enum")]
-    flight_stage: FlightStage,
-    /// `deployed` from `RocketState::DrogueChute` / `MainChute`.
-    drogue_deployed: bool,
-    main_deployed: bool,
-
-    /// The airbrakes estimator's altitude relative to the pad.
-    #[packed_field(element_size_bits = "13")]
-    ab_altitude_agl: Integer<AltitudeFacBase, packed_bits::Bits<ALTITUDE_FAC_BITS>>,
-    /// The airbrakes estimator's vertical velocity, signed (negative = descending).
-    #[packed_field(element_size_bits = "9")]
-    ab_vertical_velocity:
+    #[packed_field(element_size_bits = "14")]
+    deployment_kf_altitude_agl: Integer<AltitudeFacBase, packed_bits::Bits<ALTITUDE_FAC_BITS>>,
+    #[packed_field(element_size_bits = "14")]
+    max_deployment_kf_altitude_agl: Integer<AltitudeFacBase, packed_bits::Bits<ALTITUDE_FAC_BITS>>,
+    /// The deployment estimator's vertical velocity, signed (negative =
+    /// descending). 0 during its Mach lockout, where the KF is frozen.
+    #[packed_field(element_size_bits = "10")]
+    deployment_kf_vertical_velocity:
         Integer<VerticalVelocityFacBase, packed_bits::Bits<VERTICAL_VELOCITY_FAC_BITS>>,
-    /// The mach-lockout-exit drag check: the drag-inverted airspeed is
-    /// currently below Mach 0.8. Sustained for 1 s, this is the whole
-    /// criterion that opens the lockout.
-    ab_subsonic_drag: bool,
+
+    #[packed_field(element_size_bits = "8")]
+    airbrakes_kf_tilt_deg: Integer<TiltDegFacBase, packed_bits::Bits<TILT_DEG_FAC_BITS>>,
+
+    /// All 8 codes are used, so a new `FlightStage` variant does not fit
+    /// without widening this field.
+    #[packed_field(element_size_bits = "3", ty = "enum")]
+    flight_stage: FlightStage,
+
     /// The airbrakes estimator's vertical filter is born (baro trusted).
-    ab_born: bool,
-    ab_apogee: bool,
+    airbrakes_born: bool,
+    /// The apogee AGL the MPC predicts at the extension it is commanding.
+    /// Equal to `target_apogee_agl` while the target is reachable; the gap
+    /// between them is the whole story of whether the brakes have authority.
+    #[packed_field(element_size_bits = "14")]
+    mpc_predicted_apogee_agl: Integer<AltitudeFacBase, packed_bits::Bits<ALTITUDE_FAC_BITS>>,
     /// The configured target apogee, AGL.
-    #[packed_field(element_size_bits = "13")]
+    #[packed_field(element_size_bits = "14")]
     target_apogee_agl: Integer<AltitudeFacBase, packed_bits::Bits<ALTITUDE_FAC_BITS>>,
 
     amp_online: bool,
@@ -206,23 +200,16 @@ impl TelemetryPacket {
         pyro_main_continuity: bool,
         pyro_drogue_continuity: bool,
 
-        altitude_agl: f32,
-        max_altitude_agl: f32,
+        deployment_kf_altitude_agl: f32,
+        max_deployment_kf_altitude_agl: f32,
+        deployment_kf_vertical_velocity: f32,
 
-        air_speed: f32,
-        max_air_speed: f32,
-
-        tilt_deg: f32,
+        airbrakes_kf_tilt_deg: f32,
 
         flight_stage: FlightStage,
-        drogue_deployed: bool,
-        main_deployed: bool,
 
-        ab_altitude_agl: f32,
-        ab_vertical_velocity: f32,
-        ab_subsonic_drag: bool,
-        ab_born: bool,
-        ab_apogee: bool,
+        airbrakes_born: bool,
+        mpc_predicted_apogee_agl: f32,
         target_apogee_agl: f32,
 
         amp_online: bool,
@@ -259,7 +246,7 @@ impl TelemetryPacket {
         // Experiment channels 1..3.
         sem_actuator_steps: [Option<u16>; 3],
     ) -> Self {
-        if altitude_agl.is_nan(){
+        if deployment_kf_altitude_agl.is_nan(){
             log_info!("altitude agl nan");
         }
         Self {
@@ -276,23 +263,20 @@ impl TelemetryPacket {
             pyro_main_continuity,
             pyro_drogue_continuity,
 
-            altitude_agl: AltitudeFac::to_fixed_point_capped(altitude_agl),
-            max_altitude_agl: AltitudeFac::to_fixed_point_capped(max_altitude_agl),
+            deployment_kf_altitude_agl: AltitudeFac::to_fixed_point_capped(deployment_kf_altitude_agl),
+            max_deployment_kf_altitude_agl: AltitudeFac::to_fixed_point_capped(
+                max_deployment_kf_altitude_agl,
+            ),
+            deployment_kf_vertical_velocity: VerticalVelocityFac::to_fixed_point_capped(
+                deployment_kf_vertical_velocity,
+            ),
 
-            air_speed: AirSpeedFac::to_fixed_point_capped(air_speed),
-            max_air_speed: AirSpeedFac::to_fixed_point_capped(max_air_speed),
-
-            tilt_deg: TiltDegFac::to_fixed_point_capped(tilt_deg),
+            airbrakes_kf_tilt_deg: TiltDegFac::to_fixed_point_capped(airbrakes_kf_tilt_deg),
 
             flight_stage: flight_stage.into(),
-            drogue_deployed,
-            main_deployed,
 
-            ab_altitude_agl: AltitudeFac::to_fixed_point_capped(ab_altitude_agl),
-            ab_vertical_velocity: VerticalVelocityFac::to_fixed_point_capped(ab_vertical_velocity),
-            ab_subsonic_drag,
-            ab_born,
-            ab_apogee,
+            airbrakes_born,
+            mpc_predicted_apogee_agl: AltitudeFac::to_fixed_point_capped(mpc_predicted_apogee_agl),
             target_apogee_agl: AltitudeFac::to_fixed_point_capped(target_apogee_agl),
 
             amp_online,
@@ -422,60 +406,36 @@ impl TelemetryPacket {
         self.pyro_drogue_continuity
     }
 
-    pub fn altitude_agl(&self) -> f32 {
-        AltitudeFac::to_float(self.altitude_agl)
+    pub fn deployment_kf_altitude_agl(&self) -> f32 {
+        AltitudeFac::to_float(self.deployment_kf_altitude_agl)
     }
 
-    pub fn max_altitude_agl(&self) -> f32 {
-        AltitudeFac::to_float(self.max_altitude_agl)
+    pub fn max_deployment_kf_altitude_agl(&self) -> f32 {
+        AltitudeFac::to_float(self.max_deployment_kf_altitude_agl)
     }
 
-    pub fn air_speed(&self) -> f32 {
-        AirSpeedFac::to_float(self.air_speed)
-    }
-
-    pub fn max_air_speed(&self) -> f32 {
-        AirSpeedFac::to_float(self.max_air_speed)
-    }
-
-    pub fn tilt_deg(&self) -> f32 {
-        TiltDegFac::to_float(self.tilt_deg)
+    pub fn airbrakes_kf_tilt_deg(&self) -> f32 {
+        TiltDegFac::to_float(self.airbrakes_kf_tilt_deg)
     }
 
     pub fn flight_stage(&self) -> FlightStage {
         self.flight_stage
     }
 
-    pub fn drogue_deployed(&self) -> bool {
-        self.drogue_deployed
-    }
-
-    pub fn main_deployed(&self) -> bool {
-        self.main_deployed
-    }
-
-    /// The airbrakes estimator's altitude relative to the pad.
-    pub fn ab_altitude_agl(&self) -> f32 {
-        AltitudeFac::to_float(self.ab_altitude_agl)
-    }
-
-    /// The airbrakes estimator's vertical velocity, signed (negative = descending).
-    pub fn ab_vertical_velocity(&self) -> f32 {
-        VerticalVelocityFac::to_float(self.ab_vertical_velocity)
-    }
-
-    /// The mach-lockout-exit drag check (see the field docs).
-    pub fn ab_subsonic_drag(&self) -> bool {
-        self.ab_subsonic_drag
+    /// The deployment estimator's vertical velocity, signed (negative =
+    /// descending). 0 during its Mach lockout, where the KF is frozen.
+    pub fn deployment_kf_vertical_velocity(&self) -> f32 {
+        VerticalVelocityFac::to_float(self.deployment_kf_vertical_velocity)
     }
 
     /// The airbrakes estimator's vertical filter is born (baro trusted).
-    pub fn ab_born(&self) -> bool {
-        self.ab_born
+    pub fn airbrakes_born(&self) -> bool {
+        self.airbrakes_born
     }
 
-    pub fn ab_apogee(&self) -> bool {
-        self.ab_apogee
+    /// The apogee AGL the MPC predicts at the extension it is commanding.
+    pub fn mpc_predicted_apogee_agl(&self) -> f32 {
+        AltitudeFac::to_float(self.mpc_predicted_apogee_agl)
     }
 
     /// The configured target apogee, AGL.
@@ -646,20 +606,14 @@ impl TelemetryPacket {
             air_temperature: self.air_temperature(),
             pyro_main_continuity: self.pyro_main_continuity(),
             pyro_drogue_continuity: self.pyro_drogue_continuity(),
-            altitude_agl: self.altitude_agl(),
-            max_altitude_agl: self.max_altitude_agl(),
-            air_speed: self.air_speed(),
-            max_air_speed: self.max_air_speed(),
-            tilt_deg: self.tilt_deg(),
+            deployment_kf_altitude_agl: self.deployment_kf_altitude_agl(),
+            max_deployment_kf_altitude_agl: self.max_deployment_kf_altitude_agl(),
+            deployment_kf_vertical_velocity: self.deployment_kf_vertical_velocity(),
+            airbrakes_kf_tilt_deg: self.airbrakes_kf_tilt_deg(),
             flight_stage: format!("{:?}", self.flight_stage()),
-            drogue_deployed: self.drogue_deployed(),
-            main_deployed: self.main_deployed(),
 
-            ab_altitude_agl: self.ab_altitude_agl(),
-            ab_vertical_velocity: self.ab_vertical_velocity(),
-            ab_subsonic_drag: self.ab_subsonic_drag(),
-            ab_born: self.ab_born(),
-            ab_apogee: self.ab_apogee(),
+            airbrakes_born: self.airbrakes_born(),
+            mpc_predicted_apogee_agl: self.mpc_predicted_apogee_agl(),
             target_apogee_agl: self.target_apogee_agl(),
 
             amp_online: self.amp_online(),
@@ -735,29 +689,20 @@ pub struct TelemetryPacketBuilderState {
     pub pyro_main_continuity: bool,
     pub pyro_drogue_continuity: bool,
 
-    pub altitude_agl: f32,
-    max_altitude_agl: f32,
+    pub deployment_kf_altitude_agl: f32,
+    max_deployment_kf_altitude_agl: f32,
+    /// The deployment estimator's vertical velocity, signed. 0 during its
+    /// Mach lockout, where the KF is frozen.
+    pub deployment_kf_vertical_velocity: f32,
 
-    pub air_speed: f32,
-    max_air_speed: f32,
-
-    pub tilt_deg: f32,
+    pub airbrakes_kf_tilt_deg: f32,
 
     pub flight_stage: FlightStage,
-    /// `deployed` from `RocketState::DrogueChute` / `MainChute`.
-    pub drogue_deployed: bool,
-    pub main_deployed: bool,
 
-    /// The airbrakes estimator's altitude relative to the pad.
-    pub ab_altitude_agl: f32,
-    /// The airbrakes estimator's vertical velocity, signed (negative = descending).
-    pub ab_vertical_velocity: f32,
-    /// The mach-lockout-exit drag check: the drag-inverted airspeed is
-    /// below Mach 0.8. Sustained 1 s, this is what opens the lockout.
-    pub ab_subsonic_drag: bool,
     /// The airbrakes estimator's vertical filter is born (baro trusted).
-    pub ab_born: bool,
-    pub ab_apogee: bool,
+    pub airbrakes_born: bool,
+    /// The apogee AGL the MPC predicts at the extension it is commanding.
+    pub mpc_predicted_apogee_agl: f32,
     /// The configured target apogee, AGL.
     pub target_apogee_agl: f32,
 
@@ -818,23 +763,16 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 pyro_main_continuity: false,
                 pyro_drogue_continuity: false,
 
-                altitude_agl: 0.0,
-                max_altitude_agl: 0.0,
+                deployment_kf_altitude_agl: 0.0,
+                max_deployment_kf_altitude_agl: 0.0,
+                deployment_kf_vertical_velocity: 0.0,
 
-                air_speed: 0.0,
-                max_air_speed: 0.0,
-
-                tilt_deg: 0.0,
+                airbrakes_kf_tilt_deg: 0.0,
 
                 flight_stage: FlightStage::Armed,
-                drogue_deployed: false,
-                main_deployed: false,
 
-                ab_altitude_agl: 0.0,
-                ab_vertical_velocity: 0.0,
-                ab_subsonic_drag: false,
-                ab_born: false,
-                ab_apogee: false,
+                airbrakes_born: false,
+                mpc_predicted_apogee_agl: 0.0,
                 target_apogee_agl: 0.0,
 
                 amp_online: false,
@@ -896,19 +834,13 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 state.air_temperature,
                 state.pyro_main_continuity,
                 state.pyro_drogue_continuity,
-                state.altitude_agl,
-                state.max_altitude_agl,
-                state.air_speed,
-                state.max_air_speed,
-                state.tilt_deg,
+                state.deployment_kf_altitude_agl,
+                state.max_deployment_kf_altitude_agl,
+                state.deployment_kf_vertical_velocity,
+                state.airbrakes_kf_tilt_deg,
                 state.flight_stage,
-                state.drogue_deployed,
-                state.main_deployed,
-                state.ab_altitude_agl,
-                state.ab_vertical_velocity,
-                state.ab_subsonic_drag,
-                state.ab_born,
-                state.ab_apogee,
+                state.airbrakes_born,
+                state.mpc_predicted_apogee_agl,
                 state.target_apogee_agl,
                 state.amp_online,
                 state.amp_uptime_s < 5,
@@ -945,8 +877,7 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
         self.state.lock(|state| {
             let mut state = state.borrow_mut();
             update_fn(&mut state);
-            state.max_altitude_agl = state.altitude_agl.max(state.max_altitude_agl);
-            state.max_air_speed = state.air_speed.max(state.max_air_speed);
+            state.max_deployment_kf_altitude_agl = state.deployment_kf_altitude_agl.max(state.max_deployment_kf_altitude_agl);
         })
     }
 }
@@ -974,17 +905,11 @@ mod tests {
             true,
             1234.0,
             2345.0,
-            250.0,
-            300.0,
+            -150.0,
             10.0,
             FlightStage::Ascent,
-            false,
-            false,
-            1230.0,
-            -150.0,
             true,
-            true,
-            false,
+            2900.0,
             3000.0,
             true,
             false,
@@ -1015,8 +940,8 @@ mod tests {
 
         let mut buffer = [0u8; 64];
         let len = packet.serialize(&mut buffer);
-        // 1 byte packet type + the 43 byte packed struct.
-        assert_eq!(len, 44);
+        // 1 byte packet type + the 41 byte packed struct.
+        assert_eq!(len, 42);
 
         let deserialized_packet = VLPDownlinkPacket::deserialize(&buffer[..len]).unwrap();
         assert_eq!(deserialized_packet, packet);
@@ -1024,11 +949,14 @@ mod tests {
         let VLPDownlinkPacket::Telemetry(p) = deserialized_packet else {
             unreachable!()
         };
-        assert_relative_eq!(p.ab_altitude_agl(), 1230.0, epsilon = 1.0);
-        assert_relative_eq!(p.ab_vertical_velocity(), -150.0, epsilon = 2.0);
-        assert!(p.ab_subsonic_drag());
-        assert!(p.ab_born());
-        assert!(!p.ab_apogee());
+        // Deployment-estimator fields, at their widened ranges.
+        assert_relative_eq!(p.deployment_kf_altitude_agl(), 1234.0, epsilon = 0.7);
+        assert_eq!(p.flight_stage(), FlightStage::Ascent);
+
+        assert_relative_eq!(p.deployment_kf_vertical_velocity(), -150.0, epsilon = 1.5);
+        assert_relative_eq!(p.airbrakes_kf_tilt_deg(), 10.0, epsilon = 0.8);
+        assert!(p.airbrakes_born());
+        assert_relative_eq!(p.mpc_predicted_apogee_agl(), 2900.0, epsilon = 0.7);
         assert_relative_eq!(p.target_apogee_agl(), 3000.0, epsilon = 1.0);
 
         // Payload readings survive the round trip within their quantization

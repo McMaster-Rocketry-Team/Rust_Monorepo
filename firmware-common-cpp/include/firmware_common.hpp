@@ -460,6 +460,24 @@ namespace can_bus {
             return raw;
         }
 
+        // The six rail currents in the stack's rail index order (0 SYS_3V3,
+        // 1 SYS_5V, 2 PER_3V3, 3 PER_5V, 4 PER_9V, 5 PER_12V).
+        void rail_ma(uint16_t out[6]) const noexcept {
+            out[0] = epm_sys_3v3_ma;
+            out[1] = epm_sys_5v_ma;
+            out[2] = epm_per_3v3_ma;
+            out[3] = epm_per_5v_ma;
+            out[4] = epm_per_9v_ma;
+            out[5] = epm_per_12v_ma;
+        }
+
+        // Actuator positions for experiment channels 1..3.
+        void actuator_steps(uint16_t out[3]) const noexcept {
+            out[0] = sem_actuator_1_steps;
+            out[1] = sem_actuator_2_steps;
+            out[2] = sem_actuator_3_steps;
+        }
+
         void serialize(uint8_t* buffer) const noexcept {
             write_u16_be(buffer, epm_batt_mv);
             write_u16_be(buffer + 2, epm_sys_3v3_ma);
@@ -506,8 +524,14 @@ namespace can_bus {
         DataType data_type;
         uint16_t destination_node_id; // 12 bits
 
-        DataTransferMessage() noexcept : data{0}, data_len(0), sequence_number(0), 
+        DataTransferMessage() noexcept : data{0}, data_len(0), sequence_number(0),
             start_of_transfer(false), end_of_transfer(false), data_type(DataType::Data), destination_node_id(0) {}
+
+        // The valid prefix of `data`, matching Rust's `data()`. The bytes past
+        // data_len are padding and carry no meaning.
+        size_t data_size() const noexcept {
+            return data_len < DATA_CAPACITY ? data_len : DATA_CAPACITY;
+        }
 
         static constexpr uint8_t PRIORITY = 6;
 
@@ -551,17 +575,15 @@ namespace can_bus {
 
     struct IcarusStatusMessage {
         static constexpr uint32_t MESSAGE_TYPE = 160;
-        static constexpr size_t SIZE_BYTES = 6;
+        static constexpr size_t SIZE_BYTES = 4;
 
         uint16_t actual_extension_percentage; // 0.1%
         uint16_t servo_temperature_raw; // 0.1C
-        uint16_t servo_current_raw; // 0.01A
 
-        static IcarusStatusMessage new_msg(float extension, float temp, float current) noexcept {
+        static IcarusStatusMessage new_msg(float extension, float temp) noexcept {
             IcarusStatusMessage msg;
             msg.actual_extension_percentage = static_cast<uint16_t>(extension * 1000.0f);
             msg.servo_temperature_raw = static_cast<uint16_t>(temp * 10.0f);
-            msg.servo_current_raw = static_cast<uint16_t>(current * 100.0f);
             return msg;
         }
 
@@ -571,23 +593,18 @@ namespace can_bus {
         float servo_temperature() const noexcept {
             return static_cast<float>(servo_temperature_raw) / 10.0f;
         }
-        float servo_current() const noexcept {
-            return static_cast<float>(servo_current_raw) / 100.0f;
-        }
 
         static constexpr uint8_t PRIORITY = 5;
 
         void serialize(uint8_t* buffer) const noexcept {
             write_u16_be(buffer, actual_extension_percentage);
             write_u16_be(buffer + 2, servo_temperature_raw);
-            write_u16_be(buffer + 4, servo_current_raw);
         }
 
         static IcarusStatusMessage deserialize(const uint8_t* buffer) noexcept {
             IcarusStatusMessage msg;
             msg.actual_extension_percentage = read_u16_be(buffer);
             msg.servo_temperature_raw = read_u16_be(buffer + 2);
-            msg.servo_current_raw = read_u16_be(buffer + 4);
             return msg;
         }
     };
@@ -887,53 +904,6 @@ namespace can_bus {
         }
     };
 
-    struct RocketStateMessage {
-        static constexpr uint32_t MESSAGE_TYPE = 131;
-        static constexpr size_t SIZE_BYTES = 19;
-
-        uint32_t velocity_raw[2];
-        uint32_t altitude_agl_raw;
-        uint64_t timestamp_us;
-
-        static RocketStateMessage new_msg(uint64_t ts, const float vel[2], float altitude_agl) noexcept {
-            RocketStateMessage msg;
-            msg.timestamp_us = ts;
-            for(int i=0; i<2; i++) {
-                msg.velocity_raw[i] = bit_cast<uint32_t>(vel[i]);
-            }
-            msg.altitude_agl_raw = bit_cast<uint32_t>(altitude_agl);
-            return msg;
-        }
-
-        void velocity(float out[2]) const noexcept {
-             for(int i=0; i<2; i++) {
-                 out[i] = bit_cast<float>(velocity_raw[i]);
-             }
-        }
-
-        float altitude_agl() const noexcept {
-            return bit_cast<float>(altitude_agl_raw);
-        }
-
-        static constexpr uint8_t PRIORITY = 3;
-
-        void serialize(uint8_t* buffer) const noexcept {
-            write_u32_be(buffer, velocity_raw[0]);
-            write_u32_be(buffer + 4, velocity_raw[1]);
-            write_u32_be(buffer + 8, altitude_agl_raw);
-            write_u56_be(buffer + 12, timestamp_us);
-        }
-
-        static RocketStateMessage deserialize(const uint8_t* buffer) noexcept {
-            RocketStateMessage msg;
-            msg.velocity_raw[0] = read_u32_be(buffer);
-            msg.velocity_raw[1] = read_u32_be(buffer + 4);
-            msg.altitude_agl_raw = read_u32_be(buffer + 8);
-            msg.timestamp_us = read_u56_be(buffer + 12);
-            return msg;
-        }
-    };
-
     struct UnixTimeMessage {
         static constexpr uint32_t MESSAGE_TYPE = 7;
         static constexpr size_t SIZE_BYTES = 7;
@@ -956,12 +926,13 @@ namespace can_bus {
         LowPower = 0,
         SelfTest = 1,
         Armed = 2,
+        // The deployment estimator's Mach lockout is folded into Ascent; it has
+        // no code of its own.
         Ascent = 3,
-        MachLockout = 4,
-        DrogueChute = 5,
-        MainChute = 6,
-        Landed = 7,
-        FailedToReachMinApogee = 8
+        DrogueChute = 4,
+        MainChute = 5,
+        Landed = 6,
+        FailedToReachMinApogee = 7
     };
 
     struct VLStatusMessage {
@@ -995,20 +966,16 @@ namespace can_bus {
 
         uint16_t extension_percentage; // Unit: 0.1%, e.g. 10 = 1%
 
-        // Constructor for convenience
         AirBrakesControlMessage(uint16_t ext_pct = 0) noexcept : extension_percentage(ext_pct) {}
-        
-        // Helper to convert from float percentage (0.0 - 100.0)
-        static AirBrakesControlMessage from_percentage(float percentage) noexcept {
-            return AirBrakesControlMessage(static_cast<uint16_t>(percentage * 10.0f));
-        }
-        
-        // Rust 'new' equivalent with float input (0.0 - 1.0 range based on Rust code)
-        static AirBrakesControlMessage from_float(float percentage) noexcept {
+
+        // percentage: 0 - 1, matching Rust's `new`. There is deliberately no
+        // 0 - 100 overload: two constructors differing only by a factor of 100
+        // is a silent 100x error waiting to happen.
+        static AirBrakesControlMessage new_msg(float percentage) noexcept {
             return AirBrakesControlMessage(static_cast<uint16_t>(percentage * 1000.0f));
         }
 
-        float to_float() const noexcept {
+        float extension_percentage_float() const noexcept {
              return static_cast<float>(extension_percentage) / 1000.0f;
         }
 
@@ -1125,7 +1092,6 @@ namespace can_bus {
         NodeStatusMessage,
         OzysMeasurementMessage,
         ResetMessage,
-        RocketStateMessage,
         UnixTimeMessage,
         VLStatusMessage
     >;
@@ -1238,7 +1204,6 @@ namespace can_bus {
             case NodeStatusMessage::MESSAGE_TYPE: return NodeStatusMessage::SIZE_BYTES;
             case OzysMeasurementMessage::MESSAGE_TYPE: return OzysMeasurementMessage::SIZE_BYTES;
             case ResetMessage::MESSAGE_TYPE: return ResetMessage::SIZE_BYTES;
-            case RocketStateMessage::MESSAGE_TYPE: return RocketStateMessage::SIZE_BYTES;
             case UnixTimeMessage::MESSAGE_TYPE: return UnixTimeMessage::SIZE_BYTES;
             case VLStatusMessage::MESSAGE_TYPE: return VLStatusMessage::SIZE_BYTES;
             default:
@@ -1289,8 +1254,6 @@ namespace can_bus {
                 return CanBusMessage(OzysMeasurementMessage::deserialize(buffer));
             case ResetMessage::MESSAGE_TYPE:
                 return CanBusMessage(ResetMessage::deserialize(buffer));
-            case RocketStateMessage::MESSAGE_TYPE:
-                return CanBusMessage(RocketStateMessage::deserialize(buffer));
             case UnixTimeMessage::MESSAGE_TYPE:
                 return CanBusMessage(UnixTimeMessage::deserialize(buffer));
             case VLStatusMessage::MESSAGE_TYPE:

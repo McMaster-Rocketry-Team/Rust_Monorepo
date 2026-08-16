@@ -6,6 +6,7 @@
 mod fmt;
 
 pub mod airbrakes_estimator;
+pub mod baro_gate;
 pub mod baro_state_estimator;
 mod controller;
 pub mod flight_estimators;
@@ -14,8 +15,12 @@ mod utils;
 pub use baro_state_estimator::{
     DeploymentProfile, FlightProfile, RocketState, RocketStateEstimator,
 };
-pub use flight_estimators::{AirbrakesMPCStates, FlightConfig, FlightEstimators, ImuSample};
-pub use controller::{AirBrakesMPC, RocketParameters};
+pub use baro_gate::BaroGateOutcome;
+pub use flight_estimators::{
+    AirbrakesLogSample, AirbrakesMPCStates, EstimatorLogSample, FlightConfig, FlightEstimators,
+    ImuSample,
+};
+pub use controller::{AirBrakesMPC, MpcSolution, RocketParameters};
 pub use utils::{approximate_air_density, approximate_speed_of_sound, lerp};
 
 #[cfg(test)]

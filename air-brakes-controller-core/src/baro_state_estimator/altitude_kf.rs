@@ -1,3 +1,4 @@
+use crate::baro_gate::BaroGateOutcome;
 use crate::baro_state_estimator::{DT, SAMPLES_PER_S};
 use micromath::F32Ext;
 use nalgebra::{Matrix2, SMatrix, SVector, Vector1, Vector2};
@@ -112,25 +113,27 @@ impl BaroAltitudeKF {
         self.p = 0.5 * (self.p + self.p.transpose()); // keep symmetric
     }
 
-    /// Incorporate a new barometric altitude measurement (m).
-    /// Returns `false` if the measurement was rejected by the innovation gate
-    /// (the state keeps coasting on the prediction).
-    pub fn update(&mut self, z_baro: f32) -> bool {
+    /// Incorporate a new barometric altitude measurement (m). The returned
+    /// [`BaroGateOutcome`] is the only report of what the gate did — a resync
+    /// happens on one sample and is not recoverable by polling afterwards.
+    pub fn update(&mut self, z_baro: f32) -> BaroGateOutcome {
         let z = Vector1::new(z_baro);
 
         // Innovation y = z - H x̂₋
         let y = z - self.h * self.x;
 
+        let mut outcome = BaroGateOutcome::Accepted;
         if y[0].abs() > INNOVATION_GATE_M {
             if self.rejected_streak < MAX_REJECTED_SAMPLES {
                 self.rejected_streak += 1;
-                return false;
+                return BaroGateOutcome::Rejected;
             }
             // An offset this persistent is not a transient: the filter itself is
             // wrong. Inflate the altitude variance so this update snaps the
             // altitude state to the measurement (velocity keeps its estimate)
             // instead of bleeding toward it at the nominal gain.
             self.p[(0, 0)] += INNOVATION_GATE_M * INNOVATION_GATE_M;
+            outcome = BaroGateOutcome::Resynced;
         }
         self.rejected_streak = 0;
 
@@ -147,7 +150,7 @@ impl BaroAltitudeKF {
         let i = SMatrix::<f32, 2, 2>::identity();
         self.p = (i - k * self.h) * self.p;
         self.p = 0.5 * (self.p + self.p.transpose());
-        true
+        outcome
     }
 
     /// Re-initialize after a Mach lockout: altitude from the current

@@ -369,58 +369,34 @@ impl View for DownlinkPacketDisplay {
                         &[
                             ("state", true, format!("{:?}", p.flight_stage()).into()),
                             (
-                                "drogue deployed",
-                                true,
-                                Self::format_bool(p.drogue_deployed()),
-                            ),
-                            (
-                                "main deployed",
-                                true,
-                                Self::format_bool(p.main_deployed()),
-                            ),
-                            (
                                 "altitude agl",
                                 false,
-                                format!("{:.1}m", p.altitude_agl()).into(),
+                                format!("{:.1}m", p.deployment_kf_altitude_agl()).into(),
                             ),
                             (
                                 "max altitude agl",
                                 false,
-                                format!("{:.1}m", p.max_altitude_agl()).into(),
+                                format!("{:.1}m", p.max_deployment_kf_altitude_agl()).into(),
                             ),
                             (
-                                "air speed",
+                                "vertical velocity",
                                 false,
-                                format!("{:.1}m/s", p.air_speed()).into(),
+                                format!("{:.1}m/s", p.deployment_kf_vertical_velocity()).into(),
                             ),
-                            (
-                                "max air speed",
-                                false,
-                                format!("{:.1}m/s", p.max_air_speed()).into(),
-                            ),
-                            ("tilt", false, format!("{:.1}deg", p.tilt_deg()).into()),
+                            ("tilt", false, format!("{:.1}deg", p.airbrakes_kf_tilt_deg()).into()),
                         ],
                         &[
                             (
-                                "ab altitude agl",
+                                "predicted apogee agl",
                                 false,
-                                format!("{:.1}m", p.ab_altitude_agl()).into(),
-                            ),
-                            (
-                                "ab vertical velocity",
-                                false,
-                                format!("{:.1}m/s", p.ab_vertical_velocity()).into(),
+                                format!("{:.1}m", p.mpc_predicted_apogee_agl()).into(),
                             ),
                             (
                                 "target apogee agl",
                                 false,
                                 format!("{:.1}m", p.target_apogee_agl()).into(),
                             ),
-                        ],
-                        &[
-                            ("ab subsonic (drag)", true, Self::format_bool(p.ab_subsonic_drag())),
-                            ("born", true, Self::format_bool(p.ab_born())),
-                            ("apogee", true, Self::format_bool(p.ab_apogee())),
+                            ("airbrakes born", true, Self::format_bool(p.airbrakes_born())),
                         ],
                         &[
                             ("icarus online", true, Self::format_bool(p.icarus_online())),

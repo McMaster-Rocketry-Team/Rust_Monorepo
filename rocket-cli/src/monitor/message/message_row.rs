@@ -467,9 +467,9 @@ impl MessageRow {
                         format!("{:>4.1}%", m.actual_extension_percentage() * 100.0).into(),
                     ),
                     (
-                        "servo current",
+                        "servo temp",
                         false,
-                        format!("{:.2}A", m.servo_current()).into(),
+                        format!("{:.1}C", m.servo_temperature()).into(),
                     ),
                 ],
             ),

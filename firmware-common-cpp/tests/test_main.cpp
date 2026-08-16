@@ -329,6 +329,45 @@ TEST(CustomPayloadStatusTest, ReadingUnavailable) {
     EXPECT_EQ(CustomPayloadStatusMessage::reading(12600).value(), 12600);
 }
 
+// Rail index order must match Rust's rail_ma() / actuator_steps(); the SD slow
+// record stores the arrays in exactly this order.
+TEST(CustomPayloadStatusTest, RailAndActuatorOrder) {
+    using firmware_common::can_bus::CustomPayloadStatusMessage;
+
+    CustomPayloadStatusMessage msg{};
+    msg.epm_sys_3v3_ma = 10;
+    msg.epm_sys_5v_ma = 11;
+    msg.epm_per_3v3_ma = 12;
+    msg.epm_per_5v_ma = 13;
+    msg.epm_per_9v_ma = 14;
+    msg.epm_per_12v_ma = 15;
+    msg.sem_actuator_1_steps = 100;
+    msg.sem_actuator_2_steps = 200;
+    msg.sem_actuator_3_steps = 300;
+
+    uint16_t rails[6];
+    msg.rail_ma(rails);
+    for (uint16_t i = 0; i < 6; ++i) EXPECT_EQ(rails[i], 10 + i);
+
+    uint16_t steps[3];
+    msg.actuator_steps(steps);
+    EXPECT_EQ(steps[0], 100);
+    EXPECT_EQ(steps[1], 200);
+    EXPECT_EQ(steps[2], 300);
+}
+
+// Matches Rust's data(): the bytes past data_len are padding.
+TEST(DataTransferTest, DataSizeClampsToCapacity) {
+    using firmware_common::can_bus::DataTransferMessage;
+
+    DataTransferMessage msg;
+    EXPECT_EQ(msg.data_size(), 0u);
+    msg.data_len = 5;
+    EXPECT_EQ(msg.data_size(), 5u);
+    msg.data_len = 200;
+    EXPECT_EQ(msg.data_size(), DataTransferMessage::DATA_CAPACITY);
+}
+
 // Mirrors payload_sdrm_custom_status.rs: the SDRM's own layout, epm_alive is
 // bit 0, bits 8..10 are spare.
 TEST(PayloadSDRMCustomStatusTest, PackedBitLayout) {
@@ -453,12 +492,10 @@ TEST(IcarusStatusTest, ReferenceData) {
         
         uint16_t expected_ext = message_content["actual_extension_percentage"];
         uint16_t expected_temp = message_content["servo_temperature_raw"];
-        uint16_t expected_curr = message_content["servo_current_raw"];
 
         auto msg = firmware_common::can_bus::IcarusStatusMessage::deserialize(serialized_data.data());
         EXPECT_EQ(msg.actual_extension_percentage, expected_ext);
         EXPECT_EQ(msg.servo_temperature_raw, expected_temp);
-        EXPECT_EQ(msg.servo_current_raw, expected_curr);
         EXPECT_EQ(firmware_common::can_bus::get_frame_id(msg, 10, 20), expected_id);
 
         uint8_t buffer[firmware_common::can_bus::IcarusStatusMessage::SIZE_BYTES];
@@ -618,34 +655,6 @@ TEST(ResetTest, ReferenceData) {
     }
 }
 
-TEST(RocketStateTest, ReferenceData) {
-    json data = read_json(resolve_path("rocket_state.json"));
-
-    for (const auto& item : data) {
-        auto serialized_data = get_bytes(item["serialized_data"]);
-        auto message_content = item["message"]["RocketState"];
-        uint32_t expected_id = item["frame_id"];
-        
-        uint32_t alt_raw = message_content["altitude_agl_raw"];
-        uint64_t ts = message_content["timestamp_us"];
-        std::vector<uint32_t> vel_raw;
-        for(auto& x : message_content["velocity_raw"]) vel_raw.push_back(x.get<uint32_t>());
-
-        auto msg = firmware_common::can_bus::RocketStateMessage::deserialize(serialized_data.data());
-        EXPECT_EQ(msg.altitude_agl_raw, alt_raw);
-        EXPECT_EQ(msg.timestamp_us, ts);
-        EXPECT_EQ(msg.velocity_raw[0], vel_raw[0]);
-        EXPECT_EQ(msg.velocity_raw[1], vel_raw[1]);
-        EXPECT_EQ(firmware_common::can_bus::get_frame_id(msg, 10, 20), expected_id);
-
-        uint8_t buffer[firmware_common::can_bus::RocketStateMessage::SIZE_BYTES];
-        msg.serialize(buffer);
-        for (size_t i = 0; i < serialized_data.size(); ++i) EXPECT_EQ(buffer[i], serialized_data[i]);
-        
-        check_encoder(msg, item, "RocketState");
-    }
-}
-
 TEST(UnixTimeTest, ReferenceData) {
     json data = read_json(resolve_path("unix_time.json"));
 
@@ -684,7 +693,6 @@ TEST(VLStatusTest, ReferenceData) {
         else if (stage_str == "SelfTest") expected_stage = firmware_common::can_bus::FlightStage::SelfTest;
         else if (stage_str == "Armed") expected_stage = firmware_common::can_bus::FlightStage::Armed;
         else if (stage_str == "Ascent") expected_stage = firmware_common::can_bus::FlightStage::Ascent;
-        else if (stage_str == "MachLockout") expected_stage = firmware_common::can_bus::FlightStage::MachLockout;
         else if (stage_str == "DrogueChute") expected_stage = firmware_common::can_bus::FlightStage::DrogueChute;
         else if (stage_str == "MainChute") expected_stage = firmware_common::can_bus::FlightStage::MainChute;
         else if (stage_str == "Landed") expected_stage = firmware_common::can_bus::FlightStage::Landed;

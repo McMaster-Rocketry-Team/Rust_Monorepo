@@ -53,7 +53,7 @@ using namespace firmware_common::can_bus;
 void send_example() {
     // 1. Construct the message struct
     // Example: AirBrakesControl with 50.5% extension
-    AirBrakesControlMessage msg = AirBrakesControlMessage::from_float(0.505f);
+    AirBrakesControlMessage msg = AirBrakesControlMessage::new_msg(0.505f);
 
     // 2. Get the CAN frame ID
     // Requires node_type and node_id of the sender

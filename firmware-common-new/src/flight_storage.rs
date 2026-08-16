@@ -50,9 +50,16 @@ pub const DEFAULT_TARGET_APOGEE_AGL: f32 = 4000.0;
 
 /// On-disk format version. Bump when the record or superblock layout changes;
 /// logs written at any other version are treated as absent.
+/// v10: airbrakes commanded + actual extension moved from the fast record to
+///     the slow one (both only ever update at 10 Hz);
+///     `air_brakes_validation_deploy` added to the slow record.
+/// v9: baro `temperature` moved from the fast record to the slow one;
+///     redundant `flight_stage` dropped from the slow record; estimator
+///     fields renamed, `deployment_flags` added to the fast record,
+///     `mpc_predicted_apogee_agl` added to the slow record, `VALID_BARO` dropped.
 /// v8: payload EPM rail currents + SEM actuator steps in the slow record.
 /// v7: tagged FAST/SLOW stream (see `flight_data_record`). Older formats: see git history.
-pub const STORAGE_VERSION: u32 = 8;
+pub const STORAGE_VERSION: u32 = 10;
 
 /// rkyv body sizes for tagged record types.
 pub const FAST_BODY_LEN: usize = size_of::<<FlightDataFastRecord as rkyv::Archive>::Archived>();
@@ -359,7 +366,7 @@ mod tests {
     use super::*;
     use crate::can_bus::messages::vl_status::FlightStage;
     use crate::flight_data_record::{
-        VALID_BARO, VALID_BATTERY, VALID_GPS_FIX, VALID_IMU, merge_log_records,
+        VALID_BATTERY, VALID_GPS_FIX, VALID_IMU, merge_log_records,
     };
 
     fn sample_fast(i: u32) -> FlightDataFastRecord {
@@ -369,26 +376,25 @@ mod tests {
             unix_time_us: 1_750_000_000_000_000 + i as u64 * 2400,
             acc: [i as f32, -1.5, 9.81],
             gyro: [0.1, 0.2, 0.3],
-            temperature: 21.5,
             pressure: 101325.0 - i as f32,
             mag: [12.0, -34.0, 56.0],
-            kf_altitude_asl: 271.5 + i as f32,
-            kf_vertical_velocity: 0.25 * i as f32,
-            ab_altitude_asl: 272.0 + i as f32,
-            ab_vertical_velocity: 0.3 * i as f32,
-            ab_tilt_deg: 5.0,
-            ab_flags: 0,
+            deployment_kf_altitude_asl: 271.5 + i as f32,
+            deployment_kf_vertical_velocity: 0.25 * i as f32,
+            deployment_flags: 0,
+            airbrakes_kf_altitude_asl: 272.0 + i as f32,
+            airbrakes_kf_vertical_velocity: 0.3 * i as f32,
+            airbrakes_kf_tilt_deg: 5.0,
+            airbrakes_flags: 0,
             flight_stage: FlightStage::Ascent,
             pyro_flags: 0b0000_0101,
-            air_brakes_commanded_extension: 0.25,
-            air_brakes_actual_extension: 0.2,
-            valid: VALID_IMU | VALID_BARO,
+            valid: VALID_IMU,
         }
     }
 
     fn sample_slow(i: u32) -> FlightDataSlowRecord {
         FlightDataSlowRecord {
             timestamp_us: i as u64 * 1_000_000,
+            temperature: 21.5,
             battery_voltage: 7.4,
             lat_lon: (37.421998, -122.084),
             gps_altitude_asl: 100.0 + i as f32,
@@ -396,8 +402,11 @@ mod tests {
             hdop: 1.1,
             vdop: 2.2,
             pdop: 3.3,
-            flight_stage: FlightStage::Armed,
+            air_brakes_commanded_extension: 0.25,
+            air_brakes_actual_extension: 0.2,
             air_brakes_servo_temp: 41.5,
+            air_brakes_validation_deploy: false,
+            mpc_predicted_apogee_agl: 3010.0,
             amp_online: true,
             amp_out_status: 0b01_01_00,
             amp_shared_battery_v: 8.2,
@@ -522,7 +531,7 @@ mod tests {
         assert_eq!(merged[0].unix_time_us, 1_750_000_000_000_000);
         assert!(merged[0].amp_online);
         assert_eq!(merged[0].amp_out_status, 0b01_01_00);
-        assert_eq!(merged[0].kf_altitude_asl, 271.5);
+        assert_eq!(merged[0].deployment_kf_altitude_asl, 271.5);
 
         let sb = encode_superblock(n, blocks.len() as u32, last_off);
         let info = decode_superblock(&sb).unwrap();

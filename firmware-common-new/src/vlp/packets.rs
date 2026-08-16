@@ -1,6 +1,6 @@
 use core::fmt::Debug;
 
-use crate::{utils::FixedLenSerializable};
+use crate::{fixed_point_factory, utils::FixedLenSerializable};
 use ack::AckPacket;
 use amp_output_overwrite::AMPOutputOverwritePacket;
 use change_mode::ChangeModePacket;
@@ -25,6 +25,12 @@ pub mod set_target_apogee;
 
 // TODO change
 pub const MAX_VLP_PACKET_SIZE: usize = 100;
+
+// Shared by every packet that carries a temperature, so the same reading
+// decodes identically whichever one it arrives on. Kept here rather than
+// duplicated per packet because the two copies had drifted: the low-power
+// packet's floor was 0 C, which silently clamped sub-freezing pad readings.
+fixed_point_factory!(TemperatureFac, f32, -10.0, 85.0, 0.2);
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

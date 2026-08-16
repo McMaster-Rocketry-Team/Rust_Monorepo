@@ -10,6 +10,7 @@ use crate::{
         AirbrakesConfig, MAX_DT_S, Measurement, NOMINAL_DT, NOMINAL_SAMPLES_PER_S,
         dead_reckoner::DeadReckoner, vertical_kf::VerticalKF, welford::Welford,
     },
+    baro_gate::BaroGateOutcome,
     utils::{approximate_air_density, approximate_speed_of_sound},
 };
 
@@ -222,6 +223,10 @@ pub struct AirbrakesEstimator {
     state: State,
     config: AirbrakesConfig,
     prev_timestamp_us: Option<u64>,
+    /// What the vertical filter's innovation gate did with the sample this
+    /// estimator last processed. `Accepted` before the filter is born and
+    /// after apogee, when there is no gate running.
+    last_baro_gate: BaroGateOutcome,
 }
 
 impl AirbrakesEstimator {
@@ -246,6 +251,7 @@ impl AirbrakesEstimator {
             },
             config,
             prev_timestamp_us: None,
+            last_baro_gate: BaroGateOutcome::Accepted,
         }
     }
 
@@ -261,6 +267,10 @@ impl AirbrakesEstimator {
 
         let acc = z.acceleration();
         let gyro = z.angular_velocity();
+
+        // Only `Tracking` runs a gate; every other state leaves this at
+        // `Accepted`, which is what "no gate to reject anything" means.
+        let mut baro_gate = BaroGateOutcome::Accepted;
 
         match &mut self.state {
             State::OnPad {
@@ -626,7 +636,11 @@ impl AirbrakesEstimator {
                 // it survives only as the tilt behind `velocity()`'s
                 // horizontal component, and a drifting gyro cannot corrupt
                 // what the MPC flies on.
-                if kf.update(z.altitude_asl(), dt) {
+                // Only a plain `Accepted` counts as fresh baro: a resync
+                // snaps altitude but does not fuse the sample, which is what
+                // this age has always meant.
+                baro_gate = kf.update(z.altitude_asl(), dt);
+                if baro_gate == BaroGateOutcome::Accepted {
                     *baro_accept_age = 0.0;
                 } else {
                     *baro_accept_age += dt;
@@ -663,6 +677,8 @@ impl AirbrakesEstimator {
 
             State::Apogee { .. } => {}
         }
+
+        self.last_baro_gate = baro_gate;
     }
 
     /// Best current altitude ASL: the filter once born, dead reckoning
@@ -765,6 +781,17 @@ impl AirbrakesEstimator {
 
     pub fn is_apogee(&self) -> bool {
         matches!(self.state, State::Apogee { .. })
+    }
+
+    /// What the vertical filter's innovation gate did with the sample this
+    /// estimator last processed. Read it immediately after [`Self::update`]:
+    /// it describes that one sample and is overwritten by the next.
+    ///
+    /// Only the vertical filter has a gate, so this is `Accepted` before the
+    /// filter is born and after apogee — there is nothing to reject against
+    /// in either case.
+    pub fn baro_gate(&self) -> BaroGateOutcome {
+        self.last_baro_gate
     }
 
     /// The lockout-exit drag check, for logging/telemetry: whether the

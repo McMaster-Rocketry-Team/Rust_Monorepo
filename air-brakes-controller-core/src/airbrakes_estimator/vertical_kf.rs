@@ -1,5 +1,7 @@
 use nalgebra::{Matrix2, Vector2};
 
+use crate::baro_gate::BaroGateOutcome;
+
 /// Innovation gate on the baro channel: reject a (port-corrected) baro
 /// altitude whose disagreement with the prediction exceeds this. Genuine
 /// disagreement stays small once the filter is running; anything this
@@ -84,16 +86,18 @@ impl VerticalKF {
     }
 
     /// Fuse one port-corrected baro altitude. `dt` is the time since the
-    /// previous sample (for the rejection-streak clock). Returns whether
-    /// the sample was accepted by the gate.
-    pub fn update(&mut self, corrected_alt_asl: f32, dt: f32) -> bool {
+    /// previous sample (for the rejection-streak clock). The returned
+    /// [`BaroGateOutcome`] is the only report of what the gate did — a
+    /// re-anchor happens on one sample and cannot be polled for afterwards.
+    pub fn update(&mut self, corrected_alt_asl: f32, dt: f32) -> BaroGateOutcome {
         let innovation = corrected_alt_asl - self.x[0];
         if innovation.abs() > ALT_INNOVATION_GATE_M {
             self.rejected_s += dt;
             if self.rejected_s >= MAX_REJECTED_S {
                 self.reanchor(corrected_alt_asl);
+                return BaroGateOutcome::Resynced;
             }
-            return false;
+            return BaroGateOutcome::Rejected;
         }
         self.rejected_s = 0.0;
 
@@ -112,7 +116,7 @@ impl VerticalKF {
         self.p[(0, 1)] = a * (p01 - k1 * p00) + k0 * k1 * r;
         self.p[(1, 0)] = a * (p10 - k1 * p00) + k0 * k1 * r;
         self.p[(1, 1)] = p11 - k1 * (p01 + p10) + k1 * k1 * p00 + k1 * k1 * r;
-        true
+        BaroGateOutcome::Accepted
     }
 
     /// Re-anchor to the baro: altitude snaps to the measurement, the
@@ -185,16 +189,28 @@ mod tests {
         // transient: 2 samples of +500 m garbage — must be rejected
         let alt_before_asl = kf.altitude_asl();
         kf.predict(-15.0, dt);
-        assert!(!kf.update(alt_before_asl + 500.0, dt));
+        // One rejected sample is the gate working, not the filter failing:
+        // it reports `Rejected`, never `Resynced`.
+        assert_eq!(
+            kf.update(alt_before_asl + 500.0, dt),
+            BaroGateOutcome::Rejected
+        );
 
         // persistent offset: after 2 s of continuous disagreement the
         // filter re-anchors to the baro
         let mut t = 0.0;
+        let mut resyncs = 0;
         while t < 2.5 {
             kf.predict(-15.0, dt);
-            kf.update(kf.altitude_asl() + 300.0 + 200.0, dt); // always out of gate
+            // always out of gate
+            if kf.update(kf.altitude_asl() + 300.0 + 200.0, dt) == BaroGateOutcome::Resynced {
+                resyncs += 1;
+            }
             t += dt;
         }
+        // The resync is reported on the one sample it happens, which is the
+        // only chance the SD log gets to see it.
+        assert_eq!(resyncs, 1);
         // after the re-anchor the altitude is near the (shifted) baro
         let target = kf.altitude_asl();
         assert!(kf.p[(1, 1)] > REANCHOR_VELOCITY_STD * REANCHOR_VELOCITY_STD * 0.9);
