@@ -11,7 +11,7 @@ use firmware_common_new::{
             NodeCustomStatusExt, ozys_custom_status::OzysCustomStatus,
             payload_sdrm_custom_status::PayloadSDRMCustomStatus,
         },
-        messages::amp_status::PowerOutputStatus,
+        messages::{amp_status::PowerOutputStatus, node_status::NodeMode},
     },
     vlp::packets::{VLPDownlinkPacket, self_test_result::NodeStatus},
 };
@@ -125,6 +125,25 @@ impl DownlinkPacketDisplay {
                 BaseColor::Red.dark()
             })),
         )
+    }
+
+    /// A flag that only means something while the node carrying it is
+    /// reporting.
+    ///
+    /// The payload stack flags are the case this exists for. Both firmware
+    /// paths fabricate an all-false stack status when the SDRM is not on the
+    /// bus — `PayloadSDRMCustomStatus::new()` in armed mode, and a zero
+    /// `custom_status` via `NodeStatus::offline()` in the self test — so the
+    /// eight flags decode to `false` whether the stack is genuinely down or
+    /// simply silent. Rendering that as eight red `F`s would put what looks
+    /// like eight separate hardware failures on the screen of an operator
+    /// whose actual problem is one missing CAN node.
+    fn format_bool_reported(reported: bool, value: bool) -> StyledString {
+        if reported {
+            Self::format_bool(value)
+        } else {
+            Self::format_unavailable()
+        }
     }
 
     /// How an absent reading looks on the panel: dimmed and non-numeric, so it
@@ -536,6 +555,9 @@ impl DownlinkPacketDisplay {
                     Section::new(
                         "Payload",
                         vec![
+                            // The eight stack flags are only a reading while
+                            // the SDRM is online; off the bus they are the
+                            // firmware's all-false filler, not observations.
                             vec![
                                 (
                                     "sdrm online",
@@ -547,27 +569,71 @@ impl DownlinkPacketDisplay {
                                     true,
                                     Self::format_bool(p.payload_sdrm_rebooted_in_last_5s()),
                                 ),
-                                ("epm alive", true, Self::format_bool(p.payload_epm_alive())),
-                                ("sem alive", true, Self::format_bool(p.payload_sem_alive())),
+                                (
+                                    "epm alive",
+                                    true,
+                                    Self::format_bool_reported(
+                                        p.payload_sdrm_online(),
+                                        p.payload_epm_alive(),
+                                    ),
+                                ),
+                                (
+                                    "sem alive",
+                                    true,
+                                    Self::format_bool_reported(
+                                        p.payload_sdrm_online(),
+                                        p.payload_sem_alive(),
+                                    ),
+                                ),
                                 (
                                     "rails on",
                                     true,
-                                    Self::format_bool(p.payload_epm_rails_on()),
+                                    Self::format_bool_reported(
+                                        p.payload_sdrm_online(),
+                                        p.payload_epm_rails_on(),
+                                    ),
                                 ),
                             ],
                             vec![
-                                ("exp 1", true, Self::format_bool(p.payload_exp1_active())),
-                                ("exp 2", true, Self::format_bool(p.payload_exp2_active())),
-                                ("exp 3", true, Self::format_bool(p.payload_exp3_active())),
+                                (
+                                    "exp 1",
+                                    true,
+                                    Self::format_bool_reported(
+                                        p.payload_sdrm_online(),
+                                        p.payload_exp1_active(),
+                                    ),
+                                ),
+                                (
+                                    "exp 2",
+                                    true,
+                                    Self::format_bool_reported(
+                                        p.payload_sdrm_online(),
+                                        p.payload_exp2_active(),
+                                    ),
+                                ),
+                                (
+                                    "exp 3",
+                                    true,
+                                    Self::format_bool_reported(
+                                        p.payload_sdrm_online(),
+                                        p.payload_exp3_active(),
+                                    ),
+                                ),
                                 (
                                     "sdrm sd log",
                                     true,
-                                    Self::format_bool(p.payload_sdrm_sd_logging()),
+                                    Self::format_bool_reported(
+                                        p.payload_sdrm_online(),
+                                        p.payload_sdrm_sd_logging(),
+                                    ),
                                 ),
                                 (
                                     "sem sd log",
                                     true,
-                                    Self::format_bool(p.payload_sem_sd_logging()),
+                                    Self::format_bool_reported(
+                                        p.payload_sdrm_online(),
+                                        p.payload_sem_sd_logging(),
+                                    ),
                                 ),
                             ],
                             // Each payload reading is separately absent: one
@@ -660,7 +726,13 @@ impl DownlinkPacketDisplay {
                 // check and the in-flight panel answer "is the stack up" the
                 // same way, instead of the self test showing only a health
                 // enum and leaving the operator to guess.
+                //
+                // `NodeStatus::offline()` zeroes the custom status, so an SDRM
+                // that never appeared on the bus decodes to eight `false`
+                // flags that are filler rather than observations. Gate them on
+                // the node having actually reported.
                 let stack = PayloadSDRMCustomStatus::from_u16(p.payload_sdrm.custom_status);
+                let stack_reported = p.payload_sdrm.mode != NodeMode::Offline;
                 vec![
                     Section::new(
                         "VL",
@@ -726,20 +798,20 @@ impl DownlinkPacketDisplay {
                         vec![
                             vec![
                                 ("sdrm status", true, Self::format_node_status(&p.payload_sdrm)),
-                                ("epm alive", true, Self::format_bool(stack.epm_alive)),
-                                ("sem alive", true, Self::format_bool(stack.sem_alive)),
-                                ("rails on", true, Self::format_bool(stack.epm_rails_on)),
+                                ("epm alive", true, Self::format_bool_reported(stack_reported, stack.epm_alive)),
+                                ("sem alive", true, Self::format_bool_reported(stack_reported, stack.sem_alive)),
+                                ("rails on", true, Self::format_bool_reported(stack_reported, stack.epm_rails_on)),
                             ],
                             vec![
-                                ("exp 1", true, Self::format_bool(stack.exp1_active)),
-                                ("exp 2", true, Self::format_bool(stack.exp2_active)),
-                                ("exp 3", true, Self::format_bool(stack.exp3_active)),
+                                ("exp 1", true, Self::format_bool_reported(stack_reported, stack.exp1_active)),
+                                ("exp 2", true, Self::format_bool_reported(stack_reported, stack.exp2_active)),
+                                ("exp 3", true, Self::format_bool_reported(stack_reported, stack.exp3_active)),
                                 (
                                     "sdrm sd log",
                                     true,
-                                    Self::format_bool(stack.sdrm_sd_logging),
+                                    Self::format_bool_reported(stack_reported, stack.sdrm_sd_logging),
                                 ),
-                                ("sem sd log", true, Self::format_bool(stack.sem_sd_logging)),
+                                ("sem sd log", true, Self::format_bool_reported(stack_reported, stack.sem_sd_logging)),
                             ],
                         ],
                     ),
