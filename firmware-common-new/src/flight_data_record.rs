@@ -1,6 +1,61 @@
 use crate::can_bus::messages::{
-    custom_payload_status::PAYLOAD_READING_UNAVAILABLE, vl_status::FlightStage,
+    custom_payload_status::PAYLOAD_READING_UNAVAILABLE,
+    node_status::{NodeHealth, NodeMode, NodeStatusMessage},
+    vl_status::FlightStage,
 };
+
+/// One CAN node's last `NodeStatusMessage`, stored whole.
+///
+/// The downlink packet compresses each node to two bits (online + a
+/// `uptime_s < 5` reboot flag) because it has no room for more; the SD log
+/// has room, so it keeps everything. That is what makes "the node went
+/// unhealthy at T+12 s" or "it rebooted mid-flight" answerable after the
+/// fact — a reboot shows as `uptime_s` stepping backwards, which the packet's
+/// derived bit can miss entirely if it happens between two 2 s packets.
+#[derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive, Debug, Clone, PartialEq)]
+pub struct NodeStatusRecord {
+    /// Nothing heard from the node for 5 s. When false, every other field
+    /// describes the last heartbeat received rather than the present.
+    pub online: bool,
+    /// Seconds since the node booted. A step backwards is a reboot.
+    pub uptime_s: u32,
+    pub health: NodeHealth,
+    pub mode: NodeMode,
+    /// Node-specific flags, 11 bits. Decode with that node's custom-status
+    /// type: `OzysCustomStatus`, `PayloadSDRMCustomStatus`, `VLCustomStatus`.
+    pub custom_status: u16,
+}
+
+impl NodeStatusRecord {
+    /// Never heard from, or silent for 5 s. Matches the downlink packet's
+    /// `NodeStatus::offline()` so the two channels agree on what absence
+    /// looks like.
+    pub fn offline() -> Self {
+        Self {
+            online: false,
+            uptime_s: 0,
+            health: NodeHealth::Error,
+            mode: NodeMode::Offline,
+            custom_status: 0,
+        }
+    }
+
+    pub fn from_message(online: bool, message: &NodeStatusMessage) -> Self {
+        Self {
+            online,
+            uptime_s: message.uptime_s,
+            health: message.health,
+            mode: message.mode,
+            custom_status: message.custom_status_raw,
+        }
+    }
+}
+
+impl Default for NodeStatusRecord {
+    fn default() -> Self {
+        Self::offline()
+    }
+}
 
 /// High-rate IMU / baro / mag / estimator / pyro sample.
 pub const RECORD_TAG_FAST: u8 = 0x01;
@@ -106,10 +161,14 @@ pub struct FlightDataSlowRecord {
     /// again once the airbrakes estimator is retired and it stops, and
     /// throughout the validation deploy.
     pub mpc_predicted_apogee_agl: f32,
-    /// AMP node reachable over the CAN bus.
-    pub amp_online: bool,
+    /// Full `NodeStatusMessage` for each node on the bus, as last received.
+    pub amp_node: NodeStatusRecord,
+    pub icarus_node: NodeStatusRecord,
+    pub ozys_node: NodeStatusRecord,
+    pub payload_sdrm_node: NodeStatusRecord,
     /// AMP output statuses, 2 bits per output with out1 in the LSBs. Each
-    /// pair holds a `PowerOutputStatus` discriminant.
+    /// pair holds a `PowerOutputStatus` discriminant. From `AmpStatusMessage`,
+    /// not the node heartbeat.
     pub amp_out_status: u8,
     /// Shared (AMP) battery voltage.
     pub amp_shared_battery_v: f32,
@@ -142,7 +201,10 @@ impl Default for FlightDataSlowRecord {
             air_brakes_servo_temp: f32::NAN,
             air_brakes_validation_deploy: false,
             mpc_predicted_apogee_agl: f32::NAN,
-            amp_online: false,
+            amp_node: NodeStatusRecord::offline(),
+            icarus_node: NodeStatusRecord::offline(),
+            ozys_node: NodeStatusRecord::offline(),
+            payload_sdrm_node: NodeStatusRecord::offline(),
             amp_out_status: 0,
             amp_shared_battery_v: 0.0,
             payload_epm_batt_mv: PAYLOAD_READING_UNAVAILABLE,
@@ -221,8 +283,11 @@ pub struct FlightDataRecord {
     /// MPC predicted apogee AGL (m), from the slow snapshot.
     pub mpc_predicted_apogee_agl: f32,
 
-    /// AMP snapshot from the slow record.
-    pub amp_online: bool,
+    /// CAN node heartbeats from the slow record.
+    pub amp_node: NodeStatusRecord,
+    pub icarus_node: NodeStatusRecord,
+    pub ozys_node: NodeStatusRecord,
+    pub payload_sdrm_node: NodeStatusRecord,
     /// 2 bits per output, out1 in the LSBs (`PowerOutputStatus` discriminants).
     pub amp_out_status: u8,
     pub amp_shared_battery_v: f32,
@@ -271,7 +336,10 @@ impl FlightDataRecord {
             air_brakes_servo_temp: slow.air_brakes_servo_temp,
             air_brakes_validation_deploy: slow.air_brakes_validation_deploy,
             mpc_predicted_apogee_agl: slow.mpc_predicted_apogee_agl,
-            amp_online: slow.amp_online,
+            amp_node: slow.amp_node.clone(),
+            icarus_node: slow.icarus_node.clone(),
+            ozys_node: slow.ozys_node.clone(),
+            payload_sdrm_node: slow.payload_sdrm_node.clone(),
             amp_out_status: slow.amp_out_status,
             amp_shared_battery_v: slow.amp_shared_battery_v,
             payload_epm_batt_mv: slow.payload_epm_batt_mv,

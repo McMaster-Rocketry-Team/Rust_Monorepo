@@ -5,9 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     can_bus::{
-        custom_status::{
-            NodeCustomStatusExt, payload_sdrm_custom_status::PayloadSDRMCustomStatus,
-        },
+        custom_status::payload_sdrm_custom_status::PayloadSDRMCustomStatus,
         messages::{amp_status::PowerOutputStatus, vl_status::FlightStage},
     },
     fixed_point_factory,
@@ -15,6 +13,11 @@ use crate::{
 };
 
 use super::{TEMPERATURE_FAC_BITS, TemperatureFac, TemperatureFacBase, VLPDownlinkPacket};
+
+/// Largest satellite count the 5-bit packet field can hold. Counts above this
+/// are reported as this value; the SD log and the low-power / landed packets
+/// carry the full `u8`.
+pub const MAX_REPORTED_FIX_SATELLITES: u8 = 31;
 
 // 23 bits for latitude, 24 bits for longitude
 // resolution of 2.4m at equator
@@ -33,22 +36,30 @@ fixed_point_factory!(VerticalVelocityFac, f32, -400.0, 1050.0, 2.0);
 fixed_point_factory!(AirBrakesExtensionPercentFac, f32, 0.0, 1.0, 0.04);
 fixed_point_factory!(TiltDegFac, f32, -90.0, 90.0, 1.0);
 
-// EPM battery bus, a 4S-ish pack sitting well above the regulated rails.
-fixed_point_factory!(EpmBattVFac, f32, 11.0, 17.0, 0.01);
-// Load current of one EPM switched rail, 10mA resolution over 0..10.23A.
-fixed_point_factory!(EpmRailMaFac, f32, 0.0, 10230.0, 10.0);
+// EPM battery bus, a 4S-ish pack sitting well above the regulated rails. The
+// floor is 0 rather than 11 V because an unavailable reading is sent as 0, and
+// a floor of 11 would have decoded that as a plausible 11.0 V. Still 11 bits —
+// the same width the old range plus its validity bit took.
+fixed_point_factory!(EpmBattVFac, f32, 0.0, 17.0, 0.01);
+// Load current of one EPM switched rail. 5A is the stack's design maximum, so
+// the old 0..10.23A range was spending two bits per rail on current the
+// hardware cannot draw; 7 bits over 0..5A is ~39mA per code. A rail somehow
+// drawing more pins at 5.00A rather than wrapping. CAN and the SD slow record
+// keep the full u16 mA, so an over-range fault is still exact in the log.
+fixed_point_factory!(EpmRailMaFac, f32, 0.0, 5000.0, 40.0);
 // SEM linear actuator position. The full u16 step range at ~64 step resolution;
 // SEM's own step scale decides what that means in millimetres.
 fixed_point_factory!(ActuatorStepsFac, f32, 0.0, 65535.0, 64.0);
 
-// 325 bits = 40.625 bytes, so 41 bytes with three spare bits. With the 1 byte
-// packet type and reed-solomon ecc (len/4) that is 52 bytes on air, 1642ms at
-// 250khz bandwidth + 12sf + 8cr lora, inside the 2s telemetry period. The
-// symbol count only steps at 50 / 55 / 60 bytes on air, so anything from 37
-// to 43 bytes costs exactly this much air time — there is no saving in
-// trimming further until 36.
+// 293 bits = 36.625 bytes, so 37 with three spare bits. On air the packet
+// costs `n + 1` bytes of data plus `(n + 1) / 4` of reed-solomon ecc, which
+// puts this at 47 bytes on air. The symbol count steps at 50 / 55 / 60 bytes
+// on air, so there is headroom to 38 bytes before the next step — but the
+// struct is sized to its contents, not to the step, so growth is a deliberate
+// edit rather than something that happens by accident.
+// 250khz bandwidth + 12sf + 8cr lora, inside the 2s telemetry period.
 #[derive(PackedStruct, Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "41")]
+#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "37")]
 pub struct TelemetryPacket {
     #[packed_field(bits = "0..4")]
     nonce: Integer<u8, packed_bits::Bits<4>>,
@@ -126,62 +137,51 @@ pub struct TelemetryPacket {
     #[packed_field(element_size_bits = "9")]
     air_brakes_servo_temp: Integer<TemperatureFacBase, packed_bits::Bits<TEMPERATURE_FAC_BITS>>,
 
-    ozys1_online: bool,
-    ozys1_rebooted_in_last_5s: bool,
-
-    ozys2_online: bool,
-    ozys2_rebooted_in_last_5s: bool,
+    ozys_online: bool,
+    ozys_rebooted_in_last_5s: bool,
 
     payload_sdrm_online: bool,
     payload_sdrm_rebooted_in_last_5s: bool,
 
-    /// `PayloadSDRMCustomStatus`, relayed from
-    /// `NodeStatusMessage::custom_status_raw` of the payload SDRM node.
-    #[packed_field(element_size_bits = "11")]
-    payload_stack_status_raw: Integer<u16, packed_bits::Bits<11>>,
+    /// Payload stack flags, relayed from the SDRM node's
+    /// `NodeStatusMessage::custom_status_raw`, one packet field per flag. The
+    /// CAN field is 11 bits wide because that is what the heartbeat reserves
+    /// for any node; only these 8 flags are defined, so only 8 are carried.
+    payload_epm_alive: bool,
+    payload_sem_alive: bool,
+    payload_epm_rails_on: bool,
+    payload_exp1_active: bool,
+    payload_exp2_active: bool,
+    payload_exp3_active: bool,
+    payload_sdrm_sd_logging: bool,
+    payload_sem_sd_logging: bool,
 
-    /// Payload stack telemetry, relayed from `CustomPayloadStatusMessage`. Every
-    /// reading carries a validity bit; the payload reports `0xFFFF` when a value
-    /// is unavailable, which arrives here as `false`.
-    epm_batt_v_valid: bool,
-    #[packed_field(element_size_bits = "10")]
+    /// Payload stack telemetry, relayed from `CustomPayloadStatusMessage`. A
+    /// reading the payload could not take (`0xFFFF` on CAN) is sent as 0; the
+    /// SD slow record keeps the `0xFFFF` sentinel, so that is where an
+    /// unavailable reading stays distinguishable from a real zero.
+    #[packed_field(element_size_bits = "11")]
     epm_batt_v: Integer<EpmBattVFacBase, packed_bits::Bits<EPM_BATT_V_FAC_BITS>>,
 
     /// EPM switched rail load currents, 10mA resolution over 0..10.23A.
-    epm_sys_3v3_ma_valid: bool,
-    #[packed_field(element_size_bits = "10")]
+    #[packed_field(element_size_bits = "7")]
     epm_sys_3v3_ma: Integer<EpmRailMaFacBase, packed_bits::Bits<EPM_RAIL_MA_FAC_BITS>>,
-
-    epm_sys_5v_ma_valid: bool,
-    #[packed_field(element_size_bits = "10")]
+    #[packed_field(element_size_bits = "7")]
     epm_sys_5v_ma: Integer<EpmRailMaFacBase, packed_bits::Bits<EPM_RAIL_MA_FAC_BITS>>,
-
-    epm_per_3v3_ma_valid: bool,
-    #[packed_field(element_size_bits = "10")]
+    #[packed_field(element_size_bits = "7")]
     epm_per_3v3_ma: Integer<EpmRailMaFacBase, packed_bits::Bits<EPM_RAIL_MA_FAC_BITS>>,
-
-    epm_per_5v_ma_valid: bool,
-    #[packed_field(element_size_bits = "10")]
+    #[packed_field(element_size_bits = "7")]
     epm_per_5v_ma: Integer<EpmRailMaFacBase, packed_bits::Bits<EPM_RAIL_MA_FAC_BITS>>,
-
-    epm_per_9v_ma_valid: bool,
-    #[packed_field(element_size_bits = "10")]
+    #[packed_field(element_size_bits = "7")]
     epm_per_9v_ma: Integer<EpmRailMaFacBase, packed_bits::Bits<EPM_RAIL_MA_FAC_BITS>>,
-
-    epm_per_12v_ma_valid: bool,
-    #[packed_field(element_size_bits = "10")]
+    #[packed_field(element_size_bits = "7")]
     epm_per_12v_ma: Integer<EpmRailMaFacBase, packed_bits::Bits<EPM_RAIL_MA_FAC_BITS>>,
 
     /// SEM linear actuator positions, ~64 step resolution over the full u16 range.
-    sem_actuator_1_steps_valid: bool,
     #[packed_field(element_size_bits = "10")]
     sem_actuator_1_steps: Integer<ActuatorStepsFacBase, packed_bits::Bits<ACTUATOR_STEPS_FAC_BITS>>,
-
-    sem_actuator_2_steps_valid: bool,
     #[packed_field(element_size_bits = "10")]
     sem_actuator_2_steps: Integer<ActuatorStepsFacBase, packed_bits::Bits<ACTUATOR_STEPS_FAC_BITS>>,
-
-    sem_actuator_3_steps_valid: bool,
     #[packed_field(element_size_bits = "10")]
     sem_actuator_3_steps: Integer<ActuatorStepsFacBase, packed_bits::Bits<ACTUATOR_STEPS_FAC_BITS>>,
 }
@@ -228,11 +228,8 @@ impl TelemetryPacket {
         air_brakes_actual_extension_percentage: f32,
         air_brakes_servo_temp: f32,
 
-        ozys1_online: bool,
-        ozys1_rebooted_in_last_5s: bool,
-
-        ozys2_online: bool,
-        ozys2_rebooted_in_last_5s: bool,
+        ozys_online: bool,
+        ozys_rebooted_in_last_5s: bool,
 
         payload_sdrm_online: bool,
         payload_sdrm_rebooted_in_last_5s: bool,
@@ -253,7 +250,13 @@ impl TelemetryPacket {
             nonce: nonce.into(),
 
             unix_clock_ready,
-            num_of_fix_satellites: num_of_fix_satellites.into(),
+            // Saturate rather than let packed_struct truncate: 5 bits wrap at
+            // 32, so a 32-satellite fix would downlink as 0 — exactly the
+            // reading that means "no fix, do not fly". Clipping a very good
+            // fix to "31" is harmless; inverting it is not.
+            num_of_fix_satellites: num_of_fix_satellites
+                .min(MAX_REPORTED_FIX_SATELLITES)
+                .into(),
             lat: LatFac::to_fixed_point_capped(lat_lon.unwrap_or((0.0, 0.0)).0),
             lon: LonFac::to_fixed_point_capped(lat_lon.unwrap_or((0.0, 0.0)).1),
 
@@ -302,40 +305,36 @@ impl TelemetryPacket {
                 ),
             air_brakes_servo_temp: TemperatureFac::to_fixed_point_capped(air_brakes_servo_temp),
 
-            ozys1_online,
-            ozys1_rebooted_in_last_5s,
-
-            ozys2_online,
-            ozys2_rebooted_in_last_5s,
+            ozys_online,
+            ozys_rebooted_in_last_5s,
 
             payload_sdrm_online,
             payload_sdrm_rebooted_in_last_5s,
 
-            payload_stack_status_raw: payload_stack_status.to_u16().into(),
+            payload_epm_alive: payload_stack_status.epm_alive,
+            payload_sem_alive: payload_stack_status.sem_alive,
+            payload_epm_rails_on: payload_stack_status.epm_rails_on,
+            payload_exp1_active: payload_stack_status.exp1_active,
+            payload_exp2_active: payload_stack_status.exp2_active,
+            payload_exp3_active: payload_stack_status.exp3_active,
+            payload_sdrm_sd_logging: payload_stack_status.sdrm_sd_logging,
+            payload_sem_sd_logging: payload_stack_status.sem_sd_logging,
 
-            epm_batt_v_valid: epm_batt_mv.is_some(),
+            // An unavailable reading is sent as 0 rather than carrying its own
+            // validity bit.
             epm_batt_v: EpmBattVFac::to_fixed_point_capped(
-                epm_batt_mv.map(|mv| mv as f32 / 1000.0).unwrap_or(11.0),
+                epm_batt_mv.map(|mv| mv as f32 / 1000.0).unwrap_or(0.0),
             ),
 
-            epm_sys_3v3_ma_valid: epm_rail_ma[0].is_some(),
             epm_sys_3v3_ma: Self::encode_rail_ma(epm_rail_ma[0]),
-            epm_sys_5v_ma_valid: epm_rail_ma[1].is_some(),
             epm_sys_5v_ma: Self::encode_rail_ma(epm_rail_ma[1]),
-            epm_per_3v3_ma_valid: epm_rail_ma[2].is_some(),
             epm_per_3v3_ma: Self::encode_rail_ma(epm_rail_ma[2]),
-            epm_per_5v_ma_valid: epm_rail_ma[3].is_some(),
             epm_per_5v_ma: Self::encode_rail_ma(epm_rail_ma[3]),
-            epm_per_9v_ma_valid: epm_rail_ma[4].is_some(),
             epm_per_9v_ma: Self::encode_rail_ma(epm_rail_ma[4]),
-            epm_per_12v_ma_valid: epm_rail_ma[5].is_some(),
             epm_per_12v_ma: Self::encode_rail_ma(epm_rail_ma[5]),
 
-            sem_actuator_1_steps_valid: sem_actuator_steps[0].is_some(),
             sem_actuator_1_steps: Self::encode_steps(sem_actuator_steps[0]),
-            sem_actuator_2_steps_valid: sem_actuator_steps[1].is_some(),
             sem_actuator_2_steps: Self::encode_steps(sem_actuator_steps[1]),
-            sem_actuator_3_steps_valid: sem_actuator_steps[2].is_some(),
             sem_actuator_3_steps: Self::encode_steps(sem_actuator_steps[2]),
         }
     }
@@ -347,14 +346,9 @@ impl TelemetryPacket {
     }
 
     fn decode_rail_ma(
-        valid: bool,
         rail_ma: Integer<EpmRailMaFacBase, packed_bits::Bits<EPM_RAIL_MA_FAC_BITS>>,
-    ) -> Option<u16> {
-        if valid {
-            Some(libm::roundf(EpmRailMaFac::to_float(rail_ma)) as u16)
-        } else {
-            None
-        }
+    ) -> u16 {
+        libm::roundf(EpmRailMaFac::to_float(rail_ma)) as u16
     }
 
     fn encode_steps(
@@ -364,20 +358,16 @@ impl TelemetryPacket {
     }
 
     fn decode_steps(
-        valid: bool,
         steps: Integer<ActuatorStepsFacBase, packed_bits::Bits<ACTUATOR_STEPS_FAC_BITS>>,
-    ) -> Option<u16> {
-        if valid {
-            Some(libm::roundf(ActuatorStepsFac::to_float(steps)) as u16)
-        } else {
-            None
-        }
+    ) -> u16 {
+        libm::roundf(ActuatorStepsFac::to_float(steps)) as u16
     }
 
     pub fn unix_clock_ready(&self) -> bool {
         self.unix_clock_ready
     }
 
+    /// Saturating: [`MAX_REPORTED_FIX_SATELLITES`] means "at least that many".
     pub fn num_of_fix_satellites(&self) -> u8 {
         self.num_of_fix_satellites.into()
     }
@@ -499,20 +489,12 @@ impl TelemetryPacket {
         TemperatureFac::to_float(self.air_brakes_servo_temp)
     }
 
-    pub fn ozys1_online(&self) -> bool {
-        self.ozys1_online
+    pub fn ozys_online(&self) -> bool {
+        self.ozys_online
     }
 
-    pub fn ozys1_rebooted_in_last_5s(&self) -> bool {
-        self.ozys1_rebooted_in_last_5s
-    }
-
-    pub fn ozys2_online(&self) -> bool {
-        self.ozys2_online
-    }
-
-    pub fn ozys2_rebooted_in_last_5s(&self) -> bool {
-        self.ozys2_rebooted_in_last_5s
+    pub fn ozys_rebooted_in_last_5s(&self) -> bool {
+        self.ozys_rebooted_in_last_5s
     }
 
     pub fn payload_sdrm_online(&self) -> bool {
@@ -523,46 +505,72 @@ impl TelemetryPacket {
         self.payload_sdrm_rebooted_in_last_5s
     }
 
-    pub fn payload_stack_status(&self) -> PayloadSDRMCustomStatus {
-        PayloadSDRMCustomStatus::from_u16(self.payload_stack_status_raw.into())
+    pub fn payload_epm_alive(&self) -> bool {
+        self.payload_epm_alive
+    }
+
+    pub fn payload_sem_alive(&self) -> bool {
+        self.payload_sem_alive
+    }
+
+    pub fn payload_epm_rails_on(&self) -> bool {
+        self.payload_epm_rails_on
+    }
+
+    pub fn payload_exp1_active(&self) -> bool {
+        self.payload_exp1_active
+    }
+
+    pub fn payload_exp2_active(&self) -> bool {
+        self.payload_exp2_active
+    }
+
+    pub fn payload_exp3_active(&self) -> bool {
+        self.payload_exp3_active
+    }
+
+    pub fn payload_sdrm_sd_logging(&self) -> bool {
+        self.payload_sdrm_sd_logging
+    }
+
+    pub fn payload_sem_sd_logging(&self) -> bool {
+        self.payload_sem_sd_logging
     }
 
     /// `None` when the payload reported the reading as unavailable.
-    pub fn epm_batt_v(&self) -> Option<f32> {
-        if self.epm_batt_v_valid {
-            Some(EpmBattVFac::to_float(self.epm_batt_v))
-        } else {
-            None
-        }
+    /// 0 when the payload could not read it. The SD slow record keeps the
+    /// `0xFFFF` sentinel and is where that stays distinguishable.
+    pub fn epm_batt_v(&self) -> f32 {
+        EpmBattVFac::to_float(self.epm_batt_v)
     }
 
-    pub fn epm_sys_3v3_ma(&self) -> Option<u16> {
-        Self::decode_rail_ma(self.epm_sys_3v3_ma_valid, self.epm_sys_3v3_ma)
+    pub fn epm_sys_3v3_ma(&self) -> u16 {
+        Self::decode_rail_ma(self.epm_sys_3v3_ma)
     }
 
-    pub fn epm_sys_5v_ma(&self) -> Option<u16> {
-        Self::decode_rail_ma(self.epm_sys_5v_ma_valid, self.epm_sys_5v_ma)
+    pub fn epm_sys_5v_ma(&self) -> u16 {
+        Self::decode_rail_ma(self.epm_sys_5v_ma)
     }
 
-    pub fn epm_per_3v3_ma(&self) -> Option<u16> {
-        Self::decode_rail_ma(self.epm_per_3v3_ma_valid, self.epm_per_3v3_ma)
+    pub fn epm_per_3v3_ma(&self) -> u16 {
+        Self::decode_rail_ma(self.epm_per_3v3_ma)
     }
 
-    pub fn epm_per_5v_ma(&self) -> Option<u16> {
-        Self::decode_rail_ma(self.epm_per_5v_ma_valid, self.epm_per_5v_ma)
+    pub fn epm_per_5v_ma(&self) -> u16 {
+        Self::decode_rail_ma(self.epm_per_5v_ma)
     }
 
-    pub fn epm_per_9v_ma(&self) -> Option<u16> {
-        Self::decode_rail_ma(self.epm_per_9v_ma_valid, self.epm_per_9v_ma)
+    pub fn epm_per_9v_ma(&self) -> u16 {
+        Self::decode_rail_ma(self.epm_per_9v_ma)
     }
 
-    pub fn epm_per_12v_ma(&self) -> Option<u16> {
-        Self::decode_rail_ma(self.epm_per_12v_ma_valid, self.epm_per_12v_ma)
+    pub fn epm_per_12v_ma(&self) -> u16 {
+        Self::decode_rail_ma(self.epm_per_12v_ma)
     }
 
     /// Rail index order: 0 `SYS_3V3`, 1 `SYS_5V`, 2 `PER_3V3`, 3 `PER_5V`,
     /// 4 `PER_9V`, 5 `PER_12V`.
-    pub fn epm_rail_ma(&self) -> [Option<u16>; 6] {
+    pub fn epm_rail_ma(&self) -> [u16; 6] {
         [
             self.epm_sys_3v3_ma(),
             self.epm_sys_5v_ma(),
@@ -573,20 +581,20 @@ impl TelemetryPacket {
         ]
     }
 
-    pub fn sem_actuator_1_steps(&self) -> Option<u16> {
-        Self::decode_steps(self.sem_actuator_1_steps_valid, self.sem_actuator_1_steps)
+    pub fn sem_actuator_1_steps(&self) -> u16 {
+        Self::decode_steps(self.sem_actuator_1_steps)
     }
 
-    pub fn sem_actuator_2_steps(&self) -> Option<u16> {
-        Self::decode_steps(self.sem_actuator_2_steps_valid, self.sem_actuator_2_steps)
+    pub fn sem_actuator_2_steps(&self) -> u16 {
+        Self::decode_steps(self.sem_actuator_2_steps)
     }
 
-    pub fn sem_actuator_3_steps(&self) -> Option<u16> {
-        Self::decode_steps(self.sem_actuator_3_steps_valid, self.sem_actuator_3_steps)
+    pub fn sem_actuator_3_steps(&self) -> u16 {
+        Self::decode_steps(self.sem_actuator_3_steps)
     }
 
     /// Experiment channels 1..3.
-    pub fn sem_actuator_steps(&self) -> [Option<u16>; 3] {
+    pub fn sem_actuator_steps(&self) -> [u16; 3] {
         [
             self.sem_actuator_1_steps(),
             self.sem_actuator_2_steps(),
@@ -596,7 +604,6 @@ impl TelemetryPacket {
 
     #[cfg(feature = "json")]
     pub fn to_json(&self) -> json::JsonValue {
-        let payload_stack_status = self.payload_stack_status();
         json::object! {
             unix_clock_ready: self.unix_clock_ready(),
             num_of_fix_satellites: self.num_of_fix_satellites(),
@@ -633,22 +640,20 @@ impl TelemetryPacket {
             air_brakes_actual_extension_percentage: self.air_brakes_actual_extension_percentage(),
             air_brakes_servo_temp: self.air_brakes_servo_temp(),
 
-            ozys1_online: self.ozys1_online(),
-            ozys1_rebooted_in_last_5s: self.ozys1_rebooted_in_last_5s(),
-            ozys2_online: self.ozys2_online(),
-            ozys2_rebooted_in_last_5s: self.ozys2_rebooted_in_last_5s(),
+            ozys_online: self.ozys_online(),
+            ozys_rebooted_in_last_5s: self.ozys_rebooted_in_last_5s(),
 
             payload_sdrm_online: self.payload_sdrm_online(),
             payload_sdrm_rebooted_in_last_5s: self.payload_sdrm_rebooted_in_last_5s(),
 
-            payload_epm_alive: payload_stack_status.epm_alive,
-            payload_sem_alive: payload_stack_status.sem_alive,
-            payload_epm_rails_on: payload_stack_status.epm_rails_on,
-            payload_sdrm_sd_logging: payload_stack_status.sdrm_sd_logging,
-            payload_sem_sd_logging: payload_stack_status.sem_sd_logging,
-            payload_exp1_active: payload_stack_status.exp1_active,
-            payload_exp2_active: payload_stack_status.exp2_active,
-            payload_exp3_active: payload_stack_status.exp3_active,
+            payload_epm_alive: self.payload_epm_alive(),
+            payload_sem_alive: self.payload_sem_alive(),
+            payload_epm_rails_on: self.payload_epm_rails_on(),
+            payload_sdrm_sd_logging: self.payload_sdrm_sd_logging(),
+            payload_sem_sd_logging: self.payload_sem_sd_logging(),
+            payload_exp1_active: self.payload_exp1_active(),
+            payload_exp2_active: self.payload_exp2_active(),
+            payload_exp3_active: self.payload_exp3_active(),
 
             epm_batt_v: self.epm_batt_v(),
             epm_sys_3v3_ma: self.epm_sys_3v3_ma(),
@@ -722,11 +727,8 @@ pub struct TelemetryPacketBuilderState {
     pub air_brakes_actual_extension_percentage: f32,
     pub air_brakes_servo_temp: f32,
 
-    pub ozys1_online: bool,
-    pub ozys1_uptime_s: u32,
-
-    pub ozys2_online: bool,
-    pub ozys2_uptime_s: u32,
+    pub ozys_online: bool,
+    pub ozys_uptime_s: u32,
 
     pub payload_sdrm_online: bool,
     pub payload_sdrm_uptime_s: u32,
@@ -791,11 +793,8 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 air_brakes_actual_extension_percentage: 0.0,
                 air_brakes_servo_temp: 0.0,
 
-                ozys1_online: false,
-                ozys1_uptime_s: 0,
-
-                ozys2_online: false,
-                ozys2_uptime_s: 0,
+                ozys_online: false,
+                ozys_uptime_s: 0,
 
                 payload_sdrm_online: false,
                 payload_sdrm_uptime_s: 0,
@@ -856,10 +855,8 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 state.air_brakes_commanded_extension_percentage,
                 state.air_brakes_actual_extension_percentage,
                 state.air_brakes_servo_temp,
-                state.ozys1_online,
-                state.ozys1_uptime_s < 5,
-                state.ozys2_online,
-                state.ozys2_uptime_s < 5,
+                state.ozys_online,
+                state.ozys_uptime_s < 5,
                 state.payload_sdrm_online,
                 state.payload_sdrm_uptime_s < 5,
                 state.payload_stack_status.clone(),
@@ -929,9 +926,16 @@ mod tests {
             false,
             true,
             false,
-            true,
-            false,
-            PayloadSDRMCustomStatus::new(),
+            PayloadSDRMCustomStatus {
+                epm_alive: true,
+                sem_alive: false,
+                epm_rails_on: true,
+                exp1_active: false,
+                exp2_active: true,
+                exp3_active: false,
+                sdrm_sd_logging: true,
+                sem_sd_logging: false,
+            },
             Some(12600),
             [Some(120), Some(340), None, Some(780), Some(1500), Some(2400)],
             [Some(0), Some(1200), Some(34567)],
@@ -940,8 +944,8 @@ mod tests {
 
         let mut buffer = [0u8; 64];
         let len = packet.serialize(&mut buffer);
-        // 1 byte packet type + the 41 byte packed struct.
-        assert_eq!(len, 42);
+        // 1 byte packet type + the 37 byte packed struct.
+        assert_eq!(len, 38);
 
         let deserialized_packet = VLPDownlinkPacket::deserialize(&buffer[..len]).unwrap();
         assert_eq!(deserialized_packet, packet);
@@ -960,19 +964,96 @@ mod tests {
         assert_relative_eq!(p.target_apogee_agl(), 3000.0, epsilon = 1.0);
 
         // Payload readings survive the round trip within their quantization
-        // (10mA per rail code, ~64 steps per actuator code), and an unavailable
-        // reading stays unavailable rather than decoding as 0.
-        assert_relative_eq!(p.epm_batt_v().unwrap(), 12.6, epsilon = 0.01);
+        // (~39mA per rail code, ~64 steps per actuator code). An unavailable
+        // reading is sent as 0 -- there is no validity bit, so rail 2 here is
+        // indistinguishable on the downlink from a rail drawing nothing.
+        assert_relative_eq!(p.epm_batt_v(), 12.6, epsilon = 0.01);
         let rails = p.epm_rail_ma();
-        assert_relative_eq!(rails[0].unwrap() as f32, 120.0, epsilon = 10.0);
-        assert_relative_eq!(rails[1].unwrap() as f32, 340.0, epsilon = 10.0);
-        assert_eq!(rails[2], None);
-        assert_relative_eq!(rails[3].unwrap() as f32, 780.0, epsilon = 10.0);
-        assert_relative_eq!(rails[4].unwrap() as f32, 1500.0, epsilon = 10.0);
-        assert_relative_eq!(rails[5].unwrap() as f32, 2400.0, epsilon = 10.0);
+        assert_relative_eq!(rails[0] as f32, 120.0, epsilon = 40.0);
+        assert_relative_eq!(rails[1] as f32, 340.0, epsilon = 40.0);
+        assert_eq!(rails[2], 0);
+        assert_relative_eq!(rails[3] as f32, 780.0, epsilon = 40.0);
+        assert_relative_eq!(rails[4] as f32, 1500.0, epsilon = 40.0);
+        assert_relative_eq!(rails[5] as f32, 2400.0, epsilon = 40.0);
         let steps = p.sem_actuator_steps();
-        assert_eq!(steps[0], Some(0));
-        assert_relative_eq!(steps[1].unwrap() as f32, 1200.0, epsilon = 64.0);
-        assert_relative_eq!(steps[2].unwrap() as f32, 34567.0, epsilon = 64.0);
+        assert_eq!(steps[0], 0);
+        assert_relative_eq!(steps[1] as f32, 1200.0, epsilon = 64.0);
+        assert_relative_eq!(steps[2] as f32, 34567.0, epsilon = 64.0);
+
+        // The stack flags are individual packet fields now, not a relayed
+        // 11 bit blob.
+        assert!(p.payload_epm_alive());
+        assert!(!p.payload_sem_alive());
+        assert!(p.payload_exp2_active());
+    }
+
+    fn packet_with_satellites(n: u8) -> TelemetryPacket {
+        TelemetryPacket::new(
+            10,
+            true,
+            n,
+            Some((45.5, -73.6)),
+            7.4,
+            25.5,
+            true,
+            true,
+            1234.0,
+            2345.0,
+            -150.0,
+            10.0,
+            FlightStage::Ascent,
+            true,
+            2900.0,
+            3000.0,
+            true,
+            false,
+            8.2,
+            false,
+            PowerOutputStatus::PowerGood,
+            false,
+            PowerOutputStatus::PowerGood,
+            true,
+            PowerOutputStatus::Disabled,
+            true,
+            false,
+            0.5,
+            0.45,
+            42.0,
+            true,
+            false,
+            true,
+            false,
+            PayloadSDRMCustomStatus::new(),
+            Some(12600),
+            [Some(120), Some(340), None, Some(780), Some(1500), Some(2400)],
+            [Some(0), Some(1200), Some(34567)],
+        )
+    }
+
+    /// The satellite count is 5 bits, so packed_struct truncates rather than
+    /// clamps. Without the saturation in `new`, 32 satellites downlink as 0 --
+    /// the reading that means "no fix, do not fly". Anything at or above the
+    /// cap must read as the cap, never wrap.
+    #[test]
+    fn satellite_count_saturates_instead_of_wrapping() {
+        init_logger();
+
+        for n in 0..=MAX_REPORTED_FIX_SATELLITES {
+            assert_eq!(packet_with_satellites(n).num_of_fix_satellites(), n);
+        }
+        for n in [
+            MAX_REPORTED_FIX_SATELLITES + 1,
+            MAX_REPORTED_FIX_SATELLITES + 2,
+            40,
+            99,
+            u8::MAX,
+        ] {
+            assert_eq!(
+                packet_with_satellites(n).num_of_fix_satellites(),
+                MAX_REPORTED_FIX_SATELLITES,
+                "{} satellites must saturate, not wrap",
+                n
+            );
+        }
     }
 }

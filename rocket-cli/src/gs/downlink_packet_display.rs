@@ -80,35 +80,6 @@ impl DownlinkPacketDisplay {
         String::from(s).into()
     }
 
-    /// EPM rails arrive as `None` when the payload reports them unavailable.
-    fn format_optional_v(value: Option<f32>) -> StyledString {
-        match value {
-            Some(v) => format!("{:.2}V", v).into(),
-            None => Self::format_unavailable(),
-        }
-    }
-
-    fn format_optional_ma(value: Option<u16>) -> StyledString {
-        match value {
-            Some(ma) => format!("{}mA", ma).into(),
-            None => Self::format_unavailable(),
-        }
-    }
-
-    fn format_optional_steps(value: Option<u16>) -> StyledString {
-        match value {
-            Some(steps) => format!("{}", steps).into(),
-            None => Self::format_unavailable(),
-        }
-    }
-
-    fn format_unavailable() -> StyledString {
-        StyledString::single_span(
-            "n/a   ",
-            Style::from_color_style(ColorStyle::front(Color::Rgb(127, 127, 127))),
-        )
-    }
-
     fn format_node_status(value: &NodeStatus) -> StyledString {
         String::from(format!(
             "{:?}, {:?}{}",
@@ -318,7 +289,6 @@ impl View for DownlinkPacketDisplay {
                     ],
                 ),
                 VLPDownlinkPacket::Telemetry(p) => {
-                    let stack = p.payload_stack_status();
                     self.draw_fields(
                     &printer,
                     &[
@@ -467,17 +437,11 @@ impl View for DownlinkPacketDisplay {
                             // ),
                         ],
                         &[
-                            ("ozys 1 online", true, Self::format_bool(p.ozys1_online())),
+                            ("ozys online", true, Self::format_bool(p.ozys_online())),
                             (
                                 "rebooted",
                                 true,
-                                Self::format_bool(p.ozys1_rebooted_in_last_5s()),
-                            ),
-                            ("ozys 2 online", true, Self::format_bool(p.ozys2_online())),
-                            (
-                                "rebooted",
-                                true,
-                                Self::format_bool(p.ozys2_rebooted_in_last_5s()),
+                                Self::format_bool(p.ozys_rebooted_in_last_5s()),
                             ),
                         ],
                         &[
@@ -493,61 +457,61 @@ impl View for DownlinkPacketDisplay {
                             ),
                         ],
                         &[
-                            ("epm alive", true, Self::format_bool(stack.epm_alive)),
-                            ("sem alive", true, Self::format_bool(stack.sem_alive)),
+                            ("epm alive", true, Self::format_bool(p.payload_epm_alive())),
+                            ("sem alive", true, Self::format_bool(p.payload_sem_alive())),
                             (
                                 "epm rails on",
                                 true,
-                                Self::format_bool(stack.epm_rails_on),
+                                Self::format_bool(p.payload_epm_rails_on()),
                             ),
                             (
                                 "sdrm sd log",
                                 true,
-                                Self::format_bool(stack.sdrm_sd_logging),
+                                Self::format_bool(p.payload_sdrm_sd_logging()),
                             ),
-                            ("sem sd log", true, Self::format_bool(stack.sem_sd_logging)),
+                            ("sem sd log", true, Self::format_bool(p.payload_sem_sd_logging())),
                         ],
                         &[
-                            ("exp 1", true, Self::format_bool(stack.exp1_active)),
-                            ("exp 2", true, Self::format_bool(stack.exp2_active)),
-                            ("exp 3", true, Self::format_bool(stack.exp3_active)),
+                            ("exp 1", true, Self::format_bool(p.payload_exp1_active())),
+                            ("exp 2", true, Self::format_bool(p.payload_exp2_active())),
+                            ("exp 3", true, Self::format_bool(p.payload_exp3_active())),
                         ],
                         &[
-                            ("epm batt", false, Self::format_optional_v(p.epm_batt_v())),
+                            ("epm batt", false, format!("{:.2}V", p.epm_batt_v()).into()),
                             (
                                 "sys 3v3",
                                 false,
-                                Self::format_optional_ma(p.epm_sys_3v3_ma()),
+                                format!("{}mA", p.epm_sys_3v3_ma()).into(),
                             ),
-                            ("sys 5v", false, Self::format_optional_ma(p.epm_sys_5v_ma())),
+                            ("sys 5v", false, format!("{}mA", p.epm_sys_5v_ma()).into()),
                             (
                                 "per 3v3",
                                 false,
-                                Self::format_optional_ma(p.epm_per_3v3_ma()),
+                                format!("{}mA", p.epm_per_3v3_ma()).into(),
                             ),
-                            ("per 5v", false, Self::format_optional_ma(p.epm_per_5v_ma())),
-                            ("per 9v", false, Self::format_optional_ma(p.epm_per_9v_ma())),
+                            ("per 5v", false, format!("{}mA", p.epm_per_5v_ma()).into()),
+                            ("per 9v", false, format!("{}mA", p.epm_per_9v_ma()).into()),
                             (
                                 "per 12v",
                                 false,
-                                Self::format_optional_ma(p.epm_per_12v_ma()),
+                                format!("{}mA", p.epm_per_12v_ma()).into(),
                             ),
                         ],
                         &[
                             (
                                 "act 1",
                                 false,
-                                Self::format_optional_steps(p.sem_actuator_1_steps()),
+                                p.sem_actuator_1_steps().to_string().into(),
                             ),
                             (
                                 "act 2",
                                 false,
-                                Self::format_optional_steps(p.sem_actuator_2_steps()),
+                                p.sem_actuator_2_steps().to_string().into(),
                             ),
                             (
                                 "act 3",
                                 false,
-                                Self::format_optional_steps(p.sem_actuator_3_steps()),
+                                p.sem_actuator_3_steps().to_string().into(),
                             ),
                         ],
                     ],
@@ -585,26 +549,13 @@ impl View for DownlinkPacketDisplay {
                         ],
                         &[
                             ("icarus", true, Self::format_node_status(&p.icarus)),
-                            ("ozys 1", true, Self::format_node_status(&p.ozys1)),
+                            ("ozys", true, Self::format_node_status(&p.ozys)),
                             (
-                                "ozys 1 disk",
+                                "ozys disk",
                                 false,
                                 format!(
                                     "{}%",
-                                    (OzysCustomStatus::from_u16(p.ozys1.custom_status)
-                                        .disk_usage()
-                                        * 100.0)
-                                        .round()
-                                )
-                                .into(),
-                            ),
-                            ("ozys 2", true, Self::format_node_status(&p.ozys2)),
-                            (
-                                "ozys 2 disk",
-                                false,
-                                format!(
-                                    "{}%",
-                                    (OzysCustomStatus::from_u16(p.ozys2.custom_status)
+                                    (OzysCustomStatus::from_u16(p.ozys.custom_status)
                                         .disk_usage()
                                         * 100.0)
                                         .round()

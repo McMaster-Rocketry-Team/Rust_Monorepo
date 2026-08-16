@@ -15,7 +15,9 @@ fixed_point_factory!(LonFac, f64, -180.0, 180.0, 0.00002146);
 fixed_point_factory!(BatteryVFac, f32, 2.5, 8.5, 0.01);
 
 #[derive(PackedStruct, Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "12")]
+// 87 bits = 10.875 bytes, so 11 with one spare bit. Same content-width as
+// LowPowerTelemetryPacket, which is why both are 11.
+#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "11")]
 pub struct LandedTelemetryPacket {
     #[packed_field(bits = "0..4")]
     nonce: Integer<u8, packed_bits::Bits<4>>,

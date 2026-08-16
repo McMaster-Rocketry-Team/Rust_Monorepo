@@ -57,9 +57,11 @@ impl NodeStatus {
     }
 }
 
+// 4 bit nonce + four 16 bit NodeStatus + 11 bools = 79 bits, so 10 bytes with
+// one spare bit.
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PackedStruct, Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "12")]
+#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "10")]
 pub struct SelfTestResultPacket {
     #[packed_field(bits = "0..4")]
     nonce: u8,
@@ -71,10 +73,7 @@ pub struct SelfTestResultPacket {
     pub icarus: NodeStatus,
 
     #[packed_field(element_size_bytes = "2")]
-    pub ozys1: NodeStatus,
-
-    #[packed_field(element_size_bytes = "2")]
-    pub ozys2: NodeStatus,
+    pub ozys: NodeStatus,
 
     #[packed_field(element_size_bytes = "2")]
     pub payload_sdrm: NodeStatus,
@@ -114,8 +113,7 @@ impl SelfTestResultPacket {
 
             amp: self.amp.to_json(),
             icarus: self.icarus.to_json(),
-            ozys1: self.ozys1.to_json(),
-            ozys2: self.ozys2.to_json(),
+            ozys: self.ozys.to_json(),
             payload_sdrm: self.payload_sdrm.to_json(),
         }
     }
@@ -131,8 +129,7 @@ pub struct SelfTestResultPacketBuilderState {
     nonce: u8,
     pub amp: NodeStatus,
     pub icarus: NodeStatus,
-    pub ozys1: NodeStatus,
-    pub ozys2: NodeStatus,
+    pub ozys: NodeStatus,
     pub payload_sdrm: NodeStatus,
     pub imu_ok: bool,
     pub baro_ok: bool,
@@ -159,8 +156,7 @@ impl<M: RawMutex> SelfTestResultPacketBuilder<M> {
                 nonce: 0,
                 amp: NodeStatus::offline(),
                 icarus: NodeStatus::offline(),
-                ozys1: NodeStatus::offline(),
-                ozys2: NodeStatus::offline(),
+                ozys: NodeStatus::offline(),
                 payload_sdrm: NodeStatus::offline(),
                 imu_ok: false,
                 baro_ok: false,
@@ -189,8 +185,7 @@ impl<M: RawMutex> SelfTestResultPacketBuilder<M> {
                 nonce: state.nonce.into(),
                 amp: state.amp.clone(),
                 icarus: state.icarus.clone(),
-                ozys1: state.ozys1.clone(),
-                ozys2: state.ozys2.clone(),
+                ozys: state.ozys.clone(),
                 payload_sdrm: state.payload_sdrm.clone(),
                 imu_ok: state.imu_ok,
                 baro_ok: state.baro_ok,

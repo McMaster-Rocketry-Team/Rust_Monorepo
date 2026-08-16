@@ -50,6 +50,9 @@ pub const DEFAULT_TARGET_APOGEE_AGL: f32 = 4000.0;
 
 /// On-disk format version. Bump when the record or superblock layout changes;
 /// logs written at any other version are treated as absent.
+/// v11: the slow record stores the full `NodeStatusMessage` (uptime, health,
+///     mode, custom status) for AMP / Icarus / OzYS / payload SDRM, replacing
+///     the lone `amp_online` bool. One OzYS this year, addressed by node type.
 /// v10: airbrakes commanded + actual extension moved from the fast record to
 ///     the slow one (both only ever update at 10 Hz);
 ///     `air_brakes_validation_deploy` added to the slow record.
@@ -59,7 +62,7 @@ pub const DEFAULT_TARGET_APOGEE_AGL: f32 = 4000.0;
 ///     `mpc_predicted_apogee_agl` added to the slow record, `VALID_BARO` dropped.
 /// v8: payload EPM rail currents + SEM actuator steps in the slow record.
 /// v7: tagged FAST/SLOW stream (see `flight_data_record`). Older formats: see git history.
-pub const STORAGE_VERSION: u32 = 10;
+pub const STORAGE_VERSION: u32 = 11;
 
 /// rkyv body sizes for tagged record types.
 pub const FAST_BODY_LEN: usize = size_of::<<FlightDataFastRecord as rkyv::Archive>::Archived>();
@@ -365,8 +368,9 @@ pub fn parse_log_records(
 mod tests {
     use super::*;
     use crate::can_bus::messages::vl_status::FlightStage;
+    use crate::can_bus::messages::node_status::{NodeHealth, NodeMode};
     use crate::flight_data_record::{
-        VALID_BATTERY, VALID_GPS_FIX, VALID_IMU, merge_log_records,
+        NodeStatusRecord, VALID_BATTERY, VALID_GPS_FIX, VALID_IMU, merge_log_records,
     };
 
     fn sample_fast(i: u32) -> FlightDataFastRecord {
@@ -407,7 +411,16 @@ mod tests {
             air_brakes_servo_temp: 41.5,
             air_brakes_validation_deploy: false,
             mpc_predicted_apogee_agl: 3010.0,
-            amp_online: true,
+            amp_node: NodeStatusRecord {
+                online: true,
+                uptime_s: 42,
+                health: NodeHealth::Healthy,
+                mode: NodeMode::Operational,
+                custom_status: 0,
+            },
+            icarus_node: NodeStatusRecord::offline(),
+            ozys_node: NodeStatusRecord::offline(),
+            payload_sdrm_node: NodeStatusRecord::offline(),
             amp_out_status: 0b01_01_00,
             amp_shared_battery_v: 8.2,
             payload_epm_batt_mv: 12600,
@@ -529,7 +542,7 @@ mod tests {
         assert_eq!(merged[0].flight_stage, FlightStage::Ascent);
         assert_eq!(merged[0].pyro_flags, 0b0000_0101);
         assert_eq!(merged[0].unix_time_us, 1_750_000_000_000_000);
-        assert!(merged[0].amp_online);
+        assert!(merged[0].amp_node.online);
         assert_eq!(merged[0].amp_out_status, 0b01_01_00);
         assert_eq!(merged[0].deployment_kf_altitude_asl, 271.5);
 

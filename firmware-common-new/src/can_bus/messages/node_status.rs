@@ -8,8 +8,10 @@ use super::{CanBusMessage, CanBusMessageEnum};
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(
     PrimitiveEnum_u8, Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize,
+    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
 )]
-#[repr(C)]
+#[rkyv(derive(Clone, Copy, Debug))]
+#[repr(u8)]
 pub enum NodeHealth {
     /// The node is functioning properly.
     Healthy = 0,
@@ -24,8 +26,10 @@ pub enum NodeHealth {
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(
     PrimitiveEnum_u8, Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize,
+    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
 )]
-#[repr(C)]
+#[rkyv(derive(Clone, Copy, Debug))]
+#[repr(u8)]
 pub enum NodeMode {
     /// Normal operating mode.
     Operational = 0,

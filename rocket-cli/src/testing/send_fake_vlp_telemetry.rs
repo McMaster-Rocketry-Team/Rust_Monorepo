@@ -98,8 +98,6 @@ pub async fn send_fake_vlp_telemetry(args: SendVLPTelemetryArgs) -> Result<()> {
             false,
             false,
             false,
-            false,
-            false,
             PayloadSDRMCustomStatus::new(),
             Some(12600),
             [Some(120), Some(340), Some(55), Some(780), Some(1500), None],
