@@ -65,7 +65,7 @@ pub struct FlightProfile {
     ///
     /// Unrelated to
     /// [`MachLockoutConfig`](crate::airbrakes_estimator::MachLockoutConfig)
-    /// despite the similar name: that one bounds the airbrakes drag vote and
+    /// despite the similar name: that one bounds the airbrakes drag check and
     /// runs from a different sensor's ignition detection. Equal values in a
     /// config are coincidence, not a link.
     pub mach_lockout_duration_us: Option<u32>,

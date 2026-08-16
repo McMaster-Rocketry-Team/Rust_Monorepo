@@ -92,10 +92,10 @@ pub struct TelemetryPacket {
     #[packed_field(element_size_bits = "9")]
     ab_vertical_velocity:
         Integer<VerticalVelocityFacBase, packed_bits::Bits<VERTICAL_VELOCITY_FAC_BITS>>,
-    /// The mach-lockout-exit drag vote: the drag-inverted airspeed is
-    /// currently below Mach 0.8. Sustained for 1 s, this is what opens the
-    /// lockout — it is the whole exit criterion, not one vote of three.
-    ab_vote_drag: bool,
+    /// The mach-lockout-exit drag check: the drag-inverted airspeed is
+    /// currently below Mach 0.8. Sustained for 1 s, this is the whole
+    /// criterion that opens the lockout.
+    ab_subsonic_drag: bool,
     /// The airbrakes estimator's vertical filter is born (baro trusted).
     ab_born: bool,
     ab_apogee: bool,
@@ -220,7 +220,7 @@ impl TelemetryPacket {
 
         ab_altitude_agl: f32,
         ab_vertical_velocity: f32,
-        ab_vote_drag: bool,
+        ab_subsonic_drag: bool,
         ab_born: bool,
         ab_apogee: bool,
         target_apogee_agl: f32,
@@ -290,7 +290,7 @@ impl TelemetryPacket {
 
             ab_altitude_agl: AltitudeFac::to_fixed_point_capped(ab_altitude_agl),
             ab_vertical_velocity: VerticalVelocityFac::to_fixed_point_capped(ab_vertical_velocity),
-            ab_vote_drag,
+            ab_subsonic_drag,
             ab_born,
             ab_apogee,
             target_apogee_agl: AltitudeFac::to_fixed_point_capped(target_apogee_agl),
@@ -464,9 +464,9 @@ impl TelemetryPacket {
         VerticalVelocityFac::to_float(self.ab_vertical_velocity)
     }
 
-    /// The mach-lockout-exit drag vote (see the field docs).
-    pub fn ab_vote_drag(&self) -> bool {
-        self.ab_vote_drag
+    /// The mach-lockout-exit drag check (see the field docs).
+    pub fn ab_subsonic_drag(&self) -> bool {
+        self.ab_subsonic_drag
     }
 
     /// The airbrakes estimator's vertical filter is born (baro trusted).
@@ -657,7 +657,7 @@ impl TelemetryPacket {
 
             ab_altitude_agl: self.ab_altitude_agl(),
             ab_vertical_velocity: self.ab_vertical_velocity(),
-            ab_vote_drag: self.ab_vote_drag(),
+            ab_subsonic_drag: self.ab_subsonic_drag(),
             ab_born: self.ab_born(),
             ab_apogee: self.ab_apogee(),
             target_apogee_agl: self.target_apogee_agl(),
@@ -752,9 +752,9 @@ pub struct TelemetryPacketBuilderState {
     pub ab_altitude_agl: f32,
     /// The airbrakes estimator's vertical velocity, signed (negative = descending).
     pub ab_vertical_velocity: f32,
-    /// The mach-lockout-exit drag vote: the drag-inverted airspeed is
+    /// The mach-lockout-exit drag check: the drag-inverted airspeed is
     /// below Mach 0.8. Sustained 1 s, this is what opens the lockout.
-    pub ab_vote_drag: bool,
+    pub ab_subsonic_drag: bool,
     /// The airbrakes estimator's vertical filter is born (baro trusted).
     pub ab_born: bool,
     pub ab_apogee: bool,
@@ -832,7 +832,7 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
 
                 ab_altitude_agl: 0.0,
                 ab_vertical_velocity: 0.0,
-                ab_vote_drag: false,
+                ab_subsonic_drag: false,
                 ab_born: false,
                 ab_apogee: false,
                 target_apogee_agl: 0.0,
@@ -906,7 +906,7 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 state.main_deployed,
                 state.ab_altitude_agl,
                 state.ab_vertical_velocity,
-                state.ab_vote_drag,
+                state.ab_subsonic_drag,
                 state.ab_born,
                 state.ab_apogee,
                 state.target_apogee_agl,
@@ -1026,7 +1026,7 @@ mod tests {
         };
         assert_relative_eq!(p.ab_altitude_agl(), 1230.0, epsilon = 1.0);
         assert_relative_eq!(p.ab_vertical_velocity(), -150.0, epsilon = 2.0);
-        assert!(p.ab_vote_drag());
+        assert!(p.ab_subsonic_drag());
         assert!(p.ab_born());
         assert!(!p.ab_apogee());
         assert_relative_eq!(p.target_apogee_agl(), 3000.0, epsilon = 1.0);

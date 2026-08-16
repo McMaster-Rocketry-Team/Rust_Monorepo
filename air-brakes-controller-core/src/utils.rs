@@ -3,11 +3,9 @@ use micromath::F32Ext as _;
 /// Air density (kg/m^3) at altitude ASL (m), ISA troposphere formula
 /// (valid to 11 km).
 ///
-/// This used to be a straight-line fit to the 0-3000 m range, which
-/// under-reads density 8.7% at 5.7 km and worse above — under-predicted
-/// drag over-predicts apogee, which over-extends the airbrakes (a
-/// one-sided error in the harmful direction, found in review before
-/// LC'26, which simulates to 6+ km).
+/// The full formula rather than a low-altitude linear fit: LC'26 simulates
+/// to 6+ km, and under-reading density over-predicts apogee, which
+/// over-extends the airbrakes — a one-sided error in the harmful direction.
 pub fn approximate_air_density(altitude_asl: f32) -> f32 {
     1.225 * (1.0 - 2.25577e-5 * altitude_asl).max(0.0).powf(4.256)
 }

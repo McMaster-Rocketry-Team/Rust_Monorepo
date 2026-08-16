@@ -10,7 +10,7 @@
 //! ("born subsonic" — no state that existed during the garbage period
 //! survives into the filter).
 //!
-//! # The lockout exit is one measurement, not a vote
+//! # The lockout exit is one measurement
 //!
 //! In free flight the accelerometer measures specific force, which
 //! excludes gravity — so its raw magnitude IS drag/mass. Inverting
@@ -21,15 +21,8 @@
 //! for the dead-reckoned one (the only place air density enters) moves the
 //! answer by at most 0.01 Mach.
 //!
-//! This replaced a 2-of-3 vote over (inertial speed, deployment-filter
-//! speed, baro climb-rate agreement). That vote was weaker than it looked:
-//! two of its three members read the same dead reckoner, so a single
-//! drifting integrator moved two votes together; the deployment filter
-//! abstains for its own 12 s lockout, which outlasts the decision on a
-//! Mach 2 flight; and the baro-rate member is a lie detector pointed at a
-//! sensor that is known to be lying. The drag measurement subsumes all
-//! three — it crosses Mach 0.8 within 0.2 s of the inertial estimate while
-//! never once dipping below the threshold during the supersonic phase.
+//! It crosses Mach 0.8 within 0.2 s of the inertial estimate while never
+//! once dipping below the threshold during the supersonic phase.
 //!
 //! Two conditions it depends on, both enforced by [`MachLockoutConfig`]:
 //! the motor must be out (thrust tail-off briefly cancels drag, which
@@ -113,7 +106,7 @@ pub struct AirbrakesConfig {
     pub ignition_detection_acc_threshold: f32,
 
     /// `Some` for flights that go near or above the speed of sound: the
-    /// baro is ignored from ignition until the drag vote (bounded by
+    /// baro is ignored from ignition until the drag check (bounded by
     /// these timers) says the flow is subsonic again. `None` for subsonic
     /// profiles: the filter is born right after the thrust-vector
     /// alignment finishes.
@@ -121,12 +114,12 @@ pub struct AirbrakesConfig {
 
     /// The airframe — the same value the MPC flies on.
     ///
-    /// The drag vote needs `Cd * A / m`, and it derives that here rather
+    /// The drag check needs `Cd * A / m`, and it derives that here rather
     /// than taking it as a number, so the lockout and the apogee
     /// prediction cannot be given different airframes. It reads `cd[0]`,
-    /// the brakes-stowed entry, and that is what makes the vote one-sided:
+    /// the brakes-stowed entry, and that is what makes the check one-sided:
     /// the true Cd is higher transonically, so the inverted speed reads
-    /// high exactly while supersonic and the vote errs toward keeping the
+    /// high exactly while supersonic and the check errs toward keeping the
     /// lockout shut. Measured on LC'25 the inverted Mach peaks at 1.25
     /// where the truth is 1.03.
     pub rocket: RocketParameters,
@@ -134,7 +127,7 @@ pub struct AirbrakesConfig {
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Clone, Debug)]
-/// Bounds on when the drag vote is allowed to decide, both measured from
+/// Bounds on when the drag check is allowed to decide, both measured from
 /// **this estimator's own accelerometer ignition detection**.
 ///
 /// Note the clock: [`FlightProfile::mach_lockout_duration_us`] runs from the
@@ -145,11 +138,11 @@ pub struct AirbrakesConfig {
 ///
 /// [`FlightProfile::mach_lockout_duration_us`]: crate::FlightProfile::mach_lockout_duration_us
 pub struct MachLockoutConfig {
-    /// Earliest the rocket could possibly be below Mach 0.8; the drag vote
+    /// Earliest the rocket could possibly be below Mach 0.8; the drag check
     /// is not consulted before this.
     ///
     /// From the flight sim: the earliest simulated time below Mach 0.8,
-    /// measured from ignition detection. Erring early is unsafe (the vote
+    /// measured from ignition detection. Erring early is unsafe (the check
     /// gets to speak while still supersonic), erring late only costs
     /// control window.
     ///
@@ -159,7 +152,7 @@ pub struct MachLockoutConfig {
     /// purely from the sim's earliest subsonic time.
     pub earliest_subsonic_after_ignition_us: u32,
     /// Give-up time: at this point the vertical filter is born from the
-    /// baro regardless of what the drag vote says.
+    /// baro regardless of what the drag check says.
     ///
     /// From the flight sim: the latest plausible time below Mach 0.8 plus
     /// margin, and it must end well (>5 s) before the EARLIEST simulated
@@ -167,7 +160,7 @@ pub struct MachLockoutConfig {
     /// at all.
     ///
     /// This backstop is still subject to the burnout latch: it covers a
-    /// drag model wrong enough that the vote never passes (the axial sign
+    /// drag model wrong enough that the check never passes (the axial sign
     /// test does not depend on Cd, so the latch still fires), not an
     /// accelerometer too dead to show deceleration at all.
     pub force_birth_after_ignition_us: u32,

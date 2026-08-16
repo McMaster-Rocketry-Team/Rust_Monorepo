@@ -16,7 +16,6 @@ use mag_measurement::MagMeasurementMessage;
 use node_status::NodeStatusMessage;
 use ozys_measurement::OzysMeasurementMessage;
 use reset::ResetMessage;
-use rocket_state::RocketStateMessage;
 use static_assertions::const_assert;
 use unix_time::UnixTimeMessage;
 use vl_status::VLStatusMessage;
@@ -39,7 +38,6 @@ pub mod mag_measurement;
 pub mod node_status;
 pub mod ozys_measurement;
 pub mod reset;
-pub mod rocket_state;
 pub mod unix_time;
 pub mod vl_status;
 
@@ -202,16 +200,6 @@ pub const VL_STATUS_MESSAGE_TYPE: u8 = create_can_bus_message_type(
     },
     4,
 );
-pub const ROCKET_STATE_MESSAGE_TYPE: u8 = create_can_bus_message_type(
-    CanBusMessageTypeFlag {
-        is_measurement: true,
-        is_control: false,
-        is_status: false,
-        is_data: false,
-        is_misc: false,
-    },
-    3,
-);
 pub const ICARUS_STATUS_MESSAGE_TYPE: u8 = create_can_bus_message_type(
     CanBusMessageTypeFlag {
         is_measurement: true,
@@ -289,7 +277,6 @@ pub enum CanBusMessageEnum {
     CustomPayloadStatus(CustomPayloadStatusMessage),
 
     VLStatus(VLStatusMessage),
-    RocketState(RocketStateMessage),
     IcarusStatus(IcarusStatusMessage),
     AirBrakesControl(AirBrakesControlMessage),
 
@@ -314,7 +301,6 @@ impl CanBusMessageEnum {
             CanBusMessageEnum::AmpResetOutput(m) => m.priority(),
             CanBusMessageEnum::CustomPayloadStatus(m) => m.priority(),
             CanBusMessageEnum::VLStatus(m) => m.priority(),
-            CanBusMessageEnum::RocketState(m) => m.priority(),
             CanBusMessageEnum::IcarusStatus(m) => m.priority(),
             CanBusMessageEnum::AirBrakesControl(m) => m.priority(),
             CanBusMessageEnum::DataTransfer(m) => m.priority(),
@@ -339,7 +325,6 @@ impl CanBusMessageEnum {
             CanBusMessageEnum::AmpResetOutput(_) => AMP_RESET_OUTPUT_MESSAGE_TYPE,
             CanBusMessageEnum::CustomPayloadStatus(_) => CUSTOM_PAYLOAD_STATUS_MESSAGE_TYPE,
             CanBusMessageEnum::VLStatus(_) => VL_STATUS_MESSAGE_TYPE,
-            CanBusMessageEnum::RocketState(_) => ROCKET_STATE_MESSAGE_TYPE,
             CanBusMessageEnum::IcarusStatus(_) => ICARUS_STATUS_MESSAGE_TYPE,
             CanBusMessageEnum::AirBrakesControl(_) => AIRBRAKES_CONTROL_MESSAGE_TYPE,
             CanBusMessageEnum::DataTransfer(_) => DATA_TRANSFER_MESSAGE_TYPE,
@@ -371,7 +356,6 @@ impl CanBusMessageEnum {
                 Some(CustomPayloadStatusMessage::serialized_len())
             }
             VL_STATUS_MESSAGE_TYPE => Some(VLStatusMessage::serialized_len()),
-            ROCKET_STATE_MESSAGE_TYPE => Some(RocketStateMessage::serialized_len()),
             ICARUS_STATUS_MESSAGE_TYPE => Some(IcarusStatusMessage::serialized_len()),
             AIRBRAKES_CONTROL_MESSAGE_TYPE => Some(AirBrakesControlMessage::serialized_len()),
             DATA_TRANSFER_MESSAGE_TYPE => Some(DataTransferMessage::serialized_len()),
@@ -396,7 +380,6 @@ impl CanBusMessageEnum {
             CanBusMessageEnum::AmpResetOutput(m) => m.serialize(buffer),
             CanBusMessageEnum::CustomPayloadStatus(m) => m.serialize(buffer),
             CanBusMessageEnum::VLStatus(m) => m.serialize(buffer),
-            CanBusMessageEnum::RocketState(m) => m.serialize(buffer),
             CanBusMessageEnum::IcarusStatus(m) => m.serialize(buffer),
             CanBusMessageEnum::AirBrakesControl(m) => m.serialize(buffer),
             CanBusMessageEnum::DataTransfer(m) => m.serialize(buffer),
@@ -453,9 +436,6 @@ impl CanBusMessageEnum {
             }
             AIRBRAKES_CONTROL_MESSAGE_TYPE => {
                 AirBrakesControlMessage::deserialize(data).map(CanBusMessageEnum::AirBrakesControl)
-            }
-            ROCKET_STATE_MESSAGE_TYPE => {
-                RocketStateMessage::deserialize(data).map(CanBusMessageEnum::RocketState)
             }
 
             DATA_TRANSFER_MESSAGE_TYPE => {

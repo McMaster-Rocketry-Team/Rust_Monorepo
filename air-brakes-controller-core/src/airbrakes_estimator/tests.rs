@@ -4,6 +4,7 @@ use nalgebra::{UnitQuaternion, UnitVector3, Vector3};
 
 use super::*;
 use crate::{
+    DeploymentProfile, FlightConfig, FlightEstimators, FlightProfile, ImuSample,
     controller::RocketParameters,
     tests::init_logger,
 };
@@ -191,8 +192,8 @@ struct ReplayResult {
     apogee_alt_asl: Option<f32>,
     /// (row index, estimated vv) while the filter was alive
     vv_track: Vec<(usize, f32)>,
-    /// continuous spans (start s, end s) where the drag vote held true
-    vote_spans: Vec<(f32, f32)>,
+    /// continuous spans (start s, end s) where the drag check held true
+    subsonic_spans: Vec<(f32, f32)>,
     /// wall time (s from log start) when `burnout_detected()` first went true
     burnout_s: Option<f32>,
     /// set if `burnout_detected()` ever went back to false after latching
@@ -208,12 +209,12 @@ fn replay(rows: &[Measurement], config: AirbrakesConfig) -> ReplayResult {
         apogee_i: None,
         apogee_alt_asl: None,
         vv_track: Vec::new(),
-        vote_spans: Vec::new(),
+        subsonic_spans: Vec::new(),
         burnout_s: None,
         burnout_unlatched: false,
         calibration_complete_s: None,
     };
-    let mut vote_span_start: Option<f32> = None;
+    let mut subsonic_span_start: Option<f32> = None;
     for (i, z) in rows.iter().enumerate() {
         estimator.update(z);
 
@@ -226,12 +227,12 @@ fn replay(rows: &[Measurement], config: AirbrakesConfig) -> ReplayResult {
         if result.calibration_complete_s.is_none() && estimator.calibration_complete() {
             result.calibration_complete_s = Some(now);
         }
-        match (estimator.lockout_vote(), vote_span_start) {
-            (Some(true), None) => vote_span_start = Some(now),
+        match (estimator.subsonic_by_drag(), subsonic_span_start) {
+            (Some(true), None) => subsonic_span_start = Some(now),
             (Some(true), Some(_)) => {}
             (_, Some(start)) => {
-                result.vote_spans.push((start, now));
-                vote_span_start = None;
+                result.subsonic_spans.push((start, now));
+                subsonic_span_start = None;
             }
             _ => {}
         }
@@ -283,7 +284,7 @@ fn void_lake_v2_replay() {
         AirbrakesConfig {
             ignition_detection_acc_threshold: 4.0 * 9.81,
             mach_lockout: None,
-            // Subsonic profile: the drag vote is never consulted, so the
+            // Subsonic profile: the drag check is never consulted, so the
             // airframe cannot affect this run.
             rocket: lc25_rocket(),
         },
@@ -331,7 +332,7 @@ fn void_lake_v2_replay() {
     assert!(err < 10.0, "coast vv err {err}");
 }
 
-/// The airframe the drag vote inverts. `cd[0] * reference_area /
+/// The airframe the drag check inverts. `cd[0] * reference_area /
 /// burnout_mass` = 2.4e-4, which the flight itself corroborates: measured
 /// drag deceleration over dynamic pressure sits at 0.00022-0.00026 across
 /// the whole subsonic coast (see `mach_detection_signals`).
@@ -340,12 +341,8 @@ fn void_lake_v2_replay() {
 /// of the brakes opening — must never come alive while the motor is
 /// burning.
 ///
-/// This is the airbrakes half's own guarantee. It used to be borrowed from
-/// the deployment estimator's `is_coasting()` burn timer, which the open
-/// gate consulted; the subsonic path had no thrust check of its own at all
-/// and was born ~0.8 s BEFORE burnout (Void Lake: born ignition+0.9 s,
-/// burnout +1.7 s). Now both paths are gated on the measured axial-sign
-/// latch and the gate needs no cross-half input.
+/// This is the airbrakes half's own guarantee: both paths are gated on the
+/// measured axial-sign latch, and the gate needs no cross-half input.
 #[test]
 fn filter_is_never_born_under_thrust() {
     init_logger();
@@ -420,11 +417,11 @@ fn lc25_config() -> AirbrakesConfig {
     }
 }
 
-/// LC'25, RAW 500 Hz timestamps, Mach 2 profile: the vote (not the timer)
-/// must birth the filter, at an honest time — and the vote flip times form
+/// LC'25, RAW 500 Hz timestamps, Mach 2 profile: the drag check (not the timer)
+/// must birth the filter, at an honest time — and its flip times form
 /// the truth table the plan requires. The recorder started only ~1.8 s
 /// before ignition, so the pad is extended with its own looped noise to
-/// let calibration complete (see `extend_pad`); all vote/birth times below
+/// let calibration complete (see `extend_pad`); all check/birth times below
 /// are measured from ignition, which the extension does not move.
 #[test]
 fn lc25_v2_replay() {
@@ -442,9 +439,9 @@ fn lc25_v2_replay() {
     let (birth_t, forced) = result.birth.expect("filter never born");
     let birth_rel = (birth_t - rows[0].timestamp_us) as f32 * 1e-6 - ign_s;
     eprintln!(
-        "lc25 v2: born at ignition+{birth_rel:.1}s (forced: {forced}), drag-vote spans (rel) {:?}",
+        "lc25 v2: born at ignition+{birth_rel:.1}s (forced: {forced}), drag-check spans (rel) {:?}",
         result
-            .vote_spans
+            .subsonic_spans
             .iter()
             .map(|(s, e)| (s - ign_s, e - ign_s))
             .collect::<Vec<_>>()
@@ -459,17 +456,14 @@ fn lc25_v2_replay() {
         "birth at ignition+{birth_rel}s is outside the honest window"
     );
 
-    // The property that makes a single vote sufficient: the drag-inverted
-    // speed must NEVER read subsonic while the airframe is genuinely
-    // supersonic (before ignition+11 s). Not "not for long" — never. The
-    // old baro-rate vote could not promise this: with the static-port
-    // correction removed it held a full second at ignition+10.4s.
-    // Momentary flickers are not tolerated either, because there is no
-    // second vote left to out-vote one.
-    for (start, end) in &result.vote_spans {
+    // The property that makes a single measurement sufficient: the
+    // drag-inverted speed must NEVER read subsonic while the airframe is
+    // genuinely supersonic (before ignition+11 s). Not "not for long" —
+    // never, and momentary flickers are not tolerated either.
+    for (start, end) in &result.subsonic_spans {
         assert!(
             start - ign_s >= 11.0,
-            "drag vote read subsonic at ignition+{}s..{}s, while still supersonic",
+            "drag check read subsonic at ignition+{}s..{}s, while still supersonic",
             start - ign_s,
             end - ign_s
         );
@@ -498,9 +492,9 @@ fn lc25_v2_replay() {
 }
 
 /// LC'25 with the accelerometer artificially clipped at ±16 g (the Void
-/// Lake failure, injected into the Mach 2 flight): the inertial vote lies
-/// low and early, but a single lying vote must NOT open the lockout — and
-/// after birth the baro must pull the wrong dead-reckoned velocity back.
+/// Lake failure, injected into the Mach 2 flight): the inertial estimate
+/// reads low and early, but that must NOT open the lockout — and after
+/// birth the baro must pull the wrong dead-reckoned velocity back.
 #[test]
 fn lc25_clipped_accel_replay() {
     init_logger();
@@ -523,7 +517,7 @@ fn lc25_clipped_accel_replay() {
     let birth_rel = (birth_t - rows[0].timestamp_us) as f32 * 1e-6 - ign_s;
     eprintln!("lc25 clipped: born at ignition+{birth_rel:.1}s");
 
-    // The under-reading inertial vote alone must not exit while genuinely
+    // The under-reading inertial estimate must not exit while genuinely
     // supersonic (baro-truth vv above 280 m/s until ~10 s after ignition).
     assert!(
         birth_rel > 10.0,
@@ -767,356 +761,17 @@ fn true_apogee(rows: &[Measurement]) -> usize {
     panic!("no apogee found");
 }
 
-/// The accelerometer channel over the coast, as regressors for the port
-/// fit below: the earth-frame vertical acceleration integrated once (V)
-/// and twice (Z) from the start of the fit window, plus the tilt needed to
-/// turn a vertical velocity into an airspeed.
-struct CoastBasis {
-    /// s since the start of the fit window
-    tau: Vec<f32>,
-    /// integral of the earth-frame vertical acceleration (m/s)
-    v_int: Vec<f32>,
-    /// double integral (m)
-    z_int: Vec<f32>,
-    cos_tilt: Vec<f32>,
-    from_i: usize,
-    apogee_i: usize,
-    /// If false, airspeed is taken as the plain vertical velocity. The
-    /// gyro-only tilt drifts badly late in a long coast (on LC'25 it walks
-    /// into the 80 deg cap, where 1/cos inflates the airspeed 6x while the
-    /// true speed is nearly zero), so the tilt-corrected regressor is the
-    /// suspect one, not the reference.
-    use_tilt: bool,
-}
-
-impl CoastBasis {
-    fn tilt_gain(&self, k: usize) -> f32 {
-        if self.use_tilt {
-            1.0 / self.cos_tilt[k]
-        } else {
-            1.0
-        }
-    }
-}
-
-fn coast_basis(rows: &[Measurement], from_i: usize, apogee_i: usize) -> CoastBasis {
-    use super::dead_reckoner::DeadReckoner;
-    let up = Vector3::new(0.0f32, 0.0, 1.0);
-
-    let ign_i = find_ignition(rows);
-    let t_ign = rows[ign_i].timestamp_us;
-
-    // Pad calibration from [-2.2 s, -0.2 s] before ignition (the same
-    // window the DR diagnostic uses).
-    let (mut acc_sum, mut gyro_sum, mut n) =
-        (Vector3::<f32>::zeros(), Vector3::<f32>::zeros(), 0usize);
-    for r in rows {
-        let back = t_ign.saturating_sub(r.timestamp_us);
-        if (200_000..=2_200_000).contains(&back) {
-            acc_sum += r.acceleration();
-            gyro_sum += r.angular_velocity();
-            n += 1;
-        }
-    }
-    assert!(n > 100, "pad window too small ({n})");
-    let gravity = acc_sum / n as f32;
-    let bias = gyro_sum / n as f32;
-    let axis_body = gravity.normalize();
-
-    // Forward pass from the pad: gyro-only attitude gives the earth-frame
-    // vertical acceleration and the airframe tilt at every row.
-    let mut dr = DeadReckoner::new(q_from_vecs(&up, &gravity));
-    let (mut tau, mut v_int, mut z_int, mut cos_tilt) =
-        (Vec::new(), Vec::new(), Vec::new(), Vec::new());
-    let mut prev_t = rows[0].timestamp_us;
-    let (mut v, mut z) = (0.0f32, 0.0f32);
-    for (i, sample) in rows.iter().enumerate() {
-        let dt = ((sample.timestamp_us.saturating_sub(prev_t)) as f32 * 1e-6).clamp(0.0, MAX_DT_S);
-        prev_t = sample.timestamp_us;
-        dr.update(&sample.acceleration(), &(sample.angular_velocity() - bias), dt);
-        if i < from_i {
-            continue;
-        }
-        if i > from_i {
-            z += v * dt + 0.5 * dr.acceleration.z * dt * dt;
-            v += dr.acceleration.z * dt;
-        }
-        tau.push((sample.timestamp_us - rows[from_i].timestamp_us) as f32 * 1e-6);
-        v_int.push(v);
-        z_int.push(z);
-        let axis_earth = dr.orientation.transform_vector(&axis_body);
-        // the same 80 deg cap the estimator applies before 1/cos blows up
-        cos_tilt.push(up.angle(&axis_earth).min(1.396).cos());
-    }
-
-    CoastBasis {
-        tau,
-        v_int,
-        z_int,
-        cos_tilt,
-        from_i,
-        apogee_i,
-        use_tilt: false,
-    }
-}
-
-/// Fit only the coast entry state `(z0, v0)` — and optionally an
-/// accelerometer bias — with the port coefficient held FIXED at `c`, then
-/// report the residual RMS against the raw baro. This is the sweep that
-/// needs no collinearity argument: whichever `c` the flight really has is
-/// the one that minimises this curve.
-fn fixed_c_residual(
-    rows: &[Measurement],
-    basis: &CoastBasis,
-    c: f32,
-    with_bias: bool,
-) -> (f32, f32) {
-    let n_par = 2 + with_bias as usize;
-    let mut ata = vec![0.0f64; n_par * n_par];
-    let mut atb = vec![0.0f64; n_par];
-    let mut n = 0usize;
-    let row = |k: usize| -> [f64; 3] {
-        let tau = basis.tau[k] as f64;
-        [1.0, tau, 0.5 * tau * tau]
-    };
-    // The fixed port term moves to the left-hand side.
-    let target = |k: usize| -> f64 {
-        let i = basis.from_i + k;
-        let vv = basis.v_int[k] * basis.tilt_gain(k);
-        (rows[i].altitude_asl() - basis.z_int[k] - c * vv * vv) as f64
-    };
-    for k in 0..basis.tau.len() {
-        if basis.from_i + k > basis.apogee_i {
-            break;
-        }
-        let r = row(k);
-        let y = target(k);
-        for a in 0..n_par {
-            for b in 0..n_par {
-                ata[a * n_par + b] += r[a] * r[b];
-            }
-            atb[a] += r[a] * y;
-        }
-        n += 1;
-    }
-    let x = solve_normal(&mut ata, &mut atb, n_par);
-    let mut sse = 0.0f64;
-    for k in 0..basis.tau.len() {
-        if basis.from_i + k > basis.apogee_i {
-            break;
-        }
-        let r = row(k);
-        let pred: f64 = (0..n_par).map(|a| r[a] * x[a]).sum();
-        let d = target(k) - pred;
-        sse += d * d;
-    }
-    let k_a = basis.apogee_i - basis.from_i;
-    let b = if with_bias { x[2] as f32 } else { 0.0 };
-    let v_apogee = x[1] as f32 + basis.v_int[k_a] + b * basis.tau[k_a];
-    ((sse / n as f64).sqrt() as f32, v_apogee)
-}
-
-/// Gaussian elimination with partial pivoting on normal equations.
-fn solve_normal(ata: &mut [f64], atb: &mut [f64], n: usize) -> Vec<f64> {
-    for col in 0..n {
-        let piv = (col..n)
-            .max_by(|a, b| {
-                ata[a * n + col]
-                    .abs()
-                    .partial_cmp(&ata[b * n + col].abs())
-                    .unwrap()
-            })
-            .unwrap();
-        if piv != col {
-            for j in 0..n {
-                ata.swap(col * n + j, piv * n + j);
-            }
-            atb.swap(col, piv);
-        }
-        let d = ata[col * n + col];
-        for r in (col + 1)..n {
-            let f = ata[r * n + col] / d;
-            for j in col..n {
-                ata[r * n + j] -= f * ata[col * n + j];
-            }
-            atb[r] -= f * atb[col];
-        }
-    }
-    let mut x = vec![0.0f64; n];
-    for r in (0..n).rev() {
-        let mut s = atb[r];
-        for j in (r + 1)..n {
-            s -= ata[r * n + j] * x[j];
-        }
-        x[r] = s / ata[r * n + r];
-    }
-    x
-}
-
-/// Least-squares fit over the coast of
+/// Diagnostic (run with --ignored --nocapture): when does the drag check
+/// first call Mach 0.8, and how wrong can it be?
 ///
-/// ```text
-///   baro(t) = z0 + v0*tau + Z(tau)  [+ 0.5*b*tau^2]  [+ c*airspeed^2]
-/// ```
-///
-/// The accelerometer supplies `Z` (its double integral); `z0` and `v0` are
-/// the unknown coast entry state, `b` an optional accelerometer-bias term,
-/// and `c` the static-port coefficient. Nothing here assumes a value for
-/// `c` or an apogee anchor — the fit says what the flight data alone
-/// supports, and comparing the `with_bias` variants shows how much of `c`
-/// is really separable from plain inertial drift.
-fn fit_port_model(
-    rows: &[Measurement],
-    basis: &CoastBasis,
-    with_bias: bool,
-    with_c: bool,
-) -> (f32, f32, f32, f32, f32) {
-    let n_par = 2 + with_bias as usize + with_c as usize;
-    let mut ata = vec![0.0f64; n_par * n_par];
-    let mut atb = vec![0.0f64; n_par];
-    let mut rows_used = 0usize;
-
-    let regressors = |k: usize| -> [f64; 4] {
-        let tau = basis.tau[k] as f64;
-        let vv = basis.v_int[k] * basis.tilt_gain(k);
-        let mut r = [1.0, tau, 0.0, 0.0];
-        let mut next = 2;
-        if with_bias {
-            r[next] = 0.5 * tau * tau;
-            next += 1;
-        }
-        if with_c {
-            r[next] = (vv * vv) as f64;
-        }
-        r
-    };
-
-    for k in 0..basis.tau.len() {
-        let i = basis.from_i + k;
-        if i > basis.apogee_i {
-            break;
-        }
-        let r = regressors(k);
-        let y = (rows[i].altitude_asl() - basis.z_int[k]) as f64;
-        for a in 0..n_par {
-            for b in 0..n_par {
-                ata[a * n_par + b] += r[a] * r[b];
-            }
-            atb[a] += r[a] * y;
-        }
-        rows_used += 1;
-    }
-
-    let x = solve_normal(&mut ata, &mut atb, n_par);
-
-    // Residual RMS of the fitted model against the raw baro.
-    let mut sse = 0.0f64;
-    for k in 0..basis.tau.len() {
-        let i = basis.from_i + k;
-        if i > basis.apogee_i {
-            break;
-        }
-        let r = regressors(k);
-        let pred: f64 = (0..n_par).map(|a| r[a] * x[a]).sum();
-        let y = (rows[i].altitude_asl() - basis.z_int[k]) as f64;
-        sse += (y - pred) * (y - pred);
-    }
-    let rms = (sse / rows_used as f64).sqrt() as f32;
-    let c = if with_c { x[n_par - 1] as f32 } else { 0.0 };
-
-    // The physics check that no amount of curve fitting can dodge: at
-    // apogee the true vertical velocity is exactly 0. Each fit implies a
-    // velocity trajectory v(tau) = v0 + V(tau) [+ b*tau], so evaluating it
-    // at apogee scores the fit against a fact neither sensor supplied.
-    let k_a = basis.apogee_i - basis.from_i;
-    let b = if with_bias { x[2] as f32 } else { 0.0 };
-    let v_apogee = x[1] as f32 + basis.v_int[k_a] + b * basis.tau[k_a];
-    (c, rms, x[1] as f32, b, v_apogee)
-}
-
-/// Diagnostic (run with --ignored --nocapture): what do the two flight
-/// logs actually say about the static-port coefficient, and is it
-/// separable from ordinary inertial drift? Fits the coast four ways —
-/// with/without a `c` term, with/without an accelerometer-bias term — and
-/// prints the fitted `c` and the residual RMS of each.
+/// In free flight the accelerometer's raw magnitude IS drag/mass, so
+/// `q = a*m/(Cd*A)` inverts to a speed with no integration, no attitude and
+/// no baro slope. This prints it against the dead-reckoned Mach, and sweeps
+/// the one constant it needs (Cd*A/m) to see how much a wrong drag model
+/// costs.
 #[test]
 #[ignore]
-fn port_coefficient_fit() {
-    init_logger();
-
-    for (name, rows, honest_after_ignition_us) in [
-        // Void Lake is subsonic; skip the ±16 g clipped boost.
-        ("Void Lake (subsonic)", void_lake_rows(), 4_000_000u64),
-        // LC'25 goes Mach 2: only fit where the baro is subsonic-honest
-        // (below Mach 0.8 from ~13 s after ignition detection).
-        ("LC'25 (Mach 2)", lc25_rows(), 13_000_000),
-    ] {
-        let ign_i = find_ignition(&rows);
-        let apogee_i = true_apogee(&rows);
-        let from = rows
-            .iter()
-            .position(|r| r.timestamp_us > rows[ign_i].timestamp_us + honest_after_ignition_us)
-            .unwrap();
-        let mut basis = coast_basis(&rows, from, apogee_i);
-        eprintln!(
-            "=== {name}: coast fit t={:.1}..{:.1}s (true apogee; `baro_apogee` says {:.1}s)",
-            t_s(&rows, from),
-            t_s(&rows, apogee_i),
-            t_s(&rows, baro_apogee(&rows).0),
-        );
-        for (label, with_bias, with_c) in [
-            ("no c, no bias", false, false),
-            ("c only", false, true),
-            ("bias only", true, false),
-            ("c + bias", true, true),
-        ] {
-            let (c, rms, v0, b, v_apogee) = fit_port_model(&rows, &basis, with_bias, with_c);
-            eprintln!(
-                "    {label:<14} c = {c:>9.2e}  v0 = {v0:>6.1} m/s  b = {b:>6.3} m/s2  \
-                 RMS {rms:>6.2} m  vv(apogee) = {v_apogee:>+6.1} m/s"
-            );
-        }
-
-        // The sweep that needs no collinearity argument: hold c fixed,
-        // fit only the coast entry state, and see which c the baro
-        // actually prefers. Run it with the plain vertical velocity and
-        // again with the estimator's own tilt-corrected airspeed, so a
-        // drifted tilt cannot be blamed for the answer.
-        for use_tilt in [false, true] {
-            basis.use_tilt = use_tilt;
-            eprintln!(
-                "    -- fixed-c residual sweep ({}) --",
-                if use_tilt { "airspeed = vv/cos(tilt)" } else { "airspeed = vv" }
-            );
-            eprintln!(
-                "    {:>9} {:>16} {:>16} {:>14}",
-                "c", "RMS (z0,v0)", "RMS (z0,v0,bias)", "vv(apogee)"
-            );
-            for c in [0.0, 0.25e-3, 0.5e-3, 0.7e-3, 1.5e-3, 2.5e-3] {
-                let (rms_a, v_a) = fixed_c_residual(&rows, &basis, c, false);
-                let (rms_b, _) = fixed_c_residual(&rows, &basis, c, true);
-                eprintln!("    {c:>9.2e} {rms_a:>13.2} m {rms_b:>14.2} m {v_a:>+11.1} m/s");
-            }
-        }
-    }
-}
-
-/// Diagnostic (run with --ignored --nocapture): when does each candidate
-/// vote first call Mach 0.8, and how wrong can it be?
-///
-/// Today votes 1 and 3 BOTH read `reckoner.velocity` — vote 1 compares its
-/// magnitude to Mach 0.8, vote 3 compares the baro's slope to its vertical
-/// component. One drifting dead reckoner therefore moves two of three
-/// votes together, and 2-of-3 stops being protection.
-///
-/// The drag vote breaks that tie: in free flight the accelerometer's raw
-/// magnitude IS drag/mass, so `q = a*m/(Cd*A)` inverts to a speed with no
-/// integration, no attitude and no baro slope. This prints it against the
-/// dead-reckoned Mach, and sweeps the one constant it needs (Cd*A/m) to
-/// see how much a wrong drag model costs.
-#[test]
-#[ignore]
-fn drag_vote_timing_and_sensitivity() {
+fn drag_check_timing_and_sensitivity() {
     use super::dead_reckoner::DeadReckoner;
     use crate::utils::{approximate_air_density, approximate_speed_of_sound};
     init_logger();
@@ -1152,7 +807,7 @@ fn drag_vote_timing_and_sensitivity() {
         // The drag channel is a single raw sample, so it carries the full
         // accelerometer noise and airframe vibration. Low-pass it the same
         // way ignition detection low-passes its own channel, otherwise one
-        // noisy sample trips the vote a second early.
+        // noisy sample trips the check a second early.
         let mut lp: Option<f32> = None;
         const TAU_S: f32 = 0.3;
         for z in rows.iter() {
@@ -1169,10 +824,10 @@ fn drag_vote_timing_and_sensitivity() {
             };
             lp = Some(a);
             // rho from the BARO altitude — which is exactly what is lying
-            // during the supersonic phase this vote has to survive...
+            // during the supersonic phase this check has to survive...
             let v_drag = (2.0 * a / (rho * k)).sqrt();
             // ...versus rho from the DEAD-RECKONED altitude, which makes
-            // the drag vote completely baro-free.
+            // the drag check completely baro-free.
             let rho_dr = approximate_air_density(dr.position.z);
             let sos_dr = approximate_speed_of_sound(dr.position.z);
             let v_drag_dr = (2.0 * a / (rho_dr * k)).sqrt();
@@ -1206,12 +861,12 @@ fn drag_vote_timing_and_sensitivity() {
         );
     }
 
-    // The drag vote needs Cd*A/m. It is not a new unknown — burnout_mass,
+    // The drag check needs Cd*A/m. It is not a new unknown — burnout_mass,
     // cd[0] and reference_area are already in ROCKET_PARAMETERS because
     // the MPC needs them — but it is worth knowing what an error costs.
     // v scales as 1/sqrt(k), so k too HIGH reads the speed LOW and calls
     // subsonic early: that is the unsafe direction.
-    eprintln!("    -- sensitivity to Cd*A/m (first time each vote drops below Mach 0.8) --");
+    eprintln!("    -- sensitivity to Cd*A/m (first time each check drops below Mach 0.8) --");
     eprintln!("    {:>12} {:>10} {:>16}", "Cd*A/m", "error", "drag M < 0.8 at");
     type MachRow = (f32, f32, f32, f32, f32, f32);
     let first_below = |track: &[MachRow], pick: fn(&MachRow) -> f32| {
@@ -1232,13 +887,13 @@ fn drag_vote_timing_and_sensitivity() {
         );
     }
     eprintln!(
-        "    for reference, the inertial vote (DR) drops below Mach 0.8 at {:.1?}s",
+        "    for reference, the inertial estimate (DR) drops below Mach 0.8 at {:.1?}s",
         first_below(&track, |r| r.1)
     );
 
     // The burnout tail-off dip: residual thrust cancels part of the drag,
-    // so |accel| collapses and the drag vote reads FALSE SUBSONIC while
-    // still genuinely supersonic. This is the drag vote's own unsafe
+    // so |accel| collapses and the drag check reads FALSE SUBSONIC while
+    // still genuinely supersonic. This is the drag check's own unsafe
     // failure, and the reason it cannot stand alone without T_min.
     let burn_i = find_burnout(&clean);
     let ign_i = find_ignition(&clean);
@@ -1277,13 +932,13 @@ fn find_burnout(rows: &[Measurement]) -> usize {
 }
 
 /// Diagnostic (run with --ignored --nocapture): the evidence behind the
-/// drag vote. In free flight `|acc|` is drag/mass, so dividing it by the
+/// drag check. In free flight `|acc|` is drag/mass, so dividing it by the
 /// dynamic pressure implied by the dead-reckoned speed recovers `Cd*A/m`.
 /// If the drag model holds, that column is CONSTANT subsonically — and on
 /// LC'25 it is (0.00022-0.00026), landing on the same value
 /// `ROCKET_PARAMETERS` gives analytically. It rises ~40% through the
 /// transonic peak, which is exactly why inverting with the subsonic Cd
-/// makes the vote read high while supersonic.
+/// makes the check read high while supersonic.
 #[test]
 #[ignore]
 fn mach_detection_signals() {
@@ -1562,4 +1217,95 @@ fn pad_sensor_noise_comparison() {
     pad_noise("LC'25 (COTS recorder, 500 Hz), 1.4 s window", &lc25, 1.4);
     pad_noise("Void Lake (VLF5 LSM6DSM, 416 Hz), 1.4 s window", &vl, 1.4);
     pad_noise("Void Lake (VLF5 LSM6DSM, 416 Hz), 10 s window", &vl, 10.0);
+}
+
+/// The airbrakes half must be retired exactly once on a real flight, at
+/// apogee, and never come back — the wrapper drops it on the first of
+/// (vv <= 0), (tilt past horizontal), (deployment estimator at apogee).
+///
+/// Void Lake is the useful replay here: it flies a real ascent through a
+/// real apogee, so the retirement instant can be checked against the baro
+/// apogee rather than against a synthetic trajectory that would only prove
+/// the `if` was typed correctly.
+#[test]
+fn airbrakes_half_retires_at_apogee_and_stays_retired() {
+    init_logger();
+    let rows = extend_pad(void_lake_rows(), 8.0);
+    let (apogee_ref_i, _) = baro_apogee(&rows);
+
+    let mut est = FlightEstimators::new(FlightConfig {
+        profile: FlightProfile {
+            mach_lockout_duration_us: None,
+            deployment: DeploymentProfile::Single {
+                minimum_deployment_altitude_agl: 300.0,
+                delay_us: 0,
+            },
+        },
+        airbrakes: AirbrakesConfig {
+            ignition_detection_acc_threshold: 4.0 * 9.81,
+            mach_lockout: None,
+            rocket: lc25_rocket(),
+        },
+    });
+
+    let mut retired_i: Option<usize> = None;
+    let mut last_mpc_states_i: Option<usize> = None;
+    for (i, z) in rows.iter().enumerate() {
+        let imu = ImuSample {
+            acc: z.acceleration(),
+            gyro: z.angular_velocity(),
+        };
+        est.update(z.timestamp_us, Some(&imu), z.altitude_asl());
+
+        if est.airbrakes_estimator().is_some() {
+            // Never resurrects: nothing may be Some after the first None.
+            assert!(
+                retired_i.is_none(),
+                "airbrakes half came back at sample {i} after retiring at {:?}",
+                retired_i
+            );
+        } else if retired_i.is_none() {
+            retired_i = Some(i);
+        }
+
+        if est.airbrakes_mpc_states().is_some() {
+            assert!(
+                retired_i.is_none(),
+                "MPC states handed out at sample {i} after retirement"
+            );
+            last_mpc_states_i = Some(i);
+        }
+    }
+
+    let retired_i = retired_i.expect("airbrakes half was never retired");
+    let retired_s = t_s(&rows, retired_i);
+    let apogee_s = t_s(&rows, apogee_ref_i);
+    eprintln!(
+        "void lake: airbrakes half retired at t={retired_s:.1}s (baro apogee {apogee_s:.1}s), \
+         last MPC states at {:?}",
+        last_mpc_states_i.map(|i| t_s(&rows, i))
+    );
+
+    // The brakes must have been usable at some point, or this test would
+    // pass on an estimator that retired itself on the pad.
+    let last_mpc_states_i = last_mpc_states_i.expect("MPC states were never handed out");
+    assert!(last_mpc_states_i < retired_i);
+
+    // Retirement is an apogee event, and the two directions are not
+    // equally bad. Late is the failure that matters — brakes still
+    // commandable past apogee — so it gets the tight bound. Early only
+    // costs brake authority, and this filter's vv is known to read low
+    // near apogee on this log: `void_lake_v2_replay` allows its apogee
+    // latch 3 s of error, and `vv_error` there stops 2 s short of apogee
+    // for the same reason.
+    assert!(
+        retired_s - apogee_s < 0.5,
+        "retired {:.1}s AFTER baro apogee ({retired_s:.1}s vs {apogee_s:.1}s)",
+        retired_s - apogee_s
+    );
+    assert!(
+        apogee_s - retired_s < 3.0,
+        "retired {:.1}s before baro apogee ({retired_s:.1}s vs {apogee_s:.1}s)",
+        apogee_s - retired_s
+    );
 }

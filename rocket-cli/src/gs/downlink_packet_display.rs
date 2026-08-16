@@ -418,7 +418,7 @@ impl View for DownlinkPacketDisplay {
                             ),
                         ],
                         &[
-                            ("ab drag vote", true, Self::format_bool(p.ab_vote_drag())),
+                            ("ab subsonic (drag)", true, Self::format_bool(p.ab_subsonic_drag())),
                             ("born", true, Self::format_bool(p.ab_born())),
                             ("apogee", true, Self::format_bool(p.ab_apogee())),
                         ],

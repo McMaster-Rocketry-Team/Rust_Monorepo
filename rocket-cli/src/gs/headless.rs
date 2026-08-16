@@ -224,7 +224,7 @@ fn downlink_json(packet: &VLPDownlinkPacket, status: &PacketStatus) -> Value {
             "tilt_deg": p.tilt_deg(),
             "ab_altitude_agl": p.ab_altitude_agl(),
             "ab_vertical_velocity": p.ab_vertical_velocity(),
-            "ab_vote_drag": p.ab_vote_drag(),
+            "ab_subsonic_drag": p.ab_subsonic_drag(),
             "ab_born": p.ab_born(),
             "ab_apogee": p.ab_apogee(),
             "target_apogee_agl": p.target_apogee_agl(),

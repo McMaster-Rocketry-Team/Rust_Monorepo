@@ -135,7 +135,6 @@ impl MessageRow {
             CanBusMessageEnum::AmpResetOutput(_) => "AMP Reset Output",
             CanBusMessageEnum::CustomPayloadStatus(_) => "Custom Payload Status",
             CanBusMessageEnum::VLStatus(_) => "VL Status",
-            CanBusMessageEnum::RocketState(_) => "Rocket State",
             CanBusMessageEnum::IcarusStatus(_) => "Icarus Status",
             CanBusMessageEnum::AirBrakesControl(_) => "Airbrakes Control",
             CanBusMessageEnum::DataTransfer(_) => "Data Transfer",
@@ -458,26 +457,6 @@ impl MessageRow {
                     ),
                 ],
             ),
-            CanBusMessageEnum::RocketState(m) => {
-                self.draw_fields(
-                    printer,
-                    1,
-                    &[
-                        (
-                            "velocity (m/s)",
-                            false,
-                            format!("{:>5.2}, {:>5.2}", m.velocity()[0], m.velocity()[1],).into(),
-                        ),
-                        (
-                            "altitude agl",
-                            false,
-                            format!("{:.1}m", m.altitude_agl())
-                                .pad_to_width_with_alignment(7, Alignment::Left)
-                                .into(),
-                        ),
-                    ],
-                );
-            }
             CanBusMessageEnum::IcarusStatus(m) => self.draw_fields(
                 printer,
                 1,

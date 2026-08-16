@@ -95,13 +95,13 @@ pub struct RocketParameters {
 
 impl RocketParameters {
     /// `Cd * A / m` (m^2/kg) with the brakes stowed — the parameter the
-    /// airbrakes estimator's drag vote inverts, see
+    /// airbrakes estimator's drag check inverts, see
     /// [`AirbrakesConfig::rocket`](crate::airbrakes_estimator::AirbrakesConfig::rocket).
     ///
     /// Deriving it here rather than configuring it separately is the
     /// point: the Mach-lockout exit and the apogee prediction then cannot
     /// disagree about the airframe. `cd[0]` is the 0%-extension entry, so
-    /// this is the clean-airframe subsonic value the vote requires.
+    /// this is the clean-airframe subsonic value the check requires.
     pub const fn subsonic_cda_over_mass(&self) -> f32 {
         self.cd[0] * self.reference_area / self.burnout_mass
     }

@@ -52,16 +52,16 @@ const MIN_CALIBRATION_WINDOWS: usize = 3;
 // --- Stage 1 (thrust-vector alignment) ------------------------------------
 const STAGE1_DURATION_S: f32 = 0.5;
 
-// --- Lockout exit: the drag vote (Piece 3) --------------------------------
+// --- Lockout exit: the drag check (Piece 3) --------------------------------
 /// Exit threshold: Mach 0.8 IS the requirement. The margin lives in the
 /// measurement itself — inverting the drag with the SUBSONIC Cd reads high
 /// while the true Cd is transonically elevated, and the 1 s sustain delays
 /// the decision — so voting at a lower Mach would double-count margin and
 /// burn control-window seconds (speed decays slowly near the crossing).
-const VOTE_MACH: f32 = 0.8;
-/// The drag vote must hold continuously this long before the baro is
+const SUBSONIC_MACH: f32 = 0.8;
+/// The drag check must hold continuously this long before the baro is
 /// declared honest.
-const VOTE_SUSTAIN_S: f32 = 1.0;
+const SUBSONIC_SUSTAIN_S: f32 = 1.0;
 /// Burnout is latched when the axial specific force has been at least this
 /// negative continuously for `BURNOUT_SUSTAIN_S`.
 ///
@@ -92,7 +92,7 @@ const BARO_RING_CAP: usize = 512;
 const BARO_RING_SPAN_S: f32 = 0.7;
 
 // --- Birth of the vertical filter (Piece 4) -------------------------------
-/// Initial vertical-velocity uncertainty at a vote-approved birth (the
+/// Initial vertical-velocity uncertainty at a check-approved birth (the
 /// dead-reckoned velocity is trusted to roughly this, m/s std).
 const BORN_VELOCITY_STD: f32 = 15.0;
 /// ...and at a forced (T_max) birth, where the dead reckoner may have
@@ -123,8 +123,7 @@ struct PadCalibration {
     /// Mean gyro of the surviving windows (rad/s).
     gyro_bias: Vector3<f32>,
     /// How much the surviving windows still disagree (rad/s). Logged at
-    /// ignition as a calibration-quality readout; no longer feeds the
-    /// lockout exit, which does not use the dead reckoner at all.
+    /// ignition as a calibration-quality readout.
     bias_spread: f32,
     /// Mean accel of the surviving windows: gravity in the avionics
     /// frame, i.e. the pad orientation.
@@ -180,13 +179,13 @@ enum State {
         ignition_t_us: u64,
         /// (timestamp_us, raw baro altitude)
         baro_ring: Deque<(u64, f32), BARO_RING_CAP>,
-        vote_sustain: f32,
+        subsonic_sustain: f32,
         /// Low-passed accelerometer magnitude — drag/mass once the motor
         /// is out. `None` until the first sample of this state.
         drag_lp: Option<f32>,
-        last_vote: bool,
+        last_subsonic: bool,
         /// Latched once the axial channel proves the motor is out. Nothing
-        /// downstream — neither the drag vote nor the subsonic birth — is
+        /// downstream — neither the drag check nor the subsonic birth — is
         /// allowed to proceed before it.
         burnout: bool,
         burnout_sustain: f32,
@@ -251,12 +250,6 @@ impl AirbrakesEstimator {
     }
 
     /// Feed one timestamped IMU+baro sample.
-    ///
-    /// This used to also take the slow deployment estimator's speed as
-    /// vote 2 of the lockout exit. It no longer does: that filter runs its
-    /// own 12 s mach lockout and correctly abstains for the whole window
-    /// the decision is made in, so on a supersonic flight it never had a
-    /// say. The exit is now the drag measurement alone.
     pub fn update(&mut self, z: &Measurement) {
         let dt = match self.prev_timestamp_us {
             Some(prev) => {
@@ -431,9 +424,9 @@ impl AirbrakesEstimator {
                     launch_pad_altitude_asl: *launch_pad_altitude_asl,
                     ignition_t_us: *ignition_t_us,
                     baro_ring: Deque::new(),
-                    vote_sustain: 0.0,
+                    subsonic_sustain: 0.0,
                     drag_lp: None,
-                    last_vote: false,
+                    last_subsonic: false,
                     burnout: false,
                     burnout_sustain: 0.0,
                 };
@@ -447,22 +440,15 @@ impl AirbrakesEstimator {
                 launch_pad_altitude_asl,
                 ignition_t_us,
                 baro_ring,
-                vote_sustain,
+                subsonic_sustain,
                 drag_lp,
-                last_vote,
+                last_subsonic,
                 burnout,
                 burnout_sustain,
             } => {
                 reckoner.update(&acc, &(gyro - *gyro_bias), dt);
 
-                // The baro goes in raw. There is no static-port correction
-                // anywhere in this estimator: fitting both flight logs'
-                // coasts against their own accelerometer double-integral
-                // put the coefficient at or below the level a small
-                // accelerometer bias explains, and over the whole range
-                // the data allows, assuming zero moves apogee by under
-                // 6 m. A correction term that cannot be identified from
-                // flight data is a knob that gets guessed, not a model.
+                // The baro goes in raw.
                 if baro_ring.is_full() {
                     baro_ring.pop_front();
                 }
@@ -517,24 +503,20 @@ impl AirbrakesEstimator {
                         let t_max_s = lockout.force_birth_after_ignition_us as f32 * 1e-6;
                         if !*burnout {
                             // NOTHING births before the motor is out — not
-                            // the vote, and not the T_max backstop either.
-                            // That makes "never under thrust" a property of
-                            // this state machine rather than an invariant
-                            // between two config structs that something
-                            // else has to check.
+                            // the check, and not the T_max backstop either.
                             //
                             // T_max keeps the job it exists for: if the
-                            // drag model is wrong and the vote never
+                            // drag model is wrong and the check never
                             // passes, the axial sign test still latches
                             // (it does not depend on Cd) and the backstop
-                            // still fires. The only case it no longer
-                            // covers is an accelerometer dead enough to
-                            // never show deceleration — and there the dead
-                            // reckoner, the drag vote and the KF's own
-                            // acceleration input are all equally broken, so
-                            // staying shut is the honest outcome.
-                            *last_vote = false;
-                            *vote_sustain = 0.0;
+                            // still fires. It does not cover an
+                            // accelerometer dead enough to never show
+                            // deceleration — and there the dead reckoner,
+                            // the drag check and the KF's own acceleration
+                            // input are all equally broken, so staying shut
+                            // is the honest outcome.
+                            *last_subsonic = false;
+                            *subsonic_sustain = 0.0;
                             (false, false)
                         } else if t_since_ignition_s >= t_max_s {
                             log_info!("lockout T_max reached, forced birth");
@@ -543,8 +525,8 @@ impl AirbrakesEstimator {
                             // Before the earliest the sim says we could be
                             // subsonic. Hold the clock at zero so an early
                             // reading cannot bank sustain.
-                            *last_vote = false;
-                            *vote_sustain = 0.0;
+                            *last_subsonic = false;
+                            *subsonic_sustain = 0.0;
                             (false, false)
                         } else {
                             // Invert the drag to an airspeed and compare to
@@ -556,25 +538,25 @@ impl AirbrakesEstimator {
                             // — but taking the baro out entirely removes
                             // the question.)
                             let altitude = reckoner.position.z;
-                            let vote = match drag_airspeed(
+                            let subsonic = match drag_airspeed(
                                 a_drag,
                                 altitude,
                                 self.config.rocket.subsonic_cda_over_mass(),
                             ) {
                                 Some(airspeed) => {
-                                    airspeed < VOTE_MACH * approximate_speed_of_sound(altitude)
+                                    airspeed < SUBSONIC_MACH * approximate_speed_of_sound(altitude)
                                 }
-                                // Nonsensical drag parameter: never vote,
+                                // Nonsensical drag parameter: never pass,
                                 // fall through to the T_max backstop.
                                 None => false,
                             };
-                            *last_vote = vote;
-                            if vote {
-                                *vote_sustain += dt;
+                            *last_subsonic = subsonic;
+                            if subsonic {
+                                *subsonic_sustain += dt;
                             } else {
-                                *vote_sustain = 0.0;
+                                *subsonic_sustain = 0.0;
                             }
-                            (*vote_sustain >= VOTE_SUSTAIN_S, false)
+                            (*subsonic_sustain >= SUBSONIC_SUSTAIN_S, false)
                         }
                     }
                 };
@@ -633,19 +615,17 @@ impl AirbrakesEstimator {
                 baro_frozen_s,
                 ..
             } => {
-                // The dead reckoner keeps running for tilt (gyro-only
-                // orientation); its velocity/position are no longer used.
+                // The dead reckoner runs for tilt only (gyro-only
+                // orientation); its velocity/position are unused here.
                 reckoner.update(&acc, &(gyro - *gyro_bias), dt);
 
                 kf.predict(reckoner.acceleration.z, dt);
 
-                // The baro is fused raw. With no port correction the
-                // dead-reckoned attitude no longer reaches the altitude or
-                // vertical-velocity channel at all — it survives only as
-                // the tilt behind `velocity()`'s horizontal component — so
-                // a drifting gyro can no longer corrupt what the MPC flies
-                // on. (The old correction divided by cos(tilt), which
-                // reached 62-68 deg by apogee on both flight logs.)
+                // The baro is fused raw, so the dead-reckoned attitude
+                // never reaches the altitude or vertical-velocity channel —
+                // it survives only as the tilt behind `velocity()`'s
+                // horizontal component, and a drifting gyro cannot corrupt
+                // what the MPC flies on.
                 if kf.update(z.altitude_asl(), dt) {
                     *baro_accept_age = 0.0;
                 } else {
@@ -760,10 +740,10 @@ impl AirbrakesEstimator {
     /// and the drag channel is honest.
     ///
     /// This is the single condition standing between the estimator and any
-    /// chance of the brakes opening — no birth path, vote or T_max
+    /// chance of the brakes opening — no birth path, check or T_max
     /// backstop, proceeds without it — so it is worth logging per sample.
     /// Without it a flight where the brakes never opened cannot be told
-    /// apart from one where the drag vote simply never passed.
+    /// apart from one where the drag check simply never passed.
     ///
     /// The later states imply it, since neither can be reached otherwise.
     pub fn burnout_detected(&self) -> bool {
@@ -787,19 +767,19 @@ impl AirbrakesEstimator {
         matches!(self.state, State::Apogee { .. })
     }
 
-    /// The lockout-exit drag vote, for logging/telemetry: whether the
+    /// The lockout-exit drag check, for logging/telemetry: whether the
     /// drag-inverted airspeed is currently below Mach 0.8. `None` outside
     /// the dead-reckoning phase, and always `false` before `t_min_us`
-    /// (the vote is not consulted while the motor may still be burning).
-    pub fn lockout_vote(&self) -> Option<bool> {
+    /// (the check is not consulted while the motor may still be burning).
+    pub fn subsonic_by_drag(&self) -> Option<bool> {
         match &self.state {
-            State::DeadReckoning { last_vote, .. } => Some(*last_vote),
+            State::DeadReckoning { last_subsonic, .. } => Some(*last_subsonic),
             _ => None,
         }
     }
 
     /// When and how the vertical filter was born: (timestamp_us, forced).
-    /// `forced` means the T_max ceiling fired instead of the vote.
+    /// `forced` means the T_max ceiling fired instead of the check.
     pub fn birth(&self) -> Option<(u64, bool)> {
         match &self.state {
             State::Tracking {
@@ -848,7 +828,7 @@ impl AirbrakesEstimator {
 /// survive. There is no fallback: too few windows, or a pad where the
 /// windows never agree (heavy sway), is not-launch-ready — never a silent
 /// guess. `bias_spread` is how much the surviving windows still disagree
-/// — carried into vote 1's Mach-check margin.
+/// — carried into the Mach-check margin.
 fn screen_pad_windows(
     windows: &heapless::Vec<SVector<f32, 7>, MAX_PAD_WINDOWS>,
 ) -> Option<PadCalibration> {
@@ -915,7 +895,7 @@ fn ring_span_s(ring: &Deque<(u64, f32), BARO_RING_CAP>) -> f32 {
 /// Airspeed (m/s) implied by the measured drag deceleration, inverting
 /// `a = 0.5 * rho * v^2 * cda_over_mass`. `None` if the atmosphere or the
 /// drag parameter is degenerate, which makes a misconfigured airframe fail
-/// toward "never vote" rather than toward "always subsonic".
+/// toward "never pass" rather than toward "always subsonic".
 fn drag_airspeed(a_drag: f32, altitude_asl: f32, cda_over_mass: f32) -> Option<f32> {
     let rho = approximate_air_density(altitude_asl);
     if !(cda_over_mass > 0.0) || !(rho > 0.0) || !(a_drag >= 0.0) {

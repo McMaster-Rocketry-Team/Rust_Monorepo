@@ -39,7 +39,7 @@ pub struct FlightDataFastRecord {
     pub ab_vertical_velocity: f32,
     /// Airbrakes estimator tilt from vertical (deg). NaN before ignition.
     pub ab_tilt_deg: f32,
-    /// Airbrakes estimator status bits (`AB_*` consts): drag vote, burnout
+    /// Airbrakes estimator status bits (`AB_*` consts): drag check, burnout
     /// latch, filter-born, apogee.
     pub ab_flags: u8,
     /// Mirror of the deployment estimator's `RocketState` (plus the device
@@ -254,23 +254,19 @@ pub const VALID_MAG: u8 = 1 << 2;
 pub const VALID_GPS_FIX: u8 = 1 << 3;
 pub const VALID_GPS_ALT: u8 = 1 << 4;
 pub const VALID_BATTERY: u8 = 1 << 5;
-// Bits 6-7 unallocated. They used to flag whether the airbrakes commanded /
-// actual extensions were present; both fields now carry NaN when they are
-// not, like every other float in this record, so the flags said nothing the
-// values did not.
+// Bits 6-7 unallocated.
 
 /// `ab_flags` bits — the airbrakes estimator's status.
 ///
 /// The mach-lockout exit is a single drag measurement (the drag-inverted
-/// airspeed below Mach 0.8, sustained 1 s), so there is one vote bit;
-/// logging it per sample reconstructs the exit post-flight. Bit 2 held one
-/// of the other two members of the old 2-of-3 vote and is now free.
-pub const AB_VOTE_DRAG: u8 = 1 << 0;
+/// airspeed below Mach 0.8, sustained 1 s), so there is one bit for it;
+/// logging it per sample reconstructs the exit post-flight. Bit 2 is free.
+pub const AB_SUBSONIC_DRAG: u8 = 1 << 0;
 /// The axial-sign burnout latch has fired: the motor is out and the drag
 /// channel is honest. Nothing can birth the vertical filter before this, on
 /// either the supersonic or the subsonic path, so it separates "the brakes
 /// never opened because the motor never looked out" from "because the drag
-/// vote never passed".
+/// check never passed".
 pub const AB_BURNOUT: u8 = 1 << 1;
 /// The vertical filter is born (baro trusted; MPC state is live).
 pub const AB_BARO_TRUSTED: u8 = 1 << 3;

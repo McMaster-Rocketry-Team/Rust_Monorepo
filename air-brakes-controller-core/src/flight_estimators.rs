@@ -14,23 +14,21 @@
 //!   are integrated honestly. It is accuracy-only: its output feeds the
 //!   MPC, never the pyros.
 //!
-//! **No data crosses between the two halves at all.** Both couplings that
-//! used to exist are gone: the deployment estimator's speed fed vote V2 of
-//! the airbrakes Mach-lockout exit (removed — that filter runs its own 12 s
-//! mach lockout and abstained for the entire window the decision was made
-//! in, so on a Mach 2 flight it never got a say), and its burn timer fed
-//! the airbrakes open gate's "never under thrust" clause (removed — the
-//! airbrakes estimator now latches burnout itself from the sign of the
-//! axial specific force, on both the supersonic and subsonic paths). What
-//! remains is a struct holding two independent estimators so firmware can
-//! keep them behind one mutex. There are deliberately no `&mut` component
-//! accessors, so no coupling can be reintroduced from outside this
-//! module.
+//! **Exactly one thing crosses between the halves**, in
+//! [`FlightEstimators::update`]: the deployment estimator's apogee is one
+//! of the three conditions that retire the airbrakes half. It only ever
+//! *ends* the airbrakes window, never extends or informs it, and it flows
+//! one way — nothing the airbrakes half computes can reach the pyros.
+//!
+//! There are deliberately no `&mut` component accessors, so nothing beyond
+//! the read above can be wired up from outside this module.
 //!
 //! Failure direction of the gate: every clause of
 //! [`FlightEstimators::airbrakes_mpc_states`] fails toward `None` — if
 //! anything is missing, stale, or out of range, the brakes stay shut.
 //! Recovery (the pyro path) does not depend on the airbrakes half at all.
+
+use core::f32::consts::FRAC_PI_2;
 
 use firmware_common_new::vlp::packets::fire_pyro::PyroSelect;
 use nalgebra::{Vector2, Vector3};
@@ -44,11 +42,11 @@ use crate::utils::approximate_speed_of_sound;
 /// only open below Mach 0.85 *per the airbrakes filter's own estimate*.
 ///
 /// This is the deliberately-conservative slow-gate ceiling, and it is
-/// distinct from the lockout-exit vote's Mach 0.8 threshold on purpose:
-/// the vote decides *when the baro is honest again* and sits at the
+/// distinct from the lockout-exit check's Mach 0.8 threshold on purpose:
+/// the check decides *when the baro is honest again* and sits at the
 /// actual "safe to open" requirement; this ceiling is an independent
 /// last-layer sanity bound on the born filter's state. It sits above the
-/// vote threshold so it never fights a healthy vote — it only bites if
+/// check threshold so it never fights a healthy check — it only bites if
 /// the filter was born reporting near-sonic speed, in which case the
 /// brakes stay shut until the estimate decays below it.
 pub const MAX_OPEN_MACH: f32 = 0.85;
@@ -85,13 +83,11 @@ pub struct AirbrakesMPCStates {
 ///
 /// The two halves stay independent at runtime — [`FlightEstimators::new`]
 /// hands each estimator only its own field and nothing crosses afterwards.
-/// There is no invariant between the two halves left to check. "Never under
-/// thrust" used to be one — the airbrakes side had to be configured to keep
-/// its timers clear of the deployment side's burn timer — and it is now a
-/// property of the airbrakes state machine itself, which refuses to birth
-/// the vertical filter before its own measured burnout latch. So this is a
-/// plain pair: somewhere for firmware to write both halves down, and one
-/// value for [`FlightEstimators::new`] to take.
+/// There is no invariant between the two halves to check: "never under
+/// thrust" is a property of the airbrakes state machine itself, which
+/// refuses to birth the vertical filter before its own measured burnout
+/// latch. So this is a plain pair: somewhere for firmware to write both
+/// halves down, and one value for [`FlightEstimators::new`] to take.
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone)]
 pub struct FlightConfig {
@@ -108,7 +104,11 @@ pub struct FlightConfig {
 #[derive(Debug)]
 pub struct FlightEstimators {
     deployment: RocketStateEstimator,
-    airbrakes: AirbrakesEstimator,
+    /// `None` once the airbrakes window has closed for good — see
+    /// [`FlightEstimators::update`]. Retirement is destructive on purpose:
+    /// there is no state left to re-open the brakes from, so the window
+    /// cannot reopen no matter what any later sample looks like.
+    airbrakes: Option<AirbrakesEstimator>,
 }
 
 impl FlightEstimators {
@@ -117,7 +117,7 @@ impl FlightEstimators {
         // past this point.
         Self {
             deployment: RocketStateEstimator::new(config.profile),
-            airbrakes: AirbrakesEstimator::new(config.airbrakes),
+            airbrakes: Some(AirbrakesEstimator::new(config.airbrakes)),
         }
     }
 
@@ -130,6 +130,24 @@ impl FlightEstimators {
     ///
     /// Returns the deployment estimator's pyro command passed through
     /// UNTOUCHED — this struct adds no policy to recovery.
+    ///
+    /// This is also where the airbrakes half is **retired**: dropped
+    /// outright, never to return, as soon as any of three things is true.
+    /// Two are the airbrakes estimator's own reading of the airframe, and
+    /// one is the deployment estimator's:
+    ///
+    /// * vertical velocity at or below zero — the rocket has stopped
+    ///   climbing, so there is no apogee left to shape;
+    /// * the rocket is pointing below the horizon (tilt past 90 deg) —
+    ///   whatever the filter thinks its velocity is, drag is no longer
+    ///   acting along the axis the MPC's model assumes;
+    /// * the deployment estimator has called apogee — the trusted half,
+    ///   and the backstop for the airbrakes filter being wrong or stuck
+    ///   about either of the above.
+    ///
+    /// Dropping rather than gating is the point: a flag can be misread and
+    /// a gate can be bypassed by a later clause, but there is no way to
+    /// hand out MPC states from an estimator that no longer exists.
     pub fn update(
         &mut self,
         timestamp_us: u64,
@@ -140,10 +158,32 @@ impl FlightEstimators {
         // outright. Its pyro command is returned as-is at the bottom.
         let pyro = self.deployment.update(baro_altitude_asl);
 
-        // (c) Airbrakes, only when this sample actually carries IMU data.
-        if let Some(imu) = imu {
+        // (b) Airbrakes, only when this sample actually carries IMU data.
+        if let Some(airbrakes) = self.airbrakes.as_mut()
+            && let Some(imu) = imu
+        {
             let z = Measurement::new(timestamp_us, &imu.acc, &imu.gyro, baro_altitude_asl);
-            self.airbrakes.update(&z);
+            airbrakes.update(&z);
+        }
+
+        // (c) Retirement. Checked every sample, IMU or not, so clause 3
+        // still bites while the airbrakes half is starved of IMU data.
+        if let Some(airbrakes) = self.airbrakes.as_ref() {
+            let descending = airbrakes.velocity().is_some_and(|v| v.y <= 0.0);
+            let below_horizon = airbrakes.tilt().is_some_and(|t| t >= FRAC_PI_2);
+            let deployment_apogee = !matches!(
+                self.deployment.state(),
+                RocketState::OnPad | RocketState::Ascent { .. } | RocketState::MachLockout { .. }
+            );
+            if descending || below_horizon || deployment_apogee {
+                log_info!(
+                    "retiring airbrakes estimator (descending: {}, below horizon: {}, deployment apogee: {})",
+                    descending,
+                    below_horizon,
+                    deployment_apogee
+                );
+                self.airbrakes = None;
+            }
         }
 
         pyro
@@ -155,31 +195,29 @@ impl FlightEstimators {
     /// condition and its state source are the same value.
     ///
     /// The gate, in order:
-    /// * the airbrakes filter is alive — baro trusted, pre-apogee, and
-    ///   its altitude and velocity exist. "Never under thrust" is folded
-    ///   into this now: the filter cannot be born before the estimator's
-    ///   own axial-sign burnout latch, on either the supersonic or the
-    ///   subsonic path, so a separate coasting clause would be redundant;
-    /// * ascending (vertical velocity > 0);
+    /// * the airbrakes half has not been retired — everything about *when
+    ///   the window ends* lives in [`Self::update`], not here;
+    /// * the filter is alive — baro trusted, and its altitude and velocity
+    ///   exist. "Never under thrust" is folded into this: the filter cannot
+    ///   be born before the estimator's own axial-sign burnout latch, on
+    ///   either the supersonic or the subsonic path, so a separate coasting
+    ///   clause would be redundant;
     /// * vertical velocity at most [`MAX_OPEN_MACH`] of the local speed
     ///   of sound at the filter's own altitude.
     ///
-    /// Every clause after coasting is evaluated on the airbrakes filter's
-    /// OWN state — never the slow filter's, which may be frozen (Mach
-    /// lockout) or lagging hundreds of metres during coast. Any clause
-    /// failing yields `None`: the brakes stay shut.
+    /// Every clause here is evaluated on the airbrakes filter's OWN state —
+    /// never the slow filter's, which may be frozen (Mach lockout) or
+    /// lagging hundreds of metres during coast. Any clause failing yields
+    /// `None`: the brakes stay shut.
     pub fn airbrakes_mpc_states(&self) -> Option<AirbrakesMPCStates> {
-        if !self.airbrakes.baro_trusted() || self.airbrakes.is_apogee() {
+        let airbrakes = self.airbrakes.as_ref()?;
+        if !airbrakes.baro_trusted() {
             return None;
         }
-        let altitude_asl = self.airbrakes.altitude_asl()?;
-        let velocity = self.airbrakes.velocity()?;
+        let altitude_asl = airbrakes.altitude_asl()?;
+        let velocity = airbrakes.velocity()?;
 
-        let vertical_velocity = velocity.y;
-        if vertical_velocity <= 0.0 {
-            return None;
-        }
-        if vertical_velocity > MAX_OPEN_MACH * approximate_speed_of_sound(altitude_asl) {
+        if velocity.y > MAX_OPEN_MACH * approximate_speed_of_sound(altitude_asl) {
             return None;
         }
 
@@ -205,11 +243,15 @@ impl FlightEstimators {
         &self.deployment
     }
 
-    /// Read-only access to the airbrakes estimator (drag vote, birth, tilt,
+    /// Read-only access to the airbrakes estimator (drag check, birth, tilt,
     /// fast-record flag assembly, ...). See [`Self::deployment_estimator`]
     /// for why there is no `&mut` twin.
-    pub fn airbrakes_estimator(&self) -> &AirbrakesEstimator {
-        &self.airbrakes
+    ///
+    /// `None` once retired (see [`Self::update`]), which callers should
+    /// treat as "no reading" rather than "reading of zero" — the telemetry
+    /// and SD-log fields sourced from here go absent from that sample on.
+    pub fn airbrakes_estimator(&self) -> Option<&AirbrakesEstimator> {
+        self.airbrakes.as_ref()
     }
 }
 
