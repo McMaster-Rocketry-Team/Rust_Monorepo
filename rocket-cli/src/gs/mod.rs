@@ -275,14 +275,6 @@ pub fn tui_task(
                             )
                             .child(
                                 reset_device_selection_group
-                                    .button(DeviceToReset::MainBulkhead, "Main Bulkhead PCB"),
-                            )
-                            .child(
-                                reset_device_selection_group
-                                    .button(DeviceToReset::DrogueBulkhead, "Drogue Bulkhead PCB"),
-                            )
-                            .child(
-                                reset_device_selection_group
                                     .button(DeviceToReset::AeroRust, "AeroRust"),
                             ),
                     )

@@ -14,8 +14,7 @@ use std::time::{Duration, Instant};
 use firmware_common_new::flight_data_record::{
     FlightDataRecord, PYRO_DROGUE_CONTINUITY, PYRO_DROGUE_FIRE, PYRO_MAIN_CONTINUITY,
     PYRO_MAIN_FIRE, PYRO_SHORT_CIRCUIT, AB_APOGEE, AB_BARO_TRUSTED,
-    AB_BURNOUT, AB_VOTE_DRAG, VALID_AIRBRAKES_ACTUAL,
-    VALID_AIRBRAKES_COMMANDED,
+    AB_BURNOUT, AB_VOTE_DRAG,
     VALID_BARO, VALID_BATTERY, VALID_GPS_ALT, VALID_GPS_FIX, VALID_IMU, VALID_MAG,
     merge_log_records,
 };
@@ -318,8 +317,6 @@ fn write_csv(path: &str, records: &[FlightDataRecord]) -> Result<()> {
         "pyro_short_circuit",
         "air_brakes_commanded_extension",
         "air_brakes_actual_extension",
-        "air_brakes_commanded_valid",
-        "air_brakes_actual_valid",
         "air_brakes_servo_temp",
         "amp_online",
         "amp_out1_status",
@@ -387,8 +384,6 @@ fn write_csv(path: &str, records: &[FlightDataRecord]) -> Result<()> {
             bit(p, PYRO_SHORT_CIRCUIT),
             r.air_brakes_commanded_extension.to_string(),
             r.air_brakes_actual_extension.to_string(),
-            bit(v, VALID_AIRBRAKES_COMMANDED),
-            bit(v, VALID_AIRBRAKES_ACTUAL),
             r.air_brakes_servo_temp.to_string(),
             r.amp_online.to_string(),
             amp_out(r.amp_out_status, 0),

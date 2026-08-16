@@ -59,7 +59,7 @@ impl NodeStatus {
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PackedStruct, Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "16")]
+#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "12")]
 pub struct SelfTestResultPacket {
     #[packed_field(bits = "0..4")]
     nonce: u8,
@@ -79,11 +79,6 @@ pub struct SelfTestResultPacket {
     #[packed_field(element_size_bytes = "2")]
     pub payload_sdrm: NodeStatus,
 
-    #[packed_field(element_size_bytes = "2")]
-    pub main_bulkhead_pcb: NodeStatus,
-
-    #[packed_field(element_size_bytes = "2")]
-    pub drogue_bulkhead_pcb: NodeStatus,
 
     pub imu_ok: bool,
     pub baro_ok: bool,
@@ -122,8 +117,6 @@ impl SelfTestResultPacket {
             ozys1: self.ozys1.to_json(),
             ozys2: self.ozys2.to_json(),
             payload_sdrm: self.payload_sdrm.to_json(),
-            main_bulkhead_pcb: self.main_bulkhead_pcb.to_json(),
-            drogue_bulkhead_pcb: self.drogue_bulkhead_pcb.to_json(),
         }
     }
 }
@@ -141,8 +134,6 @@ pub struct SelfTestResultPacketBuilderState {
     pub ozys1: NodeStatus,
     pub ozys2: NodeStatus,
     pub payload_sdrm: NodeStatus,
-    pub main_bulkhead_pcb: NodeStatus,
-    pub drogue_bulkhead_pcb: NodeStatus,
     pub imu_ok: bool,
     pub baro_ok: bool,
     pub mag_ok: bool,
@@ -171,8 +162,6 @@ impl<M: RawMutex> SelfTestResultPacketBuilder<M> {
                 ozys1: NodeStatus::offline(),
                 ozys2: NodeStatus::offline(),
                 payload_sdrm: NodeStatus::offline(),
-                main_bulkhead_pcb: NodeStatus::offline(),
-                drogue_bulkhead_pcb: NodeStatus::offline(),
                 imu_ok: false,
                 baro_ok: false,
                 mag_ok: false,
@@ -203,8 +192,6 @@ impl<M: RawMutex> SelfTestResultPacketBuilder<M> {
                 ozys1: state.ozys1.clone(),
                 ozys2: state.ozys2.clone(),
                 payload_sdrm: state.payload_sdrm.clone(),
-                main_bulkhead_pcb: state.main_bulkhead_pcb.clone(),
-                drogue_bulkhead_pcb: state.drogue_bulkhead_pcb.clone(),
                 imu_ok: state.imu_ok,
                 baro_ok: state.baro_ok,
                 mag_ok: state.mag_ok,

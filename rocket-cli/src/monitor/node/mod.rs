@@ -57,8 +57,6 @@ impl NodeStatusViewerChild {
                 NodeStatusRow::new(PAYLOAD_SDRM_NODE_TYPE),
                 NodeStatusRow::new(OZYS_NODE_TYPE),
                 NodeStatusRow::new(OZYS_NODE_TYPE),
-                NodeStatusRow::new(BULKHEAD_NODE_TYPE),
-                NodeStatusRow::new(BULKHEAD_NODE_TYPE),
                 NodeStatusRow::new(AERO_RUST_NODE_TYPE),
             ],
         }

@@ -49,9 +49,13 @@ pub struct FlightDataFastRecord {
     /// Bitmask for pyro continuity/fire state (`PYRO_*` consts). Logged at
     /// the full fast rate so pyro fire edges are timestamped to ±2.3 ms.
     pub pyro_flags: u8,
-    /// Commanded extension, 0.0 = retracted, 1.0 = fully extended.
+    /// Commanded extension, 0.0 = retracted, 1.0 = fully extended. NaN until
+    /// the firmware has commanded anything (i.e. outside Armed and Demo).
     pub air_brakes_commanded_extension: f32,
     /// Reported extension from Icarus, 0.0 = retracted, 1.0 = fully extended.
+    /// NaN until Icarus reports — which is the interesting case, since an
+    /// Icarus that is offline or silent would otherwise be indistinguishable
+    /// from one reporting fully-stowed brakes.
     pub air_brakes_actual_extension: f32,
     pub valid: u8,
 }
@@ -68,7 +72,8 @@ pub struct FlightDataSlowRecord {
     pub vdop: f32,
     pub pdop: f32,
     pub flight_stage: FlightStage,
-    /// Airbrakes servo temperature (C) reported by Icarus.
+    /// Airbrakes servo temperature (C) reported by Icarus. NaN until Icarus
+    /// reports, for the same reason as `air_brakes_actual_extension`.
     pub air_brakes_servo_temp: f32,
     /// AMP node reachable over the CAN bus.
     pub amp_online: bool,
@@ -101,7 +106,7 @@ impl Default for FlightDataSlowRecord {
             vdop: 0.0,
             pdop: 0.0,
             flight_stage: FlightStage::LowPower,
-            air_brakes_servo_temp: 0.0,
+            air_brakes_servo_temp: f32::NAN,
             amp_online: false,
             amp_out_status: 0,
             amp_shared_battery_v: 0.0,
@@ -249,8 +254,10 @@ pub const VALID_MAG: u8 = 1 << 2;
 pub const VALID_GPS_FIX: u8 = 1 << 3;
 pub const VALID_GPS_ALT: u8 = 1 << 4;
 pub const VALID_BATTERY: u8 = 1 << 5;
-pub const VALID_AIRBRAKES_COMMANDED: u8 = 1 << 6;
-pub const VALID_AIRBRAKES_ACTUAL: u8 = 1 << 7;
+// Bits 6-7 unallocated. They used to flag whether the airbrakes commanded /
+// actual extensions were present; both fields now carry NaN when they are
+// not, like every other float in this record, so the flags said nothing the
+// values did not.
 
 /// `ab_flags` bits — the airbrakes estimator's status.
 ///

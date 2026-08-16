@@ -638,18 +638,6 @@ impl View for DownlinkPacketDisplay {
                         ],
                         &[
                             (
-                                "main bulkhead pcb",
-                                true,
-                                Self::format_node_status(&p.main_bulkhead_pcb),
-                            ),
-                            (
-                                "drogue bulkhead pcb",
-                                true,
-                                Self::format_node_status(&p.drogue_bulkhead_pcb),
-                            ),
-                        ],
-                        &[
-                            (
                                 "payload sdrm",
                                 true,
                                 Self::format_node_status(&p.payload_sdrm),

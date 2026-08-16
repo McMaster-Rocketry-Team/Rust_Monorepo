@@ -16,8 +16,6 @@ pub enum DeviceToReset {
     Icarus,
     PayloadSDRM,
     OzysAll,
-    MainBulkhead,
-    DrogueBulkhead,
     AeroRust,
 }
 
