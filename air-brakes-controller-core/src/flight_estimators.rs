@@ -14,13 +14,17 @@
 //!   are integrated honestly. It is accuracy-only: its output feeds the
 //!   MPC, never the pyros.
 //!
-//! The only data that crosses between the two does so **by value, inside
-//! [`FlightEstimators::update`], once per sample**: the deployment
-//! estimator's speed feeds vote V2 of the airbrakes Mach-lockout exit
-//! (abstaining while the slow filter is itself locked out), and the
-//! deployment burn timer's coasting flag is one clause of the airbrakes
-//! open gate. There are deliberately no `&mut` component accessors, so no
-//! additional coupling can be introduced from outside this module.
+//! The only data that crosses between the two is the deployment burn
+//! timer's coasting flag, one clause of the airbrakes open gate, read
+//! inside [`FlightEstimators::airbrakes_mpc_states`]. The deployment
+//! estimator's speed used to also feed vote V2 of the airbrakes
+//! Mach-lockout exit; it no longer does, because that filter runs its own
+//! 12 s mach lockout and correctly abstains for the entire window the exit
+//! decision is made in — on a Mach 2 flight V2 never got a say. The exit
+//! is now a single drag measurement inside the airbrakes estimator, so
+//! `update` passes nothing between the two at all. There are deliberately
+//! no `&mut` component accessors, so no additional coupling can be
+//! introduced from outside this module.
 //!
 //! Failure direction of the gate: every clause of
 //! [`FlightEstimators::airbrakes_mpc_states`] fails toward `None` — if
@@ -111,38 +115,10 @@ impl FlightEstimators {
         // outright. Its pyro command is returned as-is at the bottom.
         let pyro = self.deployment.update(baro_altitude_asl);
 
-        // (b) The V2 vote feed, derived by value from the state the
-        // deployment estimator just produced: `Some(vertical_velocity)`
-        // exactly when the state variant carries a live velocity, `None`
-        // (honest abstention) when it does not.
-        //
-        // The `MachLockout` arm is the load-bearing one: while the slow
-        // filter is locked out its KF is frozen, and the stale (low)
-        // velocity would make V2 spuriously vote "subsonic" — degrading
-        // the airbrakes 2-of-3 lockout-exit vote to "V1 or V3". Abstaining
-        // instead forces the vote to require V1 AND V3 in that window.
-        // The variant carrying no velocity fields makes the stale read
-        // unrepresentable, not merely avoided.
-        let deployment_speed = match self.deployment.state() {
-            RocketState::Ascent {
-                vertical_velocity, ..
-            }
-            | RocketState::DrogueChute {
-                vertical_velocity, ..
-            }
-            | RocketState::MainChute {
-                vertical_velocity, ..
-            } => Some(vertical_velocity),
-            RocketState::OnPad
-            | RocketState::MachLockout { .. }
-            | RocketState::Landed
-            | RocketState::FailedToReachMinApogee => None,
-        };
-
         // (c) Airbrakes, only when this sample actually carries IMU data.
         if let Some(imu) = imu {
             let z = Measurement::new(timestamp_us, &imu.acc, &imu.gyro, baro_altitude_asl);
-            self.airbrakes.update(&z, deployment_speed);
+            self.airbrakes.update(&z);
         }
 
         pyro
@@ -207,7 +183,7 @@ impl FlightEstimators {
         &self.deployment
     }
 
-    /// Read-only access to the airbrakes estimator (votes, birth, tilt,
+    /// Read-only access to the airbrakes estimator (drag vote, birth, tilt,
     /// fast-record flag assembly, ...). See [`Self::deployment_estimator`]
     /// for why there is no `&mut` twin.
     pub fn airbrakes_estimator(&self) -> &AirbrakesEstimator {
@@ -239,7 +215,7 @@ mod tests {
         AirbrakesConfig {
             ignition_detection_acc_threshold: 4.0 * 9.81,
             mach_lockout: None,
-            baro_port_coefficient: 0.0,
+            subsonic_cda_over_mass: 2.4e-4,
         }
     }
 

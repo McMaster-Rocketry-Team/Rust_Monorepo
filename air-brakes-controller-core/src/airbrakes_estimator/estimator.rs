@@ -10,7 +10,7 @@ use crate::{
         AirbrakesConfig, MAX_DT_S, Measurement, NOMINAL_DT, NOMINAL_SAMPLES_PER_S,
         dead_reckoner::DeadReckoner, vertical_kf::VerticalKF, welford::Welford,
     },
-    utils::approximate_speed_of_sound,
+    utils::{approximate_air_density, approximate_speed_of_sound},
 };
 
 const UP: Vector3<f32> = Vector3::new(0.0, 0.0, 1.0);
@@ -52,23 +52,23 @@ const MIN_CALIBRATION_WINDOWS: usize = 3;
 // --- Stage 1 (thrust-vector alignment) ------------------------------------
 const STAGE1_DURATION_S: f32 = 0.5;
 
-// --- Lockout exit vote (Piece 3) ------------------------------------------
+// --- Lockout exit: the drag vote (Piece 3) --------------------------------
 /// Exit threshold: Mach 0.8 IS the requirement. The margin lives in the
-/// vote stack itself — V1 subtracts an explicit uncertainty margin, V2
-/// lags high during deceleration, and the 1 s sustain delays the decision
-/// — so voting at a lower Mach would double-count margin and burn
-/// control-window seconds (speed decays slowly near the crossing).
+/// measurement itself — inverting the drag with the SUBSONIC Cd reads high
+/// while the true Cd is transonically elevated, and the 1 s sustain delays
+/// the decision — so voting at a lower Mach would double-count margin and
+/// burn control-window seconds (speed decays slowly near the crossing).
 const VOTE_MACH: f32 = 0.8;
-/// 2 of 3 votes must hold continuously this long before the baro is
+/// The drag vote must hold continuously this long before the baro is
 /// declared honest.
 const VOTE_SUSTAIN_S: f32 = 1.0;
-/// Vote 3: the (port-corrected) baro climb rate must match the
-/// dead-reckoned vertical velocity within this (m/s).
-const RATE_AGREE_M_S: f32 = 15.0;
-/// The baro-rate vote measures the slope over roughly this span (s).
-const RATE_WINDOW_S: f32 = 0.5;
-/// Ring of recent port-corrected baro samples: covers RATE_WINDOW_S with
-/// margin even at a 500 Hz feed.
+/// Time constant of the low pass on the drag channel. The channel is a
+/// single raw sample, so it carries the full accelerometer noise and
+/// airframe vibration; unfiltered, one noisy sample trips the threshold
+/// about a second early (measured on LC'25: 10.1 s vs 11.6 s).
+const DRAG_LP_TAU_S: f32 = 0.3;
+/// Ring of recent raw baro samples, used only to pick the birth altitude
+/// by median. Covers `BARO_RING_SPAN_S` even at a 500 Hz feed.
 const BARO_RING_CAP: usize = 512;
 const BARO_RING_SPAN_S: f32 = 0.7;
 
@@ -92,9 +92,8 @@ const BARO_FRESH_S: f32 = 0.25;
 const BARO_FROZEN_S: f32 = 0.5;
 
 // --- Outputs ---------------------------------------------------------------
-/// Tilt is capped here for the horizontal-velocity output and the airspeed
-/// used in the port correction (tan/1/cos blow up at 90 deg, where the
-/// brakes have no authority left anyway).
+/// Tilt is capped here for the horizontal-velocity output (tan blows up at
+/// 90 deg, where the brakes have no authority left anyway).
 const TILT_CAP_RAD: f32 = 1.396; // 80 deg
 
 /// The screened pad calibration: everything flight needs to know that can
@@ -104,8 +103,9 @@ const TILT_CAP_RAD: f32 = 1.396; // 80 deg
 struct PadCalibration {
     /// Mean gyro of the surviving windows (rad/s).
     gyro_bias: Vector3<f32>,
-    /// How much the surviving windows still disagree (rad/s) — carried
-    /// into vote 1's Mach-check margin.
+    /// How much the surviving windows still disagree (rad/s). Logged at
+    /// ignition as a calibration-quality readout; no longer feeds the
+    /// lockout exit, which does not use the dead reckoner at all.
     bias_spread: f32,
     /// Mean accel of the surviving windows: gravity in the avionics
     /// frame, i.e. the pad orientation.
@@ -144,24 +144,25 @@ enum State {
         pad_av_orientation: UnitQuaternion<f32>,
         reckoner: DeadReckoner,
         gyro_bias: Vector3<f32>,
-        bias_spread: f32,
         launch_pad_altitude_asl: f32,
         ignition_t_us: u64,
     },
 
     /// Boost and Mach lockout: inertial dead reckoning only, no filter.
-    /// The baro is watched (for the vote) but never fused.
+    /// The baro is buffered (to pick a birth altitude) but never fused.
     DeadReckoning {
         q_av_to_rocket: UnitQuaternion<f32>,
         reckoner: DeadReckoner,
         gyro_bias: Vector3<f32>,
-        bias_spread: f32,
         launch_pad_altitude_asl: f32,
         ignition_t_us: u64,
-        /// (timestamp_us, port-corrected baro altitude)
+        /// (timestamp_us, raw baro altitude)
         baro_ring: Deque<(u64, f32), BARO_RING_CAP>,
         vote_sustain: f32,
-        last_votes: (bool, bool, bool),
+        /// Low-passed accelerometer magnitude — drag/mass once the motor
+        /// is out. `None` until the first sample of this state.
+        drag_lp: Option<f32>,
+        last_vote: bool,
     },
 
     /// The baro is honest: the 2-state vertical filter exists and runs to
@@ -224,11 +225,12 @@ impl AirbrakesEstimator {
 
     /// Feed one timestamped IMU+baro sample.
     ///
-    /// `deployment_speed`: the slow deployment estimator's current speed
-    /// estimate (m/s), if available — it is vote 2 of the lockout exit.
-    /// Pass `None` if that estimator is not running; the exit then needs
-    /// both remaining votes.
-    pub fn update(&mut self, z: &Measurement, deployment_speed: Option<f32>) {
+    /// This used to also take the slow deployment estimator's speed as
+    /// vote 2 of the lockout exit. It no longer does: that filter runs its
+    /// own 12 s mach lockout and correctly abstains for the whole window
+    /// the decision is made in, so on a supersonic flight it never had a
+    /// say. The exit is now the drag measurement alone.
+    pub fn update(&mut self, z: &Measurement) {
         let dt = match self.prev_timestamp_us {
             Some(prev) => {
                 ((z.timestamp_us.saturating_sub(prev)) as f32 * 1e-6).clamp(0.0, MAX_DT_S)
@@ -357,7 +359,6 @@ impl AirbrakesEstimator {
                     pad_av_orientation,
                     reckoner,
                     gyro_bias: cal.gyro_bias,
-                    bias_spread: cal.bias_spread,
                     launch_pad_altitude_asl: cal.launch_pad_altitude_asl,
                     ignition_t_us: z.timestamp_us,
                 };
@@ -369,7 +370,6 @@ impl AirbrakesEstimator {
                 pad_av_orientation,
                 reckoner,
                 gyro_bias,
-                bias_spread,
                 launch_pad_altitude_asl,
                 ignition_t_us,
             } => {
@@ -397,12 +397,12 @@ impl AirbrakesEstimator {
                     q_av_to_rocket,
                     reckoner: reckoner.clone(),
                     gyro_bias: *gyro_bias,
-                    bias_spread: *bias_spread,
                     launch_pad_altitude_asl: *launch_pad_altitude_asl,
                     ignition_t_us: *ignition_t_us,
                     baro_ring: Deque::new(),
                     vote_sustain: 0.0,
-                    last_votes: (false, false, false),
+                    drag_lp: None,
+                    last_vote: false,
                 };
             }
 
@@ -410,23 +410,27 @@ impl AirbrakesEstimator {
                 q_av_to_rocket,
                 reckoner,
                 gyro_bias,
-                bias_spread,
                 launch_pad_altitude_asl,
                 ignition_t_us,
                 baro_ring,
                 vote_sustain,
-                last_votes,
+                drag_lp,
+                last_vote,
             } => {
                 reckoner.update(&acc, &(gyro - *gyro_bias), dt);
 
-                // Port-corrected baro, using the dead-reckoned airspeed
-                // (the only speed available before the filter is born).
-                let corrected =
-                    z.altitude_asl() - self.config.baro_port_coefficient * reckoner.velocity.magnitude_squared();
+                // The baro goes in raw. There is no static-port correction
+                // anywhere in this estimator: fitting both flight logs'
+                // coasts against their own accelerometer double-integral
+                // put the coefficient at or below the level a small
+                // accelerometer bias explains, and over the whole range
+                // the data allows, assuming zero moves apogee by under
+                // 6 m. A correction term that cannot be identified from
+                // flight data is a knob that gets guessed, not a model.
                 if baro_ring.is_full() {
                     baro_ring.pop_front();
                 }
-                let _ = baro_ring.push_back((z.timestamp_us, corrected));
+                let _ = baro_ring.push_back((z.timestamp_us, z.altitude_asl()));
                 while let Some(front) = baro_ring.front() {
                     if (z.timestamp_us.saturating_sub(front.0)) as f32 * 1e-6 > BARO_RING_SPAN_S {
                         baro_ring.pop_front();
@@ -434,6 +438,16 @@ impl AirbrakesEstimator {
                         break;
                     }
                 }
+
+                // Drag channel: in free flight the accelerometer measures
+                // specific force, which excludes gravity, so its magnitude
+                // is drag/mass. Low-passed because it is a single raw
+                // sample carrying the full noise and vibration floor.
+                let a_drag = match *drag_lp {
+                    Some(prev) => prev + (dt / DRAG_LP_TAU_S).min(1.0) * (acc.magnitude() - prev),
+                    None => acc.magnitude(),
+                };
+                *drag_lp = Some(a_drag);
 
                 let t_since_ignition_s =
                     (z.timestamp_us.saturating_sub(*ignition_t_us)) as f32 * 1e-6;
@@ -449,42 +463,37 @@ impl AirbrakesEstimator {
                             log_info!("lockout T_max reached, forced birth");
                             (true, true)
                         } else if t_since_ignition_s < t_min_s {
+                            // Before T_min the motor may still be burning,
+                            // where drag/mass is not what the accelerometer
+                            // is measuring. Hold the clock at zero so a
+                            // pre-T_min reading can never bank sustain.
+                            *last_vote = false;
+                            *vote_sustain = 0.0;
                             (false, false)
                         } else {
-                            let sos = approximate_speed_of_sound(reckoner.position.z);
-
-                            // Vote 1: dead-reckoned total speed, with an
-                            // explicit margin for the pad-calibration bias
-                            // uncertainty (tilt error grows as spread*t,
-                            // and gravity misprojection turns that into
-                            // velocity error at ~g*tilt_err*t).
-                            let speed_margin =
-                                9.81 * *bias_spread * t_since_ignition_s * t_since_ignition_s;
-                            let v1 = reckoner.velocity.magnitude() + speed_margin
-                                < VOTE_MACH * sos;
-
-                            // Vote 2: the slow deployment filter agrees.
-                            // It lags high during deceleration, so it errs
-                            // late — the safe direction.
-                            let v2 = deployment_speed
-                                .map(|v| v.abs() < VOTE_MACH * sos)
-                                .unwrap_or(false);
-
-                            // Vote 3: the corrected baro's climb rate
-                            // matches the dead-reckoned vertical velocity.
-                            // A shock-corrupted baro has a wildly wrong
-                            // slope; a merely drifted inertial altitude
-                            // does not disturb the RATE.
-                            let v3 = match baro_slope(baro_ring) {
-                                Some(slope) => {
-                                    (slope - reckoner.velocity.z).abs() < RATE_AGREE_M_S
+                            // Invert the drag to an airspeed and compare to
+                            // Mach 0.8. Air density comes from the DEAD
+                            // RECKONED altitude, not the baro, so the whole
+                            // exit decision is independent of the sensor it
+                            // is deciding about. (Either source works —
+                            // measured on LC'25 they differ by <=0.01 Mach
+                            // — but taking the baro out entirely removes
+                            // the question.)
+                            let altitude = reckoner.position.z;
+                            let vote = match drag_airspeed(
+                                a_drag,
+                                altitude,
+                                self.config.subsonic_cda_over_mass,
+                            ) {
+                                Some(airspeed) => {
+                                    airspeed < VOTE_MACH * approximate_speed_of_sound(altitude)
                                 }
+                                // Nonsensical drag parameter: never vote,
+                                // fall through to the T_max backstop.
                                 None => false,
                             };
-
-                            *last_votes = (v1, v2, v3);
-                            let count = v1 as u8 + v2 as u8 + v3 as u8;
-                            if count >= 2 {
+                            *last_vote = vote;
+                            if vote {
                                 *vote_sustain += dt;
                             } else {
                                 *vote_sustain = 0.0;
@@ -538,7 +547,6 @@ impl AirbrakesEstimator {
             }
 
             State::Tracking {
-                q_av_to_rocket,
                 reckoner,
                 gyro_bias,
                 launch_pad_altitude_asl,
@@ -555,15 +563,14 @@ impl AirbrakesEstimator {
 
                 kf.predict(reckoner.acceleration.z, dt);
 
-                // Port correction from the filter's own state: airspeed =
-                // vv / cos(tilt), tilt capped so this stays sane at apogee
-                // (and the correction correctly goes to zero with vv).
-                let tilt = axis_tilt(q_av_to_rocket, reckoner).min(TILT_CAP_RAD);
-                let airspeed = kf.vertical_velocity().abs() / tilt.cos();
-                let corrected = z.altitude_asl()
-                    - self.config.baro_port_coefficient * airspeed * airspeed;
-
-                if kf.update(corrected, dt) {
+                // The baro is fused raw. With no port correction the
+                // dead-reckoned attitude no longer reaches the altitude or
+                // vertical-velocity channel at all — it survives only as
+                // the tilt behind `velocity()`'s horizontal component — so
+                // a drifting gyro can no longer corrupt what the MPC flies
+                // on. (The old correction divided by cos(tilt), which
+                // reached 62-68 deg by apogee on both flight logs.)
+                if kf.update(z.altitude_asl(), dt) {
                     *baro_accept_age = 0.0;
                 } else {
                     *baro_accept_age += dt;
@@ -686,12 +693,13 @@ impl AirbrakesEstimator {
         matches!(self.state, State::Apogee { .. })
     }
 
-    /// The three lockout-exit votes (dead-reckoned speed, deployment
-    /// filter, baro rate) — for logging/telemetry. `None` outside the
-    /// dead-reckoning phase.
-    pub fn lockout_votes(&self) -> Option<(bool, bool, bool)> {
+    /// The lockout-exit drag vote, for logging/telemetry: whether the
+    /// drag-inverted airspeed is currently below Mach 0.8. `None` outside
+    /// the dead-reckoning phase, and always `false` before `t_min_us`
+    /// (the vote is not consulted while the motor may still be burning).
+    pub fn lockout_vote(&self) -> Option<bool> {
         match &self.state {
-            State::DeadReckoning { last_votes, .. } => Some(*last_votes),
+            State::DeadReckoning { last_vote, .. } => Some(*last_vote),
             _ => None,
         }
     }
@@ -810,15 +818,16 @@ fn ring_span_s(ring: &Deque<(u64, f32), BARO_RING_CAP>) -> f32 {
     }
 }
 
-/// Slope (m/s) of the corrected baro over the ring, oldest-to-newest.
-/// `None` until the ring spans most of the rate window.
-fn baro_slope(ring: &Deque<(u64, f32), BARO_RING_CAP>) -> Option<f32> {
-    let (front, back) = (ring.front()?, ring.back()?);
-    let span = (back.0.saturating_sub(front.0)) as f32 * 1e-6;
-    if span < RATE_WINDOW_S * 0.9 {
+/// Airspeed (m/s) implied by the measured drag deceleration, inverting
+/// `a = 0.5 * rho * v^2 * cda_over_mass`. `None` if the atmosphere or the
+/// drag parameter is degenerate, which makes a misconfigured airframe fail
+/// toward "never vote" rather than toward "always subsonic".
+fn drag_airspeed(a_drag: f32, altitude_asl: f32, cda_over_mass: f32) -> Option<f32> {
+    let rho = approximate_air_density(altitude_asl);
+    if !(cda_over_mass > 0.0) || !(rho > 0.0) || !(a_drag >= 0.0) {
         return None;
     }
-    Some((back.1 - front.1) / span)
+    Some((2.0 * a_drag / (rho * cda_over_mass)).sqrt())
 }
 
 /// Median of 9 samples spaced evenly across the ring — a transient can't

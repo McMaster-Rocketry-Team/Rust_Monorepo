@@ -45,8 +45,6 @@ impl MockVLPClient {
                     false,
                     false,
                     false,
-                    false,
-                    false,
                     3000.0,
                     false,
                     false,

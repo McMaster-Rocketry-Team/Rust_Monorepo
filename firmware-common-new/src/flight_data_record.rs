@@ -252,16 +252,17 @@ pub const VALID_BATTERY: u8 = 1 << 5;
 pub const VALID_AIRBRAKES_COMMANDED: u8 = 1 << 6;
 pub const VALID_AIRBRAKES_ACTUAL: u8 = 1 << 7;
 
-/// `ab_flags` bits — the airbrakes estimator's status. The three vote bits
-/// are the lockout-exit votes (2-of-3 sustained opens the lockout); logging
-/// them per sample reconstructs the exit truth table post-flight.
-pub const AB_VOTE_INERTIAL: u8 = 1 << 0;
-pub const AB_VOTE_DEPLOYMENT: u8 = 1 << 1;
-pub const AB_VOTE_BARO_RATE: u8 = 1 << 2;
+/// `ab_flags` bits — the airbrakes estimator's status.
+///
+/// The mach-lockout exit is a single drag measurement (the drag-inverted
+/// airspeed below Mach 0.8, sustained 1 s), so there is one vote bit;
+/// logging it per sample reconstructs the exit post-flight. Bits 1 and 2
+/// held the other two members of the old 2-of-3 vote and are now free.
+pub const AB_VOTE_DRAG: u8 = 1 << 0;
 /// The vertical filter is born (baro trusted; MPC state is live).
 pub const AB_BARO_TRUSTED: u8 = 1 << 3;
 pub const AB_APOGEE: u8 = 1 << 4;
-// bits 5-7 unallocated.
+// bits 1-2 and 5-7 unallocated.
 
 pub const PYRO_MAIN_CONTINUITY: u8 = 1 << 0;
 pub const PYRO_MAIN_FIRE: u8 = 1 << 1;

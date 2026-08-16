@@ -39,7 +39,7 @@ fixed_point_factory!(EpmRailMaFac, f32, 0.0, 10230.0, 10.0);
 // SEM's own step scale decides what that means in millimetres.
 fixed_point_factory!(ActuatorStepsFac, f32, 0.0, 65535.0, 64.0);
 
-// 343 bits = 42.875 bytes, so 43 bytes with one spare bit. With the 1 byte
+// 341 bits = 42.625 bytes, so 43 bytes with three spare bits. With the 1 byte
 // packet type and reed-solomon ecc (len/4) that is 55 bytes on air, 1774ms at
 // 250khz bandwidth + 12sf + 8cr lora — still inside the 2s telemetry period.
 // Trimming the struct back to 39 bytes (50 on air) would drop that to 1642ms,
@@ -92,10 +92,10 @@ pub struct TelemetryPacket {
     #[packed_field(element_size_bits = "9")]
     ab_vertical_velocity:
         Integer<VerticalVelocityFacBase, packed_bits::Bits<VERTICAL_VELOCITY_FAC_BITS>>,
-    /// The three mach-lockout-exit votes (2-of-3 sustained opens the lockout).
-    ab_vote_inertial: bool,
-    ab_vote_deployment: bool,
-    ab_vote_baro_rate: bool,
+    /// The mach-lockout-exit drag vote: the drag-inverted airspeed is
+    /// currently below Mach 0.8. Sustained for 1 s, this is what opens the
+    /// lockout — it is the whole exit criterion, not one vote of three.
+    ab_vote_drag: bool,
     /// The airbrakes estimator's vertical filter is born (baro trusted).
     ab_born: bool,
     ab_apogee: bool,
@@ -220,9 +220,7 @@ impl TelemetryPacket {
 
         ab_altitude_agl: f32,
         ab_vertical_velocity: f32,
-        ab_vote_inertial: bool,
-        ab_vote_deployment: bool,
-        ab_vote_baro_rate: bool,
+        ab_vote_drag: bool,
         ab_born: bool,
         ab_apogee: bool,
         target_apogee_agl: f32,
@@ -292,9 +290,7 @@ impl TelemetryPacket {
 
             ab_altitude_agl: AltitudeFac::to_fixed_point_capped(ab_altitude_agl),
             ab_vertical_velocity: VerticalVelocityFac::to_fixed_point_capped(ab_vertical_velocity),
-            ab_vote_inertial,
-            ab_vote_deployment,
-            ab_vote_baro_rate,
+            ab_vote_drag,
             ab_born,
             ab_apogee,
             target_apogee_agl: AltitudeFac::to_fixed_point_capped(target_apogee_agl),
@@ -468,16 +464,9 @@ impl TelemetryPacket {
         VerticalVelocityFac::to_float(self.ab_vertical_velocity)
     }
 
-    pub fn ab_vote_inertial(&self) -> bool {
-        self.ab_vote_inertial
-    }
-
-    pub fn ab_vote_deployment(&self) -> bool {
-        self.ab_vote_deployment
-    }
-
-    pub fn ab_vote_baro_rate(&self) -> bool {
-        self.ab_vote_baro_rate
+    /// The mach-lockout-exit drag vote (see the field docs).
+    pub fn ab_vote_drag(&self) -> bool {
+        self.ab_vote_drag
     }
 
     /// The airbrakes estimator's vertical filter is born (baro trusted).
@@ -668,9 +657,7 @@ impl TelemetryPacket {
 
             ab_altitude_agl: self.ab_altitude_agl(),
             ab_vertical_velocity: self.ab_vertical_velocity(),
-            ab_vote_inertial: self.ab_vote_inertial(),
-            ab_vote_deployment: self.ab_vote_deployment(),
-            ab_vote_baro_rate: self.ab_vote_baro_rate(),
+            ab_vote_drag: self.ab_vote_drag(),
             ab_born: self.ab_born(),
             ab_apogee: self.ab_apogee(),
             target_apogee_agl: self.target_apogee_agl(),
@@ -765,10 +752,9 @@ pub struct TelemetryPacketBuilderState {
     pub ab_altitude_agl: f32,
     /// The airbrakes estimator's vertical velocity, signed (negative = descending).
     pub ab_vertical_velocity: f32,
-    /// The three mach-lockout-exit votes (2-of-3 sustained opens the lockout).
-    pub ab_vote_inertial: bool,
-    pub ab_vote_deployment: bool,
-    pub ab_vote_baro_rate: bool,
+    /// The mach-lockout-exit drag vote: the drag-inverted airspeed is
+    /// below Mach 0.8. Sustained 1 s, this is what opens the lockout.
+    pub ab_vote_drag: bool,
     /// The airbrakes estimator's vertical filter is born (baro trusted).
     pub ab_born: bool,
     pub ab_apogee: bool,
@@ -846,9 +832,7 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
 
                 ab_altitude_agl: 0.0,
                 ab_vertical_velocity: 0.0,
-                ab_vote_inertial: false,
-                ab_vote_deployment: false,
-                ab_vote_baro_rate: false,
+                ab_vote_drag: false,
                 ab_born: false,
                 ab_apogee: false,
                 target_apogee_agl: 0.0,
@@ -922,9 +906,7 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 state.main_deployed,
                 state.ab_altitude_agl,
                 state.ab_vertical_velocity,
-                state.ab_vote_inertial,
-                state.ab_vote_deployment,
-                state.ab_vote_baro_rate,
+                state.ab_vote_drag,
                 state.ab_born,
                 state.ab_apogee,
                 state.target_apogee_agl,
@@ -1001,8 +983,6 @@ mod tests {
             1230.0,
             -150.0,
             true,
-            false,
-            true,
             true,
             false,
             3000.0,
@@ -1046,9 +1026,7 @@ mod tests {
         };
         assert_relative_eq!(p.ab_altitude_agl(), 1230.0, epsilon = 1.0);
         assert_relative_eq!(p.ab_vertical_velocity(), -150.0, epsilon = 2.0);
-        assert!(p.ab_vote_inertial());
-        assert!(!p.ab_vote_deployment());
-        assert!(p.ab_vote_baro_rate());
+        assert!(p.ab_vote_drag());
         assert!(p.ab_born());
         assert!(!p.ab_apogee());
         assert_relative_eq!(p.target_apogee_agl(), 3000.0, epsilon = 1.0);

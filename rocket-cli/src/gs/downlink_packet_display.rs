@@ -418,21 +418,7 @@ impl View for DownlinkPacketDisplay {
                             ),
                         ],
                         &[
-                            (
-                                "ab vote inertial",
-                                true,
-                                Self::format_bool(p.ab_vote_inertial()),
-                            ),
-                            (
-                                "vote deployment",
-                                true,
-                                Self::format_bool(p.ab_vote_deployment()),
-                            ),
-                            (
-                                "vote baro rate",
-                                true,
-                                Self::format_bool(p.ab_vote_baro_rate()),
-                            ),
+                            ("ab drag vote", true, Self::format_bool(p.ab_vote_drag())),
                             ("born", true, Self::format_bool(p.ab_born())),
                             ("apogee", true, Self::format_bool(p.ab_apogee())),
                         ],
