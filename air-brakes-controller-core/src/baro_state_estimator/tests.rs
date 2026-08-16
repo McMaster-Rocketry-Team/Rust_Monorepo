@@ -43,17 +43,22 @@ fn simulate_flight(
 
     let mut feed = |estimator: &mut RocketStateEstimator, altitude_asl: f32| {
         let pyro = estimator.update(altitude_asl + noise.next());
-        // Pyros only fire in chute stages, where the KF is live — reading
-        // the raw KF altitude here is safe.
-        let kf_agl = estimator.kf_altitude_asl() - estimator.launch_pad_altitude_asl();
+        // Pyros only fire in chute stages, where the KF is live, so the
+        // altitude is present on exactly the samples recorded below. A
+        // `None` at a fire would mean a pyro went off inside the Mach
+        // lockout — the one thing the lockout exists to make impossible —
+        // so unwrapping it here is itself part of what these tests check.
+        let kf_agl = estimator
+            .kf_altitude_asl()
+            .map(|altitude_asl| altitude_asl - estimator.launch_pad_altitude_asl());
         match pyro {
             Some(PyroSelect::PyroDrogue) => {
                 assert!(drogue.is_none(), "drogue fired more than once");
-                drogue = Some((sample_i, kf_agl));
+                drogue = Some((sample_i, kf_agl.expect("no KF altitude at drogue fire")));
             }
             Some(PyroSelect::PyroMain) => {
                 assert!(main.is_none(), "main fired more than once");
-                main = Some((sample_i, kf_agl));
+                main = Some((sample_i, kf_agl.expect("no KF altitude at main fire")));
             }
             None => {}
         }
@@ -350,6 +355,17 @@ fn mach_lockout_survives_supersonic_garbage() {
                 launch_pad_altitude_asl,
                 pad
             );
+            // The log path must say the same thing the state does: the
+            // frozen filter has no reading, so neither accessor hands one
+            // out. Were they to keep reporting the frozen numbers, the SD
+            // log would disagree with the telemetry over this whole window.
+            assert_eq!(estimator.kf_altitude_asl(), None);
+            assert_eq!(estimator.kf_vertical_velocity(), None);
+        } else {
+            // Everywhere else the filter is live and the log gets a number,
+            // including on the pad and after landing.
+            assert!(estimator.kf_altitude_asl().is_some());
+            assert!(estimator.kf_vertical_velocity().is_some());
         }
         if matches!(pyro, Some(PyroSelect::PyroDrogue)) {
             drogue_agl = Some(altitude_asl - pad);
@@ -375,6 +391,76 @@ fn mach_lockout_survives_supersonic_garbage() {
         estimator.update(pad + noise.next());
     }
     assert!(matches!(estimator.state(), RocketState::Landed));
+}
+
+/// The two KF accessors report absence as absence. There are exactly two
+/// ways to have no reading — the filter is not born yet (`new` does not
+/// construct it; the first `update` does), and the Mach lockout has it
+/// frozen — and both must come back `None` rather than as a zero that reads
+/// like a measurement. Everything else, on-pad included, is a live filter
+/// and must come back `Some`, even where the corresponding [`RocketState`]
+/// variant carries no altitude of its own.
+#[test]
+fn kf_accessors_absent_before_birth_and_during_lockout() {
+    let mut estimator = RocketStateEstimator::new(FlightProfile {
+        mach_lockout_duration_us: Some(10_000_000),
+        deployment: DeploymentProfile::Single {
+                minimum_deployment_altitude_agl: 300.0,
+                delay_us: 0,
+        },
+    });
+
+    assert_eq!(estimator.kf_altitude_asl(), None, "no filter before the first sample");
+    assert_eq!(estimator.kf_vertical_velocity(), None, "no filter before the first sample");
+
+    let mut noise = NoiseGen::new(0.5);
+    let pad = 200.0f32;
+    for _ in 0..(30 * SAMPLES_PER_S) {
+        estimator.update(pad + noise.next());
+    }
+
+    // `RocketState::OnPad` has no altitude field, but the filter behind it is
+    // running and fusing baro, so the log still gets both numbers.
+    assert!(matches!(estimator.state(), RocketState::OnPad));
+    let on_pad_altitude_asl = estimator.kf_altitude_asl().expect("filter is live on the pad");
+    assert!(
+        (on_pad_altitude_asl - pad).abs() < 5.0,
+        "on-pad kf altitude={} expected ~{}",
+        on_pad_altitude_asl,
+        pad
+    );
+    assert!(
+        estimator
+            .kf_vertical_velocity()
+            .expect("filter is live on the pad")
+            .abs()
+            < 1.0
+    );
+
+    // Boost until ignition detection drops the estimator into the lockout.
+    let mut altitude_asl = pad;
+    let mut velocity = 0.0f32;
+    while !matches!(estimator.state(), RocketState::MachLockout { .. }) {
+        velocity += 80.0 * DT;
+        altitude_asl += velocity * DT;
+        estimator.update(altitude_asl + noise.next());
+        assert!(
+            altitude_asl - pad < 1000.0,
+            "lockout never engaged by {}m agl",
+            altitude_asl - pad
+        );
+    }
+
+    // The frozen filter's contents are now drifting further out of date every
+    // sample; nothing may read them, however plausible they still look.
+    for _ in 0..SAMPLES_PER_S {
+        velocity += 80.0 * DT;
+        altitude_asl += velocity * DT;
+        estimator.update(altitude_asl + noise.next());
+        assert!(matches!(estimator.state(), RocketState::MachLockout { .. }));
+        assert_eq!(estimator.kf_altitude_asl(), None);
+        assert_eq!(estimator.kf_vertical_velocity(), None);
+    }
 }
 
 /// Full replay of the real Void Lake flight log (raw MS5607 pressure,

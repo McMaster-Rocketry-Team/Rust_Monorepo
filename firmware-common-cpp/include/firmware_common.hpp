@@ -14,6 +14,7 @@
 // endian = msb. A struct whose fields are shorter than its declared
 // size_bytes is padded at the end.
 
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -455,27 +456,71 @@ namespace can_bus {
         }
 
         // std::nullopt if the reading is invalid or unavailable.
+        //
+        // The struct fields stay raw uint16_t because that is what goes on the
+        // wire and what the aggregate initializers downstream are built from,
+        // but nothing should read a field directly — every accessor below runs
+        // it through here first, so a caller gets a std::optional it has to
+        // unwrap rather than a 0xFFFF it has to remember to check for.
         static std::optional<uint16_t> reading(uint16_t raw) noexcept {
             if (raw == PAYLOAD_READING_UNAVAILABLE) return std::nullopt;
             return raw;
         }
 
+        // Rust names its accessors exactly like the fields they read; C++ can
+        // not, so each one takes the Rust name plus a _reading suffix, the same
+        // way IcarusStatusMessage spells its cooked accessor
+        // actual_extension_percentage_float().
+
+        // EPM battery bus voltage, mV. std::nullopt if EPM could not read it.
+        std::optional<uint16_t> epm_batt_mv_reading() const noexcept { return reading(epm_batt_mv); }
+
+        // System 3.3V rail load current, mA. std::nullopt if EPM could not read
+        // it. A rail that is switched off reads 0, not std::nullopt.
+        std::optional<uint16_t> epm_sys_3v3_ma_reading() const noexcept { return reading(epm_sys_3v3_ma); }
+        // System 5V rail load current, mA. std::nullopt if EPM could not read it.
+        std::optional<uint16_t> epm_sys_5v_ma_reading() const noexcept { return reading(epm_sys_5v_ma); }
+        // Peripheral 3.3V rail load current, mA. std::nullopt if EPM could not read it.
+        std::optional<uint16_t> epm_per_3v3_ma_reading() const noexcept { return reading(epm_per_3v3_ma); }
+        // Peripheral 5V rail load current, mA. std::nullopt if EPM could not read it.
+        std::optional<uint16_t> epm_per_5v_ma_reading() const noexcept { return reading(epm_per_5v_ma); }
+        // Peripheral 9V rail load current, mA. std::nullopt if EPM could not read it.
+        std::optional<uint16_t> epm_per_9v_ma_reading() const noexcept { return reading(epm_per_9v_ma); }
+        // Peripheral 12V rail load current, mA. std::nullopt if EPM could not read it.
+        std::optional<uint16_t> epm_per_12v_ma_reading() const noexcept { return reading(epm_per_12v_ma); }
+
+        // Experiment channel 1 actuator position, steps. std::nullopt if SEM
+        // could not read it. An actuator parked at its home position reads 0.
+        std::optional<uint16_t> sem_actuator_1_steps_reading() const noexcept { return reading(sem_actuator_1_steps); }
+        // Experiment channel 2 actuator position, steps. std::nullopt if SEM could not read it.
+        std::optional<uint16_t> sem_actuator_2_steps_reading() const noexcept { return reading(sem_actuator_2_steps); }
+        // Experiment channel 3 actuator position, steps. std::nullopt if SEM could not read it.
+        std::optional<uint16_t> sem_actuator_3_steps_reading() const noexcept { return reading(sem_actuator_3_steps); }
+
         // The six rail currents in the stack's rail index order (0 SYS_3V3,
-        // 1 SYS_5V, 2 PER_3V3, 3 PER_5V, 4 PER_9V, 5 PER_12V).
-        void rail_ma(uint16_t out[6]) const noexcept {
-            out[0] = epm_sys_3v3_ma;
-            out[1] = epm_sys_5v_ma;
-            out[2] = epm_per_3v3_ma;
-            out[3] = epm_per_5v_ma;
-            out[4] = epm_per_9v_ma;
-            out[5] = epm_per_12v_ma;
+        // 1 SYS_5V, 2 PER_3V3, 3 PER_5V, 4 PER_9V, 5 PER_12V), each
+        // std::nullopt if EPM could not read that rail. Rails fail to read
+        // individually — one dead INA does not take the other five with it —
+        // so this is an array of optionals, not an optional array.
+        std::array<std::optional<uint16_t>, 6> rail_ma() const noexcept {
+            return {
+                epm_sys_3v3_ma_reading(),
+                epm_sys_5v_ma_reading(),
+                epm_per_3v3_ma_reading(),
+                epm_per_5v_ma_reading(),
+                epm_per_9v_ma_reading(),
+                epm_per_12v_ma_reading(),
+            };
         }
 
-        // Actuator positions for experiment channels 1..3.
-        void actuator_steps(uint16_t out[3]) const noexcept {
-            out[0] = sem_actuator_1_steps;
-            out[1] = sem_actuator_2_steps;
-            out[2] = sem_actuator_3_steps;
+        // Actuator positions for experiment channels 1..3, each std::nullopt if
+        // SEM could not read that channel.
+        std::array<std::optional<uint16_t>, 3> actuator_steps() const noexcept {
+            return {
+                sem_actuator_1_steps_reading(),
+                sem_actuator_2_steps_reading(),
+                sem_actuator_3_steps_reading(),
+            };
         }
 
         void serialize(uint8_t* buffer) const noexcept {

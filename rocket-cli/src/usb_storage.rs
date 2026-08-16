@@ -12,16 +12,15 @@ use rusb::{Context, DeviceHandle, Direction, Recipient, RequestType, UsbContext}
 use std::time::{Duration, Instant};
 
 use firmware_common_new::flight_data_record::{
-    FlightDataRecord, PYRO_DROGUE_CONTINUITY, PYRO_DROGUE_FIRE, PYRO_MAIN_CONTINUITY,
+    FlightDataRecord, NodeStatusRecord, PYRO_DROGUE_CONTINUITY, PYRO_DROGUE_FIRE,
+    PYRO_MAIN_CONTINUITY,
     PYRO_MAIN_FIRE, PYRO_SHORT_CIRCUIT, AIRBRAKES_APOGEE, AIRBRAKES_BARO_GATE_REJECT,
     AIRBRAKES_BARO_RESYNC, AIRBRAKES_BARO_TRUSTED,
     AIRBRAKES_BURNOUT, AIRBRAKES_SUBSONIC_DRAG,
     DEPLOYMENT_BARO_RESYNC, DEPLOYMENT_BARO_GATE_REJECT,
-    VALID_BATTERY, VALID_GPS_ALT, VALID_GPS_FIX, VALID_IMU, VALID_MAG,
     merge_log_records,
 };
 use firmware_common_new::can_bus::messages::amp_status::PowerOutputStatus;
-use firmware_common_new::can_bus::messages::custom_payload_status::CustomPayloadStatusMessage;
 use firmware_common_new::flight_storage::{
     BLOCK_SIZE, HEADER_LEN, RESPONSE_MAGIC, STORAGE_VERSION, decode_response_header,
     parse_log_records, verify_data_block,
@@ -246,33 +245,68 @@ fn parse_records(data: &[u8]) -> Result<(u32, Vec<FlightDataRecord>)> {
     Ok((log_record_count, merged))
 }
 
-fn bit(mask: u8, flag: u8) -> String {
-    ((mask & flag) != 0).to_string()
+/// One optional column. Absence writes an empty cell, which is the only
+/// rendering a reader cannot mistake for a measurement — a 0, a NaN or a 65535
+/// all sit inside the range of values the column legitimately holds. Every
+/// column fed by an `Option` goes through here, so nothing downstream has to
+/// know which of them can be absent.
+fn cell<T: ToString>(value: Option<T>) -> String {
+    value.map_or_else(String::new, |v| v.to_string())
+}
+
+/// One bit of a status bitmask. Blank when the mask itself is absent — no
+/// estimator sample backed this row, or the pyro watch had nothing to report
+/// yet. `false` there would be a statement about a sample that never happened,
+/// indistinguishable from a gate that looked at a real sample and passed it.
+fn bit(mask: Option<u8>, flag: u8) -> String {
+    cell(mask.map(|mask| (mask & flag) != 0))
 }
 
 /// Decode one AMP output's 2-bit `PowerOutputStatus` from the packed
-/// `amp_out_status` byte (out1 in the LSBs).
-fn amp_out(status: u8, out_index: u8) -> String {
+/// `out_status` byte (out1 in the LSBs). `None` is an AMP that has never sent
+/// an `AmpStatusMessage`, which blanks all three output columns rather than
+/// reporting them as `Disabled`.
+fn amp_out(status: Option<u8>, out_index: u8) -> String {
+    let Some(status) = status else {
+        return String::new();
+    };
     match PowerOutputStatus::from_primitive((status >> (out_index * 2)) & 0b11) {
         Some(s) => format!("{:?}", s),
         None => "Invalid".to_string(),
     }
 }
 
-/// Payload readings keep the CAN message's `0xFFFF` = unavailable sentinel;
-/// write those as an empty cell rather than 65535.
-fn payload_reading(raw: u16) -> String {
-    match CustomPayloadStatusMessage::reading(raw) {
-        Some(value) => value.to_string(),
-        None => String::new(),
+/// The five columns describing one CAN node's last heartbeat.
+///
+/// `None` is a node never heard from at all, and blanks all five. That is a
+/// different fact from a node whose last heartbeat said `online: false`, which
+/// fills the columns in with what it did report before going quiet — and the
+/// blank row is what keeps "never on the bus" from reading as "booted, then
+/// dropped".
+fn node_cells(node: Option<&NodeStatusRecord>) -> [String; 5] {
+    match node {
+        Some(node) => [
+            node.online.to_string(),
+            node.uptime_s.to_string(),
+            format!("{:?}", node.health),
+            format!("{:?}", node.mode),
+            format!("0b{:011b}", node.custom_status),
+        ],
+        None => ["", "", "", "", ""].map(String::from),
     }
 }
 
 fn write_csv(path: &str, records: &[FlightDataRecord]) -> Result<()> {
     let mut w = csv::Writer::from_path(path).with_context(|| format!("creating {}", path))?;
-    // Pyro and airbrakes-extension columns come from the fast record since
-    // storage v7, so they update at the full fast rate (±2.3 ms), not once
-    // per slow snapshot.
+    // The pyro columns come from the fast record, so they update at the full
+    // fast rate (±2.3 ms). The airbrakes actuation columns come from the slow
+    // snapshot — the control loop only produces one every 100 ms — so they
+    // repeat across the ~42 fast rows that share a snapshot.
+    //
+    // Every column below that can be absent is written by `cell` and is empty
+    // when it is, which is why there are no longer any `*_valid` columns: a
+    // reader learns the same thing from the data column itself, and cannot end
+    // up pairing a validity bit with the wrong row.
     w.write_record([
         "record_count",
         "timestamp_us",
@@ -310,11 +344,6 @@ fn write_csv(path: &str, records: &[FlightDataRecord]) -> Result<()> {
         "vdop",
         "pdop",
         "flight_stage",
-        "imu_valid",
-        "mag_valid",
-        "gps_fix",
-        "gps_alt_valid",
-        "battery_valid",
         "pyro_main_continuity",
         "pyro_main_fire",
         "pyro_drogue_continuity",
@@ -362,95 +391,83 @@ fn write_csv(path: &str, records: &[FlightDataRecord]) -> Result<()> {
     ])?;
 
     for r in records {
-        let v = r.valid;
-        let p = r.pyro_flags;
-        w.write_record([
+        let imu = r.imu.as_ref();
+        let deployment = r.deployment.as_ref();
+        let airbrakes = r.airbrakes.as_ref();
+        let air_brakes = r.air_brakes.as_ref();
+        let amp = r.amp.as_ref();
+        let payload = r.payload.as_ref();
+        let pyro = r.pyro_flags;
+
+        let mut row = vec![
             r.record_count.to_string(),
             r.timestamp_us.to_string(),
-            r.unix_time_us.to_string(),
-            r.acc[0].to_string(),
-            r.acc[1].to_string(),
-            r.acc[2].to_string(),
-            r.gyro[0].to_string(),
-            r.gyro[1].to_string(),
-            r.gyro[2].to_string(),
+            cell(r.unix_time_us),
+            cell(imu.map(|imu| imu.acc[0])),
+            cell(imu.map(|imu| imu.acc[1])),
+            cell(imu.map(|imu| imu.acc[2])),
+            cell(imu.map(|imu| imu.gyro[0])),
+            cell(imu.map(|imu| imu.gyro[1])),
+            cell(imu.map(|imu| imu.gyro[2])),
             r.pressure.to_string(),
-            r.mag[0].to_string(),
-            r.mag[1].to_string(),
-            r.mag[2].to_string(),
-            r.deployment_kf_altitude_asl.to_string(),
-            r.deployment_kf_vertical_velocity.to_string(),
-            bit(r.deployment_flags, DEPLOYMENT_BARO_GATE_REJECT),
-            bit(r.deployment_flags, DEPLOYMENT_BARO_RESYNC),
-            r.airbrakes_kf_altitude_asl.to_string(),
-            r.airbrakes_kf_vertical_velocity.to_string(),
-            r.airbrakes_kf_tilt_deg.to_string(),
-            bit(r.airbrakes_flags, AIRBRAKES_SUBSONIC_DRAG),
-            bit(r.airbrakes_flags, AIRBRAKES_BURNOUT),
-            bit(r.airbrakes_flags, AIRBRAKES_BARO_TRUSTED),
-            bit(r.airbrakes_flags, AIRBRAKES_APOGEE),
-            bit(r.airbrakes_flags, AIRBRAKES_BARO_GATE_REJECT),
-            bit(r.airbrakes_flags, AIRBRAKES_BARO_RESYNC),
-            r.temperature.to_string(),
-            r.battery_voltage.to_string(),
-            r.lat_lon.0.to_string(),
-            r.lat_lon.1.to_string(),
-            r.gps_altitude_asl.to_string(),
-            r.num_of_fixed_satalites.to_string(),
-            r.hdop.to_string(),
-            r.vdop.to_string(),
-            r.pdop.to_string(),
+            cell(r.mag.map(|mag| mag[0])),
+            cell(r.mag.map(|mag| mag[1])),
+            cell(r.mag.map(|mag| mag[2])),
+            cell(deployment.and_then(|d| d.kf_altitude_asl)),
+            cell(deployment.and_then(|d| d.kf_vertical_velocity)),
+            bit(deployment.map(|d| d.flags), DEPLOYMENT_BARO_GATE_REJECT),
+            bit(deployment.map(|d| d.flags), DEPLOYMENT_BARO_RESYNC),
+            cell(airbrakes.and_then(|a| a.kf_altitude_asl)),
+            cell(airbrakes.and_then(|a| a.kf_vertical_velocity)),
+            cell(airbrakes.and_then(|a| a.kf_tilt_deg)),
+            bit(airbrakes.map(|a| a.flags), AIRBRAKES_SUBSONIC_DRAG),
+            bit(airbrakes.map(|a| a.flags), AIRBRAKES_BURNOUT),
+            bit(airbrakes.map(|a| a.flags), AIRBRAKES_BARO_TRUSTED),
+            bit(airbrakes.map(|a| a.flags), AIRBRAKES_APOGEE),
+            bit(airbrakes.map(|a| a.flags), AIRBRAKES_BARO_GATE_REJECT),
+            bit(airbrakes.map(|a| a.flags), AIRBRAKES_BARO_RESYNC),
+            cell(r.temperature),
+            cell(r.battery_voltage),
+            cell(r.lat_lon.map(|(lat, _)| lat)),
+            cell(r.lat_lon.map(|(_, lon)| lon)),
+            cell(r.gps_altitude_asl),
+            cell(r.num_of_fix_satellites),
+            cell(r.hdop),
+            cell(r.vdop),
+            cell(r.pdop),
             format!("{:?}", r.flight_stage),
-            bit(v, VALID_IMU),
-            bit(v, VALID_MAG),
-            bit(v, VALID_GPS_FIX),
-            bit(v, VALID_GPS_ALT),
-            bit(v, VALID_BATTERY),
-            bit(p, PYRO_MAIN_CONTINUITY),
-            bit(p, PYRO_MAIN_FIRE),
-            bit(p, PYRO_DROGUE_CONTINUITY),
-            bit(p, PYRO_DROGUE_FIRE),
-            bit(p, PYRO_SHORT_CIRCUIT),
-            r.air_brakes_commanded_extension.to_string(),
-            r.air_brakes_actual_extension.to_string(),
-            r.air_brakes_servo_temp.to_string(),
-            (r.air_brakes_validation_deploy as u8).to_string(),
-            r.mpc_predicted_apogee_agl.to_string(),
-            r.amp_node.online.to_string(),
-            r.amp_node.uptime_s.to_string(),
-            format!("{:?}", r.amp_node.health),
-            format!("{:?}", r.amp_node.mode),
-            format!("0b{:011b}", r.amp_node.custom_status),
-            r.icarus_node.online.to_string(),
-            r.icarus_node.uptime_s.to_string(),
-            format!("{:?}", r.icarus_node.health),
-            format!("{:?}", r.icarus_node.mode),
-            format!("0b{:011b}", r.icarus_node.custom_status),
-            r.ozys_node.online.to_string(),
-            r.ozys_node.uptime_s.to_string(),
-            format!("{:?}", r.ozys_node.health),
-            format!("{:?}", r.ozys_node.mode),
-            format!("0b{:011b}", r.ozys_node.custom_status),
-            r.payload_sdrm_node.online.to_string(),
-            r.payload_sdrm_node.uptime_s.to_string(),
-            format!("{:?}", r.payload_sdrm_node.health),
-            format!("{:?}", r.payload_sdrm_node.mode),
-            format!("0b{:011b}", r.payload_sdrm_node.custom_status),
-            amp_out(r.amp_out_status, 0),
-            amp_out(r.amp_out_status, 1),
-            amp_out(r.amp_out_status, 2),
-            r.amp_shared_battery_v.to_string(),
-            payload_reading(r.payload_epm_batt_mv),
-            payload_reading(r.payload_rail_ma[0]),
-            payload_reading(r.payload_rail_ma[1]),
-            payload_reading(r.payload_rail_ma[2]),
-            payload_reading(r.payload_rail_ma[3]),
-            payload_reading(r.payload_rail_ma[4]),
-            payload_reading(r.payload_rail_ma[5]),
-            payload_reading(r.payload_actuator_steps[0]),
-            payload_reading(r.payload_actuator_steps[1]),
-            payload_reading(r.payload_actuator_steps[2]),
-        ])?;
+            bit(pyro, PYRO_MAIN_CONTINUITY),
+            bit(pyro, PYRO_MAIN_FIRE),
+            bit(pyro, PYRO_DROGUE_CONTINUITY),
+            bit(pyro, PYRO_DROGUE_FIRE),
+            bit(pyro, PYRO_SHORT_CIRCUIT),
+            cell(air_brakes.and_then(|a| a.commanded_extension)),
+            cell(air_brakes.and_then(|a| a.actual_extension)),
+            cell(air_brakes.and_then(|a| a.servo_temp)),
+            cell(air_brakes.map(|a| a.validation_deploy as u8)),
+            cell(air_brakes.and_then(|a| a.predicted_apogee_agl)),
+        ];
+        row.extend(node_cells(r.amp_node.as_ref()));
+        row.extend(node_cells(r.icarus_node.as_ref()));
+        row.extend(node_cells(r.ozys_node.as_ref()));
+        row.extend(node_cells(r.payload_sdrm_node.as_ref()));
+        row.extend([
+            amp_out(amp.map(|a| a.out_status), 0),
+            amp_out(amp.map(|a| a.out_status), 1),
+            amp_out(amp.map(|a| a.out_status), 2),
+            cell(amp.map(|a| a.shared_battery_v)),
+            cell(payload.and_then(|p| p.epm_batt_mv)),
+            cell(payload.and_then(|p| p.rail_ma[0])),
+            cell(payload.and_then(|p| p.rail_ma[1])),
+            cell(payload.and_then(|p| p.rail_ma[2])),
+            cell(payload.and_then(|p| p.rail_ma[3])),
+            cell(payload.and_then(|p| p.rail_ma[4])),
+            cell(payload.and_then(|p| p.rail_ma[5])),
+            cell(payload.and_then(|p| p.actuator_steps[0])),
+            cell(payload.and_then(|p| p.actuator_steps[1])),
+            cell(payload.and_then(|p| p.actuator_steps[2])),
+        ]);
+        w.write_record(&row)?;
     }
 
     w.flush()?;
@@ -487,7 +504,7 @@ pub fn list_files() -> Result<()> {
     Ok(())
 }
 
-/// `download-file <out.csv>`: pull the whole log and write it as CSV.
+/// `download-flight-log <out.csv>`: pull the whole log and write it as CSV.
 pub fn download_file(output: &str) -> Result<()> {
     let handle = find_and_open()?;
     drain_stale(&handle);
@@ -512,4 +529,78 @@ pub fn clear_storage() -> Result<()> {
     let _ack = read_header(&handle)?;
     println!("VLF5 storage cleared.");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use firmware_common_new::can_bus::messages::vl_status::FlightStage;
+    use firmware_common_new::flight_data_record::{
+        DeploymentEstimatorRecord, FlightDataFastRecord, FlightDataRecord, LogRecord,
+        merge_log_records,
+    };
+
+    /// A CSV whose rows are narrower or wider than its header silently
+    /// mis-labels every column to the right of the mistake, and nothing else in
+    /// the pipeline would catch it — the writer is happy to emit ragged rows.
+    /// This also pins the thing the `Option` refactor exists to guarantee: a
+    /// Mach-lockout sample, where the deployment filter is frozen, must reach
+    /// the spreadsheet as an EMPTY cell and never as `0`.
+    #[test]
+    fn csv_rows_match_the_header_and_absence_is_an_empty_cell() {
+        let lockout = FlightDataFastRecord {
+            sequence: 0,
+            timestamp_us: 1000,
+            unix_time_us: None,
+            imu: None,
+            pressure: 101325.0,
+            mag: None,
+            // The filter is frozen: the sample exists, the numbers do not.
+            deployment: Some(DeploymentEstimatorRecord {
+                kf_altitude_asl: None,
+                kf_vertical_velocity: None,
+                flags: 0,
+            }),
+            airbrakes: None,
+            flight_stage: FlightStage::Ascent,
+            pyro_flags: None,
+        };
+        // No slow record ahead of it, so every slow column is absent too.
+        let records = merge_log_records(&[LogRecord::Fast(lockout)]);
+        assert_eq!(records.len(), 1);
+
+        let path = std::env::temp_dir().join("rocket_cli_csv_width_test.csv");
+        let path = path.to_str().unwrap();
+        write_csv(path, &records).expect("write_csv");
+        let text = std::fs::read_to_string(path).expect("read back");
+        std::fs::remove_file(path).ok();
+
+        let mut lines = text.lines();
+        let header: Vec<&str> = lines.next().expect("header").split(',').collect();
+        let row: Vec<&str> = lines.next().expect("row").split(',').collect();
+        assert_eq!(
+            header.len(),
+            row.len(),
+            "header has {} columns but the row has {}",
+            header.len(),
+            row.len()
+        );
+
+        let col = |name: &str| {
+            let i = header
+                .iter()
+                .position(|h| *h == name)
+                .unwrap_or_else(|| panic!("no {} column", name));
+            row[i]
+        };
+        // The whole point: frozen filter reads empty, not zero.
+        assert_eq!(col("deployment_kf_altitude_asl"), "");
+        assert_eq!(col("deployment_kf_vertical_velocity"), "");
+        assert_eq!(col("acc_x"), "");
+        assert_eq!(col("unix_time_us"), "");
+        // A value that is genuinely present still prints.
+        assert_eq!(col("pressure"), "101325");
+        // The deleted `valid` bitmask must not have left a column behind.
+        assert!(!header.contains(&"imu_valid"));
+    }
 }

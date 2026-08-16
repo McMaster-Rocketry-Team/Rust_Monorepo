@@ -12,7 +12,6 @@ use firmware_common_new::can_bus::{
         CanBusMessageEnum,
         amp_overwrite::PowerOutputOverwrite,
         amp_status::{AmpOutputStatus, PowerOutputStatus},
-        custom_payload_status::CustomPayloadStatusMessage,
     },
     telemetry::message_aggregator::DecodedMessage,
 };
@@ -223,22 +222,27 @@ impl MessageRow {
         s
     }
 
-    fn format_rail_mv(raw_mv: u16) -> StyledString {
-        match CustomPayloadStatusMessage::reading(raw_mv) {
+    /// Payload readings arrive as an `Option` from the message's accessors,
+    /// which decode the CAN `0xFFFF` = unavailable sentinel at that boundary.
+    /// Nothing here touches the raw fields, so a rail sitting at a genuine 0mA
+    /// and a rail EPM could not read stay two different things all the way to
+    /// the screen.
+    fn format_rail_mv(mv: Option<u16>) -> StyledString {
+        match mv {
             Some(mv) => format!("{:.2}V", mv as f32 / 1000.0).into(),
             None => Self::format_unavailable(),
         }
     }
 
-    fn format_rail_ma(raw_ma: u16) -> StyledString {
-        match CustomPayloadStatusMessage::reading(raw_ma) {
+    fn format_rail_ma(ma: Option<u16>) -> StyledString {
+        match ma {
             Some(ma) => format!("{}mA", ma).into(),
             None => Self::format_unavailable(),
         }
     }
 
-    fn format_steps(raw_steps: u16) -> StyledString {
-        match CustomPayloadStatusMessage::reading(raw_steps) {
+    fn format_steps(steps: Option<u16>) -> StyledString {
+        match steps {
             Some(steps) => format!("{}", steps).into(),
             None => Self::format_unavailable(),
         }
@@ -429,16 +433,16 @@ impl MessageRow {
                 printer,
                 1,
                 &[
-                    ("epm batt", false, Self::format_rail_mv(m.epm_batt_mv)),
-                    ("sys 3v3", false, Self::format_rail_ma(m.epm_sys_3v3_ma)),
-                    ("sys 5v", false, Self::format_rail_ma(m.epm_sys_5v_ma)),
-                    ("per 3v3", false, Self::format_rail_ma(m.epm_per_3v3_ma)),
-                    ("per 5v", false, Self::format_rail_ma(m.epm_per_5v_ma)),
-                    ("per 9v", false, Self::format_rail_ma(m.epm_per_9v_ma)),
-                    ("per 12v", false, Self::format_rail_ma(m.epm_per_12v_ma)),
-                    ("act 1", false, Self::format_steps(m.sem_actuator_1_steps)),
-                    ("act 2", false, Self::format_steps(m.sem_actuator_2_steps)),
-                    ("act 3", false, Self::format_steps(m.sem_actuator_3_steps)),
+                    ("epm batt", false, Self::format_rail_mv(m.epm_batt_mv())),
+                    ("sys 3v3", false, Self::format_rail_ma(m.epm_sys_3v3_ma())),
+                    ("sys 5v", false, Self::format_rail_ma(m.epm_sys_5v_ma())),
+                    ("per 3v3", false, Self::format_rail_ma(m.epm_per_3v3_ma())),
+                    ("per 5v", false, Self::format_rail_ma(m.epm_per_5v_ma())),
+                    ("per 9v", false, Self::format_rail_ma(m.epm_per_9v_ma())),
+                    ("per 12v", false, Self::format_rail_ma(m.epm_per_12v_ma())),
+                    ("act 1", false, Self::format_steps(m.sem_actuator_1_steps())),
+                    ("act 2", false, Self::format_steps(m.sem_actuator_2_steps())),
+                    ("act 3", false, Self::format_steps(m.sem_actuator_3_steps())),
                 ],
             ),
             CanBusMessageEnum::VLStatus(m) => self.draw_fields(

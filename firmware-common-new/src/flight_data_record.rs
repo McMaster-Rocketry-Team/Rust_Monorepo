@@ -1,5 +1,4 @@
 use crate::can_bus::messages::{
-    custom_payload_status::PAYLOAD_READING_UNAVAILABLE,
     node_status::{NodeHealth, NodeMode, NodeStatusMessage},
     vl_status::FlightStage,
 };
@@ -12,6 +11,10 @@ use crate::can_bus::messages::{
 /// unhealthy at T+12 s" or "it rebooted mid-flight" answerable after the
 /// fact — a reboot shows as `uptime_s` stepping backwards, which the packet's
 /// derived bit can miss entirely if it happens between two 2 s packets.
+///
+/// A node never heard from at all has no record: the slot in the slow record
+/// is `None`. Every `NodeStatusRecord` that exists therefore describes a
+/// heartbeat that really arrived.
 #[derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive, Debug, Clone, PartialEq)]
 pub struct NodeStatusRecord {
     /// Nothing heard from the node for 5 s. When false, every other field
@@ -27,19 +30,6 @@ pub struct NodeStatusRecord {
 }
 
 impl NodeStatusRecord {
-    /// Never heard from, or silent for 5 s. Matches the downlink packet's
-    /// `NodeStatus::offline()` so the two channels agree on what absence
-    /// looks like.
-    pub fn offline() -> Self {
-        Self {
-            online: false,
-            uptime_s: 0,
-            health: NodeHealth::Error,
-            mode: NodeMode::Offline,
-            custom_status: 0,
-        }
-    }
-
     pub fn from_message(online: bool, message: &NodeStatusMessage) -> Self {
         Self {
             online,
@@ -51,16 +41,48 @@ impl NodeStatusRecord {
     }
 }
 
-impl Default for NodeStatusRecord {
-    fn default() -> Self {
-        Self::offline()
-    }
-}
-
 /// High-rate IMU / baro / mag / estimator / pyro sample.
 pub const RECORD_TAG_FAST: u8 = 0x01;
 /// Low-rate GPS / battery / AMP / temperature / airbrakes-actuation snapshot.
 pub const RECORD_TAG_SLOW: u8 = 0x02;
+
+/// One IMU sample: both halves come from the same read, so they are present
+/// or absent together.
+#[derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive, Debug, Clone, PartialEq)]
+pub struct ImuRecord {
+    pub acc: [f32; 3],
+    pub gyro: [f32; 3],
+}
+
+/// The deployment (slow baro) estimator's output for one fast sample.
+#[derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive, Debug, Clone, PartialEq)]
+pub struct DeploymentEstimatorRecord {
+    /// Estimator altitude ASL (m). `None` through the Mach lockout, where the
+    /// KF is frozen and nothing is fused at all.
+    pub kf_altitude_asl: Option<f32>,
+    /// Estimator vertical velocity (m/s). `None` for the same reason as
+    /// `kf_altitude_asl` — the two are frozen and released together.
+    pub kf_vertical_velocity: Option<f32>,
+    /// Status bits (`DEPLOYMENT_*` consts): what the baro innovation gate did
+    /// with THIS sample.
+    pub flags: u8,
+}
+
+/// The airbrakes estimator's output for one fast sample.
+#[derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive, Debug, Clone, PartialEq)]
+pub struct AirbrakesEstimatorRecord {
+    /// Estimator altitude ASL (m). `None` until it has a value.
+    pub kf_altitude_asl: Option<f32>,
+    /// Estimator vertical velocity (m/s). `None` until its vertical filter is
+    /// born (`AIRBRAKES_BARO_TRUSTED`).
+    pub kf_vertical_velocity: Option<f32>,
+    /// Tilt from vertical (deg). `None` before ignition.
+    pub kf_tilt_deg: Option<f32>,
+    /// Status bits (`AIRBRAKES_*` consts): drag check, burnout latch,
+    /// filter-born, apogee, and what its baro innovation gate did with THIS
+    /// sample.
+    pub flags: u8,
+}
 
 #[derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive, Debug, Clone, PartialEq)]
 pub struct FlightDataFastRecord {
@@ -77,33 +99,23 @@ pub struct FlightDataFastRecord {
     /// one ends.
     pub sequence: u32,
     pub timestamp_us: u64,
-    /// GPS-disciplined unix clock, microseconds since the epoch. 0 until the
-    /// clock is ready (no time fix yet).
-    pub unix_time_us: u64,
-    pub acc: [f32; 3],
-    pub gyro: [f32; 3],
+    /// GPS-disciplined unix clock, microseconds since the epoch. `None` until
+    /// the clock is ready (no time fix yet).
+    pub unix_time_us: Option<u64>,
+    /// `None` when no IMU sample backed this tick — the driver was riding out
+    /// a bus error or had not produced a reading yet.
+    pub imu: Option<ImuRecord>,
+    /// Barometric pressure (Pa). Every published sample carries one, so this
+    /// is never absent: the fast records are driven by the baro stream.
     pub pressure: f32,
-    pub mag: [f32; 3],
-    /// Deployment (slow baro) estimator altitude ASL (m). NaN until the
-    /// estimator has run.
-    pub deployment_kf_altitude_asl: f32,
-    /// Deployment (slow baro) estimator vertical velocity (m/s). NaN until
-    /// the estimator has run.
-    pub deployment_kf_vertical_velocity: f32,
-    /// Deployment estimator status bits (`DEPLOYMENT_*` consts): what the
-    /// baro innovation gate did with THIS sample.
-    pub deployment_flags: u8,
-    /// Airbrakes estimator altitude ASL (m). NaN until it has a value.
-    pub airbrakes_kf_altitude_asl: f32,
-    /// Airbrakes estimator vertical velocity (m/s). NaN until its vertical
-    /// filter is born.
-    pub airbrakes_kf_vertical_velocity: f32,
-    /// Airbrakes estimator tilt from vertical (deg). NaN before ignition.
-    pub airbrakes_kf_tilt_deg: f32,
-    /// Airbrakes estimator status bits (`AIRBRAKES_*` consts): drag check,
-    /// burnout latch, filter-born, apogee, and what its baro innovation gate
-    /// did with THIS sample.
-    pub airbrakes_flags: u8,
+    /// Magnetometer field (µT). `None` when no mag sample backed this tick,
+    /// same causes as `imu`.
+    pub mag: Option<[f32; 3]>,
+    /// `None` when no deployment estimator sample matched this tick.
+    pub deployment: Option<DeploymentEstimatorRecord>,
+    /// `None` when the airbrakes estimator produced nothing for this tick:
+    /// it is not born yet, or it was retired at apogee.
+    pub airbrakes: Option<AirbrakesEstimatorRecord>,
     /// Mirror of the deployment estimator's `RocketState` (plus the device
     /// modes), with its Mach lockout folded into `Ascent`. Logged only here,
     /// at the full fast rate — the chutes' deployment shows up as this
@@ -111,8 +123,72 @@ pub struct FlightDataFastRecord {
     pub flight_stage: FlightStage,
     /// Bitmask for pyro continuity/fire state (`PYRO_*` consts). Logged at
     /// the full fast rate so pyro fire edges are timestamped to ±2.3 ms.
-    pub pyro_flags: u8,
-    pub valid: u8,
+    /// `None` until there is anything on the continuity watch to report.
+    pub pyro_flags: Option<u8>,
+}
+
+/// Airbrakes actuation: what was commanded, why, and what Icarus did with it.
+#[derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive, Debug, Clone, PartialEq)]
+pub struct AirBrakesRecord {
+    /// Commanded extension, 0.0 = retracted, 1.0 = fully extended. `None`
+    /// until the firmware has commanded anything (i.e. outside Armed and Demo).
+    ///
+    /// Slow-rate because the control loop only produces one every 100 ms;
+    /// logging it per fast record stored the same value ~42 times over.
+    pub commanded_extension: Option<f32>,
+    /// Apogee AGL (m) the MPC predicts at the extension it is commanding.
+    /// `None` whenever the MPC is not running: before the brakes are
+    /// permitted, again once the airbrakes estimator is retired and it stops,
+    /// and throughout the validation deploy.
+    pub predicted_apogee_agl: Option<f32>,
+    /// The commanded extension is the forced validation deploy, not the MPC's
+    /// output: the MPC never asked for full extension the whole way up, so the
+    /// firmware opened the brakes anyway once slow enough for it to be
+    /// harmless, to leave in-flight evidence they actuate. While this is set,
+    /// `commanded_extension` is 1.0 and `predicted_apogee_agl` is `None` —
+    /// read the commanded column there as a servo test, not as MPC intent.
+    pub validation_deploy: bool,
+    /// Reported extension from Icarus, 0.0 = retracted, 1.0 = fully extended.
+    /// `None` until Icarus reports — which is the interesting case, since an
+    /// Icarus that is offline or silent would otherwise be indistinguishable
+    /// from one reporting fully-stowed brakes.
+    ///
+    /// Slow-rate because Icarus reports at 10 Hz; the reading is up to 100 ms
+    /// older than this record's timestamp, so a commanded/actual pair on one
+    /// row is not a step response.
+    pub actual_extension: Option<f32>,
+    /// Airbrakes servo temperature (C) reported by Icarus. `None` until Icarus
+    /// reports, for the same reason as `actual_extension`.
+    pub servo_temp: Option<f32>,
+}
+
+/// Last `AmpStatusMessage`, which is a different stream from the AMP node
+/// heartbeat — this is the power board's own report, so it is present or
+/// absent independently of `amp_node`.
+#[derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive, Debug, Clone, PartialEq)]
+pub struct AmpRecord {
+    /// Shared (AMP) battery voltage.
+    pub shared_battery_v: f32,
+    /// AMP output statuses, 2 bits per output with out1 in the LSBs. Each
+    /// pair holds a `PowerOutputStatus` discriminant.
+    pub out_status: u8,
+}
+
+/// Last `CustomPayloadStatusMessage`, in the units that message carries.
+///
+/// Each reading is separately `None`: the payload marks individual readings
+/// unavailable, so a live EPM with one dead rail sensor is a real state and
+/// stays distinguishable from a payload that has said nothing at all (every
+/// field `None`).
+#[derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive, Debug, Clone, PartialEq)]
+pub struct PayloadRecord {
+    /// Payload EPM battery bus voltage (mV).
+    pub epm_batt_mv: Option<u16>,
+    /// Payload EPM switched rail load currents (mA), rail index order 0 `SYS_3V3`,
+    /// 1 `SYS_5V`, 2 `PER_3V3`, 3 `PER_5V`, 4 `PER_9V`, 5 `PER_12V`.
+    pub rail_ma: [Option<u16>; 6],
+    /// SEM linear actuator positions (steps), experiment channels 1..3.
+    pub actuator_steps: [Option<u16>; 3],
 }
 
 #[derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive, Debug, Clone, PartialEq)]
@@ -120,99 +196,34 @@ pub struct FlightDataSlowRecord {
     pub timestamp_us: u64,
     /// MS5607 die temperature (C). Slow-rate because the driver only sources
     /// it once per `TEMP_DECIMATION` pressure reads (~13 Hz) — logging it per
-    /// fast record stored the same value ~30 times over.
+    /// fast record stored the same value ~30 times over. Sourced from the same
+    /// stream that drives the fast records, so it is always present.
     pub temperature: f32,
-    pub battery_voltage: f32,
-    pub lat_lon: (f64, f64),
-    /// GPS-reported altitude, metres above mean sea level (≈ASL).
-    pub gps_altitude_asl: f32,
-    pub num_of_fixed_satalites: u8,
-    pub hdop: f32,
-    pub vdop: f32,
-    pub pdop: f32,
-    /// Commanded extension, 0.0 = retracted, 1.0 = fully extended. NaN until
-    /// the firmware has commanded anything (i.e. outside Armed and Demo).
-    ///
-    /// Slow-rate because the control loop only produces one every 100 ms;
-    /// logging it per fast record stored the same value ~42 times over.
-    pub air_brakes_commanded_extension: f32,
-    /// Reported extension from Icarus, 0.0 = retracted, 1.0 = fully extended.
-    /// NaN until Icarus reports — which is the interesting case, since an
-    /// Icarus that is offline or silent would otherwise be indistinguishable
-    /// from one reporting fully-stowed brakes.
-    ///
-    /// Slow-rate because Icarus reports at 10 Hz; the reading is up to 100 ms
-    /// older than this record's timestamp, so a commanded/actual pair on one
-    /// row is not a step response.
-    pub air_brakes_actual_extension: f32,
-    /// Airbrakes servo temperature (C) reported by Icarus. NaN until Icarus
-    /// reports, for the same reason as `air_brakes_actual_extension`.
-    pub air_brakes_servo_temp: f32,
-    /// The commanded extension is the forced validation deploy, not the MPC's
-    /// output: the MPC never asked for full extension the whole way up, so the
-    /// firmware opened the brakes anyway once slow enough for it to be
-    /// harmless, to leave in-flight evidence they actuate. While this is set,
-    /// `air_brakes_commanded_extension` is 1.0 and
-    /// `mpc_predicted_apogee_agl` is NaN — read the commanded column there as
-    /// a servo test, not as MPC intent.
-    pub air_brakes_validation_deploy: bool,
-    /// Apogee AGL (m) the MPC predicts at the extension it is commanding.
-    /// NaN until the MPC runs (it starts only once the brakes are permitted),
-    /// again once the airbrakes estimator is retired and it stops, and
-    /// throughout the validation deploy.
-    pub mpc_predicted_apogee_agl: f32,
+    /// VL battery voltage. `None` until the ADC has produced a reading.
+    pub battery_voltage: Option<f32>,
+    /// `None` until the GPS has a position fix.
+    pub lat_lon: Option<(f64, f64)>,
+    /// GPS-reported altitude, metres above mean sea level (≈ASL). `None` until
+    /// the fix carries an altitude — it can be absent while `lat_lon` is not.
+    pub gps_altitude_asl: Option<f32>,
+    /// Satellites used in the fix. 0 is a real reading (no fix), so it is not
+    /// optional.
+    pub num_of_fix_satellites: u8,
+    /// Dilution of precision, `None` when the GPS did not report it.
+    pub hdop: Option<f32>,
+    pub vdop: Option<f32>,
+    pub pdop: Option<f32>,
+    pub air_brakes: AirBrakesRecord,
+    /// `None` until the first `AmpStatusMessage` heartbeat arrives.
+    pub amp: Option<AmpRecord>,
+    pub payload: PayloadRecord,
     /// Full `NodeStatusMessage` for each node on the bus, as last received.
-    pub amp_node: NodeStatusRecord,
-    pub icarus_node: NodeStatusRecord,
-    pub ozys_node: NodeStatusRecord,
-    pub payload_sdrm_node: NodeStatusRecord,
-    /// AMP output statuses, 2 bits per output with out1 in the LSBs. Each
-    /// pair holds a `PowerOutputStatus` discriminant. From `AmpStatusMessage`,
-    /// not the node heartbeat.
-    pub amp_out_status: u8,
-    /// Shared (AMP) battery voltage.
-    pub amp_shared_battery_v: f32,
-    /// Payload EPM battery bus voltage (mV), from `CustomPayloadStatusMessage`.
-    /// `PAYLOAD_READING_UNAVAILABLE` (0xFFFF) when the payload reported it as
-    /// unavailable or has not reported at all — same sentinel as the CAN message.
-    pub payload_epm_batt_mv: u16,
-    /// Payload EPM switched rail load currents (mA), rail index order 0 `SYS_3V3`,
-    /// 1 `SYS_5V`, 2 `PER_3V3`, 3 `PER_5V`, 4 `PER_9V`, 5 `PER_12V`.
-    pub payload_rail_ma: [u16; 6],
-    /// SEM linear actuator positions (steps), experiment channels 1..3.
-    pub payload_actuator_steps: [u16; 3],
-    pub valid: u8,
-}
-
-impl Default for FlightDataSlowRecord {
-    fn default() -> Self {
-        Self {
-            timestamp_us: 0,
-            temperature: 0.0,
-            battery_voltage: 0.0,
-            lat_lon: (0.0, 0.0),
-            gps_altitude_asl: 0.0,
-            num_of_fixed_satalites: 0,
-            hdop: 0.0,
-            vdop: 0.0,
-            pdop: 0.0,
-            air_brakes_commanded_extension: f32::NAN,
-            air_brakes_actual_extension: f32::NAN,
-            air_brakes_servo_temp: f32::NAN,
-            air_brakes_validation_deploy: false,
-            mpc_predicted_apogee_agl: f32::NAN,
-            amp_node: NodeStatusRecord::offline(),
-            icarus_node: NodeStatusRecord::offline(),
-            ozys_node: NodeStatusRecord::offline(),
-            payload_sdrm_node: NodeStatusRecord::offline(),
-            amp_out_status: 0,
-            amp_shared_battery_v: 0.0,
-            payload_epm_batt_mv: PAYLOAD_READING_UNAVAILABLE,
-            payload_rail_ma: [PAYLOAD_READING_UNAVAILABLE; 6],
-            payload_actuator_steps: [PAYLOAD_READING_UNAVAILABLE; 3],
-            valid: 0,
-        }
-    }
+    /// `None` means never heard from at all — as opposed to a record with
+    /// `online: false`, which is a node that spoke and then went quiet.
+    pub amp_node: Option<NodeStatusRecord>,
+    pub icarus_node: Option<NodeStatusRecord>,
+    pub ozys_node: Option<NodeStatusRecord>,
+    pub payload_sdrm_node: Option<NodeStatusRecord>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -222,129 +233,101 @@ pub enum LogRecord {
 }
 
 /// Merged view used for CSV export (one row per fast record).
+///
+/// Everything sourced from the slow snapshot is `Option` here, including the
+/// fields the slow record itself always carries: rows before the first slow
+/// record have no snapshot to read from. A reader draws the same conclusion
+/// either way — nothing has been reported for this column yet — so those
+/// fields are a single `Option`, not a nested one.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FlightDataRecord {
     /// [`FlightDataFastRecord::sequence`] — see there for what a discontinuity
     /// means (a drop forwards, a session boundary backwards).
     pub record_count: u32,
     pub timestamp_us: u64,
-    /// GPS-disciplined unix clock (µs since epoch), 0 until the clock is ready.
-    pub unix_time_us: u64,
+    /// GPS-disciplined unix clock (µs since epoch), `None` until the clock is
+    /// ready.
+    pub unix_time_us: Option<u64>,
 
-    pub acc: [f32; 3],
-    pub gyro: [f32; 3],
+    pub imu: Option<ImuRecord>,
 
     pub pressure: f32,
 
-    pub mag: [f32; 3],
+    pub mag: Option<[f32; 3]>,
 
-    pub deployment_kf_altitude_asl: f32,
-    pub deployment_kf_vertical_velocity: f32,
-    pub deployment_flags: u8,
+    pub deployment: Option<DeploymentEstimatorRecord>,
 
-    pub airbrakes_kf_altitude_asl: f32,
-    pub airbrakes_kf_vertical_velocity: f32,
-    pub airbrakes_kf_tilt_deg: f32,
-    pub airbrakes_flags: u8,
+    pub airbrakes: Option<AirbrakesEstimatorRecord>,
 
     /// MS5607 die temperature (C), from the slow snapshot.
-    pub temperature: f32,
-    pub battery_voltage: f32,
+    pub temperature: Option<f32>,
+    pub battery_voltage: Option<f32>,
 
-    /// Bitmask for which fields held trustworthy data when logged.
-    pub valid: u8,
-
-    pub lat_lon: (f64, f64),
+    pub lat_lon: Option<(f64, f64)>,
     /// GPS-reported altitude, metres above mean sea level (≈ASL).
-    pub gps_altitude_asl: f32,
-    pub num_of_fixed_satalites: u8,
-    pub hdop: f32,
-    pub vdop: f32,
-    pub pdop: f32,
+    pub gps_altitude_asl: Option<f32>,
+    pub num_of_fix_satellites: Option<u8>,
+    pub hdop: Option<f32>,
+    pub vdop: Option<f32>,
+    pub pdop: Option<f32>,
 
     /// From the fast record, so it is full-rate.
     pub flight_stage: FlightStage,
 
     /// Bitmask for pyro continuity/fire state (see firmware `ContinuityUpdate`).
     /// Full rate, from the fast record.
-    pub pyro_flags: u8,
+    pub pyro_flags: Option<u8>,
 
-    /// Commanded extension, from the slow snapshot (the control loop runs at
+    /// Airbrakes actuation from the slow snapshot (the control loop runs at
     /// 10 Hz, so there is nothing faster to log).
-    pub air_brakes_commanded_extension: f32,
-    /// Icarus-reported extension, from the slow snapshot.
-    pub air_brakes_actual_extension: f32,
-
-    /// Airbrakes servo temperature (C), from the slow snapshot.
-    pub air_brakes_servo_temp: f32,
-    /// The commanded extension is the forced validation deploy rather than the
-    /// MPC's output. From the slow snapshot.
-    pub air_brakes_validation_deploy: bool,
-    /// MPC predicted apogee AGL (m), from the slow snapshot.
-    pub mpc_predicted_apogee_agl: f32,
+    pub air_brakes: Option<AirBrakesRecord>,
 
     /// CAN node heartbeats from the slow record.
-    pub amp_node: NodeStatusRecord,
-    pub icarus_node: NodeStatusRecord,
-    pub ozys_node: NodeStatusRecord,
-    pub payload_sdrm_node: NodeStatusRecord,
-    /// 2 bits per output, out1 in the LSBs (`PowerOutputStatus` discriminants).
-    pub amp_out_status: u8,
-    pub amp_shared_battery_v: f32,
+    pub amp_node: Option<NodeStatusRecord>,
+    pub icarus_node: Option<NodeStatusRecord>,
+    pub ozys_node: Option<NodeStatusRecord>,
+    pub payload_sdrm_node: Option<NodeStatusRecord>,
+    /// AMP power-board report from the slow record.
+    pub amp: Option<AmpRecord>,
 
     /// Payload snapshot from the slow record, in the units the payload CAN
-    /// message carries. `PAYLOAD_READING_UNAVAILABLE` (0xFFFF) = no reading.
-    pub payload_epm_batt_mv: u16,
-    /// Rail index order: 0 `SYS_3V3`, 1 `SYS_5V`, 2 `PER_3V3`, 3 `PER_5V`,
-    /// 4 `PER_9V`, 5 `PER_12V`.
-    pub payload_rail_ma: [u16; 6],
-    /// Experiment channels 1..3.
-    pub payload_actuator_steps: [u16; 3],
+    /// message carries.
+    pub payload: Option<PayloadRecord>,
 }
 
 impl FlightDataRecord {
-    /// Combine one fast sample with the most recent slow snapshot.
-    pub fn from_fast_and_slow(fast: &FlightDataFastRecord, slow: &FlightDataSlowRecord) -> Self {
+    /// Combine one fast sample with the most recent slow snapshot, or `None`
+    /// if no slow record has been seen yet.
+    pub fn from_fast_and_slow(
+        fast: &FlightDataFastRecord,
+        slow: Option<&FlightDataSlowRecord>,
+    ) -> Self {
         Self {
             record_count: fast.sequence,
             timestamp_us: fast.timestamp_us,
             unix_time_us: fast.unix_time_us,
-            acc: fast.acc,
-            gyro: fast.gyro,
+            imu: fast.imu.clone(),
             pressure: fast.pressure,
             mag: fast.mag,
-            deployment_kf_altitude_asl: fast.deployment_kf_altitude_asl,
-            deployment_kf_vertical_velocity: fast.deployment_kf_vertical_velocity,
-            deployment_flags: fast.deployment_flags,
-            airbrakes_kf_altitude_asl: fast.airbrakes_kf_altitude_asl,
-            airbrakes_kf_vertical_velocity: fast.airbrakes_kf_vertical_velocity,
-            airbrakes_kf_tilt_deg: fast.airbrakes_kf_tilt_deg,
-            airbrakes_flags: fast.airbrakes_flags,
-            temperature: slow.temperature,
-            battery_voltage: slow.battery_voltage,
-            valid: fast.valid | slow.valid,
-            lat_lon: slow.lat_lon,
-            gps_altitude_asl: slow.gps_altitude_asl,
-            num_of_fixed_satalites: slow.num_of_fixed_satalites,
-            hdop: slow.hdop,
-            vdop: slow.vdop,
-            pdop: slow.pdop,
+            deployment: fast.deployment.clone(),
+            airbrakes: fast.airbrakes.clone(),
+            temperature: slow.map(|s| s.temperature),
+            battery_voltage: slow.and_then(|s| s.battery_voltage),
+            lat_lon: slow.and_then(|s| s.lat_lon),
+            gps_altitude_asl: slow.and_then(|s| s.gps_altitude_asl),
+            num_of_fix_satellites: slow.map(|s| s.num_of_fix_satellites),
+            hdop: slow.and_then(|s| s.hdop),
+            vdop: slow.and_then(|s| s.vdop),
+            pdop: slow.and_then(|s| s.pdop),
             flight_stage: fast.flight_stage,
             pyro_flags: fast.pyro_flags,
-            air_brakes_commanded_extension: slow.air_brakes_commanded_extension,
-            air_brakes_actual_extension: slow.air_brakes_actual_extension,
-            air_brakes_servo_temp: slow.air_brakes_servo_temp,
-            air_brakes_validation_deploy: slow.air_brakes_validation_deploy,
-            mpc_predicted_apogee_agl: slow.mpc_predicted_apogee_agl,
-            amp_node: slow.amp_node.clone(),
-            icarus_node: slow.icarus_node.clone(),
-            ozys_node: slow.ozys_node.clone(),
-            payload_sdrm_node: slow.payload_sdrm_node.clone(),
-            amp_out_status: slow.amp_out_status,
-            amp_shared_battery_v: slow.amp_shared_battery_v,
-            payload_epm_batt_mv: slow.payload_epm_batt_mv,
-            payload_rail_ma: slow.payload_rail_ma,
-            payload_actuator_steps: slow.payload_actuator_steps,
+            air_brakes: slow.map(|s| s.air_brakes.clone()),
+            amp_node: slow.and_then(|s| s.amp_node.clone()),
+            icarus_node: slow.and_then(|s| s.icarus_node.clone()),
+            ozys_node: slow.and_then(|s| s.ozys_node.clone()),
+            payload_sdrm_node: slow.and_then(|s| s.payload_sdrm_node.clone()),
+            amp: slow.and_then(|s| s.amp.clone()),
+            payload: slow.map(|s| s.payload.clone()),
         }
     }
 }
@@ -352,33 +335,26 @@ impl FlightDataRecord {
 /// Expand a tagged log into merged rows (one CSV row per fast sample).
 #[cfg(any(feature = "std", test))]
 pub fn merge_log_records(log: &[LogRecord]) -> std::vec::Vec<FlightDataRecord> {
-    let mut slow = FlightDataSlowRecord::default();
+    let mut slow: Option<FlightDataSlowRecord> = None;
     let mut out = std::vec::Vec::new();
     for rec in log {
         match rec {
-            LogRecord::Slow(s) => slow = s.clone(),
-            LogRecord::Fast(fast) => out.push(FlightDataRecord::from_fast_and_slow(fast, &slow)),
+            LogRecord::Slow(s) => slow = Some(s.clone()),
+            LogRecord::Fast(fast) => {
+                out.push(FlightDataRecord::from_fast_and_slow(fast, slow.as_ref()))
+            }
         }
     }
     out
 }
 
-pub const VALID_IMU: u8 = 1 << 0;
-// Bit 1 was VALID_BARO, dropped: every published sample carries a baro
-// reading, so it could only ever read 1.
-pub const VALID_MAG: u8 = 1 << 2;
-pub const VALID_GPS_FIX: u8 = 1 << 3;
-pub const VALID_GPS_ALT: u8 = 1 << 4;
-pub const VALID_BATTERY: u8 = 1 << 5;
-// Bits 6-7 unallocated.
-
-/// `deployment_flags` bits — the deployment estimator's status.
+/// `DeploymentEstimatorRecord::flags` bits — the deployment estimator's status.
 ///
 /// Both bits describe **this record's sample**, not a running state: they are
 /// read in the same critical section as the estimator update that produced
 /// them, so a single-sample event cannot be missed or land on the wrong row.
 /// Both read 0 through Mach lockout, where the KF is frozen and nothing is
-/// fused at all.
+/// fused at all — which is also where the altitude and velocity are `None`.
 ///
 /// The deployment KF is the one that fires pyros, so its gate is the first
 /// thing to look at when a deploy went wrong.
@@ -390,7 +366,7 @@ pub const DEPLOYMENT_BARO_GATE_REJECT: u8 = 1 << 0;
 pub const DEPLOYMENT_BARO_RESYNC: u8 = 1 << 1;
 // bits 2-7 unallocated.
 
-/// `airbrakes_flags` bits — the airbrakes estimator's status.
+/// `AirbrakesEstimatorRecord::flags` bits — the airbrakes estimator's status.
 ///
 /// The mach-lockout exit is a single drag measurement (the drag-inverted
 /// airspeed below Mach 0.8, sustained 1 s), so there is one bit for it;

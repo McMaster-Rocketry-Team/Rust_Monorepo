@@ -80,6 +80,43 @@ impl DownlinkPacketDisplay {
         String::from(s).into()
     }
 
+    /// How an absent reading looks on the panel: dimmed and non-numeric, so it
+    /// reads as "the rocket did not report this" at a glance rather than as a
+    /// value.
+    ///
+    /// This is not cosmetic. The deployment KF is absent for the whole Mach
+    /// lockout, and the alternative rendering — the 0.0 the packet's unused
+    /// bits hold — puts "0.0m, 0.0m/s" on the screen at Mach 1, which is what
+    /// a landed rocket looks like. Same placeholder as the CAN monitor's
+    /// unavailable payload readings, so one convention covers both panels.
+    fn format_unavailable() -> StyledString {
+        StyledString::single_span(
+            "n/a",
+            Style::from_color_style(ColorStyle::front(Color::Rgb(127, 127, 127))),
+        )
+    }
+
+    /// Render a reading that the packet may not carry. Every `Option`-returning
+    /// getter goes through here, so no call site can quietly `unwrap_or(0.0)`
+    /// its way back to a number the rocket never sent.
+    fn format_optional<T>(value: Option<T>, format: impl FnOnce(T) -> String) -> StyledString {
+        match value {
+            Some(value) => format(value).into(),
+            None => Self::format_unavailable(),
+        }
+    }
+
+    /// The two coordinate fields, from the one `Option` that carries both.
+    /// Taking them from a single `lat_lon()` is what keeps them blanking
+    /// together: a latitude shown next to an "n/a" longitude would be a
+    /// bearing the recovery team could act on and shouldn't.
+    fn format_lat_lon(lat_lon: Option<(f64, f64)>) -> (StyledString, StyledString) {
+        (
+            Self::format_optional(lat_lon, |(lat, _)| lat.to_string()),
+            Self::format_optional(lat_lon, |(_, lon)| lon.to_string()),
+        )
+    }
+
     fn format_node_status(value: &NodeStatus) -> StyledString {
         String::from(format!(
             "{:?}, {:?}{}",
@@ -191,7 +228,9 @@ impl View for DownlinkPacketDisplay {
 
             let printer = printer.windowed(Rect::from_corners(Vec2::new(0, 1), printer.size));
             match packet {
-                VLPDownlinkPacket::LowPowerTelemetry(p) => self.draw_fields(
+                VLPDownlinkPacket::LowPowerTelemetry(p) => {
+                    let (lat, lon) = Self::format_lat_lon(p.lat_lon());
+                    self.draw_fields(
                     &printer,
                     &[
                         &[
@@ -201,8 +240,8 @@ impl View for DownlinkPacketDisplay {
                                 false,
                                 p.num_of_fix_satellites().to_string().into(),
                             ),
-                            ("lat", false, p.lat().to_string().into()),
-                            ("lon", false, p.lon().to_string().into()),
+                            ("lat", false, lat),
+                            ("lon", false, lon),
                         ],
                         &[(
                             "air temperature",
@@ -223,8 +262,11 @@ impl View for DownlinkPacketDisplay {
                         ],
                         &[("amp online", true, Self::format_bool(p.amp_online))],
                     ],
-                ),
-                VLPDownlinkPacket::LandedTelemetry(p) => self.draw_fields(
+                    )
+                }
+                VLPDownlinkPacket::LandedTelemetry(p) => {
+                    let (lat, lon) = Self::format_lat_lon(p.lat_lon());
+                    self.draw_fields(
                     &printer,
                     &[
                         &[
@@ -233,8 +275,8 @@ impl View for DownlinkPacketDisplay {
                                 false,
                                 p.num_of_fix_satellites().to_string().into(),
                             ),
-                            ("lat", false, p.lat().to_string().into()),
-                            ("lon", false, p.lon().to_string().into()),
+                            ("lat", false, lat),
+                            ("lon", false, lon),
                         ],
                         &[
                             ("vl battery", false, format!("{:.2}V", p.battery_v()).into()),
@@ -287,8 +329,10 @@ impl View for DownlinkPacketDisplay {
                             // ),
                         ],
                     ],
-                ),
+                    )
+                }
                 VLPDownlinkPacket::Telemetry(p) => {
+                    let (lat, lon) = Self::format_lat_lon(p.lat_lon());
                     self.draw_fields(
                     &printer,
                     &[
@@ -299,8 +343,8 @@ impl View for DownlinkPacketDisplay {
                                 p.num_of_fix_satellites().to_string().into(),
                             ),
                             ("unix clock", true, Self::format_bool(p.unix_clock_ready())),
-                            ("lat", false, p.lat().to_string().into()),
-                            ("lon", false, p.lon().to_string().into()),
+                            ("lat", false, lat),
+                            ("lon", false, lon),
                         ],
                         &[
                             (
@@ -333,33 +377,55 @@ impl View for DownlinkPacketDisplay {
                             (
                                 "servo temp",
                                 false,
-                                format!("{:.1}C", p.air_brakes_servo_temp()).into(),
+                                Self::format_optional(p.air_brakes_servo_temp(), |v| {
+                                    format!("{:.1}C", v)
+                                }),
                             ),
                         ],
+                        // The deployment KF goes absent for the whole Mach
+                        // lockout, so these three read "n/a" there while the
+                        // stage still says Ascent. That pairing is the tell:
+                        // an operator who sees blanks under an ascending
+                        // rocket is looking at a frozen filter, not at a
+                        // rocket sitting at 0m doing 0m/s.
                         &[
                             ("state", true, format!("{:?}", p.flight_stage()).into()),
                             (
                                 "altitude agl",
                                 false,
-                                format!("{:.1}m", p.deployment_kf_altitude_agl()).into(),
+                                Self::format_optional(p.deployment_kf_altitude_agl(), |v| {
+                                    format!("{:.1}m", v)
+                                }),
                             ),
                             (
                                 "max altitude agl",
                                 false,
-                                format!("{:.1}m", p.max_deployment_kf_altitude_agl()).into(),
+                                Self::format_optional(p.max_deployment_kf_altitude_agl(), |v| {
+                                    format!("{:.1}m", v)
+                                }),
                             ),
                             (
                                 "vertical velocity",
                                 false,
-                                format!("{:.1}m/s", p.deployment_kf_vertical_velocity()).into(),
+                                Self::format_optional(p.deployment_kf_vertical_velocity(), |v| {
+                                    format!("{:.1}m/s", v)
+                                }),
                             ),
-                            ("tilt", false, format!("{:.1}deg", p.airbrakes_kf_tilt_deg()).into()),
+                            (
+                                "tilt",
+                                false,
+                                Self::format_optional(p.airbrakes_kf_tilt_deg(), |v| {
+                                    format!("{:.1}deg", v)
+                                }),
+                            ),
                         ],
                         &[
                             (
                                 "predicted apogee agl",
                                 false,
-                                format!("{:.1}m", p.mpc_predicted_apogee_agl()).into(),
+                                Self::format_optional(p.mpc_predicted_apogee_agl(), |v| {
+                                    format!("{:.1}m", v)
+                                }),
                             ),
                             (
                                 "target apogee agl",
@@ -384,14 +450,18 @@ impl View for DownlinkPacketDisplay {
                                 )
                                 .into(),
                             ),
+                            // Absent until Icarus sends its first status
+                            // message, which is later than "icarus online"
+                            // going true — an "n/a" next to an online Icarus
+                            // means it has not reported the brakes yet, not
+                            // that they are stowed.
                             (
                                 "actual extension",
                                 false,
-                                format!(
-                                    "{}%",
-                                    (p.air_brakes_actual_extension_percentage() * 100.0).round()
-                                )
-                                .into(),
+                                Self::format_optional(
+                                    p.air_brakes_actual_extension_percentage(),
+                                    |v| format!("{}%", (v * 100.0).round()),
+                                ),
                             ),
                         ],
                         &[
@@ -476,42 +546,63 @@ impl View for DownlinkPacketDisplay {
                             ("exp 2", true, Self::format_bool(p.payload_exp2_active())),
                             ("exp 3", true, Self::format_bool(p.payload_exp3_active())),
                         ],
+                        // Each payload reading is separately absent: one dead
+                        // sensor blanks its own column and leaves the rest
+                        // readable. A rail that is switched off still shows
+                        // 0mA, which is why "n/a" has to look different from a
+                        // zero here.
                         &[
-                            ("epm batt", false, format!("{:.2}V", p.epm_batt_v()).into()),
+                            (
+                                "epm batt",
+                                false,
+                                Self::format_optional(p.epm_batt_v(), |v| format!("{:.2}V", v)),
+                            ),
                             (
                                 "sys 3v3",
                                 false,
-                                format!("{}mA", p.epm_sys_3v3_ma()).into(),
+                                Self::format_optional(p.epm_sys_3v3_ma(), |v| format!("{}mA", v)),
                             ),
-                            ("sys 5v", false, format!("{}mA", p.epm_sys_5v_ma()).into()),
+                            (
+                                "sys 5v",
+                                false,
+                                Self::format_optional(p.epm_sys_5v_ma(), |v| format!("{}mA", v)),
+                            ),
                             (
                                 "per 3v3",
                                 false,
-                                format!("{}mA", p.epm_per_3v3_ma()).into(),
+                                Self::format_optional(p.epm_per_3v3_ma(), |v| format!("{}mA", v)),
                             ),
-                            ("per 5v", false, format!("{}mA", p.epm_per_5v_ma()).into()),
-                            ("per 9v", false, format!("{}mA", p.epm_per_9v_ma()).into()),
+                            (
+                                "per 5v",
+                                false,
+                                Self::format_optional(p.epm_per_5v_ma(), |v| format!("{}mA", v)),
+                            ),
+                            (
+                                "per 9v",
+                                false,
+                                Self::format_optional(p.epm_per_9v_ma(), |v| format!("{}mA", v)),
+                            ),
                             (
                                 "per 12v",
                                 false,
-                                format!("{}mA", p.epm_per_12v_ma()).into(),
+                                Self::format_optional(p.epm_per_12v_ma(), |v| format!("{}mA", v)),
                             ),
                         ],
                         &[
                             (
                                 "act 1",
                                 false,
-                                p.sem_actuator_1_steps().to_string().into(),
+                                Self::format_optional(p.sem_actuator_1_steps(), |v| v.to_string()),
                             ),
                             (
                                 "act 2",
                                 false,
-                                p.sem_actuator_2_steps().to_string().into(),
+                                Self::format_optional(p.sem_actuator_2_steps(), |v| v.to_string()),
                             ),
                             (
                                 "act 3",
                                 false,
-                                p.sem_actuator_3_steps().to_string().into(),
+                                Self::format_optional(p.sem_actuator_3_steps(), |v| v.to_string()),
                             ),
                         ],
                     ],

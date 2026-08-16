@@ -20,6 +20,18 @@ struct MockVLPClient {
 }
 
 impl MockVLPClient {
+    /// The packet the mock TUI renders. Deliberately a *mid-flight Mach
+    /// lockout* snapshot rather than a fully-populated one: the deployment KF
+    /// is frozen (`deployment_kf: None`) while the stage still reads `Ascent`,
+    /// which is the state a fully-populated mock could never show and the one
+    /// the display has to get right — an operator seeing a blank altitude
+    /// under an ascending rocket must read "filter locked out", not "on the
+    /// ground at 0m".
+    ///
+    /// Icarus is online but has not sent an `IcarusStatusMessage` yet, and one
+    /// EPM rail failed to read, so the other two flavours of absence are on
+    /// screen too. Everything else is present, so the mock still exercises the
+    /// value path for each field.
     pub fn new() -> Self {
         Self {
             mock_packet: RwLock::new(Some((
@@ -32,13 +44,14 @@ impl MockVLPClient {
                     25.5,
                     false,
                     false,
-                    10.0,
-                    20.0,
-                    0.0,
-                    0.0,
-                    FlightStage::Armed,
-                    false,
-                    10.0,
+                    None,
+                    // Latched, so the apogee reached so far stays readable
+                    // through the lockout that blanks the live altitude.
+                    Some(1500.0),
+                    Some(4.0),
+                    FlightStage::Ascent,
+                    true,
+                    Some(2800.0),
                     3000.0,
                     false,
                     false,
@@ -49,11 +62,10 @@ impl MockVLPClient {
                     PowerOutputStatus::Disabled,
                     false,
                     PowerOutputStatus::Disabled,
-                    false,
+                    true,
                     false,
                     0.0,
-                    0.0,
-                    50.0,
+                    None,
                     false,
                     false,
                     false,

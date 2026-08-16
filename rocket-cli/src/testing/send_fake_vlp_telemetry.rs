@@ -18,7 +18,10 @@ use firmware_common_new::{
     vlp::{
         client::VLPAvionics,
         lora_config::LoraConfig,
-        packets::{VLPDownlinkPacket, telemetry::TelemetryPacket},
+        packets::{
+            VLPDownlinkPacket,
+            telemetry::{DeploymentKfState, IcarusAirBrakesState, TelemetryPacket},
+        },
     },
 };
 use log::info;
@@ -62,6 +65,10 @@ pub async fn send_fake_vlp_telemetry(args: SendVLPTelemetryArgs) -> Result<()> {
     let mut daemon = vlp_avionics_client.daemon(&mut rpc_radio, &vlp_key);
 
     let altitude_agl = args.altitude_agl.unwrap_or(0.0);
+    // The opposite shape to the mock ground station's packet: everything the
+    // operator asked for on the command line is present, because this one is
+    // aimed at a real receiver during a range test and a blanked-out field
+    // there would look like a link problem rather than a deliberate absence.
     let packet: VLPDownlinkPacket = {
         TelemetryPacket::new(
             0,
@@ -72,13 +79,15 @@ pub async fn send_fake_vlp_telemetry(args: SendVLPTelemetryArgs) -> Result<()> {
             25.5,
             false,
             false,
-            altitude_agl,
-            altitude_agl,
-            0.0,
-            0.0,
+            Some(DeploymentKfState {
+                altitude_agl,
+                vertical_velocity: 0.0,
+            }),
+            Some(altitude_agl),
+            Some(0.0),
             FlightStage::Armed,
             false,
-            altitude_agl,
+            Some(altitude_agl),
             3000.0,
             false,
             false,
@@ -92,8 +101,10 @@ pub async fn send_fake_vlp_telemetry(args: SendVLPTelemetryArgs) -> Result<()> {
             false,
             false,
             0.0,
-            0.0,
-            50.0,
+            Some(IcarusAirBrakesState {
+                actual_extension_percentage: 0.0,
+                servo_temp: 50.0,
+            }),
             false,
             false,
             false,

@@ -24,6 +24,14 @@ pub struct LowPowerTelemetryPacket {
 
     #[packed_field(element_size_bits = "5")]
     num_of_fix_satellites: u8,
+    /// Whether `lat` / `lon` hold a position. This packet already had the bit
+    /// the other two telemetry packets had to grow one for, so no width
+    /// changed here — only the getter, which now refuses to hand out the
+    /// (0, 0) the fields hold with no fix.
+    ///
+    /// Kept `pub` for compatibility, but read it through
+    /// [`LowPowerTelemetryPacket::lat_lon`] rather than pairing it with the
+    /// raw fields by hand.
     pub gps_fixed: bool,
 
     #[packed_field(element_size_bits = "23")]
@@ -56,7 +64,14 @@ impl LowPowerTelemetryPacket {
         Self {
             nonce: nonce.into(),
             num_of_fix_satellites,
-            gps_fixed,
+            // `gps_fixed` is the validity bit for the position, so it cannot be
+            // allowed to claim a fix the packet has no coordinates for. Every
+            // caller already passes `gps_data.lat_lon.is_some()`; the `&&`
+            // makes that agreement structural instead of a convention two
+            // firmware call sites happen to follow.
+            gps_fixed: gps_fixed && lat_lon.is_some(),
+            // The 0.0 filler is never read back: `lat_lon` refuses to decode
+            // unless `gps_fixed` is set.
             lat: LatFac::to_fixed_point_capped(lat_lon.unwrap_or((0.0, 0.0)).0),
             lon: LonFac::to_fixed_point_capped(lat_lon.unwrap_or((0.0, 0.0)).1),
             vl_battery_v: BatteryVFac::to_fixed_point_capped(vl_battery_v),
@@ -70,12 +85,16 @@ impl LowPowerTelemetryPacket {
         self.num_of_fix_satellites
     }
 
-    pub fn lat(&self) -> f64 {
-        LatFac::to_float(self.lat)
-    }
-
-    pub fn lon(&self) -> f64 {
-        LonFac::to_float(self.lon)
+    /// `None` until the GPS has solved a position. One getter rather than a
+    /// `lat()` and a `lon()`, for the same reason as on the other two
+    /// telemetry packets: a coordinate is only useful whole, and there should
+    /// be exactly one place the fix check can be skipped -- namely nowhere.
+    pub fn lat_lon(&self) -> Option<(f64, f64)> {
+        if self.gps_fixed {
+            Some((LatFac::to_float(self.lat), LonFac::to_float(self.lon)))
+        } else {
+            None
+        }
     }
 
     pub fn vl_battery_v(&self) -> f32 {
@@ -95,8 +114,8 @@ impl LowPowerTelemetryPacket {
         json::object! {
             num_of_fix_satellites: self.num_of_fix_satellites(),
             gps_fixed: self.gps_fixed,
-            lat: self.lat(),
-            lon: self.lon(),
+            lat: self.lat_lon().map(|(lat, _)| lat),
+            lon: self.lat_lon().map(|(_, lon)| lon),
             vl_battery_v: self.vl_battery_v(),
             amp_online: self.amp_online,
             shared_battery_v: self.shared_battery_v(),
@@ -122,6 +141,9 @@ pub struct LowPowerTelemetryPacketBuilderState {
     nonce: u8,
     pub num_of_fix_satellites: u8,
     pub gps_fixed: bool,
+    /// `None` until the GPS has a fix. `gps_fixed` is anded with this in
+    /// `new`, so a builder that sets one and forgets the other still produces
+    /// a packet whose validity bit matches its contents.
     pub lat_lon: Option<(f64, f64)>,
     pub vl_battery_v: f32,
     pub amp_online: bool,
@@ -202,7 +224,24 @@ mod tests {
         let VLPDownlinkPacket::LowPowerTelemetry(p) = deserialized_packet else {
             unreachable!()
         };
-        assert_relative_eq!(p.lat(), 45.5, epsilon = 0.0001);
-        assert_relative_eq!(p.lon(), -73.6, epsilon = 0.0001);
+        let (lat, lon) = p.lat_lon().unwrap();
+        assert_relative_eq!(lat, 45.5, epsilon = 0.0001);
+        assert_relative_eq!(lon, -73.6, epsilon = 0.0001);
+    }
+
+    /// With no fix the raw fields still hold the 0.0 filler, so the getter has
+    /// to be the thing that refuses -- otherwise the ground station plots the
+    /// rocket at Null Island.
+    #[test]
+    fn no_fix_reports_no_position() {
+        let packet = LowPowerTelemetryPacket::new(12, 0, false, None, 8.1, true, 8.2, 27.0);
+        assert!(!packet.gps_fixed);
+        assert_eq!(packet.lat_lon(), None);
+
+        // And a caller that claims a fix without supplying one does not get to
+        // downlink (0, 0) as a position.
+        let packet = LowPowerTelemetryPacket::new(12, 4, true, None, 8.1, true, 8.2, 27.0);
+        assert!(!packet.gps_fixed);
+        assert_eq!(packet.lat_lon(), None);
     }
 }

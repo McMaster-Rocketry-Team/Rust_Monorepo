@@ -50,6 +50,14 @@ pub const DEFAULT_TARGET_APOGEE_AGL: f32 = 4000.0;
 
 /// On-disk format version. Bump when the record or superblock layout changes;
 /// logs written at any other version are treated as absent.
+/// v12: absent data is `Option` everywhere instead of a sentinel value.
+///     `f32::NAN`, `PAYLOAD_READING_UNAVAILABLE` (0xFFFF), a zero
+///     `unix_time_us`, the `valid` bitmask and its `VALID_*` flags are all
+///     gone; sources that go missing as a unit (IMU, the two estimators, the
+///     AMP status, each node heartbeat) moved into grouped structs behind one
+///     `Option` each. Records grew — a sentinel costs nothing, an `Option`
+///     costs a discriminant plus padding — which is the price of a log that
+///     cannot mistake a reading for its own absence.
 /// v11: the slow record stores the full `NodeStatusMessage` (uptime, health,
 ///     mode, custom status) for AMP / Icarus / OzYS / payload SDRM, replacing
 ///     the lone `amp_online` bool. One OzYS this year, addressed by node type.
@@ -62,7 +70,7 @@ pub const DEFAULT_TARGET_APOGEE_AGL: f32 = 4000.0;
 ///     `mpc_predicted_apogee_agl` added to the slow record, `VALID_BARO` dropped.
 /// v8: payload EPM rail currents + SEM actuator steps in the slow record.
 /// v7: tagged FAST/SLOW stream (see `flight_data_record`). Older formats: see git history.
-pub const STORAGE_VERSION: u32 = 11;
+pub const STORAGE_VERSION: u32 = 12;
 
 /// rkyv body sizes for tagged record types.
 pub const FAST_BODY_LEN: usize = size_of::<<FlightDataFastRecord as rkyv::Archive>::Archived>();
@@ -370,28 +378,34 @@ mod tests {
     use crate::can_bus::messages::vl_status::FlightStage;
     use crate::can_bus::messages::node_status::{NodeHealth, NodeMode};
     use crate::flight_data_record::{
-        NodeStatusRecord, VALID_BATTERY, VALID_GPS_FIX, VALID_IMU, merge_log_records,
+        AirBrakesRecord, AirbrakesEstimatorRecord, AmpRecord, DeploymentEstimatorRecord, ImuRecord,
+        NodeStatusRecord, PayloadRecord, merge_log_records,
     };
 
     fn sample_fast(i: u32) -> FlightDataFastRecord {
         FlightDataFastRecord {
             sequence: i,
             timestamp_us: i as u64 * 2400,
-            unix_time_us: 1_750_000_000_000_000 + i as u64 * 2400,
-            acc: [i as f32, -1.5, 9.81],
-            gyro: [0.1, 0.2, 0.3],
+            unix_time_us: Some(1_750_000_000_000_000 + i as u64 * 2400),
+            imu: Some(ImuRecord {
+                acc: [i as f32, -1.5, 9.81],
+                gyro: [0.1, 0.2, 0.3],
+            }),
             pressure: 101325.0 - i as f32,
-            mag: [12.0, -34.0, 56.0],
-            deployment_kf_altitude_asl: 271.5 + i as f32,
-            deployment_kf_vertical_velocity: 0.25 * i as f32,
-            deployment_flags: 0,
-            airbrakes_kf_altitude_asl: 272.0 + i as f32,
-            airbrakes_kf_vertical_velocity: 0.3 * i as f32,
-            airbrakes_kf_tilt_deg: 5.0,
-            airbrakes_flags: 0,
+            mag: Some([12.0, -34.0, 56.0]),
+            deployment: Some(DeploymentEstimatorRecord {
+                kf_altitude_asl: Some(271.5 + i as f32),
+                kf_vertical_velocity: Some(0.25 * i as f32),
+                flags: 0,
+            }),
+            airbrakes: Some(AirbrakesEstimatorRecord {
+                kf_altitude_asl: Some(272.0 + i as f32),
+                kf_vertical_velocity: Some(0.3 * i as f32),
+                kf_tilt_deg: Some(5.0),
+                flags: 0,
+            }),
             flight_stage: FlightStage::Ascent,
-            pyro_flags: 0b0000_0101,
-            valid: VALID_IMU,
+            pyro_flags: Some(0b0000_0101),
         }
     }
 
@@ -399,34 +413,39 @@ mod tests {
         FlightDataSlowRecord {
             timestamp_us: i as u64 * 1_000_000,
             temperature: 21.5,
-            battery_voltage: 7.4,
-            lat_lon: (37.421998, -122.084),
-            gps_altitude_asl: 100.0 + i as f32,
-            num_of_fixed_satalites: 9,
-            hdop: 1.1,
-            vdop: 2.2,
-            pdop: 3.3,
-            air_brakes_commanded_extension: 0.25,
-            air_brakes_actual_extension: 0.2,
-            air_brakes_servo_temp: 41.5,
-            air_brakes_validation_deploy: false,
-            mpc_predicted_apogee_agl: 3010.0,
-            amp_node: NodeStatusRecord {
+            battery_voltage: Some(7.4),
+            lat_lon: Some((37.421998, -122.084)),
+            gps_altitude_asl: Some(100.0 + i as f32),
+            num_of_fix_satellites: 9,
+            hdop: Some(1.1),
+            vdop: Some(2.2),
+            pdop: Some(3.3),
+            air_brakes: AirBrakesRecord {
+                commanded_extension: Some(0.25),
+                predicted_apogee_agl: Some(3010.0),
+                validation_deploy: false,
+                actual_extension: Some(0.2),
+                servo_temp: Some(41.5),
+            },
+            amp: Some(AmpRecord {
+                shared_battery_v: 8.2,
+                out_status: 0b01_01_00,
+            }),
+            payload: PayloadRecord {
+                epm_batt_mv: Some(12600),
+                rail_ma: [Some(120), Some(340), None, Some(780), Some(1500), Some(2400)],
+                actuator_steps: [Some(0), Some(1200), Some(34567)],
+            },
+            amp_node: Some(NodeStatusRecord {
                 online: true,
                 uptime_s: 42,
                 health: NodeHealth::Healthy,
                 mode: NodeMode::Operational,
                 custom_status: 0,
-            },
-            icarus_node: NodeStatusRecord::offline(),
-            ozys_node: NodeStatusRecord::offline(),
-            payload_sdrm_node: NodeStatusRecord::offline(),
-            amp_out_status: 0b01_01_00,
-            amp_shared_battery_v: 8.2,
-            payload_epm_batt_mv: 12600,
-            payload_rail_ma: [120, 340, 0xFFFF, 780, 1500, 2400],
-            payload_actuator_steps: [0, 1200, 34567],
-            valid: VALID_BATTERY | VALID_GPS_FIX,
+            }),
+            icarus_node: None,
+            ozys_node: None,
+            payload_sdrm_node: None,
         }
     }
 
@@ -462,6 +481,55 @@ mod tests {
         let (back, wire) = deserialize_log_record_at(&bytes[..len], 0).unwrap();
         assert_eq!(wire, FAST_WIRE_LEN);
         assert_eq!(back, r);
+    }
+
+    /// Absence has to survive the card, not just the type system.
+    ///
+    /// [`sample_fast`] populates every field, so on its own it only proves
+    /// that *values* round trip — rkyv could drop an `Option`'s discriminant
+    /// and every existing test would still pass. This is the shape the format
+    /// exists to carry: a Mach-lockout sample, where the deployment filter is
+    /// frozen and has nothing to report, riding next to an airbrakes half that
+    /// is not born yet and an IMU that missed its tick. If any of these came
+    /// back as `Some(0.0)`, a post-flight plot would show the rocket sitting
+    /// at zero altitude through the fastest part of the flight.
+    #[test]
+    fn absent_fields_survive_the_round_trip() {
+        let r = LogRecord::Fast(FlightDataFastRecord {
+            deployment: Some(DeploymentEstimatorRecord {
+                kf_altitude_asl: None,
+                kf_vertical_velocity: None,
+                flags: 0,
+            }),
+            airbrakes: None,
+            imu: None,
+            mag: None,
+            unix_time_us: None,
+            pyro_flags: None,
+            ..sample_fast(7)
+        });
+
+        let (bytes, len) = serialize_log_record(&r);
+        let (back, _) = deserialize_log_record_at(&bytes[..len], 0).unwrap();
+        assert_eq!(back, r);
+
+        let LogRecord::Fast(fast) = back else {
+            panic!("tag changed across the round trip");
+        };
+        // Spelled out rather than left to the `assert_eq!` above, because the
+        // failure this guards against is precisely an `Option` decaying into a
+        // plausible-looking zero.
+        let deployment = fast.deployment.expect("the estimator sample itself is present");
+        assert_eq!(deployment.kf_altitude_asl, None);
+        assert_eq!(deployment.kf_vertical_velocity, None);
+        assert_eq!(fast.airbrakes, None);
+        assert_eq!(fast.imu, None);
+        assert_eq!(fast.mag, None);
+        assert_eq!(fast.unix_time_us, None);
+        assert_eq!(fast.pyro_flags, None);
+        // The record is a fixed-width archive, so an all-absent sample costs
+        // exactly what a fully populated one does.
+        assert_eq!(len, FAST_WIRE_LEN);
     }
 
     #[test]
@@ -540,14 +608,43 @@ mod tests {
         // Stage and pyro flags come from the fast record at full rate, not
         // the slow snapshot; the AMP snapshot rides in the slow record.
         assert_eq!(merged[0].flight_stage, FlightStage::Ascent);
-        assert_eq!(merged[0].pyro_flags, 0b0000_0101);
-        assert_eq!(merged[0].unix_time_us, 1_750_000_000_000_000);
-        assert!(merged[0].amp_node.online);
-        assert_eq!(merged[0].amp_out_status, 0b01_01_00);
-        assert_eq!(merged[0].deployment_kf_altitude_asl, 271.5);
+        assert_eq!(merged[0].pyro_flags, Some(0b0000_0101));
+        assert_eq!(merged[0].unix_time_us, Some(1_750_000_000_000_000));
+        assert!(merged[0].amp_node.as_ref().unwrap().online);
+        // Nodes that never sent a heartbeat have no record at all.
+        assert!(merged[0].ozys_node.is_none());
+        assert_eq!(merged[0].amp.as_ref().unwrap().out_status, 0b01_01_00);
+        assert_eq!(
+            merged[0].deployment.as_ref().unwrap().kf_altitude_asl,
+            Some(271.5)
+        );
 
         let sb = encode_superblock(n, blocks.len() as u32, last_off);
         let info = decode_superblock(&sb).unwrap();
         assert_eq!(info.last_block_offset, last_off);
     }
+
+    #[test]
+    fn merge_before_first_slow_record_reports_nothing() {
+        // A fast record logged before any slow snapshot has no slow data to
+        // borrow, and says so rather than inventing a plausible zero.
+        let merged = merge_log_records(&[LogRecord::Fast(sample_fast(0))]);
+        assert_eq!(merged.len(), 1);
+        assert!(merged[0].temperature.is_none());
+        assert!(merged[0].num_of_fix_satellites.is_none());
+        assert!(merged[0].air_brakes.is_none());
+        assert!(merged[0].payload.is_none());
+        assert!(merged[0].amp.is_none());
+        // Fast-record columns are unaffected.
+        assert_eq!(merged[0].pressure, 101325.0);
+
+        let merged = merge_log_records(&[
+            LogRecord::Slow(sample_slow(0)),
+            LogRecord::Fast(sample_fast(0)),
+        ]);
+        assert_eq!(merged[0].temperature, Some(21.5));
+        assert_eq!(merged[0].num_of_fix_satellites, Some(9));
+        assert_eq!(merged[0].payload.as_ref().unwrap().rail_ma[2], None);
+    }
+
 }

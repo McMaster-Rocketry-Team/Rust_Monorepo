@@ -209,6 +209,13 @@ fn emit(value: Value) {
 }
 
 /// Serialize a downlink packet + link status to a JSON object (one line).
+///
+/// Every field the rocket may not have is an `Option` coming out of the packet
+/// and serializes as `null`, so a scripted consumer sees the absence instead of
+/// a stand-in number — a `deployment_kf_altitude_agl` of `null` through the
+/// Mach lockout rather than a 0.0 that would plot as a rocket on the ground.
+/// The key set is fixed either way: a key is always present, its value may be
+/// `null`.
 fn downlink_json(packet: &VLPDownlinkPacket, status: &PacketStatus) -> Value {
     match packet {
         VLPDownlinkPacket::Telemetry(p) => json!({
@@ -230,7 +237,7 @@ fn downlink_json(packet: &VLPDownlinkPacket, status: &PacketStatus) -> Value {
             "shared_battery_v": p.shared_battery_v(),
             "air_temperature": p.air_temperature(),
             "satellites": p.num_of_fix_satellites(),
-            "lat": p.lat(), "lon": p.lon(),
+            "lat": p.lat_lon().map(|(lat, _)| lat), "lon": p.lat_lon().map(|(_, lon)| lon),
             "icarus_online": p.icarus_online(),
             "amp_online": p.amp_online(),
         }),
@@ -239,7 +246,7 @@ fn downlink_json(packet: &VLPDownlinkPacket, status: &PacketStatus) -> Value {
             "rssi": status.rssi, "snr": status.snr,
             "gps_fixed": p.gps_fixed,
             "satellites": p.num_of_fix_satellites(),
-            "lat": p.lat(), "lon": p.lon(),
+            "lat": p.lat_lon().map(|(lat, _)| lat), "lon": p.lat_lon().map(|(_, lon)| lon),
             "air_temperature": p.air_temperature(),
             "vl_battery_v": p.vl_battery_v(),
             "shared_battery_v": p.shared_battery_v(),
@@ -256,7 +263,7 @@ fn downlink_json(packet: &VLPDownlinkPacket, status: &PacketStatus) -> Value {
             "type": "landed_telemetry",
             "rssi": status.rssi, "snr": status.snr,
             "satellites": p.num_of_fix_satellites(),
-            "lat": p.lat(), "lon": p.lon(),
+            "lat": p.lat_lon().map(|(lat, _)| lat), "lon": p.lat_lon().map(|(_, lon)| lon),
             "vl_battery_v": p.battery_v(),
             "shared_battery_v": p.shared_battery_v(),
             "amp_online": p.amp_online(),

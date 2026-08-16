@@ -150,10 +150,11 @@ impl DeploymentProfile {
 /// Each variant carries only numbers that are live and trustworthy in that
 /// state — most prominently, [`RocketState::MachLockout`] has no altitude
 /// and no velocity, because the KF is frozen there and any value would be
-/// stale. A caller who needs the raw (possibly frozen) KF numbers for
-/// logging must ask for them explicitly via
+/// stale. A caller that wants the filter's numbers without the state
+/// machine wrapped around them — the SD log, mainly — reads
 /// [`RocketStateEstimator::kf_altitude_asl`] /
-/// [`RocketStateEstimator::kf_vertical_velocity`].
+/// [`RocketStateEstimator::kf_vertical_velocity`] instead, which go absent
+/// over exactly the same window this variant set drops its fields in.
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum RocketState {
@@ -514,11 +515,6 @@ impl RocketStateEstimator {
         }
     }
 
-    /// Raw KF altitude ASL (m) for the fast flight-log record ONLY. During
-    /// the Mach lockout the KF is frozen, so this value may be stale by tens
-    /// of seconds — for logging/diagnostics, never for control decisions.
-    /// The honest interface is [`Self::state`], whose
-    /// [`RocketState::MachLockout`] variant carries no altitude at all.
     /// What the innovation gate did with the sample this estimator last
     /// processed. Read it immediately after [`Self::update`]: it describes
     /// that one sample and is overwritten by the next.
@@ -526,19 +522,54 @@ impl RocketStateEstimator {
         self.last_baro_gate
     }
 
-    pub fn kf_altitude_asl(&self) -> f32 {
-        self.kf.as_ref().map(|kf| kf.altitude_asl()).unwrap_or(0.0)
+    /// The filter, but only on samples where its contents are an actual
+    /// reading of the present: `None` before the first [`Self::update`]
+    /// births it, and `None` for the whole Mach lockout, where it is frozen
+    /// (no predict, no update) and still holds whatever it last saw before
+    /// ignition. Both public KF accessors funnel through here so they cannot
+    /// disagree about whether this sample has a reading at all — one handing
+    /// out a number while the other admits it has none would be a worse lie
+    /// than either alone.
+    fn live_kf(&self) -> Option<&BaroAltitudeKF> {
+        if matches!(self.stage, Stage::MachLockout { .. }) {
+            return None;
+        }
+        self.kf.as_ref()
     }
 
-    /// Raw KF vertical velocity (m/s) for the fast flight-log record ONLY.
-    /// Like [`Self::kf_altitude_asl`], may be frozen/stale during the Mach
-    /// lockout — for logging/diagnostics, never for control decisions. The
-    /// honest interface is [`Self::state`].
-    pub fn kf_vertical_velocity(&self) -> f32 {
-        self.kf
-            .as_ref()
-            .map(|kf| kf.vertical_velocity())
-            .unwrap_or(0.0)
+    /// KF altitude ASL (m) for the fast flight-log record, or `None` when
+    /// there is genuinely no altitude to report: before the filter is born,
+    /// and throughout the Mach lockout, where it is frozen and what it holds
+    /// is a pre-ignition reading that can be tens of seconds and kilometres
+    /// out of date. Absence is reported as absence rather than as a
+    /// plausible-looking zero, so the SD log and the telemetry packet now
+    /// describe the lockout window the same way instead of one recording the
+    /// frozen value and the other recording 0.
+    ///
+    /// Every other stage returns `Some` — including `OnPad`, `Landed` and
+    /// `FailedToReachMinApogee`, whose [`RocketState`] variants carry no
+    /// altitude field of their own. The filter is running and fusing baro in
+    /// all of them, so the number is live and means what it says; those
+    /// variants omit it because the state machine has nothing to *decide*
+    /// from it there, not because it is untrustworthy.
+    ///
+    /// Still prefer [`Self::state`] for anything that acts on the value —
+    /// not because this accessor is less honest, but because `state()` hands
+    /// over the stage and the numbers as one value, so a caller cannot read
+    /// an altitude without also learning which flight phase produced it.
+    pub fn kf_altitude_asl(&self) -> Option<f32> {
+        self.live_kf().map(|kf| kf.altitude_asl())
+    }
+
+    /// KF vertical velocity (m/s) for the fast flight-log record. Present in
+    /// exactly the samples [`Self::kf_altitude_asl`] is present in, and
+    /// absent for the same two reasons — unborn filter, or frozen filter
+    /// during the Mach lockout — so the logged altitude and velocity always
+    /// come from the same live filter state or from no filter state at all.
+    /// [`Self::state`] remains the interface to prefer for control, for the
+    /// stage-plus-numbers reason given there.
+    pub fn kf_vertical_velocity(&self) -> Option<f32> {
+        self.live_kf().map(|kf| kf.vertical_velocity())
     }
 
     /// Launch pad altitude ASL (m), available in every stage: while on the

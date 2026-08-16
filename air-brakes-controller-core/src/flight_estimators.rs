@@ -287,9 +287,15 @@ impl FlightEstimators {
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy)]
 pub struct EstimatorLogSample {
-    /// Raw, possibly lockout-frozen deployment KF output.
-    pub deployment_altitude_asl: f32,
-    pub deployment_vertical_velocity: f32,
+    /// The deployment KF's output, `None` on every sample where that filter
+    /// has no live reading: before it is born, and throughout the Mach
+    /// lockout, where it is frozen (see
+    /// [`RocketStateEstimator::kf_altitude_asl`]). Absent, not zero and not
+    /// the stale frozen value — so this record and the telemetry packet,
+    /// which sources the same window from [`RocketState::MachLockout`],
+    /// agree that nothing was measured there.
+    pub deployment_altitude_asl: Option<f32>,
+    pub deployment_vertical_velocity: Option<f32>,
     pub deployment_baro_gate: BaroGateOutcome,
     /// `None` once the airbrakes half is retired at apogee — absent, not zero.
     pub airbrakes: Option<AirbrakesLogSample>,

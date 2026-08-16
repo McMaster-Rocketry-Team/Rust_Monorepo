@@ -62,6 +62,15 @@ impl CustomPayloadStatusMessage {
     }
 
     /// `None` if the reading is invalid or unavailable.
+    ///
+    /// The struct fields stay raw `u16` because that is what goes on the wire
+    /// and what a `PackedStruct` literal has to be built from, but nothing
+    /// downstream should be reading them directly — every accessor below runs
+    /// the field through here first, so a caller gets an `Option` it has to
+    /// deal with rather than a `0xFFFF` it has to remember to check for. Each
+    /// accessor is deliberately named exactly like its field, so
+    /// `msg.epm_batt_mv()` is the obvious thing to reach for and
+    /// `msg.epm_batt_mv` is the thing you have to go out of your way to write.
     pub fn reading(raw: u16) -> Option<u16> {
         if raw == PAYLOAD_READING_UNAVAILABLE {
             None
@@ -70,25 +79,83 @@ impl CustomPayloadStatusMessage {
         }
     }
 
+    /// EPM battery bus voltage, mV. `None` if EPM could not read it.
+    pub fn epm_batt_mv(&self) -> Option<u16> {
+        Self::reading(self.epm_batt_mv)
+    }
+
+    /// System 3.3V rail load current, mA. `None` if EPM could not read it.
+    /// A rail that is switched off reads `Some(0)`, not `None`.
+    pub fn epm_sys_3v3_ma(&self) -> Option<u16> {
+        Self::reading(self.epm_sys_3v3_ma)
+    }
+
+    /// System 5V rail load current, mA. `None` if EPM could not read it.
+    pub fn epm_sys_5v_ma(&self) -> Option<u16> {
+        Self::reading(self.epm_sys_5v_ma)
+    }
+
+    /// Peripheral 3.3V rail load current, mA. `None` if EPM could not read it.
+    pub fn epm_per_3v3_ma(&self) -> Option<u16> {
+        Self::reading(self.epm_per_3v3_ma)
+    }
+
+    /// Peripheral 5V rail load current, mA. `None` if EPM could not read it.
+    pub fn epm_per_5v_ma(&self) -> Option<u16> {
+        Self::reading(self.epm_per_5v_ma)
+    }
+
+    /// Peripheral 9V rail load current, mA. `None` if EPM could not read it.
+    pub fn epm_per_9v_ma(&self) -> Option<u16> {
+        Self::reading(self.epm_per_9v_ma)
+    }
+
+    /// Peripheral 12V rail load current, mA. `None` if EPM could not read it.
+    pub fn epm_per_12v_ma(&self) -> Option<u16> {
+        Self::reading(self.epm_per_12v_ma)
+    }
+
+    /// Experiment channel 1 actuator position, steps. `None` if SEM could not
+    /// read it. An actuator parked at its home position reads `Some(0)`.
+    pub fn sem_actuator_1_steps(&self) -> Option<u16> {
+        Self::reading(self.sem_actuator_1_steps)
+    }
+
+    /// Experiment channel 2 actuator position, steps. `None` if SEM could not
+    /// read it.
+    pub fn sem_actuator_2_steps(&self) -> Option<u16> {
+        Self::reading(self.sem_actuator_2_steps)
+    }
+
+    /// Experiment channel 3 actuator position, steps. `None` if SEM could not
+    /// read it.
+    pub fn sem_actuator_3_steps(&self) -> Option<u16> {
+        Self::reading(self.sem_actuator_3_steps)
+    }
+
     /// The six rail currents in the stack's rail index order (0 `SYS_3V3`,
-    /// 1 `SYS_5V`, 2 `PER_3V3`, 3 `PER_5V`, 4 `PER_9V`, 5 `PER_12V`).
-    pub fn rail_ma(&self) -> [u16; 6] {
+    /// 1 `SYS_5V`, 2 `PER_3V3`, 3 `PER_5V`, 4 `PER_9V`, 5 `PER_12V`), each
+    /// `None` if EPM could not read that rail. Rails fail to read
+    /// individually — one dead INA does not take the other five with it — so
+    /// this is an array of `Option`, not an `Option` of an array.
+    pub fn rail_ma(&self) -> [Option<u16>; 6] {
         [
-            self.epm_sys_3v3_ma,
-            self.epm_sys_5v_ma,
-            self.epm_per_3v3_ma,
-            self.epm_per_5v_ma,
-            self.epm_per_9v_ma,
-            self.epm_per_12v_ma,
+            self.epm_sys_3v3_ma(),
+            self.epm_sys_5v_ma(),
+            self.epm_per_3v3_ma(),
+            self.epm_per_5v_ma(),
+            self.epm_per_9v_ma(),
+            self.epm_per_12v_ma(),
         ]
     }
 
-    /// Actuator positions for experiment channels 1..3.
-    pub fn actuator_steps(&self) -> [u16; 3] {
+    /// Actuator positions for experiment channels 1..3, each `None` if SEM
+    /// could not read that channel.
+    pub fn actuator_steps(&self) -> [Option<u16>; 3] {
         [
-            self.sem_actuator_1_steps,
-            self.sem_actuator_2_steps,
-            self.sem_actuator_3_steps,
+            self.sem_actuator_1_steps(),
+            self.sem_actuator_2_steps(),
+            self.sem_actuator_3_steps(),
         ]
     }
 }
@@ -173,8 +240,42 @@ mod test {
             sem_actuator_2_steps: 8,
             sem_actuator_3_steps: 9,
         };
-        assert_eq!(message.rail_ma(), [1, 2, 3, 4, 5, 6]);
-        assert_eq!(message.actuator_steps(), [7, 8, 9]);
+        assert_eq!(message.epm_batt_mv(), Some(12600));
+        assert_eq!(
+            message.rail_ma(),
+            [Some(1), Some(2), Some(3), Some(4), Some(5), Some(6)]
+        );
+        assert_eq!(message.actuator_steps(), [Some(7), Some(8), Some(9)]);
+    }
+
+    /// A reading that is unavailable has to stay unavailable all the way to
+    /// the caller, and a genuine 0 has to survive as a 0 — a switched-off rail
+    /// and an actuator at its home position both read 0 in normal operation.
+    #[test]
+    fn unavailable_readings_are_none_and_zeros_are_not() {
+        let message = CustomPayloadStatusMessage::new_unavailable();
+        assert_eq!(message.epm_batt_mv(), None);
+        assert_eq!(message.rail_ma(), [None; 6]);
+        assert_eq!(message.actuator_steps(), [None; 3]);
+
+        let message = CustomPayloadStatusMessage {
+            epm_batt_mv: 0,
+            epm_sys_3v3_ma: 0,
+            epm_sys_5v_ma: PAYLOAD_READING_UNAVAILABLE,
+            epm_per_3v3_ma: 0,
+            epm_per_5v_ma: 0,
+            epm_per_9v_ma: 0,
+            epm_per_12v_ma: 0,
+            sem_actuator_1_steps: 0,
+            sem_actuator_2_steps: PAYLOAD_READING_UNAVAILABLE,
+            sem_actuator_3_steps: 0,
+        };
+        assert_eq!(message.epm_batt_mv(), Some(0));
+        assert_eq!(
+            message.rail_ma(),
+            [Some(0), None, Some(0), Some(0), Some(0), Some(0)]
+        );
+        assert_eq!(message.actuator_steps(), [Some(0), None, Some(0)]);
     }
 
     #[test]

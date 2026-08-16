@@ -345,15 +345,57 @@ TEST(CustomPayloadStatusTest, RailAndActuatorOrder) {
     msg.sem_actuator_2_steps = 200;
     msg.sem_actuator_3_steps = 300;
 
-    uint16_t rails[6];
-    msg.rail_ma(rails);
-    for (uint16_t i = 0; i < 6; ++i) EXPECT_EQ(rails[i], 10 + i);
+    auto rails = msg.rail_ma();
+    for (uint16_t i = 0; i < 6; ++i) EXPECT_EQ(rails[i].value(), 10 + i);
 
-    uint16_t steps[3];
-    msg.actuator_steps(steps);
-    EXPECT_EQ(steps[0], 100);
-    EXPECT_EQ(steps[1], 200);
-    EXPECT_EQ(steps[2], 300);
+    auto steps = msg.actuator_steps();
+    EXPECT_EQ(steps[0].value(), 100);
+    EXPECT_EQ(steps[1].value(), 200);
+    EXPECT_EQ(steps[2].value(), 300);
+}
+
+// A reading that is unavailable has to stay unavailable all the way to the
+// caller, and a genuine 0 has to survive as a 0 — a switched-off rail and an
+// actuator at its home position both read 0 in normal operation.
+TEST(CustomPayloadStatusTest, UnavailableReadingsAreNulloptAndZerosAreNot) {
+    using firmware_common::can_bus::CustomPayloadStatusMessage;
+    constexpr uint16_t UNAVAILABLE = CustomPayloadStatusMessage::PAYLOAD_READING_UNAVAILABLE;
+
+    auto all_unavailable = CustomPayloadStatusMessage::new_unavailable();
+    EXPECT_FALSE(all_unavailable.epm_batt_mv_reading().has_value());
+    for (const auto& rail : all_unavailable.rail_ma()) EXPECT_FALSE(rail.has_value());
+    for (const auto& step : all_unavailable.actuator_steps()) EXPECT_FALSE(step.has_value());
+
+    // One dead rail and one dead actuator channel, everything else a real 0.
+    CustomPayloadStatusMessage msg{};
+    msg.epm_sys_5v_ma = UNAVAILABLE;
+    msg.sem_actuator_2_steps = UNAVAILABLE;
+
+    EXPECT_EQ(msg.epm_batt_mv_reading().value(), 0);
+
+    auto rails = msg.rail_ma();
+    EXPECT_EQ(rails[0].value(), 0);
+    EXPECT_FALSE(rails[1].has_value());
+    for (size_t i = 2; i < rails.size(); ++i) EXPECT_EQ(rails[i].value(), 0);
+
+    auto steps = msg.actuator_steps();
+    EXPECT_EQ(steps[0].value(), 0);
+    EXPECT_FALSE(steps[1].has_value());
+    EXPECT_EQ(steps[2].value(), 0);
+
+    // The individual accessors agree with the arrays, and the sentinel still
+    // goes out on the wire and comes back as std::nullopt.
+    EXPECT_FALSE(msg.epm_sys_5v_ma_reading().has_value());
+    EXPECT_FALSE(msg.sem_actuator_2_steps_reading().has_value());
+    EXPECT_EQ(msg.epm_per_12v_ma_reading().value(), 0);
+    EXPECT_EQ(msg.sem_actuator_3_steps_reading().value(), 0);
+
+    uint8_t buffer[CustomPayloadStatusMessage::SIZE_BYTES];
+    msg.serialize(buffer);
+    auto round_tripped = CustomPayloadStatusMessage::deserialize(buffer);
+    EXPECT_EQ(round_tripped.epm_sys_5v_ma, UNAVAILABLE);
+    EXPECT_FALSE(round_tripped.epm_sys_5v_ma_reading().has_value());
+    EXPECT_EQ(round_tripped.epm_sys_3v3_ma_reading().value(), 0);
 }
 
 // Matches Rust's data(): the bytes past data_len are padding.
