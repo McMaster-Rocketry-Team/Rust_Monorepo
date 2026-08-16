@@ -9,6 +9,13 @@ pub const RECORD_TAG_SLOW: u8 = 0x02;
 
 #[derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive, Debug, Clone, PartialEq)]
 pub struct FlightDataFastRecord {
+    /// Per-record counter, restarting at 0 each armed session — the logger runs
+    /// inside armed mode, so a re-arm (or a reboot) begins a new count.
+    ///
+    /// Within a session, a step of anything other than +1 means records were
+    /// dropped on the way to the SD card. A step *backwards* is a session
+    /// boundary, not a drop: one stored log can hold several armed sessions
+    /// (nothing is logged in between), and this is what marks where one ends.
     pub sequence: u32,
     pub timestamp_us: u64,
     /// GPS-disciplined unix clock, microseconds since the epoch. 0 until the
@@ -115,6 +122,8 @@ pub enum LogRecord {
 /// Merged view used for CSV export (one row per fast record).
 #[derive(Debug, Clone, PartialEq)]
 pub struct FlightDataRecord {
+    /// [`FlightDataFastRecord::sequence`] — see there for what a discontinuity
+    /// means (a drop forwards, a session boundary backwards).
     pub record_count: u32,
     pub timestamp_us: u64,
     /// GPS-disciplined unix clock (µs since epoch), 0 until the clock is ready.
