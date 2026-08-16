@@ -19,11 +19,13 @@ use firmware_common_new::flight_data_record::{
     VALID_BARO, VALID_BATTERY, VALID_GPS_ALT, VALID_GPS_FIX, VALID_IMU, VALID_MAG,
     merge_log_records,
 };
+use firmware_common_new::can_bus::messages::amp_status::PowerOutputStatus;
 use firmware_common_new::flight_storage::{
     BLOCK_SIZE, HEADER_LEN, RECORD_LEN_TAGGED, RESPONSE_MAGIC, decode_response_header,
     parse_log_records, verify_data_block,
 };
 use firmware_common_new::vlp::usb::CliRequest;
+use packed_struct::PrimitiveEnum as _;
 
 /// USB vendor/product IDs for the WinUSB flight-log interface.
 const VLF5_USB_VID: u16 = 0xc0de;
@@ -238,9 +240,10 @@ fn parse_records(data: &[u8]) -> Result<(u32, Vec<FlightDataRecord>)> {
     }
     let log = parse_log_records(log_record_count, blocks, block_count).ok_or_else(|| {
         anyhow!(
-            "failed to decode the log stream — it was likely written by firmware using an \
-             older storage version. Use a matching rocket-cli to download it, or clear \
-             the storage."
+            "failed to decode the log stream — this rocket-cli reads storage v{}, so the \
+             log was likely written by firmware using an older storage version. Use a \
+             matching rocket-cli to download it, or clear the storage.",
+            firmware_common_new::flight_storage::STORAGE_VERSION
         )
     })?;
     let merged = merge_log_records(&log);
@@ -252,11 +255,24 @@ fn bit(mask: u8, flag: u8) -> String {
     ((mask & flag) != 0).to_string()
 }
 
+/// Decode one AMP output's 2-bit `PowerOutputStatus` from the packed
+/// `amp_out_status` byte (out1 in the LSBs).
+fn amp_out(status: u8, out_index: u8) -> String {
+    match PowerOutputStatus::from_primitive((status >> (out_index * 2)) & 0b11) {
+        Some(s) => format!("{:?}", s),
+        None => "Invalid".to_string(),
+    }
+}
+
 fn write_csv(path: &str, records: &[FlightDataRecord]) -> Result<()> {
     let mut w = csv::Writer::from_path(path).with_context(|| format!("creating {}", path))?;
+    // Pyro and airbrakes-extension columns come from the fast record since
+    // storage v7, so they update at the full fast rate (±2.3 ms), not once
+    // per slow snapshot.
     w.write_record([
         "record_count",
         "timestamp_us",
+        "unix_time_us",
         "acc_x",
         "acc_y",
         "acc_z",
@@ -287,7 +303,6 @@ fn write_csv(path: &str, records: &[FlightDataRecord]) -> Result<()> {
         "vdop",
         "pdop",
         "flight_stage",
-        "coasting",
         "imu_valid",
         "baro_valid",
         "mag_valid",
@@ -303,6 +318,12 @@ fn write_csv(path: &str, records: &[FlightDataRecord]) -> Result<()> {
         "air_brakes_actual_extension",
         "air_brakes_commanded_valid",
         "air_brakes_actual_valid",
+        "air_brakes_servo_temp",
+        "amp_online",
+        "amp_out1_status",
+        "amp_out2_status",
+        "amp_out3_status",
+        "amp_shared_battery_v",
     ])?;
 
     for r in records {
@@ -311,6 +332,7 @@ fn write_csv(path: &str, records: &[FlightDataRecord]) -> Result<()> {
         w.write_record([
             r.record_count.to_string(),
             r.timestamp_us.to_string(),
+            r.unix_time_us.to_string(),
             r.acc[0].to_string(),
             r.acc[1].to_string(),
             r.acc[2].to_string(),
@@ -341,7 +363,6 @@ fn write_csv(path: &str, records: &[FlightDataRecord]) -> Result<()> {
             r.vdop.to_string(),
             r.pdop.to_string(),
             format!("{:?}", r.flight_stage),
-            r.coasting.to_string(),
             bit(v, VALID_IMU),
             bit(v, VALID_BARO),
             bit(v, VALID_MAG),
@@ -357,6 +378,12 @@ fn write_csv(path: &str, records: &[FlightDataRecord]) -> Result<()> {
             r.air_brakes_actual_extension.to_string(),
             bit(v, VALID_AIRBRAKES_COMMANDED),
             bit(v, VALID_AIRBRAKES_ACTUAL),
+            r.air_brakes_servo_temp.to_string(),
+            r.amp_online.to_string(),
+            amp_out(r.amp_out_status, 0),
+            amp_out(r.amp_out_status, 1),
+            amp_out(r.amp_out_status, 2),
+            r.amp_shared_battery_v.to_string(),
         ])?;
     }
 

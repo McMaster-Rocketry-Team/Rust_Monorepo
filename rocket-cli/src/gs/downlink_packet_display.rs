@@ -261,6 +261,8 @@ impl View for DownlinkPacketDisplay {
                                 false,
                                 p.num_of_fix_satellites().to_string().into(),
                             ),
+                            ("lat", false, p.lat().to_string().into()),
+                            ("lon", false, p.lon().to_string().into()),
                         ],
                         &[(
                             "air temperature",
@@ -397,7 +399,6 @@ impl View for DownlinkPacketDisplay {
                         ],
                         &[
                             ("state", true, format!("{:?}", p.flight_stage()).into()),
-                            ("coasting", true, Self::format_bool(p.coasting())),
                             (
                                 "drogue deployed",
                                 true,
@@ -429,6 +430,42 @@ impl View for DownlinkPacketDisplay {
                                 format!("{:.1}m/s", p.max_air_speed()).into(),
                             ),
                             ("tilt", false, format!("{:.1}deg", p.tilt_deg()).into()),
+                        ],
+                        &[
+                            (
+                                "ab altitude agl",
+                                false,
+                                format!("{:.1}m", p.ab_altitude_agl()).into(),
+                            ),
+                            (
+                                "ab vertical velocity",
+                                false,
+                                format!("{:.1}m/s", p.ab_vertical_velocity()).into(),
+                            ),
+                            (
+                                "target apogee agl",
+                                false,
+                                format!("{:.1}m", p.target_apogee_agl()).into(),
+                            ),
+                        ],
+                        &[
+                            (
+                                "ab vote inertial",
+                                true,
+                                Self::format_bool(p.ab_vote_inertial()),
+                            ),
+                            (
+                                "vote deployment",
+                                true,
+                                Self::format_bool(p.ab_vote_deployment()),
+                            ),
+                            (
+                                "vote baro rate",
+                                true,
+                                Self::format_bool(p.ab_vote_baro_rate()),
+                            ),
+                            ("born", true, Self::format_bool(p.ab_born())),
+                            ("apogee", true, Self::format_bool(p.ab_apogee())),
                         ],
                         &[
                             ("icarus online", true, Self::format_bool(p.icarus_online())),
@@ -497,38 +534,6 @@ impl View for DownlinkPacketDisplay {
                             //         p.amp_out4(),
                             //     ),
                             // ),
-                        ],
-                        &[
-                            (
-                                "main bulkhead online",
-                                true,
-                                Self::format_bool(p.main_bulkhead_online()),
-                            ),
-                            (
-                                "rebooted",
-                                true,
-                                Self::format_bool(p.main_bulkhead_rebooted_in_last_5s()),
-                            ),
-                            (
-                                "brightness",
-                                true,
-                                format!("{:.2}lux", p.main_bulkhead_brightness_lux()).into(),
-                            ),
-                            (
-                                "drogue bulkhead online",
-                                true,
-                                Self::format_bool(p.drogue_bulkhead_online()),
-                            ),
-                            (
-                                "rebooted",
-                                true,
-                                Self::format_bool(p.drogue_bulkhead_rebooted_in_last_5s()),
-                            ),
-                            (
-                                "brightness",
-                                true,
-                                format!("{:.2}lux", p.drogue_bulkhead_brightness_lux()).into(),
-                            ),
                         ],
                         &[
                             ("ozys 1 online", true, Self::format_bool(p.ozys1_online())),

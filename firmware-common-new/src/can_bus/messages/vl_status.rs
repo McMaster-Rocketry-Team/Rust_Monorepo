@@ -8,10 +8,9 @@ use super::{CanBusMessage, CanBusMessageEnum};
 /// `LowPower` / `SelfTest` / `Armed` are device modes; the remaining values
 /// mirror the deployment estimator's `RocketState` variants 1:1 — nothing is
 /// folded (`MachLockout` and `FailedToReachMinApogee` report as themselves).
-/// The `coasting` burn-timer flag and the chutes' `deployed` bools are
-/// orthogonal to the stage and travel as separate bools next to it
-/// (`RocketStateMessage::is_coasting` on CAN, dedicated bools in the VLP
-/// telemetry packet, `coasting` / pyro fire flags in the flight data records).
+/// The chutes' `deployed` bools are orthogonal to the stage and travel as
+/// separate bools next to it (dedicated bools in the VLP telemetry packet,
+/// pyro fire flags in the flight data records).
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PrimitiveEnum_u8, Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[rkyv(derive(Clone, Copy, Debug))]

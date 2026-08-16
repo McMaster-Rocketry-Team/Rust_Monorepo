@@ -55,7 +55,11 @@ pub const DEFAULT_TARGET_APOGEE_AGL: f32 = 4000.0;
 /// v6: `FlightStage` mirrors `RocketState` 1:1 (`MachLockout` and
 /// `FailedToReachMinApogee` are their own values), the fast record gains the
 /// `coasting` burn-timer flag, and the `AB_ACCEL_CLIPPED` flag is removed.
-pub const STORAGE_VERSION: u32 = 6;
+/// v7: `coasting` is dropped; the fast record gains the GPS-disciplined unix
+/// clock plus full-rate `pyro_flags` and both airbrakes extensions (moved
+/// from slow); the slow record instead carries the airbrakes servo
+/// temperature and the AMP snapshot (online, output status, shared battery).
+pub const STORAGE_VERSION: u32 = 7;
 
 /// USB/superblock `record_len` field for the tagged stream (variable per record).
 pub const RECORD_LEN_TAGGED: u32 = 0;
@@ -368,6 +372,7 @@ mod tests {
         FlightDataFastRecord {
             sequence: i,
             timestamp_us: i as u64 * 2400,
+            unix_time_us: 1_750_000_000_000_000 + i as u64 * 2400,
             acc: [i as f32, -1.5, 9.81],
             gyro: [0.1, 0.2, 0.3],
             temperature: 21.5,
@@ -380,7 +385,9 @@ mod tests {
             ab_tilt_deg: 5.0,
             ab_flags: 0,
             flight_stage: FlightStage::Ascent,
-            coasting: true,
+            pyro_flags: 0b0000_0101,
+            air_brakes_commanded_extension: 0.25,
+            air_brakes_actual_extension: 0.2,
             valid: VALID_IMU | VALID_BARO,
         }
     }
@@ -396,9 +403,10 @@ mod tests {
             vdop: 2.2,
             pdop: 3.3,
             flight_stage: FlightStage::Armed,
-            pyro_flags: 0b0000_0101,
-            air_brakes_commanded_extension: 0.25,
-            air_brakes_actual_extension: 0.2,
+            air_brakes_servo_temp: 41.5,
+            amp_online: true,
+            amp_out_status: 0b01_01_00,
+            amp_shared_battery_v: 8.2,
             valid: VALID_BATTERY | VALID_GPS_FIX,
         }
     }
@@ -510,9 +518,13 @@ mod tests {
         let merged = merge_log_records(&recovered);
         assert_eq!(merged.len(), 20);
         assert_eq!(merged[0].record_count, 0);
-        // Stage comes from the fast record at full rate, not the slow snapshot.
+        // Stage and pyro flags come from the fast record at full rate, not
+        // the slow snapshot; the AMP snapshot rides in the slow record.
         assert_eq!(merged[0].flight_stage, FlightStage::Ascent);
-        assert!(merged[0].coasting);
+        assert_eq!(merged[0].pyro_flags, 0b0000_0101);
+        assert_eq!(merged[0].unix_time_us, 1_750_000_000_000_000);
+        assert!(merged[0].amp_online);
+        assert_eq!(merged[0].amp_out_status, 0b01_01_00);
         assert_eq!(merged[0].kf_altitude_asl, 271.5);
 
         let sb = encode_superblock(n, blocks.len() as u32, last_off);

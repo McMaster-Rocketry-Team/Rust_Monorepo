@@ -1,6 +1,5 @@
 use core::cell::{RefCell, RefMut};
 use embassy_sync::blocking_mutex::{Mutex as BlockingMutex, raw::RawMutex};
-use micromath::F32Ext;
 use packed_struct::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -26,6 +25,9 @@ fixed_point_factory!(BatteryVFac, f32, 2.5, 8.5, 0.01);
 fixed_point_factory!(TemperatureFac, f32, -10.0, 85.0, 0.2);
 fixed_point_factory!(AltitudeFac, f32, -100.0, 7000.0, 1.0);
 fixed_point_factory!(AirSpeedFac, f32, 0.0, 400.0, 2.0);
+// 9 bits, signed: the airbrakes estimator's vertical velocity keeps its sign
+// (unlike `AirSpeedFac`, which is an unsigned magnitude). ~1.6m/s resolution.
+fixed_point_factory!(VerticalVelocityFac, f32, -400.0, 400.0, 2.0);
 fixed_point_factory!(AirBrakesExtensionPercentFac, f32, 0.0, 1.0, 0.04);
 fixed_point_factory!(TiltDegFac, f32, -90.0, 90.0, 1.0);
 
@@ -35,8 +37,9 @@ fixed_point_factory!(EpmBattVFac, f32, 11.0, 17.0, 0.01);
 fixed_point_factory!(EpmRailVFac, f32, 0.0, 10.0, 0.01);
 
 // 48 byte max size to achieve 0.5Hz with 250khz bandwidth + 12sf + 8cr lora
+// 288 bits = 36 bytes, zero spare bits.
 #[derive(PackedStruct, Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "34")]
+#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "36")]
 pub struct TelemetryPacket {
     #[packed_field(bits = "0..4")]
     nonce: Integer<u8, packed_bits::Bits<4>>,
@@ -71,12 +74,27 @@ pub struct TelemetryPacket {
 
     #[packed_field(element_size_bits = "4", ty = "enum")]
     flight_stage: FlightStage,
-    /// Burn-timer flag from the deployment estimator — orthogonal to
-    /// `flight_stage`, never folded into it.
-    coasting: bool,
     /// `deployed` from `RocketState::DrogueChute` / `MainChute`.
     drogue_deployed: bool,
     main_deployed: bool,
+
+    /// The airbrakes estimator's altitude relative to the pad.
+    #[packed_field(element_size_bits = "13")]
+    ab_altitude_agl: Integer<AltitudeFacBase, packed_bits::Bits<ALTITUDE_FAC_BITS>>,
+    /// The airbrakes estimator's vertical velocity, signed (negative = descending).
+    #[packed_field(element_size_bits = "9")]
+    ab_vertical_velocity:
+        Integer<VerticalVelocityFacBase, packed_bits::Bits<VERTICAL_VELOCITY_FAC_BITS>>,
+    /// The three mach-lockout-exit votes (2-of-3 sustained opens the lockout).
+    ab_vote_inertial: bool,
+    ab_vote_deployment: bool,
+    ab_vote_baro_rate: bool,
+    /// The airbrakes estimator's vertical filter is born (baro trusted).
+    ab_born: bool,
+    ab_apogee: bool,
+    /// The configured target apogee, AGL.
+    #[packed_field(element_size_bits = "13")]
+    target_apogee_agl: Integer<AltitudeFacBase, packed_bits::Bits<ALTITUDE_FAC_BITS>>,
 
     amp_online: bool,
     amp_rebooted_in_last_5s: bool,
@@ -94,14 +112,6 @@ pub struct TelemetryPacket {
     // amp_out4_overwrote: bool,
     // #[packed_field(element_size_bits = "2", ty = "enum")]
     // amp_out4: PowerOutputStatus,
-
-    main_bulkhead_online: bool,
-    main_bulkhead_rebooted_in_last_5s: bool,
-    main_bulkhead_brightness: u8,
-
-    drogue_bulkhead_online: bool,
-    drogue_bulkhead_rebooted_in_last_5s: bool,
-    drogue_bulkhead_brightness: u8,
 
     icarus_online: bool,
     icarus_rebooted_in_last_5s: bool,
@@ -179,9 +189,17 @@ impl TelemetryPacket {
         tilt_deg: f32,
 
         flight_stage: FlightStage,
-        coasting: bool,
         drogue_deployed: bool,
         main_deployed: bool,
+
+        ab_altitude_agl: f32,
+        ab_vertical_velocity: f32,
+        ab_vote_inertial: bool,
+        ab_vote_deployment: bool,
+        ab_vote_baro_rate: bool,
+        ab_born: bool,
+        ab_apogee: bool,
+        target_apogee_agl: f32,
 
         amp_online: bool,
         amp_rebooted_in_last_5s: bool,
@@ -194,14 +212,6 @@ impl TelemetryPacket {
         amp_out3: PowerOutputStatus,
         // amp_out4_overwrote: bool,
         // amp_out4: PowerOutputStatus,
-
-        main_bulkhead_online: bool,
-        main_bulkhead_rebooted_in_last_5s: bool,
-        main_bulkhead_brightness: f32,
-
-        drogue_bulkhead_online: bool,
-        drogue_bulkhead_rebooted_in_last_5s: bool,
-        drogue_bulkhead_brightness: f32,
 
         icarus_online: bool,
         icarus_rebooted_in_last_5s: bool,
@@ -252,9 +262,17 @@ impl TelemetryPacket {
             tilt_deg: TiltDegFac::to_fixed_point_capped(tilt_deg),
 
             flight_stage: flight_stage.into(),
-            coasting,
             drogue_deployed,
             main_deployed,
+
+            ab_altitude_agl: AltitudeFac::to_fixed_point_capped(ab_altitude_agl),
+            ab_vertical_velocity: VerticalVelocityFac::to_fixed_point_capped(ab_vertical_velocity),
+            ab_vote_inertial,
+            ab_vote_deployment,
+            ab_vote_baro_rate,
+            ab_born,
+            ab_apogee,
+            target_apogee_agl: AltitudeFac::to_fixed_point_capped(target_apogee_agl),
 
             amp_online,
             amp_rebooted_in_last_5s,
@@ -268,18 +286,6 @@ impl TelemetryPacket {
             amp_out3,
             // amp_out4_overwrote,
             // amp_out4,
-
-            main_bulkhead_online,
-            main_bulkhead_rebooted_in_last_5s,
-            main_bulkhead_brightness: TelemetryPacket::encode_brightness_lux(
-                main_bulkhead_brightness,
-            ),
-
-            drogue_bulkhead_online,
-            drogue_bulkhead_rebooted_in_last_5s,
-            drogue_bulkhead_brightness: TelemetryPacket::encode_brightness_lux(
-                drogue_bulkhead_brightness,
-            ),
 
             icarus_online,
             icarus_rebooted_in_last_5s,
@@ -330,14 +336,6 @@ impl TelemetryPacket {
         } else {
             None
         }
-    }
-
-    fn encode_brightness_lux(brightness_lux: f32) -> u8 {
-        F32Ext::round(F32Ext::log(brightness_lux, 1.04f32)) as u8
-    }
-
-    fn decode_brightness_lux(brightness_lux: u8) -> f32 {
-        F32Ext::powf(1.04, brightness_lux as f32)
     }
 
     pub fn unix_clock_ready(&self) -> bool {
@@ -396,16 +394,48 @@ impl TelemetryPacket {
         self.flight_stage
     }
 
-    pub fn coasting(&self) -> bool {
-        self.coasting
-    }
-
     pub fn drogue_deployed(&self) -> bool {
         self.drogue_deployed
     }
 
     pub fn main_deployed(&self) -> bool {
         self.main_deployed
+    }
+
+    /// The airbrakes estimator's altitude relative to the pad.
+    pub fn ab_altitude_agl(&self) -> f32 {
+        AltitudeFac::to_float(self.ab_altitude_agl)
+    }
+
+    /// The airbrakes estimator's vertical velocity, signed (negative = descending).
+    pub fn ab_vertical_velocity(&self) -> f32 {
+        VerticalVelocityFac::to_float(self.ab_vertical_velocity)
+    }
+
+    pub fn ab_vote_inertial(&self) -> bool {
+        self.ab_vote_inertial
+    }
+
+    pub fn ab_vote_deployment(&self) -> bool {
+        self.ab_vote_deployment
+    }
+
+    pub fn ab_vote_baro_rate(&self) -> bool {
+        self.ab_vote_baro_rate
+    }
+
+    /// The airbrakes estimator's vertical filter is born (baro trusted).
+    pub fn ab_born(&self) -> bool {
+        self.ab_born
+    }
+
+    pub fn ab_apogee(&self) -> bool {
+        self.ab_apogee
+    }
+
+    /// The configured target apogee, AGL.
+    pub fn target_apogee_agl(&self) -> f32 {
+        AltitudeFac::to_float(self.target_apogee_agl)
     }
 
     pub fn amp_online(&self) -> bool {
@@ -451,30 +481,6 @@ impl TelemetryPacket {
     // pub fn amp_out4(&self) -> PowerOutputStatus {
     //     self.amp_out4
     // }
-
-    pub fn main_bulkhead_online(&self) -> bool {
-        self.main_bulkhead_online
-    }
-
-    pub fn main_bulkhead_rebooted_in_last_5s(&self) -> bool {
-        self.main_bulkhead_rebooted_in_last_5s
-    }
-
-    pub fn main_bulkhead_brightness_lux(&self) -> f32 {
-        Self::decode_brightness_lux(self.main_bulkhead_brightness)
-    }
-
-    pub fn drogue_bulkhead_online(&self) -> bool {
-        self.drogue_bulkhead_online
-    }
-
-    pub fn drogue_bulkhead_rebooted_in_last_5s(&self) -> bool {
-        self.drogue_bulkhead_rebooted_in_last_5s
-    }
-
-    pub fn drogue_bulkhead_brightness_lux(&self) -> f32 {
-        Self::decode_brightness_lux(self.drogue_bulkhead_brightness)
-    }
 
     pub fn icarus_online(&self) -> bool {
         self.icarus_online
@@ -567,9 +573,17 @@ impl TelemetryPacket {
             max_air_speed: self.max_air_speed(),
             tilt_deg: self.tilt_deg(),
             flight_stage: format!("{:?}", self.flight_stage()),
-            coasting: self.coasting(),
             drogue_deployed: self.drogue_deployed(),
             main_deployed: self.main_deployed(),
+
+            ab_altitude_agl: self.ab_altitude_agl(),
+            ab_vertical_velocity: self.ab_vertical_velocity(),
+            ab_vote_inertial: self.ab_vote_inertial(),
+            ab_vote_deployment: self.ab_vote_deployment(),
+            ab_vote_baro_rate: self.ab_vote_baro_rate(),
+            ab_born: self.ab_born(),
+            ab_apogee: self.ab_apogee(),
+            target_apogee_agl: self.target_apogee_agl(),
 
             amp_online: self.amp_online(),
             amp_rebooted_in_last_5s: self.amp_rebooted_in_last_5s(),
@@ -582,14 +596,6 @@ impl TelemetryPacket {
             amp_out3: format!("{:?}", self.amp_out3()),
             // amp_out4_overwrote: self.amp_out4_overwrote(),
             // amp_out4: format!("{:?}", self.amp_out4()),
-
-            main_bulkhead_online: self.main_bulkhead_online(),
-            main_bulkhead_rebooted_in_last_5s: self.main_bulkhead_rebooted_in_last_5s(),
-            main_bulkhead_brightness: self.main_bulkhead_brightness_lux(),
-
-            drogue_bulkhead_online: self.drogue_bulkhead_online(),
-            drogue_bulkhead_rebooted_in_last_5s: self.drogue_bulkhead_rebooted_in_last_5s(),
-            drogue_bulkhead_brightness: self.drogue_bulkhead_brightness_lux(),
 
             icarus_online: self.icarus_online(),
             icarus_rebooted_in_last_5s: self.icarus_rebooted_in_last_5s(),
@@ -660,12 +666,23 @@ pub struct TelemetryPacketBuilderState {
     pub tilt_deg: f32,
 
     pub flight_stage: FlightStage,
-    /// Burn-timer flag from the deployment estimator — orthogonal to
-    /// `flight_stage`, never folded into it.
-    pub coasting: bool,
     /// `deployed` from `RocketState::DrogueChute` / `MainChute`.
     pub drogue_deployed: bool,
     pub main_deployed: bool,
+
+    /// The airbrakes estimator's altitude relative to the pad.
+    pub ab_altitude_agl: f32,
+    /// The airbrakes estimator's vertical velocity, signed (negative = descending).
+    pub ab_vertical_velocity: f32,
+    /// The three mach-lockout-exit votes (2-of-3 sustained opens the lockout).
+    pub ab_vote_inertial: bool,
+    pub ab_vote_deployment: bool,
+    pub ab_vote_baro_rate: bool,
+    /// The airbrakes estimator's vertical filter is born (baro trusted).
+    pub ab_born: bool,
+    pub ab_apogee: bool,
+    /// The configured target apogee, AGL.
+    pub target_apogee_agl: f32,
 
     pub amp_online: bool,
     pub amp_uptime_s: u32,
@@ -678,14 +695,6 @@ pub struct TelemetryPacketBuilderState {
     pub amp_out3: PowerOutputStatus,
     // pub amp_out4_overwrote: bool,
     // pub amp_out4: PowerOutputStatus,
-
-    pub main_bulkhead_online: bool,
-    pub main_bulkhead_uptime_s: u32,
-    pub main_bulkhead_brightness: f32,
-
-    pub drogue_bulkhead_online: bool,
-    pub drogue_bulkhead_uptime_s: u32,
-    pub drogue_bulkhead_brightness: f32,
 
     pub icarus_online: bool,
     pub icarus_uptime_s: u32,
@@ -741,9 +750,17 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 tilt_deg: 0.0,
 
                 flight_stage: FlightStage::Armed,
-                coasting: false,
                 drogue_deployed: false,
                 main_deployed: false,
+
+                ab_altitude_agl: 0.0,
+                ab_vertical_velocity: 0.0,
+                ab_vote_inertial: false,
+                ab_vote_deployment: false,
+                ab_vote_baro_rate: false,
+                ab_born: false,
+                ab_apogee: false,
+                target_apogee_agl: 0.0,
 
                 amp_online: false,
                 amp_uptime_s: 0,
@@ -756,14 +773,6 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 amp_out3: PowerOutputStatus::Disabled,
                 // amp_out4_overwrote: false,
                 // amp_out4: PowerOutputStatus::Disabled,
-
-                main_bulkhead_online: false,
-                main_bulkhead_uptime_s: 0,
-                main_bulkhead_brightness: 0f32, 
-
-                drogue_bulkhead_online: false,
-                drogue_bulkhead_uptime_s: 0,
-                drogue_bulkhead_brightness: 0f32,
 
                 icarus_online: false,
                 icarus_uptime_s: 0,
@@ -822,9 +831,16 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 state.max_air_speed,
                 state.tilt_deg,
                 state.flight_stage,
-                state.coasting,
                 state.drogue_deployed,
                 state.main_deployed,
+                state.ab_altitude_agl,
+                state.ab_vertical_velocity,
+                state.ab_vote_inertial,
+                state.ab_vote_deployment,
+                state.ab_vote_baro_rate,
+                state.ab_born,
+                state.ab_apogee,
+                state.target_apogee_agl,
                 state.amp_online,
                 state.amp_uptime_s < 5,
                 state.shared_battery_v,
@@ -836,12 +852,6 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 state.amp_out3,
                 // state.amp_out4_overwrote,
                 // state.amp_out4,
-                state.main_bulkhead_online,
-                state.main_bulkhead_uptime_s < 5,
-                state.main_bulkhead_brightness,
-                state.drogue_bulkhead_online,
-                state.drogue_bulkhead_uptime_s < 5,
-                state.drogue_bulkhead_brightness,
                 state.icarus_online,
                 state.icarus_uptime_s < 5,
                 state.air_brakes_commanded_extension_percentage,
@@ -878,20 +888,88 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
 
 #[cfg(test)]
 mod tests {
+    use approx::assert_relative_eq;
+
     use crate::tests::init_logger;
 
     use super::*;
 
     #[test]
-    fn test_encode_brightness_lux() {
+    fn test_serialize_deserialize() {
         init_logger();
 
-        let brightness_lux = 1000.0;
-        let encoded = TelemetryPacket::encode_brightness_lux(brightness_lux);
+        let packet = TelemetryPacket::new(
+            10,
+            true,
+            12,
+            Some((45.5, -73.6)),
+            7.4,
+            25.5,
+            true,
+            true,
+            1234.0,
+            2345.0,
+            250.0,
+            300.0,
+            10.0,
+            FlightStage::Ascent,
+            false,
+            false,
+            1230.0,
+            -150.0,
+            true,
+            false,
+            true,
+            true,
+            false,
+            3000.0,
+            true,
+            false,
+            8.2,
+            false,
+            PowerOutputStatus::PowerGood,
+            false,
+            PowerOutputStatus::PowerGood,
+            true,
+            PowerOutputStatus::Disabled,
+            true,
+            false,
+            0.5,
+            0.45,
+            42.0,
+            true,
+            false,
+            true,
+            false,
+            true,
+            false,
+            PayloadSDRMCustomStatus::new(),
+            Some(12.6),
+            Some(3.3),
+            Some(5.0),
+            None,
+            Some(9.0),
+        );
+        let packet: VLPDownlinkPacket = packet.into();
 
-        let decoded = TelemetryPacket::decode_brightness_lux(encoded);
+        let mut buffer = [0u8; 64];
+        let len = packet.serialize(&mut buffer);
+        // 1 byte packet type + the 36 byte packed struct.
+        assert_eq!(len, 37);
 
-        log_info!("original: {}", brightness_lux);
-        log_info!("decoded: {}", decoded);
+        let deserialized_packet = VLPDownlinkPacket::deserialize(&buffer[..len]).unwrap();
+        assert_eq!(deserialized_packet, packet);
+
+        let VLPDownlinkPacket::Telemetry(p) = deserialized_packet else {
+            unreachable!()
+        };
+        assert_relative_eq!(p.ab_altitude_agl(), 1230.0, epsilon = 1.0);
+        assert_relative_eq!(p.ab_vertical_velocity(), -150.0, epsilon = 2.0);
+        assert!(p.ab_vote_inertial());
+        assert!(!p.ab_vote_deployment());
+        assert!(p.ab_vote_baro_rate());
+        assert!(p.ab_born());
+        assert!(!p.ab_apogee());
+        assert_relative_eq!(p.target_apogee_agl(), 3000.0, epsilon = 1.0);
     }
 }

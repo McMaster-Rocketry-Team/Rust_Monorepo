@@ -836,21 +836,19 @@ namespace can_bus {
 
     struct RocketStateMessage {
         static constexpr uint32_t MESSAGE_TYPE = 131;
-        static constexpr size_t SIZE_BYTES = 20;
+        static constexpr size_t SIZE_BYTES = 19;
 
         uint32_t velocity_raw[2];
         uint32_t altitude_agl_raw;
         uint64_t timestamp_us;
-        bool is_coasting;
 
-        static RocketStateMessage new_msg(uint64_t ts, const float vel[2], float alt, bool coasting) noexcept {
+        static RocketStateMessage new_msg(uint64_t ts, const float vel[2], float alt) noexcept {
             RocketStateMessage msg;
             msg.timestamp_us = ts;
             for(int i=0; i<2; i++) {
                 msg.velocity_raw[i] = bit_cast<uint32_t>(vel[i]);
             }
             msg.altitude_agl_raw = bit_cast<uint32_t>(alt);
-            msg.is_coasting = coasting;
             return msg;
         }
 
@@ -871,7 +869,6 @@ namespace can_bus {
             write_u32_be(buffer + 4, velocity_raw[1]);
             write_u32_be(buffer + 8, altitude_agl_raw);
             write_u56_be(buffer + 12, timestamp_us);
-            buffer[19] = is_coasting ? 0x80 : 0x00;
         }
 
         static RocketStateMessage deserialize(const uint8_t* buffer) noexcept {
@@ -880,7 +877,6 @@ namespace can_bus {
             msg.velocity_raw[1] = read_u32_be(buffer + 4);
             msg.altitude_agl_raw = read_u32_be(buffer + 8);
             msg.timestamp_us = read_u56_be(buffer + 12);
-            msg.is_coasting = (buffer[19] & 0x80) != 0;
             return msg;
         }
     };
@@ -907,11 +903,12 @@ namespace can_bus {
         LowPower = 0,
         SelfTest = 1,
         Armed = 2,
-        PoweredAscent = 3,
-        Coasting = 4,
-        DrogueDeployed = 5,
-        MainDeployed = 6,
-        Landed = 7
+        Ascent = 3,
+        MachLockout = 4,
+        DrogueChute = 5,
+        MainChute = 6,
+        Landed = 7,
+        FailedToReachMinApogee = 8
     };
 
     struct VLStatusMessage {

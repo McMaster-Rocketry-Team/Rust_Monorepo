@@ -624,14 +624,12 @@ TEST(RocketStateTest, ReferenceData) {
         
         uint32_t alt_raw = message_content["altitude_agl_raw"];
         uint64_t ts = message_content["timestamp_us"];
-        bool coasting = message_content["is_coasting"];
         std::vector<uint32_t> vel_raw;
         for(auto& x : message_content["velocity_raw"]) vel_raw.push_back(x.get<uint32_t>());
 
         auto msg = firmware_common::can_bus::RocketStateMessage::deserialize(serialized_data.data());
         EXPECT_EQ(msg.altitude_agl_raw, alt_raw);
         EXPECT_EQ(msg.timestamp_us, ts);
-        EXPECT_EQ(msg.is_coasting, coasting);
         EXPECT_EQ(msg.velocity_raw[0], vel_raw[0]);
         EXPECT_EQ(msg.velocity_raw[1], vel_raw[1]);
         EXPECT_EQ(firmware_common::can_bus::get_frame_id(msg, 10, 20), expected_id);
@@ -681,11 +679,12 @@ TEST(VLStatusTest, ReferenceData) {
         if (stage_str == "LowPower") expected_stage = firmware_common::can_bus::FlightStage::LowPower;
         else if (stage_str == "SelfTest") expected_stage = firmware_common::can_bus::FlightStage::SelfTest;
         else if (stage_str == "Armed") expected_stage = firmware_common::can_bus::FlightStage::Armed;
-        else if (stage_str == "PoweredAscent") expected_stage = firmware_common::can_bus::FlightStage::PoweredAscent;
-        else if (stage_str == "Coasting") expected_stage = firmware_common::can_bus::FlightStage::Coasting;
-        else if (stage_str == "DrogueDeployed") expected_stage = firmware_common::can_bus::FlightStage::DrogueDeployed;
-        else if (stage_str == "MainDeployed") expected_stage = firmware_common::can_bus::FlightStage::MainDeployed;
+        else if (stage_str == "Ascent") expected_stage = firmware_common::can_bus::FlightStage::Ascent;
+        else if (stage_str == "MachLockout") expected_stage = firmware_common::can_bus::FlightStage::MachLockout;
+        else if (stage_str == "DrogueChute") expected_stage = firmware_common::can_bus::FlightStage::DrogueChute;
+        else if (stage_str == "MainChute") expected_stage = firmware_common::can_bus::FlightStage::MainChute;
         else if (stage_str == "Landed") expected_stage = firmware_common::can_bus::FlightStage::Landed;
+        else if (stage_str == "FailedToReachMinApogee") expected_stage = firmware_common::can_bus::FlightStage::FailedToReachMinApogee;
         else throw std::runtime_error("Unknown flight stage: " + stage_str);
 
         auto msg = firmware_common::can_bus::VLStatusMessage::deserialize(serialized_data.data());

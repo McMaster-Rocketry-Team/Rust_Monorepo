@@ -592,7 +592,7 @@ mod tests {
         };
         let avionics_fut = async {
             avionics_client.send(VLPDownlinkPacket::LowPowerTelemetry(
-                LowPowerTelemetryPacket::new(12, 5, true, 8.1, true, 8.2, 27.0),
+                LowPowerTelemetryPacket::new(12, 5, true, Some((45.5, -73.6)), 8.1, true, 8.2, 27.0),
             ));
         };
 
@@ -648,7 +648,7 @@ mod tests {
         };
         let avionics_fut = async {
             avionics_client.send(VLPDownlinkPacket::LowPowerTelemetry(
-                LowPowerTelemetryPacket::new(12, 5, true, 8.1, true, 8.2, 27.0),
+                LowPowerTelemetryPacket::new(12, 5, true, Some((45.5, -73.6)), 8.1, true, 8.2, 27.0),
             ));
 
             let (received_packet, _) = avionics_client.receive().await;
