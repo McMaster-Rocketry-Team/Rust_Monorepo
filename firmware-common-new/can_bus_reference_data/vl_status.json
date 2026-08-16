@@ -35,7 +35,7 @@
     },
     "message_type": 36,
     "serialized_data": [
-      7,
+      6,
       255,
       255,
       0,
@@ -44,7 +44,7 @@
     "frame_id": 143695892,
     "encoded_data": [
       [
-        7,
+        6,
         255,
         255,
         0,
@@ -137,7 +137,7 @@
   {
     "message": {
       "VLStatus": {
-        "flight_stage": "MachLockout",
+        "flight_stage": "DrogueChute",
         "battery_mv": 0
       }
     },
@@ -164,7 +164,7 @@
   {
     "message": {
       "VLStatus": {
-        "flight_stage": "DrogueChute",
+        "flight_stage": "MainChute",
         "battery_mv": 0
       }
     },
@@ -191,40 +191,13 @@
   {
     "message": {
       "VLStatus": {
-        "flight_stage": "MainChute",
-        "battery_mv": 0
-      }
-    },
-    "message_type": 36,
-    "serialized_data": [
-      6,
-      0,
-      0,
-      0,
-      0
-    ],
-    "frame_id": 143695892,
-    "encoded_data": [
-      [
-        6,
-        0,
-        0,
-        0,
-        0,
-        192
-      ]
-    ]
-  },
-  {
-    "message": {
-      "VLStatus": {
         "flight_stage": "FailedToReachMinApogee",
         "battery_mv": 0
       }
     },
     "message_type": 36,
     "serialized_data": [
-      8,
+      7,
       0,
       0,
       0,
@@ -233,7 +206,7 @@
     "frame_id": 143695892,
     "encoded_data": [
       [
-        8,
+        7,
         0,
         0,
         0,

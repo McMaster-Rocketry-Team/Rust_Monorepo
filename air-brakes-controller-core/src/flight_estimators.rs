@@ -14,17 +14,18 @@
 //!   are integrated honestly. It is accuracy-only: its output feeds the
 //!   MPC, never the pyros.
 //!
-//! The only data that crosses between the two is the deployment burn
-//! timer's coasting flag, one clause of the airbrakes open gate, read
-//! inside [`FlightEstimators::airbrakes_mpc_states`]. The deployment
-//! estimator's speed used to also feed vote V2 of the airbrakes
-//! Mach-lockout exit; it no longer does, because that filter runs its own
-//! 12 s mach lockout and correctly abstains for the entire window the exit
-//! decision is made in — on a Mach 2 flight V2 never got a say. The exit
-//! is now a single drag measurement inside the airbrakes estimator, so
-//! `update` passes nothing between the two at all. There are deliberately
-//! no `&mut` component accessors, so no additional coupling can be
-//! introduced from outside this module.
+//! **No data crosses between the two halves at all.** Both couplings that
+//! used to exist are gone: the deployment estimator's speed fed vote V2 of
+//! the airbrakes Mach-lockout exit (removed — that filter runs its own 12 s
+//! mach lockout and abstained for the entire window the decision was made
+//! in, so on a Mach 2 flight it never got a say), and its burn timer fed
+//! the airbrakes open gate's "never under thrust" clause (removed — the
+//! airbrakes estimator now latches burnout itself from the sign of the
+//! axial specific force, on both the supersonic and subsonic paths). What
+//! remains is a struct holding two independent estimators so firmware can
+//! keep them behind one mutex. There are deliberately no `&mut` component
+//! accessors, so no coupling can be reintroduced from outside this
+//! module.
 //!
 //! Failure direction of the gate: every clause of
 //! [`FlightEstimators::airbrakes_mpc_states`] fails toward `None` — if
@@ -80,6 +81,28 @@ pub struct AirbrakesMPCStates {
     pub velocity: Vector2<f32>,
 }
 
+/// Everything [`FlightEstimators`] is configured with, in one value.
+///
+/// The two halves stay independent at runtime — [`FlightEstimators::new`]
+/// hands each estimator only its own field and nothing crosses afterwards.
+/// There is no invariant between the two halves left to check. "Never under
+/// thrust" used to be one — the airbrakes side had to be configured to keep
+/// its timers clear of the deployment side's burn timer — and it is now a
+/// property of the airbrakes state machine itself, which refuses to birth
+/// the vertical filter before its own measured burnout latch. So this is a
+/// plain pair: somewhere for firmware to write both halves down, and one
+/// value for [`FlightEstimators::new`] to take.
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Debug, Clone)]
+pub struct FlightConfig {
+    /// The deployment estimator's profile: Mach lockout, burn timer, and
+    /// the drogue/main deployment scheme. This half fires the pyros.
+    pub profile: FlightProfile,
+    /// The airbrakes estimator's config, including the airframe it shares
+    /// with the MPC.
+    pub airbrakes: AirbrakesConfig,
+}
+
 /// The two flight estimators plus the policy connecting them. See the
 /// module docs for the composition philosophy.
 #[derive(Debug)]
@@ -89,10 +112,12 @@ pub struct FlightEstimators {
 }
 
 impl FlightEstimators {
-    pub fn new(profile: FlightProfile, config: AirbrakesConfig) -> Self {
+    pub fn new(config: FlightConfig) -> Self {
+        // Each half gets only its own half of the config; nothing is shared
+        // past this point.
         Self {
-            deployment: RocketStateEstimator::new(profile),
-            airbrakes: AirbrakesEstimator::new(config),
+            deployment: RocketStateEstimator::new(config.profile),
+            airbrakes: AirbrakesEstimator::new(config.airbrakes),
         }
     }
 
@@ -130,10 +155,11 @@ impl FlightEstimators {
     /// condition and its state source are the same value.
     ///
     /// The gate, in order:
-    /// * coasting — the slow filter's burn timer, the one "never under
-    ///   thrust" input, kept on the most trusted source;
     /// * the airbrakes filter is alive — baro trusted, pre-apogee, and
-    ///   its altitude and velocity exist;
+    ///   its altitude and velocity exist. "Never under thrust" is folded
+    ///   into this now: the filter cannot be born before the estimator's
+    ///   own axial-sign burnout latch, on either the supersonic or the
+    ///   subsonic path, so a separate coasting clause would be redundant;
     /// * ascending (vertical velocity > 0);
     /// * vertical velocity at most [`MAX_OPEN_MACH`] of the local speed
     ///   of sound at the filter's own altitude.
@@ -143,10 +169,6 @@ impl FlightEstimators {
     /// lockout) or lagging hundreds of metres during coast. Any clause
     /// failing yields `None`: the brakes stay shut.
     pub fn airbrakes_mpc_states(&self) -> Option<AirbrakesMPCStates> {
-        if !self.deployment.is_coasting() {
-            return None;
-        }
-
         if !self.airbrakes.baro_trusted() || self.airbrakes.is_apogee() {
             return None;
         }
@@ -173,7 +195,7 @@ impl FlightEstimators {
         self.deployment.state()
     }
 
-    /// Read-only access to the deployment estimator (`is_coasting`,
+    /// Read-only access to the deployment estimator (state,
     /// `launch_pad_altitude_asl`, telemetry assembly, ...).
     ///
     /// Deliberately no `&mut` twin: cross-estimator data flows by value,
@@ -200,10 +222,11 @@ mod tests {
     /// Nominal 416 Hz sample spacing in microseconds.
     const SAMPLE_DT_US: u64 = 2404;
 
+    use crate::controller::RocketParameters;
+
     fn test_profile() -> FlightProfile {
         FlightProfile {
             mach_lockout_duration_us: None,
-            max_burn_time_us: 4_000_000,
             deployment: DeploymentProfile::Single {
                 minimum_deployment_altitude_agl: 300.0,
                 delay_us: 0,
@@ -215,7 +238,11 @@ mod tests {
         AirbrakesConfig {
             ignition_detection_acc_threshold: 4.0 * 9.81,
             mach_lockout: None,
-            subsonic_cda_over_mass: 2.4e-4,
+            rocket: RocketParameters {
+                burnout_mass: 17.607,
+                cd: [0.47044, 0.5082, 0.57784, 0.665, 0.74313],
+                reference_area: 0.008982476,
+            },
         }
     }
 
@@ -223,7 +250,10 @@ mod tests {
     /// must hand out nothing, even with a healthy IMU feed coming in.
     #[test]
     fn no_mpc_states_before_coasting() {
-        let mut est = FlightEstimators::new(test_profile(), test_config());
+        let mut est = FlightEstimators::new(FlightConfig {
+            profile: test_profile(),
+            airbrakes: test_config(),
+        });
         let imu = ImuSample {
             acc: Vector3::new(0.0, 0.0, 9.81),
             gyro: Vector3::zeros(),
@@ -245,7 +275,10 @@ mod tests {
     #[test]
     fn pyro_command_passes_through_unchanged() {
         let mut bare = RocketStateEstimator::new(test_profile());
-        let mut composed = FlightEstimators::new(test_profile(), test_config());
+        let mut composed = FlightEstimators::new(FlightConfig {
+            profile: test_profile(),
+            airbrakes: test_config(),
+        });
 
         // Clean point-mass trajectory: 5 s pad hold, 3 s burn at
         // 80 m/s^2, ballistic coast over apogee, -25 m/s terminal

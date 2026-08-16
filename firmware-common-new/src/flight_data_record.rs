@@ -39,12 +39,12 @@ pub struct FlightDataFastRecord {
     pub ab_vertical_velocity: f32,
     /// Airbrakes estimator tilt from vertical (deg). NaN before ignition.
     pub ab_tilt_deg: f32,
-    /// Airbrakes estimator status bits (`AB_*` consts): the three
-    /// lockout-exit votes, filter-born, apogee.
+    /// Airbrakes estimator status bits (`AB_*` consts): drag vote, burnout
+    /// latch, filter-born, apogee.
     pub ab_flags: u8,
-    /// Honest mirror of the deployment estimator's `RocketState` (plus the
-    /// device modes). The chutes' `deployed` bools ride in this record's
-    /// `pyro_flags` fire bits.
+    /// Mirror of the deployment estimator's `RocketState` (plus the device
+    /// modes), with its Mach lockout folded into `Ascent`. The chutes'
+    /// `deployed` bools ride in this record's `pyro_flags` fire bits.
     pub flight_stage: FlightStage,
     /// Bitmask for pyro continuity/fire state (`PYRO_*` consts). Logged at
     /// the full fast rate so pyro fire edges are timestamped to ±2.3 ms.
@@ -256,13 +256,19 @@ pub const VALID_AIRBRAKES_ACTUAL: u8 = 1 << 7;
 ///
 /// The mach-lockout exit is a single drag measurement (the drag-inverted
 /// airspeed below Mach 0.8, sustained 1 s), so there is one vote bit;
-/// logging it per sample reconstructs the exit post-flight. Bits 1 and 2
-/// held the other two members of the old 2-of-3 vote and are now free.
+/// logging it per sample reconstructs the exit post-flight. Bit 2 held one
+/// of the other two members of the old 2-of-3 vote and is now free.
 pub const AB_VOTE_DRAG: u8 = 1 << 0;
+/// The axial-sign burnout latch has fired: the motor is out and the drag
+/// channel is honest. Nothing can birth the vertical filter before this, on
+/// either the supersonic or the subsonic path, so it separates "the brakes
+/// never opened because the motor never looked out" from "because the drag
+/// vote never passed".
+pub const AB_BURNOUT: u8 = 1 << 1;
 /// The vertical filter is born (baro trusted; MPC state is live).
 pub const AB_BARO_TRUSTED: u8 = 1 << 3;
 pub const AB_APOGEE: u8 = 1 << 4;
-// bits 1-2 and 5-7 unallocated.
+// bits 2 and 5-7 unallocated.
 
 pub const PYRO_MAIN_CONTINUITY: u8 = 1 << 0;
 pub const PYRO_MAIN_FIRE: u8 = 1 << 1;

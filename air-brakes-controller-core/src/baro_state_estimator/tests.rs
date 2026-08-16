@@ -110,7 +110,6 @@ fn dual_deploys_drogue_near_apogee_and_main_at_altitude() {
     let main_agl = 457.2;
     let mut estimator = RocketStateEstimator::new(FlightProfile {
         mach_lockout_duration_us: None,
-        max_burn_time_us: 4_000_000,
         deployment: DeploymentProfile::Dual {
                 drogue_chute_minimum_altitude_agl: 500.0,
                 drogue_chute_delay_us: 0,
@@ -144,7 +143,6 @@ fn dual_deploys_drogue_near_apogee_and_main_at_altitude() {
 fn single_deploys_both_near_apogee() {
     let mut estimator = RocketStateEstimator::new(FlightProfile {
         mach_lockout_duration_us: None,
-        max_burn_time_us: 4_000_000,
         deployment: DeploymentProfile::Single {
                 minimum_deployment_altitude_agl: 500.0,
                 delay_us: 0,
@@ -176,7 +174,6 @@ fn single_deploys_both_near_apogee() {
 fn below_min_apogee_does_not_deploy() {
     let mut estimator = RocketStateEstimator::new(FlightProfile {
         mach_lockout_duration_us: None,
-        max_burn_time_us: 2_500_000,
         deployment: DeploymentProfile::Dual {
                 drogue_chute_minimum_altitude_agl: 5000.0,
                 drogue_chute_delay_us: 0,
@@ -198,7 +195,6 @@ fn below_min_apogee_does_not_deploy() {
 fn no_false_ignition_on_pad() {
     let mut estimator = RocketStateEstimator::new(FlightProfile {
         mach_lockout_duration_us: None,
-        max_burn_time_us: 4_000_000,
         deployment: DeploymentProfile::Single {
                 minimum_deployment_altitude_agl: 300.0,
                 delay_us: 0,
@@ -209,52 +205,8 @@ fn no_false_ignition_on_pad() {
     // 2 minutes armed on the pad
     for _ in 0..(120 * SAMPLES_PER_S) {
         estimator.update(200.0 + noise.next());
-        assert!(!estimator.is_coasting());
     }
     assert!(matches!(estimator.state(), RocketState::OnPad));
-}
-
-/// Coasting comes from the burn timer: never under thrust, latched a fixed
-/// time after ignition detection, independent of the KF.
-#[test]
-fn coasting_latches_on_burn_timer() {
-    let mut estimator = RocketStateEstimator::new(FlightProfile {
-        mach_lockout_duration_us: None,
-        max_burn_time_us: 4_000_000, // sim burn is 3 s; ~1.3x margin
-        deployment: DeploymentProfile::Single {
-                minimum_deployment_altitude_agl: 300.0,
-                delay_us: 0,
-        },
-    });
-    let mut noise = NoiseGen::new(0.5);
-    let pad_altitude_asl = 200.0f32;
-
-    for _ in 0..(30 * SAMPLES_PER_S) {
-        estimator.update(pad_altitude_asl + noise.next());
-    }
-    assert!(!estimator.is_coasting());
-
-    // 3 s burn at 80 m/s^2: the timer must not expire while under thrust
-    let mut altitude_asl = pad_altitude_asl;
-    let mut velocity = 0.0f32;
-    for _ in 0..(3 * SAMPLES_PER_S) {
-        velocity += 80.0 * DT;
-        altitude_asl += velocity * DT;
-        estimator.update(altitude_asl + noise.next());
-        assert!(!estimator.is_coasting(), "coasting during burn, v={}", velocity);
-    }
-    assert!(matches!(estimator.state(), RocketState::Ascent { .. }));
-
-    // gravity-only coast: the timer (4 s after ignition detection, which
-    // completes ~1.5 s into the burn on the slow filter) expires here
-    let mut latched = false;
-    for _ in 0..(4 * SAMPLES_PER_S) {
-        velocity -= 9.81 * DT;
-        altitude_asl += velocity * DT;
-        estimator.update(altitude_asl + noise.next());
-        latched |= estimator.is_coasting();
-    }
-    assert!(latched, "burn timer never latched coasting during coast");
 }
 
 /// Redundant-computer ejection blast during coast (60 ms of readings ~1400 m
@@ -264,7 +216,6 @@ fn coasting_latches_on_burn_timer() {
 fn blast_transient_during_coast_does_not_deploy_early() {
     let mut estimator = RocketStateEstimator::new(FlightProfile {
         mach_lockout_duration_us: None,
-        max_burn_time_us: 3_000_000,
         deployment: DeploymentProfile::Single {
                 minimum_deployment_altitude_agl: 300.0,
                 delay_us: 0,
@@ -342,7 +293,6 @@ fn mach_lockout_survives_supersonic_garbage() {
     // detection (~margin), ending ~23 s before apogee.
     let mut estimator = RocketStateEstimator::new(FlightProfile {
         mach_lockout_duration_us: Some(48_000_000),
-        max_burn_time_us: 8_000_000, // burn 6.5 s x ~1.2 margin
         deployment: DeploymentProfile::Single {
                 minimum_deployment_altitude_agl: 1000.0,
                 delay_us: 0,
@@ -361,7 +311,6 @@ fn mach_lockout_survives_supersonic_garbage() {
     let mut t = 0.0f32;
     let mut apogee_agl = 0.0f32;
     let mut entered_lockout = false;
-    let mut coasted_in_lockout = false;
     let mut fired_in_lockout = false;
     let mut drogue_agl = None;
     let descent_terminal_velocity = -25.0f32;
@@ -394,7 +343,6 @@ fn mach_lockout_survives_supersonic_garbage() {
         } = estimator.state()
         {
             entered_lockout = true;
-            coasted_in_lockout |= estimator.is_coasting();
             fired_in_lockout |= pyro.is_some();
             assert!(
                 (launch_pad_altitude_asl - pad).abs() < 5.0,
@@ -414,11 +362,6 @@ fn mach_lockout_survives_supersonic_garbage() {
         !matches!(estimator.state(), RocketState::MachLockout { .. }),
         "lockout never exited"
     );
-    assert!(
-        coasted_in_lockout,
-        "burn timer should latch coasting while still locked out"
-    );
-
     let drogue_agl = drogue_agl.expect("expected drogue deploy");
     assert!(
         (drogue_agl - apogee_agl).abs() < 150.0,
@@ -508,7 +451,6 @@ fn void_lake_flight_replay() {
 
     let mut estimator = RocketStateEstimator::new(FlightProfile {
         mach_lockout_duration_us: None, // subsonic flight
-        max_burn_time_us: 4_000_000, // actual burn ~3.5 s from liftoff, ~2 s after detection
         deployment: DeploymentProfile::Dual {
                 drogue_chute_minimum_altitude_agl: 500.0,
                 drogue_chute_delay_us: 0,
@@ -518,7 +460,6 @@ fn void_lake_flight_replay() {
     });
 
     let mut ignition_i = None;
-    let mut coasting_i = None;
     let mut drogue = None;
     let mut main = None;
     for (i, &alt) in grid.iter().enumerate() {
@@ -529,9 +470,6 @@ fn void_lake_flight_replay() {
         ));
         if ignition_i.is_none() && !matches!(estimator.state(), RocketState::OnPad) {
             ignition_i = Some(i);
-        }
-        if coasting_i.is_none() && estimator.is_coasting() {
-            coasting_i = Some(i);
         }
         match pyro {
             Some(PyroSelect::PyroDrogue) => {
@@ -559,15 +497,6 @@ fn void_lake_flight_replay() {
         "ignition detected at grid {} vs liftoff {}",
         ignition_i,
         liftoff_i
-    );
-
-    let coasting_i = coasting_i.expect("coasting never latched");
-    assert!(
-        coasting_i > ignition_i && coasting_i < apogee_i,
-        "coasting at {} (ignition {}, apogee {})",
-        coasting_i,
-        ignition_i,
-        apogee_i
     );
 
     let (drogue_i, drogue_alt) = drogue.expect("drogue never fired");

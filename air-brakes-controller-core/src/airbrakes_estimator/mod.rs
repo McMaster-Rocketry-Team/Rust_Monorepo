@@ -42,6 +42,8 @@
 
 use nalgebra::{SVector, Vector3};
 
+use crate::controller::RocketParameters;
+
 mod dead_reckoner;
 mod estimator;
 #[cfg(test)]
@@ -117,35 +119,56 @@ pub struct AirbrakesConfig {
     /// alignment finishes.
     pub mach_lockout: Option<MachLockoutConfig>,
 
-    /// Clean-airframe `Cd * A / m` (m^2/kg) — the drag vote's only
-    /// parameter. Take it straight from the MPC's own `RocketParameters`
-    /// via [`RocketParameters::subsonic_cda_over_mass`] so the lockout and
-    /// the apogee prediction can never disagree about the airframe.
+    /// The airframe — the same value the MPC flies on.
     ///
-    /// It must be the SUBSONIC (brakes-stowed) value. That is what makes
-    /// the vote one-sided: the true Cd is higher transonically, so the
-    /// inverted speed reads high exactly while supersonic, and the vote
-    /// errs toward keeping the lockout shut. Measured on LC'25 the
-    /// inverted Mach peaks at 1.25 where the truth is 1.03.
-    pub subsonic_cda_over_mass: f32,
+    /// The drag vote needs `Cd * A / m`, and it derives that here rather
+    /// than taking it as a number, so the lockout and the apogee
+    /// prediction cannot be given different airframes. It reads `cd[0]`,
+    /// the brakes-stowed entry, and that is what makes the vote one-sided:
+    /// the true Cd is higher transonically, so the inverted speed reads
+    /// high exactly while supersonic and the vote errs toward keeping the
+    /// lockout shut. Measured on LC'25 the inverted Mach peaks at 1.25
+    /// where the truth is 1.03.
+    pub rocket: RocketParameters,
 }
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Clone, Debug)]
+/// Bounds on when the drag vote is allowed to decide, both measured from
+/// **this estimator's own accelerometer ignition detection**.
+///
+/// Note the clock: [`FlightProfile::mach_lockout_duration_us`] runs from the
+/// DEPLOYMENT estimator's baro ignition detection instead, which lags. The
+/// two lockouts are independent — different subsystems, different sensors,
+/// different thresholds — and equal values in a config are coincidence, not
+/// a relationship. Changing one does not imply changing the other.
+///
+/// [`FlightProfile::mach_lockout_duration_us`]: crate::FlightProfile::mach_lockout_duration_us
 pub struct MachLockoutConfig {
-    /// Earliest possible time the rocket can be below Mach 0.8, measured
-    /// from ignition detection (sim-derived). The drag vote is not
-    /// consulted before this.
+    /// Earliest the rocket could possibly be below Mach 0.8; the drag vote
+    /// is not consulted before this.
     ///
-    /// This ALSO has to sit after the motor is out. The drag vote assumes
-    /// free flight, and during thrust tail-off the residual thrust cancels
-    /// part of the drag: on LC'25 the unfiltered channel dipped to an
-    /// apparent Mach 0.91 at burnout while the truth was 1.14. The low
-    /// pass lifts that to 1.55, but do not lean on the filter — keep
-    /// `t_min_us` past `max_burn_time_us`.
-    pub t_min_us: u64,
-    /// Give-up time from ignition detection: at this point the filter is
-    /// born from the baro regardless of the vote (sim-derived, must end
-    /// well before the earliest possible apogee).
-    pub t_max_us: u64,
+    /// From the flight sim: the earliest simulated time below Mach 0.8,
+    /// measured from ignition detection. Erring early is unsafe (the vote
+    /// gets to speak while still supersonic), erring late only costs
+    /// control window.
+    ///
+    /// It does not have to be placed after burnout by hand: the estimator
+    /// latches burnout itself from the sign of the axial specific force and
+    /// refuses to birth the filter before then, by either path. Set this
+    /// purely from the sim's earliest subsonic time.
+    pub earliest_subsonic_after_ignition_us: u32,
+    /// Give-up time: at this point the vertical filter is born from the
+    /// baro regardless of what the drag vote says.
+    ///
+    /// From the flight sim: the latest plausible time below Mach 0.8 plus
+    /// margin, and it must end well (>5 s) before the EARLIEST simulated
+    /// apogee — a forced birth after apogee leaves the airbrakes no window
+    /// at all.
+    ///
+    /// This backstop is still subject to the burnout latch: it covers a
+    /// drag model wrong enough that the vote never passes (the axial sign
+    /// test does not depend on Cd, so the latch still fires), not an
+    /// accelerometer too dead to show deceleration at all.
+    pub force_birth_after_ignition_us: u32,
 }

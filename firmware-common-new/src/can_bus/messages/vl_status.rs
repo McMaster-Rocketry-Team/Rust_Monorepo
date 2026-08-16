@@ -3,14 +3,6 @@ use serde::{Deserialize, Serialize};
 
 use super::{CanBusMessage, CanBusMessageEnum};
 
-/// may skip stages, may go back to a previous stage
-///
-/// `LowPower` / `SelfTest` / `Armed` are device modes; the remaining values
-/// mirror the deployment estimator's `RocketState` variants 1:1 — nothing is
-/// folded (`MachLockout` and `FailedToReachMinApogee` report as themselves).
-/// The chutes' `deployed` bools are orthogonal to the stage and travel as
-/// separate bools next to it (dedicated bools in the VLP telemetry packet,
-/// pyro fire flags in the flight data records).
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PrimitiveEnum_u8, Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[rkyv(derive(Clone, Copy, Debug))]
@@ -20,12 +12,12 @@ pub enum FlightStage {
     SelfTest = 1,
     /// Armed, still on the pad (`RocketState::OnPad`).
     Armed = 2,
+    /// Ascending, powered or coasting.
     Ascent = 3,
-    MachLockout = 4,
-    DrogueChute = 5,
-    MainChute = 6,
-    Landed = 7,
-    FailedToReachMinApogee = 8,
+    DrogueChute = 4,
+    MainChute = 5,
+    Landed = 6,
+    FailedToReachMinApogee = 7,
 }
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
@@ -79,11 +71,6 @@ mod test {
             .into(),
             VLStatusMessage {
                 flight_stage: FlightStage::Ascent,
-                battery_mv: 0,
-            }
-            .into(),
-            VLStatusMessage {
-                flight_stage: FlightStage::MachLockout,
                 battery_mv: 0,
             }
             .into(),

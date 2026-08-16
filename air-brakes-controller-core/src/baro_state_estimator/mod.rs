@@ -49,20 +49,26 @@ const PAD_ALTITUDE_FILTER_TIME_CONSTANT: f32 = 10.0; // s
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, PartialEq)]
 pub struct FlightProfile {
-    /// Baro Mach lockout: starting at ignition detection, the KF is frozen
-    /// (no predict, no update) for this long, then re-seeded — supersonic
-    /// static-port readings are garbage. Take (time from ignition detection
-    /// until decelerated back below Mach 0.75) from the flight sim with
-    /// ~1.4x margin; it must still end well (>5 s) before apogee. `None`
-    /// disables the lockout — use that for subsonic rockets.
+    /// Baro Mach lockout: starting at THIS estimator's baro ignition
+    /// detection, the KF is frozen (no predict, no update) for this long,
+    /// then re-seeded — supersonic static-port readings are garbage.
+    ///
+    /// From the flight sim: time from ignition detection until decelerated
+    /// back below Mach 0.75, with ~1.4x margin; it must still end well
+    /// (>5 s) before apogee. `None` disables the lockout — use that for
+    /// subsonic rockets.
+    ///
+    /// The Mach 0.75 here is deliberately lower than the airbrakes
+    /// estimator's 0.8: a lower threshold is reached later, so this freeze
+    /// runs longer than that estimator's lockout would. This half fires the
+    /// pyros, so it buys its margin in time rather than in cleverness.
+    ///
+    /// Unrelated to
+    /// [`MachLockoutConfig`](crate::airbrakes_estimator::MachLockoutConfig)
+    /// despite the similar name: that one bounds the airbrakes drag vote and
+    /// runs from a different sensor's ignition detection. Equal values in a
+    /// config are coincidence, not a link.
     pub mach_lockout_duration_us: Option<u32>,
-    /// Coasting is declared this long after ignition detection (burn timer:
-    /// motors don't relight, and a timer needs neither the KF nor a
-    /// stall-free sensor stream). Take the sim burn time with generous
-    /// (~1.3x+) margin: too long only delays airbrakes, but too short
-    /// declares coasting under thrust — the airbrakes gate's one "never
-    /// under thrust" input.
-    pub max_burn_time_us: u32,
     pub deployment: DeploymentProfile,
 }
 
@@ -232,10 +238,6 @@ enum Stage {
 #[derive(Debug, Clone)]
 pub struct RocketStateEstimator {
     profile: FlightProfile,
-    /// [`FlightProfile::max_burn_time_us`] in samples.
-    burn_time_ticks: usize,
-    /// Samples since ignition detection; `None` until ignition.
-    samples_since_ignition: Option<usize>,
     kf: Option<BaroAltitudeKF>,
     stage: Stage,
 }
@@ -249,9 +251,7 @@ fn us_to_ticks(us: u32) -> usize {
 impl RocketStateEstimator {
     pub fn new(profile: FlightProfile) -> Self {
         Self {
-            burn_time_ticks: us_to_ticks(profile.max_burn_time_us),
             profile,
-            samples_since_ignition: None,
             kf: None,
             stage: Stage::OnPad {
                 pad_altitude_asl: 0.0,
@@ -262,10 +262,6 @@ impl RocketStateEstimator {
     /// Process one baro altitude ASL sample (m).
     /// Returns `Some(pyro)` when a pyro channel should be fired.
     pub fn update(&mut self, baro_altitude_asl: f32) -> Option<PyroSelect> {
-        if let Some(n) = &mut self.samples_since_ignition {
-            *n = n.saturating_add(1);
-        }
-
         let kf = match &mut self.kf {
             Some(kf) => {
                 // During Mach lockout the KF is frozen: predicting on the
@@ -302,7 +298,6 @@ impl RocketStateEstimator {
                         velocity,
                         *pad_altitude_asl
                     );
-                    self.samples_since_ignition = Some(0);
                     let pad = *pad_altitude_asl;
                     self.stage = match self.profile.mach_lockout_duration_us {
                         Some(duration_us) => {
@@ -508,20 +503,6 @@ impl RocketStateEstimator {
             Stage::Landed { .. } => RocketState::Landed,
             Stage::FailedToReachMinApogee { .. } => RocketState::FailedToReachMinApogee,
         }
-    }
-
-    /// True during ascent once the motor has burned out, i.e. the rocket is
-    /// coasting to apogee. Burn-timer based: latches `max_burn_time_us` after
-    /// ignition detection (motors don't relight), independent of the KF — so
-    /// it keeps working through the Mach lockout and through sensor stalls.
-    pub fn is_coasting(&self) -> bool {
-        matches!(
-            self.stage,
-            Stage::Ascent { .. } | Stage::MachLockout { .. }
-        ) && self
-            .samples_since_ignition
-            .map(|n| n > self.burn_time_ticks)
-            .unwrap_or(false)
     }
 
     /// Raw KF altitude ASL (m) for the fast flight-log record ONLY. During

@@ -83,19 +83,20 @@ pub(crate) struct State {
 /// `velocity` holds acceleration.
 pub(crate) struct Derivative<T>(pub(crate) T);
 
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Clone, Debug)]
 pub struct RocketParameters {
     pub burnout_mass: f32,
     /// cd is a look up table from extension percentage to cd
-    /// e.g. cd[2] is cd at 50% extension percentage
+    /// e.g. `cd[2]` is cd at 50% extension percentage
     pub cd: [f32; 5],
     pub reference_area: f32,
 }
 
 impl RocketParameters {
-    /// `Cd * A / m` (m^2/kg) with the brakes stowed — the airbrakes
-    /// estimator's drag-vote parameter, see
-    /// [`AirbrakesConfig::subsonic_cda_over_mass`](crate::airbrakes_estimator::AirbrakesConfig::subsonic_cda_over_mass).
+    /// `Cd * A / m` (m^2/kg) with the brakes stowed — the parameter the
+    /// airbrakes estimator's drag vote inverts, see
+    /// [`AirbrakesConfig::rocket`](crate::airbrakes_estimator::AirbrakesConfig::rocket).
     ///
     /// Deriving it here rather than configuring it separately is the
     /// point: the Mach-lockout exit and the apogee prediction then cannot

@@ -62,6 +62,25 @@ const VOTE_MACH: f32 = 0.8;
 /// The drag vote must hold continuously this long before the baro is
 /// declared honest.
 const VOTE_SUSTAIN_S: f32 = 1.0;
+/// Burnout is latched when the axial specific force has been at least this
+/// negative continuously for `BURNOUT_SUSTAIN_S`.
+///
+/// The SIGN is the discriminator, not the magnitude: thrust acts along
+/// +axis and drag along -axis, so the axial channel crosses zero at burnout
+/// and stays negative for the whole coast. A magnitude test cannot tell
+/// 11.7 m/s^2 of thrust-minus-drag from 11.7 m/s^2 of pure drag — measured
+/// on LC'25 at ignition+6.00 s, where inverting |accel| yields a confident
+/// and completely wrong Mach 0.91 while the axial channel still reads
+/// +10.66 and correctly says "still burning".
+///
+/// -2 m/s^2 rather than 0 keeps the latch clear of the crossing itself.
+/// Coast drag is 7-21 m/s^2 over the region that matters, and the pad noise
+/// floor is ~0.04 m/s^2, so there is no contest.
+const BURNOUT_AXIAL_M_S2: f32 = -2.0;
+/// How long the axial channel must stay decelerating before burnout latches.
+/// Measured latch times: LC'25 ignition+6.38 s, Void Lake +1.96 s — both
+/// about this long after true burnout, i.e. erring late.
+const BURNOUT_SUSTAIN_S: f32 = 0.3;
 /// Time constant of the low pass on the drag channel. The channel is a
 /// single raw sample, so it carries the full accelerometer noise and
 /// airframe vibration; unfiltered, one noisy sample trips the threshold
@@ -152,6 +171,9 @@ enum State {
     /// The baro is buffered (to pick a birth altitude) but never fused.
     DeadReckoning {
         q_av_to_rocket: UnitQuaternion<f32>,
+        /// Unit airframe axis in the avionics frame, from the stage-1 mean
+        /// thrust direction. Thrust is +, drag is -.
+        thrust_axis_av: Vector3<f32>,
         reckoner: DeadReckoner,
         gyro_bias: Vector3<f32>,
         launch_pad_altitude_asl: f32,
@@ -163,6 +185,11 @@ enum State {
         /// is out. `None` until the first sample of this state.
         drag_lp: Option<f32>,
         last_vote: bool,
+        /// Latched once the axial channel proves the motor is out. Nothing
+        /// downstream — neither the drag vote nor the subsonic birth — is
+        /// allowed to proceed before it.
+        burnout: bool,
+        burnout_sustain: f32,
     },
 
     /// The baro is honest: the 2-state vertical filter exists and runs to
@@ -395,6 +422,10 @@ impl AirbrakesEstimator {
 
                 self.state = State::DeadReckoning {
                     q_av_to_rocket,
+                    // The mean thrust direction IS the airframe axis in the
+                    // avionics frame, so the burnout latch self-calibrates
+                    // its mounting and sign from the flight itself.
+                    thrust_axis_av: avg_acc_av_frame.normalize(),
                     reckoner: reckoner.clone(),
                     gyro_bias: *gyro_bias,
                     launch_pad_altitude_asl: *launch_pad_altitude_asl,
@@ -403,11 +434,14 @@ impl AirbrakesEstimator {
                     vote_sustain: 0.0,
                     drag_lp: None,
                     last_vote: false,
+                    burnout: false,
+                    burnout_sustain: 0.0,
                 };
             }
 
             State::DeadReckoning {
                 q_av_to_rocket,
+                thrust_axis_av,
                 reckoner,
                 gyro_bias,
                 launch_pad_altitude_asl,
@@ -416,6 +450,8 @@ impl AirbrakesEstimator {
                 vote_sustain,
                 drag_lp,
                 last_vote,
+                burnout,
+                burnout_sustain,
             } => {
                 reckoner.update(&acc, &(gyro - *gyro_bias), dt);
 
@@ -449,24 +485,64 @@ impl AirbrakesEstimator {
                 };
                 *drag_lp = Some(a_drag);
 
+                // Burnout, measured rather than timed: the axial channel is
+                // strongly positive under thrust and negative in free
+                // flight, so a sustained negative reading proves the motor
+                // is out. One-way latch — motors do not relight.
+                if !*burnout {
+                    if acc.dot(thrust_axis_av) < BURNOUT_AXIAL_M_S2 {
+                        *burnout_sustain += dt;
+                        if *burnout_sustain >= BURNOUT_SUSTAIN_S {
+                            *burnout = true;
+                            log_info!("burnout detected, drag channel is now honest");
+                        }
+                    } else {
+                        *burnout_sustain = 0.0;
+                    }
+                }
+
                 let t_since_ignition_s =
                     (z.timestamp_us.saturating_sub(*ignition_t_us)) as f32 * 1e-6;
 
                 let (born, forced) = match &self.config.mach_lockout {
-                    // Subsonic profile: the baro is honest as soon as we
-                    // have enough of it buffered for a clean median.
-                    None => (ring_span_s(baro_ring) >= 0.25, false),
+                    // Subsonic profile: the baro is honest as soon as the
+                    // motor is out and we have enough of it buffered for a
+                    // clean median. The burnout latch is what stops this
+                    // path from handing the MPC a state under thrust —
+                    // without it the filter was born ~0.8 s before burnout
+                    // (Void Lake: born ignition+0.9 s, burnout +1.7 s).
+                    None => (*burnout && ring_span_s(baro_ring) >= 0.25, false),
                     Some(lockout) => {
-                        let t_min_s = lockout.t_min_us as f32 * 1e-6;
-                        let t_max_s = lockout.t_max_us as f32 * 1e-6;
-                        if t_since_ignition_s >= t_max_s {
+                        let t_min_s = lockout.earliest_subsonic_after_ignition_us as f32 * 1e-6;
+                        let t_max_s = lockout.force_birth_after_ignition_us as f32 * 1e-6;
+                        if !*burnout {
+                            // NOTHING births before the motor is out — not
+                            // the vote, and not the T_max backstop either.
+                            // That makes "never under thrust" a property of
+                            // this state machine rather than an invariant
+                            // between two config structs that something
+                            // else has to check.
+                            //
+                            // T_max keeps the job it exists for: if the
+                            // drag model is wrong and the vote never
+                            // passes, the axial sign test still latches
+                            // (it does not depend on Cd) and the backstop
+                            // still fires. The only case it no longer
+                            // covers is an accelerometer dead enough to
+                            // never show deceleration — and there the dead
+                            // reckoner, the drag vote and the KF's own
+                            // acceleration input are all equally broken, so
+                            // staying shut is the honest outcome.
+                            *last_vote = false;
+                            *vote_sustain = 0.0;
+                            (false, false)
+                        } else if t_since_ignition_s >= t_max_s {
                             log_info!("lockout T_max reached, forced birth");
                             (true, true)
                         } else if t_since_ignition_s < t_min_s {
-                            // Before T_min the motor may still be burning,
-                            // where drag/mass is not what the accelerometer
-                            // is measuring. Hold the clock at zero so a
-                            // pre-T_min reading can never bank sustain.
+                            // Before the earliest the sim says we could be
+                            // subsonic. Hold the clock at zero so an early
+                            // reading cannot bank sustain.
                             *last_vote = false;
                             *vote_sustain = 0.0;
                             (false, false)
@@ -483,7 +559,7 @@ impl AirbrakesEstimator {
                             let vote = match drag_airspeed(
                                 a_drag,
                                 altitude,
-                                self.config.subsonic_cda_over_mass,
+                                self.config.rocket.subsonic_cda_over_mass(),
                             ) {
                                 Some(airspeed) => {
                                     airspeed < VOTE_MACH * approximate_speed_of_sound(altitude)
@@ -677,6 +753,24 @@ impl AirbrakesEstimator {
                 ..
             } => Some(axis_tilt(q_av_to_rocket, reckoner)),
             _ => None,
+        }
+    }
+
+    /// True once the axial-sign burnout latch has fired: the motor is out
+    /// and the drag channel is honest.
+    ///
+    /// This is the single condition standing between the estimator and any
+    /// chance of the brakes opening — no birth path, vote or T_max
+    /// backstop, proceeds without it — so it is worth logging per sample.
+    /// Without it a flight where the brakes never opened cannot be told
+    /// apart from one where the drag vote simply never passed.
+    ///
+    /// The later states imply it, since neither can be reached otherwise.
+    pub fn burnout_detected(&self) -> bool {
+        match &self.state {
+            State::OnPad { .. } | State::Stage1 { .. } => false,
+            State::DeadReckoning { burnout, .. } => *burnout,
+            State::Tracking { .. } | State::Apogee { .. } => true,
         }
     }
 

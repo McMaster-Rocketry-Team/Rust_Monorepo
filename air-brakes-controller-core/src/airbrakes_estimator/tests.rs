@@ -4,7 +4,7 @@ use nalgebra::{UnitQuaternion, UnitVector3, Vector3};
 
 use super::*;
 use crate::{
-    baro_state_estimator::{DeploymentProfile, FlightProfile, RocketStateEstimator},
+    controller::RocketParameters,
     tests::init_logger,
 };
 
@@ -193,6 +193,10 @@ struct ReplayResult {
     vv_track: Vec<(usize, f32)>,
     /// continuous spans (start s, end s) where the drag vote held true
     vote_spans: Vec<(f32, f32)>,
+    /// wall time (s from log start) when `burnout_detected()` first went true
+    burnout_s: Option<f32>,
+    /// set if `burnout_detected()` ever went back to false after latching
+    burnout_unlatched: bool,
     /// wall time (s from log start) when pad calibration first completed
     calibration_complete_s: Option<f32>,
 }
@@ -205,6 +209,8 @@ fn replay(rows: &[Measurement], config: AirbrakesConfig) -> ReplayResult {
         apogee_alt_asl: None,
         vv_track: Vec::new(),
         vote_spans: Vec::new(),
+        burnout_s: None,
+        burnout_unlatched: false,
         calibration_complete_s: None,
     };
     let mut vote_span_start: Option<f32> = None;
@@ -212,6 +218,11 @@ fn replay(rows: &[Measurement], config: AirbrakesConfig) -> ReplayResult {
         estimator.update(z);
 
         let now = t_s(rows, i);
+        match (estimator.burnout_detected(), result.burnout_s) {
+            (true, None) => result.burnout_s = Some(now),
+            (false, Some(_)) => result.burnout_unlatched = true,
+            _ => {}
+        }
         if result.calibration_complete_s.is_none() && estimator.calibration_complete() {
             result.calibration_complete_s = Some(now);
         }
@@ -272,9 +283,9 @@ fn void_lake_v2_replay() {
         AirbrakesConfig {
             ignition_detection_acc_threshold: 4.0 * 9.81,
             mach_lockout: None,
-            // Subsonic profile: the drag vote is never consulted, so this
-            // value cannot affect the run.
-            subsonic_cda_over_mass: 5.0e-4,
+            // Subsonic profile: the drag vote is never consulted, so the
+            // airframe cannot affect this run.
+            rocket: lc25_rocket(),
         },
     );
 
@@ -320,6 +331,81 @@ fn void_lake_v2_replay() {
     assert!(err < 10.0, "coast vv err {err}");
 }
 
+/// The airframe the drag vote inverts. `cd[0] * reference_area /
+/// burnout_mass` = 2.4e-4, which the flight itself corroborates: measured
+/// drag deceleration over dynamic pressure sits at 0.00022-0.00026 across
+/// the whole subsonic coast (see `mach_detection_signals`).
+/// The property the burnout latch exists for, on BOTH profiles: the
+/// vertical filter — and therefore the MPC state, and therefore any chance
+/// of the brakes opening — must never come alive while the motor is
+/// burning.
+///
+/// This is the airbrakes half's own guarantee. It used to be borrowed from
+/// the deployment estimator's `is_coasting()` burn timer, which the open
+/// gate consulted; the subsonic path had no thrust check of its own at all
+/// and was born ~0.8 s BEFORE burnout (Void Lake: born ignition+0.9 s,
+/// burnout +1.7 s). Now both paths are gated on the measured axial-sign
+/// latch and the gate needs no cross-half input.
+#[test]
+fn filter_is_never_born_under_thrust() {
+    init_logger();
+    for (name, rows, config) in [
+        (
+            "Void Lake (subsonic profile)",
+            extend_pad(void_lake_rows(), 8.0),
+            AirbrakesConfig {
+                ignition_detection_acc_threshold: 4.0 * 9.81,
+                mach_lockout: None,
+                rocket: lc25_rocket(),
+            },
+        ),
+        ("LC'25 (supersonic profile)", extend_pad(lc25_rows(), 12.0), lc25_config()),
+    ] {
+        let ign_s = t_s(&rows, find_ignition(&rows));
+        let burnout_s = t_s(&rows, find_burnout(&rows)) - ign_s;
+
+        let result = replay(&rows, config);
+        let (birth_t, forced) = result.birth.expect("filter never born");
+        let birth_s = (birth_t - rows[0].timestamp_us) as f32 * 1e-6 - ign_s;
+
+        eprintln!(
+            "{name}: burnout at ignition+{burnout_s:.2}s, filter born at \
+             ignition+{birth_s:.2}s (forced: {forced})"
+        );
+        assert!(
+            birth_s > burnout_s,
+            "{name}: filter born at ignition+{birth_s:.2}s, BEFORE burnout at \
+             ignition+{burnout_s:.2}s — the MPC could be handed a state under thrust"
+        );
+
+        // The latch is what the log records, so it has to be honest: one
+        // way, and reported consistently once the estimator leaves the
+        // dead-reckoning state that owns the flag.
+        let latched_s = result.burnout_s.expect("burnout never detected") - ign_s;
+        assert!(
+            !result.burnout_unlatched,
+            "{name}: burnout_detected() went back to false after latching"
+        );
+        // `<=` not `<`: on the subsonic path the baro ring is already full
+        // by the time the latch fires, so the same `update` call that
+        // latches burnout also births the filter.
+        assert!(
+            latched_s > burnout_s && latched_s <= birth_s,
+            "{name}: latch at ignition+{latched_s:.2}s is not between burnout \
+             ({burnout_s:.2}s) and birth ({birth_s:.2}s)"
+        );
+        eprintln!("{name}: burnout latch reported at ignition+{latched_s:.2}s");
+    }
+}
+
+fn lc25_rocket() -> RocketParameters {
+    RocketParameters {
+        burnout_mass: 17.607,
+        cd: [0.47044, 0.5082, 0.57784, 0.665, 0.74313],
+        reference_area: 0.008982476,
+    }
+}
+
 fn lc25_config() -> AirbrakesConfig {
     AirbrakesConfig {
         ignition_detection_acc_threshold: 4.0 * 9.81,
@@ -327,14 +413,10 @@ fn lc25_config() -> AirbrakesConfig {
         // 0.8 M slightly earlier: T_min well before, T_max bounded well
         // before apogee (~32 s after ignition)
         mach_lockout: Some(MachLockoutConfig {
-            t_min_us: 8_000_000,
-            t_max_us: 20_000_000,
+            earliest_subsonic_after_ignition_us: 8_000_000,
+            force_birth_after_ignition_us: 20_000_000,
         }),
-        // Cd*A/m for this airframe, brakes stowed. Independently
-        // corroborated by the flight itself: measured drag deceleration
-        // over dynamic pressure sits at 0.00022-0.00026 across the whole
-        // subsonic coast (see `mach_detection_signals`).
-        subsonic_cda_over_mass: 2.4e-4,
+        rocket: lc25_rocket(),
     }
 }
 
@@ -1273,6 +1355,87 @@ fn mach_detection_signals() {
                 q * 1e-3,
                 if q > 100.0 { drag_a / q } else { f32::NAN },
                 if i < burn_i { "  (thrusting)" } else { "" },
+            );
+        }
+    }
+}
+
+/// Diagnostic (run with --ignored --nocapture): can the accelerometer
+/// detect burnout on its own, so the airbrakes half stops needing the baro
+/// half's `is_coasting()` timer?
+///
+/// The discriminator is the SIGN of the axial specific force, not its
+/// magnitude. Thrust acts along +axis, drag along -axis, so the axial
+/// channel crosses zero at burnout and stays negative for the whole coast.
+/// A magnitude test cannot see that crossing; a sign test can.
+///
+/// Prints the axial channel through burnout for both logs, plus how long
+/// the zero crossing takes (the one window where a burning motor could be
+/// mistaken for free flight).
+#[test]
+#[ignore]
+fn axial_sign_detects_burnout() {
+    init_logger();
+    for (name, rows) in [
+        ("LC'25 (Mach 2)", lc25_rows()),
+        ("Void Lake (subsonic)", void_lake_rows()),
+    ] {
+        let ign_i = find_ignition(&rows);
+        let burn_i = find_burnout(&rows);
+        let t_ign = rows[ign_i].timestamp_us;
+
+        // Rocket axis in the body frame: gravity on the pad, which points
+        // along the airframe axis while it sits on the rail.
+        let (mut acc_sum, mut n) = (Vector3::<f32>::zeros(), 0usize);
+        for r in &rows {
+            let back = t_ign.saturating_sub(r.timestamp_us);
+            if (200_000..=2_200_000).contains(&back) {
+                acc_sum += r.acceleration();
+                n += 1;
+            }
+        }
+        let axis = (acc_sum / n as f32).normalize();
+
+        let axial = |i: usize| rows[i].acceleration().dot(&axis);
+
+        // First sample after ignition where the axial channel goes negative
+        // and STAYS negative for 0.3 s — a candidate burnout latch.
+        let mut latch = None;
+        let mut neg_since: Option<u64> = None;
+        for i in ign_i..rows.len() {
+            if axial(i) < -2.0 {
+                let t0 = *neg_since.get_or_insert(rows[i].timestamp_us);
+                if rows[i].timestamp_us - t0 >= 300_000 {
+                    latch = Some(i);
+                    break;
+                }
+            } else {
+                neg_since = None;
+            }
+        }
+
+        eprintln!(
+            "=== {name}: |acc|-based burnout at ignition+{:.2}s, axial-sign latch at ignition+{:.2}s",
+            t_s(&rows, burn_i) - t_s(&rows, ign_i),
+            latch.map(|i| t_s(&rows, i) - t_s(&rows, ign_i)).unwrap_or(f32::NAN),
+        );
+        eprintln!("    {:>8} {:>10} {:>10}", "t-ign", "axial", "|acc|");
+        let mut next = t_ign;
+        for i in ign_i..rows.len() {
+            let rel = (rows[i].timestamp_us - t_ign) as f32 * 1e-6;
+            if rel > 12.0 {
+                break;
+            }
+            if rows[i].timestamp_us < next {
+                continue;
+            }
+            next = rows[i].timestamp_us + 250_000;
+            eprintln!(
+                "    {:>+8.2} {:>10.2} {:>10.2}{}",
+                rel,
+                axial(i),
+                rows[i].acceleration().magnitude(),
+                if Some(i) == latch { "   <- burnout latched" } else { "" },
             );
         }
     }
