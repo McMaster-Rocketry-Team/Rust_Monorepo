@@ -1,4 +1,6 @@
-use crate::can_bus::messages::vl_status::FlightStage;
+use crate::can_bus::messages::{
+    custom_payload_status::PAYLOAD_READING_UNAVAILABLE, vl_status::FlightStage,
+};
 
 /// High-rate IMU / baro / mag / estimator / pyro / airbrakes-extension sample.
 pub const RECORD_TAG_FAST: u8 = 0x01;
@@ -68,6 +70,15 @@ pub struct FlightDataSlowRecord {
     pub amp_out_status: u8,
     /// Shared (AMP) battery voltage.
     pub amp_shared_battery_v: f32,
+    /// Payload EPM battery bus voltage (mV), from `CustomPayloadStatusMessage`.
+    /// `PAYLOAD_READING_UNAVAILABLE` (0xFFFF) when the payload reported it as
+    /// unavailable or has not reported at all — same sentinel as the CAN message.
+    pub payload_epm_batt_mv: u16,
+    /// Payload EPM switched rail load currents (mA), rail index order 0 `SYS_3V3`,
+    /// 1 `SYS_5V`, 2 `PER_3V3`, 3 `PER_5V`, 4 `PER_9V`, 5 `PER_12V`.
+    pub payload_rail_ma: [u16; 6],
+    /// SEM linear actuator positions (steps), experiment channels 1..3.
+    pub payload_actuator_steps: [u16; 3],
     pub valid: u8,
 }
 
@@ -87,6 +98,9 @@ impl Default for FlightDataSlowRecord {
             amp_online: false,
             amp_out_status: 0,
             amp_shared_battery_v: 0.0,
+            payload_epm_batt_mv: PAYLOAD_READING_UNAVAILABLE,
+            payload_rail_ma: [PAYLOAD_READING_UNAVAILABLE; 6],
+            payload_actuator_steps: [PAYLOAD_READING_UNAVAILABLE; 3],
             valid: 0,
         }
     }
@@ -154,6 +168,15 @@ pub struct FlightDataRecord {
     /// 2 bits per output, out1 in the LSBs (`PowerOutputStatus` discriminants).
     pub amp_out_status: u8,
     pub amp_shared_battery_v: f32,
+
+    /// Payload snapshot from the slow record, in the units the payload CAN
+    /// message carries. `PAYLOAD_READING_UNAVAILABLE` (0xFFFF) = no reading.
+    pub payload_epm_batt_mv: u16,
+    /// Rail index order: 0 `SYS_3V3`, 1 `SYS_5V`, 2 `PER_3V3`, 3 `PER_5V`,
+    /// 4 `PER_9V`, 5 `PER_12V`.
+    pub payload_rail_ma: [u16; 6],
+    /// Experiment channels 1..3.
+    pub payload_actuator_steps: [u16; 3],
 }
 
 impl FlightDataRecord {
@@ -190,6 +213,9 @@ impl FlightDataRecord {
             amp_online: slow.amp_online,
             amp_out_status: slow.amp_out_status,
             amp_shared_battery_v: slow.amp_shared_battery_v,
+            payload_epm_batt_mv: slow.payload_epm_batt_mv,
+            payload_rail_ma: slow.payload_rail_ma,
+            payload_actuator_steps: slow.payload_actuator_steps,
         }
     }
 }

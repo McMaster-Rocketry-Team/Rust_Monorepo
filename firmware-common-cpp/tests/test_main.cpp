@@ -285,17 +285,27 @@ TEST(CustomPayloadStatusTest, ReferenceData) {
         uint32_t expected_id = item["frame_id"];
 
         uint16_t expected_batt = message_content["epm_batt_mv"];
-        uint16_t expected_sys_3v3 = message_content["epm_sys_3v3_mv"];
-        uint16_t expected_sys_5v = message_content["epm_sys_5v_mv"];
-        uint16_t expected_per_5v = message_content["epm_per_5v_mv"];
-        uint16_t expected_per_9v = message_content["epm_per_9v_mv"];
+        uint16_t expected_sys_3v3 = message_content["epm_sys_3v3_ma"];
+        uint16_t expected_sys_5v = message_content["epm_sys_5v_ma"];
+        uint16_t expected_per_3v3 = message_content["epm_per_3v3_ma"];
+        uint16_t expected_per_5v = message_content["epm_per_5v_ma"];
+        uint16_t expected_per_9v = message_content["epm_per_9v_ma"];
+        uint16_t expected_per_12v = message_content["epm_per_12v_ma"];
+        uint16_t expected_act_1 = message_content["sem_actuator_1_steps"];
+        uint16_t expected_act_2 = message_content["sem_actuator_2_steps"];
+        uint16_t expected_act_3 = message_content["sem_actuator_3_steps"];
 
         auto msg = firmware_common::can_bus::CustomPayloadStatusMessage::deserialize(serialized_data.data());
         EXPECT_EQ(msg.epm_batt_mv, expected_batt);
-        EXPECT_EQ(msg.epm_sys_3v3_mv, expected_sys_3v3);
-        EXPECT_EQ(msg.epm_sys_5v_mv, expected_sys_5v);
-        EXPECT_EQ(msg.epm_per_5v_mv, expected_per_5v);
-        EXPECT_EQ(msg.epm_per_9v_mv, expected_per_9v);
+        EXPECT_EQ(msg.epm_sys_3v3_ma, expected_sys_3v3);
+        EXPECT_EQ(msg.epm_sys_5v_ma, expected_sys_5v);
+        EXPECT_EQ(msg.epm_per_3v3_ma, expected_per_3v3);
+        EXPECT_EQ(msg.epm_per_5v_ma, expected_per_5v);
+        EXPECT_EQ(msg.epm_per_9v_ma, expected_per_9v);
+        EXPECT_EQ(msg.epm_per_12v_ma, expected_per_12v);
+        EXPECT_EQ(msg.sem_actuator_1_steps, expected_act_1);
+        EXPECT_EQ(msg.sem_actuator_2_steps, expected_act_2);
+        EXPECT_EQ(msg.sem_actuator_3_steps, expected_act_3);
         EXPECT_EQ(firmware_common::can_bus::get_frame_id(msg, 10, 20), expected_id);
 
         uint8_t buffer[firmware_common::can_bus::CustomPayloadStatusMessage::SIZE_BYTES];
@@ -306,19 +316,21 @@ TEST(CustomPayloadStatusTest, ReferenceData) {
     }
 }
 
-TEST(CustomPayloadStatusTest, RailUnavailable) {
+TEST(CustomPayloadStatusTest, ReadingUnavailable) {
     using firmware_common::can_bus::CustomPayloadStatusMessage;
 
     auto msg = CustomPayloadStatusMessage::new_unavailable();
-    EXPECT_EQ(msg.epm_batt_mv, CustomPayloadStatusMessage::RAIL_MV_UNAVAILABLE);
-    EXPECT_FALSE(CustomPayloadStatusMessage::rail_mv(msg.epm_batt_mv).has_value());
+    EXPECT_EQ(msg.epm_batt_mv, CustomPayloadStatusMessage::PAYLOAD_READING_UNAVAILABLE);
+    EXPECT_EQ(msg.epm_per_12v_ma, CustomPayloadStatusMessage::PAYLOAD_READING_UNAVAILABLE);
+    EXPECT_EQ(msg.sem_actuator_3_steps, CustomPayloadStatusMessage::PAYLOAD_READING_UNAVAILABLE);
+    EXPECT_FALSE(CustomPayloadStatusMessage::reading(msg.epm_batt_mv).has_value());
 
-    EXPECT_EQ(CustomPayloadStatusMessage::rail_mv(0).value(), 0);
-    EXPECT_EQ(CustomPayloadStatusMessage::rail_mv(12600).value(), 12600);
+    EXPECT_EQ(CustomPayloadStatusMessage::reading(0).value(), 0);
+    EXPECT_EQ(CustomPayloadStatusMessage::reading(12600).value(), 12600);
 }
 
-// Mirrors payload_sdrm_custom_status.rs: the 11 bits are packed
-// most-significant first, so epm_alive is bit 10 and fault is bit 0.
+// Mirrors payload_sdrm_custom_status.rs: the SDRM's own layout, epm_alive is
+// bit 0, bits 8..10 are spare.
 TEST(PayloadSDRMCustomStatusTest, PackedBitLayout) {
     using firmware_common::can_bus::PayloadSDRMCustomStatus;
 
@@ -326,51 +338,46 @@ TEST(PayloadSDRMCustomStatusTest, PackedBitLayout) {
     EXPECT_EQ(status.to_raw(), 0);
 
     status.epm_alive = true;
-    EXPECT_EQ(status.to_raw(), 0b10000000000);
+    EXPECT_EQ(status.to_raw(), 0b00000001);
 
     status = PayloadSDRMCustomStatus{};
-    status.fault = true;
-    EXPECT_EQ(status.to_raw(), 0b00000000001);
+    status.sem_sd_logging = true;
+    EXPECT_EQ(status.to_raw(), 0b10000000);
 
     status = PayloadSDRMCustomStatus{};
     status.epm_alive = true;
     status.sem_alive = true;
-    status.stack_powered = true;
-    status.prep_complete = true;
-    status.fault = true;
-    EXPECT_EQ(status.to_raw(), 0b11100000101);
+    status.epm_rails_on = true;
+    EXPECT_EQ(status.to_raw(), 0b00000111);
 
     auto round_tripped = PayloadSDRMCustomStatus::from_raw(status.to_raw());
     EXPECT_EQ(round_tripped.to_raw(), status.to_raw());
     EXPECT_TRUE(round_tripped.epm_alive);
-    EXPECT_TRUE(round_tripped.prep_complete);
-    EXPECT_TRUE(round_tripped.fault);
-    EXPECT_FALSE(round_tripped.armed_bundle_complete);
+    EXPECT_TRUE(round_tripped.epm_rails_on);
+    EXPECT_FALSE(round_tripped.exp1_active);
 }
 
-// Reference frame shared with the payload team: armed bundle complete, all
-// experiments active, uptime 120s, no fault.
+// Reference frame shared with the payload team: rails up, all experiments
+// active, both SD logs healthy, uptime 120s.
 TEST(PayloadSDRMCustomStatusTest, ReferenceNodeStatusFrame) {
     using namespace firmware_common::can_bus;
 
     PayloadSDRMCustomStatus status;
     status.epm_alive = true;
     status.sem_alive = true;
-    status.stack_powered = true;
+    status.epm_rails_on = true;
     status.sdrm_sd_logging = true;
     status.sem_sd_logging = true;
     status.exp1_active = true;
     status.exp2_active = true;
     status.exp3_active = true;
-    status.prep_complete = true;
-    status.armed_bundle_complete = true;
-    EXPECT_EQ(status.to_raw(), 0x7FE);
+    EXPECT_EQ(status.to_raw(), 0xFF);
 
     NodeStatusMessage msg(120, NodeHealth::Healthy, NodeMode::Operational, status.to_raw());
 
     uint8_t buffer[NodeStatusMessage::SIZE_BYTES];
     msg.serialize(buffer);
-    const uint8_t expected[] = {0x00, 0x00, 0x78, 0x0F, 0xFC};
+    const uint8_t expected[] = {0x00, 0x00, 0x78, 0x01, 0xFE};
     for (size_t i = 0; i < sizeof(expected); ++i) EXPECT_EQ(buffer[i], expected[i]);
 }
 
@@ -380,25 +387,22 @@ TEST(PayloadSDRMCustomStatusTest, ClearFlags) {
     PayloadSDRMCustomStatus all_set;
     all_set.epm_alive = true;
     all_set.sem_alive = true;
-    all_set.stack_powered = true;
+    all_set.epm_rails_on = true;
     all_set.sdrm_sd_logging = true;
     all_set.sem_sd_logging = true;
     all_set.exp1_active = true;
     all_set.exp2_active = true;
     all_set.exp3_active = true;
-    all_set.prep_complete = true;
-    all_set.armed_bundle_complete = true;
-    all_set.fault = true;
 
     // LowPower safe-reset: experiment flags cleared, everything else kept
     auto status = all_set;
     status.clear_experiment_flags();
-    EXPECT_EQ(status.to_raw(), 0b11111000001);
+    EXPECT_EQ(status.to_raw(), 0b11000111);
 
-    // Landed shutdown: power and logging cleared too, liveness and fault kept
+    // Landed shutdown: rails and logging cleared too, liveness kept
     status = all_set;
     status.clear_powered_flags();
-    EXPECT_EQ(status.to_raw(), 0b11000000001);
+    EXPECT_EQ(status.to_raw(), 0b00000011);
 }
 
 TEST(DataTransferTest, ReferenceData) {
@@ -718,7 +722,7 @@ TEST(CanBusMultiFrameDecoderTest, SingleFrame) {
 }
 
 TEST(CanBusMultiFrameDecoderTest, MultiFrame) {
-    // CustomPayloadStatusMessage is 10 bytes, should be multi-frame
+    // CustomPayloadStatusMessage is 20 bytes, should be multi-frame
     auto msg = firmware_common::can_bus::CustomPayloadStatusMessage::new_unavailable();
     msg.epm_batt_mv = 7400;
     uint32_t id = firmware_common::can_bus::get_frame_id(msg, 10, 20);
@@ -826,6 +830,18 @@ TEST(CanBusFilterMaskTest, PointerAndInitializerListAgree) {
     EXPECT_EQ(CanBusExtendedId::create(7, 0, 0x3F, 0xFFF) & empty_mask, 0u);
 }
 
+// Mirrors node_types.rs. The payload's own node_type comes from here.
+TEST(NodeTypesTest, MatchesRust) {
+    using namespace firmware_common::can_bus;
+    EXPECT_EQ(VOID_LAKE_NODE_TYPE, 5);
+    EXPECT_EQ(AMP_NODE_TYPE, 10);
+    EXPECT_EQ(ICARUS_NODE_TYPE, 15);
+    EXPECT_EQ(PAYLOAD_SDRM_NODE_TYPE, 20);
+    EXPECT_EQ(OZYS_NODE_TYPE, 25);
+    EXPECT_EQ(BULKHEAD_NODE_TYPE, 30);
+    EXPECT_EQ(AERO_RUST_NODE_TYPE, 50);
+}
+
 TEST(CanNodeIdTest, FromSerialNumber) {
     using namespace firmware_common::can_bus;
 
@@ -865,7 +881,7 @@ TEST(CanBusMultiFrameDecoderTest, LRUDiscard) {
     
     // Fill up all 8 state machines with first frames of different IDs
     for (int i = 0; i < 8; ++i) {
-        auto msg = firmware_common::can_bus::CustomPayloadStatusMessage::new_unavailable(); // 10 bytes
+        auto msg = firmware_common::can_bus::CustomPayloadStatusMessage::new_unavailable(); // 20 bytes
         firmware_common::can_bus::CanBusMultiFrameEncoder encoder(msg);
         auto frame_data = encoder.next();
         uint32_t id = firmware_common::can_bus::CanBusExtendedId::create(

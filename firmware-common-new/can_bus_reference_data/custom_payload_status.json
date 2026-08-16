@@ -3,14 +3,29 @@
     "message": {
       "CustomPayloadStatus": {
         "epm_batt_mv": 0,
-        "epm_sys_3v3_mv": 0,
-        "epm_sys_5v_mv": 0,
-        "epm_per_5v_mv": 0,
-        "epm_per_9v_mv": 0
+        "epm_sys_3v3_ma": 0,
+        "epm_sys_5v_ma": 0,
+        "epm_per_3v3_ma": 0,
+        "epm_per_5v_ma": 0,
+        "epm_per_9v_ma": 0,
+        "epm_per_12v_ma": 0,
+        "sem_actuator_1_steps": 0,
+        "sem_actuator_2_steps": 0,
+        "sem_actuator_3_steps": 0
       }
     },
     "message_type": 35,
     "serialized_data": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
       0,
       0,
       0,
@@ -25,8 +40,8 @@
     "frame_id": 344760340,
     "encoded_data": [
       [
-        57,
-        225,
+        184,
+        246,
         0,
         0,
         0,
@@ -40,6 +55,22 @@
         0,
         0,
         0,
+        0,
+        0,
+        32
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
         96
       ]
     ]
@@ -48,14 +79,29 @@
     "message": {
       "CustomPayloadStatus": {
         "epm_batt_mv": 65535,
-        "epm_sys_3v3_mv": 65535,
-        "epm_sys_5v_mv": 65535,
-        "epm_per_5v_mv": 65535,
-        "epm_per_9v_mv": 65535
+        "epm_sys_3v3_ma": 65535,
+        "epm_sys_5v_ma": 65535,
+        "epm_per_3v3_ma": 65535,
+        "epm_per_5v_ma": 65535,
+        "epm_per_9v_ma": 65535,
+        "epm_per_12v_ma": 65535,
+        "sem_actuator_1_steps": 65535,
+        "sem_actuator_2_steps": 65535,
+        "sem_actuator_3_steps": 65535
       }
     },
     "message_type": 35,
     "serialized_data": [
+      255,
+      255,
+      255,
+      255,
+      255,
+      255,
+      255,
+      255,
+      255,
+      255,
       255,
       255,
       255,
@@ -70,8 +116,8 @@
     "frame_id": 344760340,
     "encoded_data": [
       [
-        225,
-        166,
+        234,
+        69,
         255,
         255,
         255,
@@ -84,6 +130,22 @@
         255,
         255,
         255,
+        255,
+        255,
+        255,
+        32
+      ],
+      [
+        255,
+        255,
+        255,
+        255,
+        255,
+        255,
+        255,
+        0
+      ],
+      [
         255,
         96
       ]
@@ -93,43 +155,74 @@
     "message": {
       "CustomPayloadStatus": {
         "epm_batt_mv": 12600,
-        "epm_sys_3v3_mv": 3300,
-        "epm_sys_5v_mv": 5000,
-        "epm_per_5v_mv": 5000,
-        "epm_per_9v_mv": 9000
+        "epm_sys_3v3_ma": 120,
+        "epm_sys_5v_ma": 340,
+        "epm_per_3v3_ma": 55,
+        "epm_per_5v_ma": 780,
+        "epm_per_9v_ma": 1500,
+        "epm_per_12v_ma": 2400,
+        "sem_actuator_1_steps": 0,
+        "sem_actuator_2_steps": 1200,
+        "sem_actuator_3_steps": 34567
       }
     },
     "message_type": 35,
     "serialized_data": [
       49,
       56,
+      0,
+      120,
+      1,
+      84,
+      0,
+      55,
+      3,
       12,
-      228,
-      19,
-      136,
-      19,
-      136,
-      35,
-      40
+      5,
+      220,
+      9,
+      96,
+      0,
+      0,
+      4,
+      176,
+      135,
+      7
     ],
     "frame_id": 344760340,
     "encoded_data": [
       [
-        78,
-        38,
+        167,
+        219,
         49,
         56,
-        12,
-        228,
-        19,
+        0,
+        120,
+        1,
         128
       ],
       [
-        136,
-        19,
-        136,
-        35,
-        40,
+        84,
+        0,
+        55,
+        3,
+        12,
+        5,
+        220,
+        32
+      ],
+      [
+        9,
+        96,
+        0,
+        0,
+        4,
+        176,
+        135,
+        0
+      ],
+      [
+        7,
         96
       ]
     ]

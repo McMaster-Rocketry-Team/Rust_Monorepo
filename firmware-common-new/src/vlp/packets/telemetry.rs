@@ -33,13 +33,20 @@ fixed_point_factory!(TiltDegFac, f32, -90.0, 90.0, 1.0);
 
 // EPM battery bus, a 4S-ish pack sitting well above the regulated rails.
 fixed_point_factory!(EpmBattVFac, f32, 11.0, 17.0, 0.01);
-// The four regulated EPM rails: 3.3V, system 5V, peripheral 5V and peripheral 9V.
-fixed_point_factory!(EpmRailVFac, f32, 0.0, 10.0, 0.01);
+// Load current of one EPM switched rail, 10mA resolution over 0..10.23A.
+fixed_point_factory!(EpmRailMaFac, f32, 0.0, 10230.0, 10.0);
+// SEM linear actuator position. The full u16 step range at ~64 step resolution;
+// SEM's own step scale decides what that means in millimetres.
+fixed_point_factory!(ActuatorStepsFac, f32, 0.0, 65535.0, 64.0);
 
-// 48 byte max size to achieve 0.5Hz with 250khz bandwidth + 12sf + 8cr lora
-// 288 bits = 36 bytes, zero spare bits.
+// 343 bits = 42.875 bytes, so 43 bytes with one spare bit. With the 1 byte
+// packet type and reed-solomon ecc (len/4) that is 55 bytes on air, 1774ms at
+// 250khz bandwidth + 12sf + 8cr lora — still inside the 2s telemetry period.
+// Trimming the struct back to 39 bytes (50 on air) would drop that to 1642ms,
+// the same time-on-air as a 36 byte struct: the symbol count only steps at
+// 50 / 55 / 60 bytes.
 #[derive(PackedStruct, Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "36")]
+#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "43")]
 pub struct TelemetryPacket {
     #[packed_field(bits = "0..4")]
     nonce: Integer<u8, packed_bits::Bits<4>>,
@@ -139,28 +146,50 @@ pub struct TelemetryPacket {
     #[packed_field(element_size_bits = "11")]
     payload_stack_status_raw: Integer<u16, packed_bits::Bits<11>>,
 
-    /// EPM rail voltages, relayed from `CustomPayloadStatusMessage`. Each rail
-    /// carries a validity bit; the payload reports `0xFFFF` when a reading is
-    /// unavailable, which arrives here as `false`.
+    /// Payload stack telemetry, relayed from `CustomPayloadStatusMessage`. Every
+    /// reading carries a validity bit; the payload reports `0xFFFF` when a value
+    /// is unavailable, which arrives here as `false`.
     epm_batt_v_valid: bool,
     #[packed_field(element_size_bits = "10")]
     epm_batt_v: Integer<EpmBattVFacBase, packed_bits::Bits<EPM_BATT_V_FAC_BITS>>,
 
-    epm_sys_3v3_v_valid: bool,
+    /// EPM switched rail load currents, 10mA resolution over 0..10.23A.
+    epm_sys_3v3_ma_valid: bool,
     #[packed_field(element_size_bits = "10")]
-    epm_sys_3v3_v: Integer<EpmRailVFacBase, packed_bits::Bits<EPM_RAIL_V_FAC_BITS>>,
+    epm_sys_3v3_ma: Integer<EpmRailMaFacBase, packed_bits::Bits<EPM_RAIL_MA_FAC_BITS>>,
 
-    epm_sys_5v_v_valid: bool,
+    epm_sys_5v_ma_valid: bool,
     #[packed_field(element_size_bits = "10")]
-    epm_sys_5v_v: Integer<EpmRailVFacBase, packed_bits::Bits<EPM_RAIL_V_FAC_BITS>>,
+    epm_sys_5v_ma: Integer<EpmRailMaFacBase, packed_bits::Bits<EPM_RAIL_MA_FAC_BITS>>,
 
-    epm_per_5v_v_valid: bool,
+    epm_per_3v3_ma_valid: bool,
     #[packed_field(element_size_bits = "10")]
-    epm_per_5v_v: Integer<EpmRailVFacBase, packed_bits::Bits<EPM_RAIL_V_FAC_BITS>>,
+    epm_per_3v3_ma: Integer<EpmRailMaFacBase, packed_bits::Bits<EPM_RAIL_MA_FAC_BITS>>,
 
-    epm_per_9v_v_valid: bool,
+    epm_per_5v_ma_valid: bool,
     #[packed_field(element_size_bits = "10")]
-    epm_per_9v_v: Integer<EpmRailVFacBase, packed_bits::Bits<EPM_RAIL_V_FAC_BITS>>,
+    epm_per_5v_ma: Integer<EpmRailMaFacBase, packed_bits::Bits<EPM_RAIL_MA_FAC_BITS>>,
+
+    epm_per_9v_ma_valid: bool,
+    #[packed_field(element_size_bits = "10")]
+    epm_per_9v_ma: Integer<EpmRailMaFacBase, packed_bits::Bits<EPM_RAIL_MA_FAC_BITS>>,
+
+    epm_per_12v_ma_valid: bool,
+    #[packed_field(element_size_bits = "10")]
+    epm_per_12v_ma: Integer<EpmRailMaFacBase, packed_bits::Bits<EPM_RAIL_MA_FAC_BITS>>,
+
+    /// SEM linear actuator positions, ~64 step resolution over the full u16 range.
+    sem_actuator_1_steps_valid: bool,
+    #[packed_field(element_size_bits = "10")]
+    sem_actuator_1_steps: Integer<ActuatorStepsFacBase, packed_bits::Bits<ACTUATOR_STEPS_FAC_BITS>>,
+
+    sem_actuator_2_steps_valid: bool,
+    #[packed_field(element_size_bits = "10")]
+    sem_actuator_2_steps: Integer<ActuatorStepsFacBase, packed_bits::Bits<ACTUATOR_STEPS_FAC_BITS>>,
+
+    sem_actuator_3_steps_valid: bool,
+    #[packed_field(element_size_bits = "10")]
+    sem_actuator_3_steps: Integer<ActuatorStepsFacBase, packed_bits::Bits<ACTUATOR_STEPS_FAC_BITS>>,
 }
 
 impl TelemetryPacket {
@@ -225,11 +254,12 @@ impl TelemetryPacket {
 
         payload_stack_status: PayloadSDRMCustomStatus,
 
-        epm_batt_v: Option<f32>,
-        epm_sys_3v3_v: Option<f32>,
-        epm_sys_5v_v: Option<f32>,
-        epm_per_5v_v: Option<f32>,
-        epm_per_9v_v: Option<f32>,
+        epm_batt_mv: Option<u16>,
+        // Rail index order: 0 SYS_3V3, 1 SYS_5V, 2 PER_3V3, 3 PER_5V, 4 PER_9V,
+        // 5 PER_12V.
+        epm_rail_ma: [Option<u16>; 6],
+        // Experiment channels 1..3.
+        sem_actuator_steps: [Option<u16>; 3],
     ) -> Self {
         if altitude_agl.is_nan(){
             log_info!("altitude agl nan");
@@ -303,29 +333,62 @@ impl TelemetryPacket {
 
             payload_stack_status_raw: payload_stack_status.to_u16().into(),
 
-            epm_batt_v_valid: epm_batt_v.is_some(),
-            epm_batt_v: EpmBattVFac::to_fixed_point_capped(epm_batt_v.unwrap_or(11.0)),
-            epm_sys_3v3_v_valid: epm_sys_3v3_v.is_some(),
-            epm_sys_3v3_v: Self::encode_rail_v(epm_sys_3v3_v),
-            epm_sys_5v_v_valid: epm_sys_5v_v.is_some(),
-            epm_sys_5v_v: Self::encode_rail_v(epm_sys_5v_v),
-            epm_per_5v_v_valid: epm_per_5v_v.is_some(),
-            epm_per_5v_v: Self::encode_rail_v(epm_per_5v_v),
-            epm_per_9v_v_valid: epm_per_9v_v.is_some(),
-            epm_per_9v_v: Self::encode_rail_v(epm_per_9v_v),
+            epm_batt_v_valid: epm_batt_mv.is_some(),
+            epm_batt_v: EpmBattVFac::to_fixed_point_capped(
+                epm_batt_mv.map(|mv| mv as f32 / 1000.0).unwrap_or(11.0),
+            ),
+
+            epm_sys_3v3_ma_valid: epm_rail_ma[0].is_some(),
+            epm_sys_3v3_ma: Self::encode_rail_ma(epm_rail_ma[0]),
+            epm_sys_5v_ma_valid: epm_rail_ma[1].is_some(),
+            epm_sys_5v_ma: Self::encode_rail_ma(epm_rail_ma[1]),
+            epm_per_3v3_ma_valid: epm_rail_ma[2].is_some(),
+            epm_per_3v3_ma: Self::encode_rail_ma(epm_rail_ma[2]),
+            epm_per_5v_ma_valid: epm_rail_ma[3].is_some(),
+            epm_per_5v_ma: Self::encode_rail_ma(epm_rail_ma[3]),
+            epm_per_9v_ma_valid: epm_rail_ma[4].is_some(),
+            epm_per_9v_ma: Self::encode_rail_ma(epm_rail_ma[4]),
+            epm_per_12v_ma_valid: epm_rail_ma[5].is_some(),
+            epm_per_12v_ma: Self::encode_rail_ma(epm_rail_ma[5]),
+
+            sem_actuator_1_steps_valid: sem_actuator_steps[0].is_some(),
+            sem_actuator_1_steps: Self::encode_steps(sem_actuator_steps[0]),
+            sem_actuator_2_steps_valid: sem_actuator_steps[1].is_some(),
+            sem_actuator_2_steps: Self::encode_steps(sem_actuator_steps[1]),
+            sem_actuator_3_steps_valid: sem_actuator_steps[2].is_some(),
+            sem_actuator_3_steps: Self::encode_steps(sem_actuator_steps[2]),
         }
     }
 
-    fn encode_rail_v(rail_v: Option<f32>) -> Integer<EpmRailVFacBase, packed_bits::Bits<EPM_RAIL_V_FAC_BITS>> {
-        EpmRailVFac::to_fixed_point_capped(rail_v.unwrap_or(0.0))
+    fn encode_rail_ma(
+        rail_ma: Option<u16>,
+    ) -> Integer<EpmRailMaFacBase, packed_bits::Bits<EPM_RAIL_MA_FAC_BITS>> {
+        EpmRailMaFac::to_fixed_point_capped(rail_ma.unwrap_or(0) as f32)
     }
 
-    fn decode_rail_v(
+    fn decode_rail_ma(
         valid: bool,
-        rail_v: Integer<EpmRailVFacBase, packed_bits::Bits<EPM_RAIL_V_FAC_BITS>>,
-    ) -> Option<f32> {
+        rail_ma: Integer<EpmRailMaFacBase, packed_bits::Bits<EPM_RAIL_MA_FAC_BITS>>,
+    ) -> Option<u16> {
         if valid {
-            Some(EpmRailVFac::to_float(rail_v))
+            Some(libm::roundf(EpmRailMaFac::to_float(rail_ma)) as u16)
+        } else {
+            None
+        }
+    }
+
+    fn encode_steps(
+        steps: Option<u16>,
+    ) -> Integer<ActuatorStepsFacBase, packed_bits::Bits<ACTUATOR_STEPS_FAC_BITS>> {
+        ActuatorStepsFac::to_fixed_point_capped(steps.unwrap_or(0) as f32)
+    }
+
+    fn decode_steps(
+        valid: bool,
+        steps: Integer<ActuatorStepsFacBase, packed_bits::Bits<ACTUATOR_STEPS_FAC_BITS>>,
+    ) -> Option<u16> {
+        if valid {
+            Some(libm::roundf(ActuatorStepsFac::to_float(steps)) as u16)
         } else {
             None
         }
@@ -515,7 +578,7 @@ impl TelemetryPacket {
         PayloadSDRMCustomStatus::from_u16(self.payload_stack_status_raw.into())
     }
 
-    /// `None` when the payload reported the rail as unavailable.
+    /// `None` when the payload reported the reading as unavailable.
     pub fn epm_batt_v(&self) -> Option<f32> {
         if self.epm_batt_v_valid {
             Some(EpmBattVFac::to_float(self.epm_batt_v))
@@ -524,20 +587,62 @@ impl TelemetryPacket {
         }
     }
 
-    pub fn epm_sys_3v3_v(&self) -> Option<f32> {
-        Self::decode_rail_v(self.epm_sys_3v3_v_valid, self.epm_sys_3v3_v)
+    pub fn epm_sys_3v3_ma(&self) -> Option<u16> {
+        Self::decode_rail_ma(self.epm_sys_3v3_ma_valid, self.epm_sys_3v3_ma)
     }
 
-    pub fn epm_sys_5v_v(&self) -> Option<f32> {
-        Self::decode_rail_v(self.epm_sys_5v_v_valid, self.epm_sys_5v_v)
+    pub fn epm_sys_5v_ma(&self) -> Option<u16> {
+        Self::decode_rail_ma(self.epm_sys_5v_ma_valid, self.epm_sys_5v_ma)
     }
 
-    pub fn epm_per_5v_v(&self) -> Option<f32> {
-        Self::decode_rail_v(self.epm_per_5v_v_valid, self.epm_per_5v_v)
+    pub fn epm_per_3v3_ma(&self) -> Option<u16> {
+        Self::decode_rail_ma(self.epm_per_3v3_ma_valid, self.epm_per_3v3_ma)
     }
 
-    pub fn epm_per_9v_v(&self) -> Option<f32> {
-        Self::decode_rail_v(self.epm_per_9v_v_valid, self.epm_per_9v_v)
+    pub fn epm_per_5v_ma(&self) -> Option<u16> {
+        Self::decode_rail_ma(self.epm_per_5v_ma_valid, self.epm_per_5v_ma)
+    }
+
+    pub fn epm_per_9v_ma(&self) -> Option<u16> {
+        Self::decode_rail_ma(self.epm_per_9v_ma_valid, self.epm_per_9v_ma)
+    }
+
+    pub fn epm_per_12v_ma(&self) -> Option<u16> {
+        Self::decode_rail_ma(self.epm_per_12v_ma_valid, self.epm_per_12v_ma)
+    }
+
+    /// Rail index order: 0 `SYS_3V3`, 1 `SYS_5V`, 2 `PER_3V3`, 3 `PER_5V`,
+    /// 4 `PER_9V`, 5 `PER_12V`.
+    pub fn epm_rail_ma(&self) -> [Option<u16>; 6] {
+        [
+            self.epm_sys_3v3_ma(),
+            self.epm_sys_5v_ma(),
+            self.epm_per_3v3_ma(),
+            self.epm_per_5v_ma(),
+            self.epm_per_9v_ma(),
+            self.epm_per_12v_ma(),
+        ]
+    }
+
+    pub fn sem_actuator_1_steps(&self) -> Option<u16> {
+        Self::decode_steps(self.sem_actuator_1_steps_valid, self.sem_actuator_1_steps)
+    }
+
+    pub fn sem_actuator_2_steps(&self) -> Option<u16> {
+        Self::decode_steps(self.sem_actuator_2_steps_valid, self.sem_actuator_2_steps)
+    }
+
+    pub fn sem_actuator_3_steps(&self) -> Option<u16> {
+        Self::decode_steps(self.sem_actuator_3_steps_valid, self.sem_actuator_3_steps)
+    }
+
+    /// Experiment channels 1..3.
+    pub fn sem_actuator_steps(&self) -> [Option<u16>; 3] {
+        [
+            self.sem_actuator_1_steps(),
+            self.sem_actuator_2_steps(),
+            self.sem_actuator_3_steps(),
+        ]
     }
 
     #[cfg(feature = "json")]
@@ -597,21 +702,24 @@ impl TelemetryPacket {
 
             payload_epm_alive: payload_stack_status.epm_alive,
             payload_sem_alive: payload_stack_status.sem_alive,
-            payload_stack_powered: payload_stack_status.stack_powered,
+            payload_epm_rails_on: payload_stack_status.epm_rails_on,
             payload_sdrm_sd_logging: payload_stack_status.sdrm_sd_logging,
             payload_sem_sd_logging: payload_stack_status.sem_sd_logging,
             payload_exp1_active: payload_stack_status.exp1_active,
             payload_exp2_active: payload_stack_status.exp2_active,
             payload_exp3_active: payload_stack_status.exp3_active,
-            payload_prep_complete: payload_stack_status.prep_complete,
-            payload_armed_bundle_complete: payload_stack_status.armed_bundle_complete,
-            payload_fault: payload_stack_status.fault,
 
             epm_batt_v: self.epm_batt_v(),
-            epm_sys_3v3_v: self.epm_sys_3v3_v(),
-            epm_sys_5v_v: self.epm_sys_5v_v(),
-            epm_per_5v_v: self.epm_per_5v_v(),
-            epm_per_9v_v: self.epm_per_9v_v(),
+            epm_sys_3v3_ma: self.epm_sys_3v3_ma(),
+            epm_sys_5v_ma: self.epm_sys_5v_ma(),
+            epm_per_3v3_ma: self.epm_per_3v3_ma(),
+            epm_per_5v_ma: self.epm_per_5v_ma(),
+            epm_per_9v_ma: self.epm_per_9v_ma(),
+            epm_per_12v_ma: self.epm_per_12v_ma(),
+
+            sem_actuator_1_steps: self.sem_actuator_1_steps(),
+            sem_actuator_2_steps: self.sem_actuator_2_steps(),
+            sem_actuator_3_steps: self.sem_actuator_3_steps(),
         }
     }
 }
@@ -695,13 +803,15 @@ pub struct TelemetryPacketBuilderState {
     /// Stack flags from the payload SDRM node's `NodeStatusMessage`.
     pub payload_stack_status: PayloadSDRMCustomStatus,
 
-    /// EPM rails from `CustomPayloadStatusMessage`. `None` while the payload has
-    /// not reported, or when it reports a rail as unavailable.
-    pub epm_batt_v: Option<f32>,
-    pub epm_sys_3v3_v: Option<f32>,
-    pub epm_sys_5v_v: Option<f32>,
-    pub epm_per_5v_v: Option<f32>,
-    pub epm_per_9v_v: Option<f32>,
+    /// Payload stack telemetry from `CustomPayloadStatusMessage`, in the units it
+    /// arrives in. `None` while the payload has not reported, or when it reports
+    /// a reading as unavailable.
+    pub epm_batt_mv: Option<u16>,
+    /// Rail index order: 0 `SYS_3V3`, 1 `SYS_5V`, 2 `PER_3V3`, 3 `PER_5V`,
+    /// 4 `PER_9V`, 5 `PER_12V`.
+    pub epm_rail_ma: [Option<u16>; 6],
+    /// Experiment channels 1..3.
+    pub sem_actuator_steps: [Option<u16>; 3],
 }
 
 pub struct TelemetryPacketBuilder<M: RawMutex> {
@@ -770,11 +880,9 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
 
                 payload_stack_status: PayloadSDRMCustomStatus::new(),
 
-                epm_batt_v: None,
-                epm_sys_3v3_v: None,
-                epm_sys_5v_v: None,
-                epm_per_5v_v: None,
-                epm_per_9v_v: None,
+                epm_batt_mv: None,
+                epm_rail_ma: [None; 6],
+                sem_actuator_steps: [None; 3],
             })),
         }
     }
@@ -841,11 +949,9 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 state.payload_sdrm_online,
                 state.payload_sdrm_uptime_s < 5,
                 state.payload_stack_status.clone(),
-                state.epm_batt_v,
-                state.epm_sys_3v3_v,
-                state.epm_sys_5v_v,
-                state.epm_per_5v_v,
-                state.epm_per_9v_v,
+                state.epm_batt_mv,
+                state.epm_rail_ma,
+                state.sem_actuator_steps,
             )
         })
     }
@@ -921,18 +1027,16 @@ mod tests {
             true,
             false,
             PayloadSDRMCustomStatus::new(),
-            Some(12.6),
-            Some(3.3),
-            Some(5.0),
-            None,
-            Some(9.0),
+            Some(12600),
+            [Some(120), Some(340), None, Some(780), Some(1500), Some(2400)],
+            [Some(0), Some(1200), Some(34567)],
         );
         let packet: VLPDownlinkPacket = packet.into();
 
         let mut buffer = [0u8; 64];
         let len = packet.serialize(&mut buffer);
-        // 1 byte packet type + the 36 byte packed struct.
-        assert_eq!(len, 37);
+        // 1 byte packet type + the 43 byte packed struct.
+        assert_eq!(len, 44);
 
         let deserialized_packet = VLPDownlinkPacket::deserialize(&buffer[..len]).unwrap();
         assert_eq!(deserialized_packet, packet);
@@ -948,5 +1052,21 @@ mod tests {
         assert!(p.ab_born());
         assert!(!p.ab_apogee());
         assert_relative_eq!(p.target_apogee_agl(), 3000.0, epsilon = 1.0);
+
+        // Payload readings survive the round trip within their quantization
+        // (10mA per rail code, ~64 steps per actuator code), and an unavailable
+        // reading stays unavailable rather than decoding as 0.
+        assert_relative_eq!(p.epm_batt_v().unwrap(), 12.6, epsilon = 0.01);
+        let rails = p.epm_rail_ma();
+        assert_relative_eq!(rails[0].unwrap() as f32, 120.0, epsilon = 10.0);
+        assert_relative_eq!(rails[1].unwrap() as f32, 340.0, epsilon = 10.0);
+        assert_eq!(rails[2], None);
+        assert_relative_eq!(rails[3].unwrap() as f32, 780.0, epsilon = 10.0);
+        assert_relative_eq!(rails[4].unwrap() as f32, 1500.0, epsilon = 10.0);
+        assert_relative_eq!(rails[5].unwrap() as f32, 2400.0, epsilon = 10.0);
+        let steps = p.sem_actuator_steps();
+        assert_eq!(steps[0], Some(0));
+        assert_relative_eq!(steps[1].unwrap() as f32, 1200.0, epsilon = 64.0);
+        assert_relative_eq!(steps[2].unwrap() as f32, 34567.0, epsilon = 64.0);
     }
 }

@@ -20,6 +20,7 @@ use firmware_common_new::flight_data_record::{
     merge_log_records,
 };
 use firmware_common_new::can_bus::messages::amp_status::PowerOutputStatus;
+use firmware_common_new::can_bus::messages::custom_payload_status::CustomPayloadStatusMessage;
 use firmware_common_new::flight_storage::{
     BLOCK_SIZE, HEADER_LEN, RESPONSE_MAGIC, STORAGE_VERSION, decode_response_header,
     parse_log_records, verify_data_block,
@@ -257,6 +258,15 @@ fn amp_out(status: u8, out_index: u8) -> String {
     }
 }
 
+/// Payload readings keep the CAN message's `0xFFFF` = unavailable sentinel;
+/// write those as an empty cell rather than 65535.
+fn payload_reading(raw: u16) -> String {
+    match CustomPayloadStatusMessage::reading(raw) {
+        Some(value) => value.to_string(),
+        None => String::new(),
+    }
+}
+
 fn write_csv(path: &str, records: &[FlightDataRecord]) -> Result<()> {
     let mut w = csv::Writer::from_path(path).with_context(|| format!("creating {}", path))?;
     // Pyro and airbrakes-extension columns come from the fast record since
@@ -317,6 +327,16 @@ fn write_csv(path: &str, records: &[FlightDataRecord]) -> Result<()> {
         "amp_out2_status",
         "amp_out3_status",
         "amp_shared_battery_v",
+        "payload_epm_batt_mv",
+        "payload_sys_3v3_ma",
+        "payload_sys_5v_ma",
+        "payload_per_3v3_ma",
+        "payload_per_5v_ma",
+        "payload_per_9v_ma",
+        "payload_per_12v_ma",
+        "payload_actuator_1_steps",
+        "payload_actuator_2_steps",
+        "payload_actuator_3_steps",
     ])?;
 
     for r in records {
@@ -377,6 +397,16 @@ fn write_csv(path: &str, records: &[FlightDataRecord]) -> Result<()> {
             amp_out(r.amp_out_status, 1),
             amp_out(r.amp_out_status, 2),
             r.amp_shared_battery_v.to_string(),
+            payload_reading(r.payload_epm_batt_mv),
+            payload_reading(r.payload_rail_ma[0]),
+            payload_reading(r.payload_rail_ma[1]),
+            payload_reading(r.payload_rail_ma[2]),
+            payload_reading(r.payload_rail_ma[3]),
+            payload_reading(r.payload_rail_ma[4]),
+            payload_reading(r.payload_rail_ma[5]),
+            payload_reading(r.payload_actuator_steps[0]),
+            payload_reading(r.payload_actuator_steps[1]),
+            payload_reading(r.payload_actuator_steps[2]),
         ])?;
     }
 

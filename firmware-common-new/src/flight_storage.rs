@@ -50,8 +50,9 @@ pub const DEFAULT_TARGET_APOGEE_AGL: f32 = 4000.0;
 
 /// On-disk format version. Bump when the record or superblock layout changes;
 /// logs written at any other version are treated as absent.
+/// v8: payload EPM rail currents + SEM actuator steps in the slow record.
 /// v7: tagged FAST/SLOW stream (see `flight_data_record`). Older formats: see git history.
-pub const STORAGE_VERSION: u32 = 7;
+pub const STORAGE_VERSION: u32 = 8;
 
 /// rkyv body sizes for tagged record types.
 pub const FAST_BODY_LEN: usize = size_of::<<FlightDataFastRecord as rkyv::Archive>::Archived>();
@@ -400,6 +401,9 @@ mod tests {
             amp_online: true,
             amp_out_status: 0b01_01_00,
             amp_shared_battery_v: 8.2,
+            payload_epm_batt_mv: 12600,
+            payload_rail_ma: [120, 340, 0xFFFF, 780, 1500, 2400],
+            payload_actuator_steps: [0, 1200, 34567],
             valid: VALID_BATTERY | VALID_GPS_FIX,
         }
     }

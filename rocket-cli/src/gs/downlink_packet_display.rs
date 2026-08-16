@@ -84,11 +84,29 @@ impl DownlinkPacketDisplay {
     fn format_optional_v(value: Option<f32>) -> StyledString {
         match value {
             Some(v) => format!("{:.2}V", v).into(),
-            None => StyledString::single_span(
-                "n/a   ",
-                Style::from_color_style(ColorStyle::front(Color::Rgb(127, 127, 127))),
-            ),
+            None => Self::format_unavailable(),
         }
+    }
+
+    fn format_optional_ma(value: Option<u16>) -> StyledString {
+        match value {
+            Some(ma) => format!("{}mA", ma).into(),
+            None => Self::format_unavailable(),
+        }
+    }
+
+    fn format_optional_steps(value: Option<u16>) -> StyledString {
+        match value {
+            Some(steps) => format!("{}", steps).into(),
+            None => Self::format_unavailable(),
+        }
+    }
+
+    fn format_unavailable() -> StyledString {
+        StyledString::single_span(
+            "n/a   ",
+            Style::from_color_style(ColorStyle::front(Color::Rgb(127, 127, 127))),
+        )
     }
 
     fn format_node_status(value: &NodeStatus) -> StyledString {
@@ -516,9 +534,9 @@ impl View for DownlinkPacketDisplay {
                             ("epm alive", true, Self::format_bool(stack.epm_alive)),
                             ("sem alive", true, Self::format_bool(stack.sem_alive)),
                             (
-                                "stack powered",
+                                "epm rails on",
                                 true,
-                                Self::format_bool(stack.stack_powered),
+                                Self::format_bool(stack.epm_rails_on),
                             ),
                             (
                                 "sdrm sd log",
@@ -531,28 +549,44 @@ impl View for DownlinkPacketDisplay {
                             ("exp 1", true, Self::format_bool(stack.exp1_active)),
                             ("exp 2", true, Self::format_bool(stack.exp2_active)),
                             ("exp 3", true, Self::format_bool(stack.exp3_active)),
-                            (
-                                "prep complete",
-                                true,
-                                Self::format_bool(stack.prep_complete),
-                            ),
-                            (
-                                "armed bundle",
-                                true,
-                                Self::format_bool(stack.armed_bundle_complete),
-                            ),
-                            ("fault", true, Self::format_bool(stack.fault)),
                         ],
                         &[
                             ("epm batt", false, Self::format_optional_v(p.epm_batt_v())),
                             (
                                 "sys 3v3",
                                 false,
-                                Self::format_optional_v(p.epm_sys_3v3_v()),
+                                Self::format_optional_ma(p.epm_sys_3v3_ma()),
                             ),
-                            ("sys 5v", false, Self::format_optional_v(p.epm_sys_5v_v())),
-                            ("per 5v", false, Self::format_optional_v(p.epm_per_5v_v())),
-                            ("per 9v", false, Self::format_optional_v(p.epm_per_9v_v())),
+                            ("sys 5v", false, Self::format_optional_ma(p.epm_sys_5v_ma())),
+                            (
+                                "per 3v3",
+                                false,
+                                Self::format_optional_ma(p.epm_per_3v3_ma()),
+                            ),
+                            ("per 5v", false, Self::format_optional_ma(p.epm_per_5v_ma())),
+                            ("per 9v", false, Self::format_optional_ma(p.epm_per_9v_ma())),
+                            (
+                                "per 12v",
+                                false,
+                                Self::format_optional_ma(p.epm_per_12v_ma()),
+                            ),
+                        ],
+                        &[
+                            (
+                                "act 1",
+                                false,
+                                Self::format_optional_steps(p.sem_actuator_1_steps()),
+                            ),
+                            (
+                                "act 2",
+                                false,
+                                Self::format_optional_steps(p.sem_actuator_2_steps()),
+                            ),
+                            (
+                                "act 3",
+                                false,
+                                Self::format_optional_steps(p.sem_actuator_3_steps()),
+                            ),
                         ],
                     ],
                     )

@@ -44,6 +44,16 @@ namespace can_bus {
     // undecodable and likewise dropped.
     static constexpr uint8_t LOG_MESSAGE_TYPE = 8;
 
+    // Node types, mirroring node_types.rs. Lower number = higher arbitration
+    // priority when two nodes send the same message type. Max is 63 (6 bits).
+    static constexpr uint8_t VOID_LAKE_NODE_TYPE = 5;    // Main avionics
+    static constexpr uint8_t AMP_NODE_TYPE = 10;         // Power distribution
+    static constexpr uint8_t ICARUS_NODE_TYPE = 15;      // Air brakes
+    static constexpr uint8_t PAYLOAD_SDRM_NODE_TYPE = 20;
+    static constexpr uint8_t OZYS_NODE_TYPE = 25;        // Strain gauges
+    static constexpr uint8_t BULKHEAD_NODE_TYPE = 30;
+    static constexpr uint8_t AERO_RUST_NODE_TYPE = 50;
+
     // CAN Extended ID implementation based on Rust's packed_struct
     // 3 bits reserved
     // 3 bits priority
@@ -397,60 +407,84 @@ namespace can_bus {
         }
     };
 
-    // Extended EPM telemetry from the payload SDRM node, sent every 500ms.
+    // Extended EPM / SEM telemetry from the payload SDRM node, sent every 500ms.
     //
     // Supplementary to NodeStatusMessage, which stays the primary go/no-go source.
     // Deliberately does not repeat uptime_s, health, mode or the stack flags, so
     // the two messages can not drift apart.
     //
-    // Voltages are relayed from EPM on the intra-stack bus, not measured by SDRM.
+    // Everything here is relayed from EPM / SEM on the intra-stack bus, not
+    // measured by SDRM: EPM reports the battery bus voltage and the load current
+    // of all six switched rails, SEM reports the linear actuator positions.
     struct CustomPayloadStatusMessage {
         static constexpr uint32_t MESSAGE_TYPE = 35;
-        static constexpr size_t SIZE_BYTES = 10;
+        static constexpr size_t SIZE_BYTES = 20;
 
-        // Reported for a rail whose reading is invalid or unavailable.
-        static constexpr uint16_t RAIL_MV_UNAVAILABLE = 0xFFFF;
+        // Reported for a reading that is invalid or unavailable.
+        static constexpr uint16_t PAYLOAD_READING_UNAVAILABLE = 0xFFFF;
 
         uint16_t epm_batt_mv;
-        uint16_t epm_sys_3v3_mv;
-        uint16_t epm_sys_5v_mv;
-        uint16_t epm_per_5v_mv;
-        uint16_t epm_per_9v_mv;
+
+        uint16_t epm_sys_3v3_ma;
+        uint16_t epm_sys_5v_ma;
+        uint16_t epm_per_3v3_ma;
+        uint16_t epm_per_5v_ma;
+        uint16_t epm_per_9v_ma;
+        uint16_t epm_per_12v_ma;
+
+        uint16_t sem_actuator_1_steps;
+        uint16_t sem_actuator_2_steps;
+        uint16_t sem_actuator_3_steps;
 
         static constexpr uint8_t PRIORITY = 5;
 
-        // Every rail unavailable, e.g. before EPM has reported.
+        // Every reading unavailable, e.g. before EPM / SEM have reported.
         static CustomPayloadStatusMessage new_unavailable() noexcept {
             CustomPayloadStatusMessage msg;
-            msg.epm_batt_mv = RAIL_MV_UNAVAILABLE;
-            msg.epm_sys_3v3_mv = RAIL_MV_UNAVAILABLE;
-            msg.epm_sys_5v_mv = RAIL_MV_UNAVAILABLE;
-            msg.epm_per_5v_mv = RAIL_MV_UNAVAILABLE;
-            msg.epm_per_9v_mv = RAIL_MV_UNAVAILABLE;
+            msg.epm_batt_mv = PAYLOAD_READING_UNAVAILABLE;
+            msg.epm_sys_3v3_ma = PAYLOAD_READING_UNAVAILABLE;
+            msg.epm_sys_5v_ma = PAYLOAD_READING_UNAVAILABLE;
+            msg.epm_per_3v3_ma = PAYLOAD_READING_UNAVAILABLE;
+            msg.epm_per_5v_ma = PAYLOAD_READING_UNAVAILABLE;
+            msg.epm_per_9v_ma = PAYLOAD_READING_UNAVAILABLE;
+            msg.epm_per_12v_ma = PAYLOAD_READING_UNAVAILABLE;
+            msg.sem_actuator_1_steps = PAYLOAD_READING_UNAVAILABLE;
+            msg.sem_actuator_2_steps = PAYLOAD_READING_UNAVAILABLE;
+            msg.sem_actuator_3_steps = PAYLOAD_READING_UNAVAILABLE;
             return msg;
         }
 
         // std::nullopt if the reading is invalid or unavailable.
-        static std::optional<uint16_t> rail_mv(uint16_t raw_mv) noexcept {
-            if (raw_mv == RAIL_MV_UNAVAILABLE) return std::nullopt;
-            return raw_mv;
+        static std::optional<uint16_t> reading(uint16_t raw) noexcept {
+            if (raw == PAYLOAD_READING_UNAVAILABLE) return std::nullopt;
+            return raw;
         }
 
         void serialize(uint8_t* buffer) const noexcept {
             write_u16_be(buffer, epm_batt_mv);
-            write_u16_be(buffer + 2, epm_sys_3v3_mv);
-            write_u16_be(buffer + 4, epm_sys_5v_mv);
-            write_u16_be(buffer + 6, epm_per_5v_mv);
-            write_u16_be(buffer + 8, epm_per_9v_mv);
+            write_u16_be(buffer + 2, epm_sys_3v3_ma);
+            write_u16_be(buffer + 4, epm_sys_5v_ma);
+            write_u16_be(buffer + 6, epm_per_3v3_ma);
+            write_u16_be(buffer + 8, epm_per_5v_ma);
+            write_u16_be(buffer + 10, epm_per_9v_ma);
+            write_u16_be(buffer + 12, epm_per_12v_ma);
+            write_u16_be(buffer + 14, sem_actuator_1_steps);
+            write_u16_be(buffer + 16, sem_actuator_2_steps);
+            write_u16_be(buffer + 18, sem_actuator_3_steps);
         }
 
         static CustomPayloadStatusMessage deserialize(const uint8_t* buffer) noexcept {
             CustomPayloadStatusMessage msg;
             msg.epm_batt_mv = read_u16_be(buffer);
-            msg.epm_sys_3v3_mv = read_u16_be(buffer + 2);
-            msg.epm_sys_5v_mv = read_u16_be(buffer + 4);
-            msg.epm_per_5v_mv = read_u16_be(buffer + 6);
-            msg.epm_per_9v_mv = read_u16_be(buffer + 8);
+            msg.epm_sys_3v3_ma = read_u16_be(buffer + 2);
+            msg.epm_sys_5v_ma = read_u16_be(buffer + 4);
+            msg.epm_per_3v3_ma = read_u16_be(buffer + 6);
+            msg.epm_per_5v_ma = read_u16_be(buffer + 8);
+            msg.epm_per_9v_ma = read_u16_be(buffer + 10);
+            msg.epm_per_12v_ma = read_u16_be(buffer + 12);
+            msg.sem_actuator_1_steps = read_u16_be(buffer + 14);
+            msg.sem_actuator_2_steps = read_u16_be(buffer + 16);
+            msg.sem_actuator_3_steps = read_u16_be(buffer + 18);
             return msg;
         }
     };
@@ -703,79 +737,73 @@ namespace can_bus {
     // Stack state of the payload SDRM node, packed into
     // NodeStatusMessage::custom_status_raw.
     //
-    // Uses all 11 available bits, declaration order most-significant first:
-    // epm_alive occupies bit 10 and fault occupies bit 0.
+    // The SDRM's own layout, least significant bit first (matching
+    // stack_protocol.h). Bits 8..10 of the 11 available are spare.
+    //
+    //     0 epm_alive     3 exp1_active   6 sdrm_sd_logging
+    //     1 sem_alive     4 exp2_active   7 sem_sd_logging
+    //     2 epm_rails_on  5 exp3_active   8..10 spare
     //
     //     PayloadSDRMCustomStatus status;
     //     status.epm_alive = true;
-    //     status.stack_powered = true;
+    //     status.epm_rails_on = true;
     //     NodeStatusMessage msg(uptime_s, NodeHealth::Healthy,
     //                          NodeMode::Operational, status.to_raw());
     struct PayloadSDRMCustomStatus {
-        bool epm_alive = false;             // EPM responded on the intra-stack bus
-        bool sem_alive = false;             // SEM responded on the intra-stack bus
-        bool stack_powered = false;         // power_on complete
-        bool sdrm_sd_logging = false;       // SDRM SD log active
-        bool sem_sd_logging = false;        // SEM SD log active
-        bool exp1_active = false;           // Experiment channel 1 active
-        bool exp2_active = false;           // Experiment channel 2 active
-        bool exp3_active = false;           // Experiment channel 3 active
-        bool prep_complete = false;         // Tare + home complete for channels 1..3
-        bool armed_bundle_complete = false; // Full Armed sequence finished OK
-        bool fault = false;                 // Last stack action failed
+        bool epm_alive = false;       // EPM responded on the intra-stack bus
+        bool sem_alive = false;       // SEM responded on the intra-stack bus
+        bool epm_rails_on = false;    // EPM reports the peripheral rails energized
+        bool exp1_active = false;     // Experiment channel 1 active
+        bool exp2_active = false;     // Experiment channel 2 active
+        bool exp3_active = false;     // Experiment channel 3 active
+        bool sdrm_sd_logging = false; // SDRM SD log active
+        bool sem_sd_logging = false;  // SEM SD log active
 
         // Pack into the 11-bit value carried by NodeStatusMessage::custom_status_raw.
         uint16_t to_raw() const noexcept {
             uint16_t raw = 0;
-            if (epm_alive)             raw |= 1u << 10;
-            if (sem_alive)             raw |= 1u << 9;
-            if (stack_powered)         raw |= 1u << 8;
-            if (sdrm_sd_logging)       raw |= 1u << 7;
-            if (sem_sd_logging)        raw |= 1u << 6;
-            if (exp1_active)           raw |= 1u << 5;
-            if (exp2_active)           raw |= 1u << 4;
-            if (exp3_active)           raw |= 1u << 3;
-            if (prep_complete)         raw |= 1u << 2;
-            if (armed_bundle_complete) raw |= 1u << 1;
-            if (fault)                 raw |= 1u << 0;
+            if (epm_alive)       raw |= 1u << 0;
+            if (sem_alive)       raw |= 1u << 1;
+            if (epm_rails_on)    raw |= 1u << 2;
+            if (exp1_active)     raw |= 1u << 3;
+            if (exp2_active)     raw |= 1u << 4;
+            if (exp3_active)     raw |= 1u << 5;
+            if (sdrm_sd_logging) raw |= 1u << 6;
+            if (sem_sd_logging)  raw |= 1u << 7;
             return raw;
         }
 
         static PayloadSDRMCustomStatus from_raw(uint16_t raw) noexcept {
             PayloadSDRMCustomStatus status;
-            status.epm_alive             = (raw & (1u << 10)) != 0;
-            status.sem_alive             = (raw & (1u << 9)) != 0;
-            status.stack_powered         = (raw & (1u << 8)) != 0;
-            status.sdrm_sd_logging       = (raw & (1u << 7)) != 0;
-            status.sem_sd_logging        = (raw & (1u << 6)) != 0;
-            status.exp1_active           = (raw & (1u << 5)) != 0;
-            status.exp2_active           = (raw & (1u << 4)) != 0;
-            status.exp3_active           = (raw & (1u << 3)) != 0;
-            status.prep_complete         = (raw & (1u << 2)) != 0;
-            status.armed_bundle_complete = (raw & (1u << 1)) != 0;
-            status.fault                 = (raw & (1u << 0)) != 0;
+            status.epm_alive       = (raw & (1u << 0)) != 0;
+            status.sem_alive       = (raw & (1u << 1)) != 0;
+            status.epm_rails_on    = (raw & (1u << 2)) != 0;
+            status.exp1_active     = (raw & (1u << 3)) != 0;
+            status.exp2_active     = (raw & (1u << 4)) != 0;
+            status.exp3_active     = (raw & (1u << 5)) != 0;
+            status.sdrm_sd_logging = (raw & (1u << 6)) != 0;
+            status.sem_sd_logging  = (raw & (1u << 7)) != 0;
             return status;
         }
 
-        // Clears expN_active, prep_complete and armed_bundle_complete, leaving
-        // liveness, power, logging and fault untouched.
+        // Clears expN_active, leaving liveness, rail state and logging untouched.
         //
         // Applied after the LowPower safe-reset completes.
         void clear_experiment_flags() noexcept {
             exp1_active = false;
             exp2_active = false;
             exp3_active = false;
-            prep_complete = false;
-            armed_bundle_complete = false;
         }
 
-        // Clears clear_experiment_flags() plus stack_powered and both SD logging
-        // flags, leaving liveness and fault untouched.
+        // Clears clear_experiment_flags() plus epm_rails_on and both SD logging
+        // flags, leaving liveness untouched.
         //
-        // Applied after the Landed shutdown completes.
+        // Applied after the Landed shutdown completes. Clearing epm_rails_on here
+        // is only an immediate optimistic update — EPM's next intra-stack status
+        // frame is what the bit actually tracks.
         void clear_powered_flags() noexcept {
             clear_experiment_flags();
-            stack_powered = false;
+            epm_rails_on = false;
             sdrm_sd_logging = false;
             sem_sd_logging = false;
         }

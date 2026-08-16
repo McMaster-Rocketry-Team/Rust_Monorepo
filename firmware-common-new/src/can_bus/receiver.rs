@@ -324,10 +324,15 @@ mod tests {
 
         let message = CanBusMessageEnum::CustomPayloadStatus(CustomPayloadStatusMessage {
             epm_batt_mv: 12600,
-            epm_sys_3v3_mv: 3300,
-            epm_sys_5v_mv: 5000,
-            epm_per_5v_mv: 5000,
-            epm_per_9v_mv: 9000,
+            epm_sys_3v3_ma: 120,
+            epm_sys_5v_ma: 340,
+            epm_per_3v3_ma: 55,
+            epm_per_5v_ma: 780,
+            epm_per_9v_ma: 1500,
+            epm_per_12v_ma: 2400,
+            sem_actuator_1_steps: 0,
+            sem_actuator_2_steps: 1200,
+            sem_actuator_3_steps: 34567,
         });
 
         let id = message.get_id(0, 1);
