@@ -39,8 +39,8 @@ pub struct AmpStatusMessage {
     pub out2: AmpOutputStatus,
     #[packed_field(element_size_bytes = "1")]
     pub out3: AmpOutputStatus,
-    #[packed_field(element_size_bytes = "1")]
-    pub out4: AmpOutputStatus,
+    // #[packed_field(element_size_bytes = "1")]
+    // pub out4: AmpOutputStatus,
 }
 
 impl CanBusMessage for AmpStatusMessage {
@@ -77,10 +77,10 @@ mod tests {
                     overwrote: true,
                     status: PowerOutputStatus::PowerBad,
                 },
-                out4: AmpOutputStatus {
-                    overwrote: false,
-                    status: PowerOutputStatus::PowerBad,
-                },
+                // out4: AmpOutputStatus {
+                //     overwrote: false,
+                //     status: PowerOutputStatus::PowerBad,
+                // },
             }
             .into(),
             AmpStatusMessage {
@@ -97,10 +97,10 @@ mod tests {
                     overwrote: true,
                     status: PowerOutputStatus::PowerBad,
                 },
-                out4: AmpOutputStatus {
-                    overwrote: false,
-                    status: PowerOutputStatus::PowerBad,
-                },
+                // out4: AmpOutputStatus {
+                //     overwrote: false,
+                //     status: PowerOutputStatus::PowerBad,
+                // },
             }
             .into(),
         ]

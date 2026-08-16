@@ -257,10 +257,10 @@ pub fn tui_task(
                                 reset_device_selection_group
                                     .button(DeviceToReset::AMPOut3, "AMP Out 3"),
                             )
-                            .child(
-                                reset_device_selection_group
-                                    .button(DeviceToReset::AMPOut4, "AMP Out 4"),
-                            )
+                            // .child(
+                            //     reset_device_selection_group
+                            //         .button(DeviceToReset::AMPOut4, "AMP Out 4"),
+                            // )
                             .child(
                                 reset_device_selection_group
                                     .button(DeviceToReset::Icarus, "ICARUS"),
@@ -308,7 +308,7 @@ pub fn tui_task(
             let mut out1_selection_group: RadioGroup<PowerOutputOverwrite> = RadioGroup::new();
             let mut out2_selection_group: RadioGroup<PowerOutputOverwrite> = RadioGroup::new();
             let mut out3_selection_group: RadioGroup<PowerOutputOverwrite> = RadioGroup::new();
-            let mut out4_selection_group: RadioGroup<PowerOutputOverwrite> = RadioGroup::new();
+            // let mut out4_selection_group: RadioGroup<PowerOutputOverwrite> = RadioGroup::new();
 
             s.add_layer(
                 Dialog::new()
@@ -375,26 +375,26 @@ pub fn tui_task(
                                             .button(PowerOutputOverwrite::ForceDisabled, "Disable"),
                                     ),
                             )
-                            .child(
-                                LinearLayout::horizontal()
-                                    .child(TextView::new("Out 4:  "))
-                                    .child(
-                                        out4_selection_group.button(
-                                            PowerOutputOverwrite::NoOverwrite,
-                                            "No Overwrite",
-                                        ),
-                                    )
-                                    .child(TextView::new("  "))
-                                    .child(
-                                        out4_selection_group
-                                            .button(PowerOutputOverwrite::ForceEnabled, "Enable"),
-                                    )
-                                    .child(TextView::new("  "))
-                                    .child(
-                                        out4_selection_group
-                                            .button(PowerOutputOverwrite::ForceDisabled, "Disable"),
-                                    ),
-                            ),
+                            // .child(
+                            //     LinearLayout::horizontal()
+                            //         .child(TextView::new("Out 4:  "))
+                            //         .child(
+                            //             out4_selection_group.button(
+                            //                 PowerOutputOverwrite::NoOverwrite,
+                            //                 "No Overwrite",
+                            //             ),
+                            //         )
+                            //         .child(TextView::new("  "))
+                            //         .child(
+                            //             out4_selection_group
+                            //                 .button(PowerOutputOverwrite::ForceEnabled, "Enable"),
+                            //         )
+                            //         .child(TextView::new("  "))
+                            //         .child(
+                            //             out4_selection_group
+                            //                 .button(PowerOutputOverwrite::ForceDisabled, "Disable"),
+                            //         ),
+                            // ),
                     )
                     .dismiss_button("Cancel")
                     .button("Confirm", move |s| {
@@ -404,7 +404,7 @@ pub fn tui_task(
                                 out1: *out1_selection_group.selection(),
                                 out2: *out2_selection_group.selection(),
                                 out3: *out3_selection_group.selection(),
-                                out4: *out4_selection_group.selection(),
+                                // out4: *out4_selection_group.selection(),
                             }
                             .into(),
                         );

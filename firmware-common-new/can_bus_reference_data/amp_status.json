@@ -14,10 +14,6 @@
         "out3": {
           "overwrote": true,
           "status": "PowerBad"
-        },
-        "out4": {
-          "overwrote": false,
-          "status": "PowerBad"
         }
       }
     },
@@ -28,7 +24,7 @@
       160,
       0,
       192,
-      64
+      0
     ],
     "frame_id": 344236052,
     "encoded_data": [
@@ -38,7 +34,7 @@
         160,
         0,
         192,
-        64,
+        0,
         192
       ]
     ]
@@ -58,10 +54,6 @@
         "out3": {
           "overwrote": true,
           "status": "PowerBad"
-        },
-        "out4": {
-          "overwrote": false,
-          "status": "PowerBad"
         }
       }
     },
@@ -72,7 +64,7 @@
       160,
       0,
       192,
-      64
+      0
     ],
     "frame_id": 344236052,
     "encoded_data": [
@@ -82,7 +74,7 @@
         160,
         0,
         192,
-        64,
+        0,
         192
       ]
     ]

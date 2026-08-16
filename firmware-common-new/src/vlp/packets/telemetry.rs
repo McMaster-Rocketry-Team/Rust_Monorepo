@@ -91,9 +91,9 @@ pub struct TelemetryPacket {
     amp_out3_overwrote: bool,
     #[packed_field(element_size_bits = "2", ty = "enum")]
     amp_out3: PowerOutputStatus,
-    amp_out4_overwrote: bool,
-    #[packed_field(element_size_bits = "2", ty = "enum")]
-    amp_out4: PowerOutputStatus,
+    // amp_out4_overwrote: bool,
+    // #[packed_field(element_size_bits = "2", ty = "enum")]
+    // amp_out4: PowerOutputStatus,
 
     main_bulkhead_online: bool,
     main_bulkhead_rebooted_in_last_5s: bool,
@@ -192,8 +192,8 @@ impl TelemetryPacket {
         amp_out2: PowerOutputStatus,
         amp_out3_overwrote: bool,
         amp_out3: PowerOutputStatus,
-        amp_out4_overwrote: bool,
-        amp_out4: PowerOutputStatus,
+        // amp_out4_overwrote: bool,
+        // amp_out4: PowerOutputStatus,
 
         main_bulkhead_online: bool,
         main_bulkhead_rebooted_in_last_5s: bool,
@@ -266,8 +266,8 @@ impl TelemetryPacket {
             amp_out2,
             amp_out3_overwrote,
             amp_out3,
-            amp_out4_overwrote,
-            amp_out4,
+            // amp_out4_overwrote,
+            // amp_out4,
 
             main_bulkhead_online,
             main_bulkhead_rebooted_in_last_5s,
@@ -444,13 +444,13 @@ impl TelemetryPacket {
         self.amp_out3
     }
 
-    pub fn amp_out4_overwrote(&self) -> bool {
-        self.amp_out4_overwrote
-    }
+    // pub fn amp_out4_overwrote(&self) -> bool {
+    //     self.amp_out4_overwrote
+    // }
 
-    pub fn amp_out4(&self) -> PowerOutputStatus {
-        self.amp_out4
-    }
+    // pub fn amp_out4(&self) -> PowerOutputStatus {
+    //     self.amp_out4
+    // }
 
     pub fn main_bulkhead_online(&self) -> bool {
         self.main_bulkhead_online
@@ -580,8 +580,8 @@ impl TelemetryPacket {
             amp_out2: format!("{:?}", self.amp_out2()),
             amp_out3_overwrote: self.amp_out3_overwrote(),
             amp_out3: format!("{:?}", self.amp_out3()),
-            amp_out4_overwrote: self.amp_out4_overwrote(),
-            amp_out4: format!("{:?}", self.amp_out4()),
+            // amp_out4_overwrote: self.amp_out4_overwrote(),
+            // amp_out4: format!("{:?}", self.amp_out4()),
 
             main_bulkhead_online: self.main_bulkhead_online(),
             main_bulkhead_rebooted_in_last_5s: self.main_bulkhead_rebooted_in_last_5s(),
@@ -676,8 +676,8 @@ pub struct TelemetryPacketBuilderState {
     pub amp_out2: PowerOutputStatus,
     pub amp_out3_overwrote: bool,
     pub amp_out3: PowerOutputStatus,
-    pub amp_out4_overwrote: bool,
-    pub amp_out4: PowerOutputStatus,
+    // pub amp_out4_overwrote: bool,
+    // pub amp_out4: PowerOutputStatus,
 
     pub main_bulkhead_online: bool,
     pub main_bulkhead_uptime_s: u32,
@@ -754,12 +754,12 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 amp_out2: PowerOutputStatus::Disabled,
                 amp_out3_overwrote: false,
                 amp_out3: PowerOutputStatus::Disabled,
-                amp_out4_overwrote: false,
-                amp_out4: PowerOutputStatus::Disabled,
+                // amp_out4_overwrote: false,
+                // amp_out4: PowerOutputStatus::Disabled,
 
                 main_bulkhead_online: false,
                 main_bulkhead_uptime_s: 0,
-                main_bulkhead_brightness: 0f32,
+                main_bulkhead_brightness: 0f32, 
 
                 drogue_bulkhead_online: false,
                 drogue_bulkhead_uptime_s: 0,
@@ -834,8 +834,8 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 state.amp_out2,
                 state.amp_out3_overwrote,
                 state.amp_out3,
-                state.amp_out4_overwrote,
-                state.amp_out4,
+                // state.amp_out4_overwrote,
+                // state.amp_out4,
                 state.main_bulkhead_online,
                 state.main_bulkhead_uptime_s < 5,
                 state.main_bulkhead_brightness,

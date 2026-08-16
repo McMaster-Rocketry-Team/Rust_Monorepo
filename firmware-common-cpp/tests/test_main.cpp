@@ -100,13 +100,11 @@ TEST(AmpControlTest, ReferenceData) {
         bool expected_out1 = message_content["out1_enable"];
         bool expected_out2 = message_content["out2_enable"];
         bool expected_out3 = message_content["out3_enable"];
-        bool expected_out4 = message_content["out4_enable"];
 
         auto msg = firmware_common::can_bus::AmpControlMessage::deserialize(serialized_data.data());
         EXPECT_EQ(msg.out1_enable, expected_out1);
         EXPECT_EQ(msg.out2_enable, expected_out2);
         EXPECT_EQ(msg.out3_enable, expected_out3);
-        EXPECT_EQ(msg.out4_enable, expected_out4);
         EXPECT_EQ(firmware_common::can_bus::get_frame_id(msg, 10, 20), expected_id);
 
         uint8_t buffer[firmware_common::can_bus::AmpControlMessage::SIZE_BYTES];
@@ -159,7 +157,6 @@ TEST(AmpOverwriteTest, ReferenceData) {
         EXPECT_EQ(msg.out1, parse_enum(message_content["out1"]));
         EXPECT_EQ(msg.out2, parse_enum(message_content["out2"]));
         EXPECT_EQ(msg.out3, parse_enum(message_content["out3"]));
-        EXPECT_EQ(msg.out4, parse_enum(message_content["out4"]));
         EXPECT_EQ(firmware_common::can_bus::get_frame_id(msg, 10, 20), expected_id);
 
         uint8_t buffer[firmware_common::can_bus::AmpOverwriteMessage::SIZE_BYTES];
@@ -219,9 +216,6 @@ TEST(AmpStatusTest, ReferenceData) {
 
         EXPECT_EQ(msg.out3.overwrote, message_content["out3"]["overwrote"]);
         EXPECT_EQ(msg.out3.status, parse_status_enum(message_content["out3"]["status"]));
-
-        EXPECT_EQ(msg.out4.overwrote, message_content["out4"]["overwrote"]);
-        EXPECT_EQ(msg.out4.status, parse_status_enum(message_content["out4"]["status"]));
         EXPECT_EQ(firmware_common::can_bus::get_frame_id(msg, 10, 20), expected_id);
 
         uint8_t buffer[firmware_common::can_bus::AmpStatusMessage::SIZE_BYTES];
@@ -744,6 +738,64 @@ TEST(CanBusMultiFrameDecoderTest, MultiFrame) {
     EXPECT_TRUE(std::holds_alternative<firmware_common::can_bus::CustomPayloadStatusMessage>(decoded->message));
     auto decoded_msg = std::get<firmware_common::can_bus::CustomPayloadStatusMessage>(decoded->message);
     EXPECT_EQ(decoded_msg.epm_batt_mv, 7400);
+}
+
+// Mirrors Rust's PackedStructSlice: a buffer that is not exactly the serialized
+// length of the message type decodes to nullopt rather than reading past the end.
+TEST(DecodeTest, RejectsWrongLength) {
+    using namespace firmware_common::can_bus;
+
+    uint8_t buffer[NodeStatusMessage::SIZE_BYTES] = {0};
+    NodeStatusMessage(120, NodeHealth::Healthy, NodeMode::Operational, 0).serialize(buffer);
+
+    EXPECT_TRUE(decode(NodeStatusMessage::MESSAGE_TYPE, buffer, NodeStatusMessage::SIZE_BYTES).has_value());
+    EXPECT_FALSE(decode(NodeStatusMessage::MESSAGE_TYPE, buffer, NodeStatusMessage::SIZE_BYTES - 1).has_value());
+    EXPECT_FALSE(decode(NodeStatusMessage::MESSAGE_TYPE, buffer, NodeStatusMessage::SIZE_BYTES + 1).has_value());
+
+    // Unknown message type
+    EXPECT_FALSE(decode(0xFF, buffer, sizeof(buffer)).has_value());
+    EXPECT_FALSE(serialized_len(0xFF).has_value());
+}
+
+// Log frames are a raw byte stream and must be ignored by the decoder.
+TEST(CanBusMultiFrameDecoderTest, IgnoresLogFrames) {
+    using namespace firmware_common::can_bus;
+
+    CanBusMultiFrameDecoder decoder;
+    uint32_t id = CanBusExtendedId::create(7, LOG_MESSAGE_TYPE, 10, 20);
+    uint8_t frame_data[8] = {'h', 'e', 'l', 'l', 'o', '!', '!', '!'};
+
+    EXPECT_FALSE(decoder.process_frame(id, frame_data, sizeof(frame_data), 1000).has_value());
+}
+
+TEST(CanBusExtendedIdTest, FromRawRoundTrip) {
+    using namespace firmware_common::can_bus;
+
+    uint32_t raw = CanBusExtendedId::create(5, BaroMeasurementMessage::MESSAGE_TYPE, 10, 20);
+    auto id = CanBusExtendedId::from_raw(raw);
+
+    EXPECT_EQ(id.priority, 5);
+    EXPECT_EQ(id.message_type, BaroMeasurementMessage::MESSAGE_TYPE);
+    EXPECT_EQ(id.node_type, 10);
+    EXPECT_EQ(id.node_id, 20);
+    EXPECT_EQ(CanBusExtendedId::message_type_from_raw(raw), BaroMeasurementMessage::MESSAGE_TYPE);
+}
+
+// An absent strain gauge channel is carried as NaN, same as Rust's Option<f32>.
+TEST(OzysMeasurementTest, AbsentChannelsAreNaN) {
+    using namespace firmware_common::can_bus;
+
+    auto msg = OzysMeasurementMessage::new_msg(std::nullopt, 1.5f, std::nullopt, -2.25f);
+    EXPECT_FALSE(msg.sg_1().has_value());
+    EXPECT_EQ(msg.sg_2().value(), 1.5f);
+    EXPECT_FALSE(msg.sg_3().has_value());
+    EXPECT_EQ(msg.sg_4().value(), -2.25f);
+
+    uint8_t buffer[OzysMeasurementMessage::SIZE_BYTES];
+    msg.serialize(buffer);
+    auto round_tripped = OzysMeasurementMessage::deserialize(buffer);
+    EXPECT_FALSE(round_tripped.sg_1().has_value());
+    EXPECT_EQ(round_tripped.sg_2().value(), 1.5f);
 }
 
 TEST(CanBusMultiFrameDecoderTest, LRUDiscard) {

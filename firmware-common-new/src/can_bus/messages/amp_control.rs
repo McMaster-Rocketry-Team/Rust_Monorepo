@@ -11,7 +11,7 @@ pub struct AmpControlMessage {
     pub out1_enable: bool,
     pub out2_enable: bool,
     pub out3_enable: bool,
-    pub out4_enable: bool,
+    // pub out4_enable: bool,
 }
 
 impl CanBusMessage for AmpControlMessage {
@@ -37,14 +37,14 @@ mod test {
                 out1_enable: false,
                 out2_enable: false,
                 out3_enable: false,
-                out4_enable: false,
+                // out4_enable: false,
             }
             .into(),
             AmpControlMessage {
                 out1_enable: true,
                 out2_enable: true,
                 out3_enable: true,
-                out4_enable: true,
+                // out4_enable: true,
             }
             .into(),
         ]

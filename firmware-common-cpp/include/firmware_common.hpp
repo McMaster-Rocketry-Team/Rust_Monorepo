@@ -1,5 +1,20 @@
 #pragma once
 
+// Hand-written C++ port of firmware-common-new/src/can_bus. Nothing generates
+// this file, so it has to be updated by hand whenever a CAN message changes:
+//
+//   1. edit the message in firmware-common-new/src/can_bus/messages/
+//   2. `cargo test --lib can_bus` in firmware-common-new, which rewrites the
+//      golden vectors in firmware-common-new/can_bus_reference_data/
+//   3. mirror the change here
+//   4. `cmake --build build && ctest` in firmware-common-cpp to check the port
+//      still produces byte-identical frames
+//
+// Bit layouts follow Rust's packed_struct with bit_numbering = msb0 and
+// endian = msb. A struct whose fields are shorter than its declared
+// size_bytes is padded at the end.
+
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <variant>
@@ -17,6 +32,14 @@ namespace can_bus {
         std::memcpy(&dst, &src, sizeof(To));
         return dst;
     }
+
+    // Largest serialized message, matches MAX_CAN_MESSAGE_SIZE in Rust.
+    static constexpr size_t MAX_CAN_MESSAGE_SIZE = 64;
+
+    // Log frames are a raw byte stream, not an encoded message. The decoder
+    // ignores them. Note this collides with PreUnixTimeMessage::MESSAGE_TYPE,
+    // exactly as it does in Rust: both are misc + sub type 0.
+    static constexpr uint8_t LOG_MESSAGE_TYPE = 8;
 
     // CAN Extended ID implementation based on Rust's packed_struct
     // 3 bits reserved
@@ -48,8 +71,21 @@ namespace can_bus {
             
             // Node ID: 12 bits (bits 0-11)
             id |= (static_cast<uint32_t>(node_id) & 0xFFF);
-            
+
             return id;
+        }
+
+        static CanBusExtendedId from_raw(uint32_t raw) noexcept {
+            CanBusExtendedId id;
+            id.priority = (raw >> 26) & 0x07;
+            id.message_type = (raw >> 18) & 0xFF;
+            id.node_type = (raw >> 12) & 0x3F;
+            id.node_id = raw & 0xFFF;
+            return id;
+        }
+
+        static uint8_t message_type_from_raw(uint32_t raw) noexcept {
+            return (raw >> 18) & 0xFF;
         }
     };
 
@@ -158,16 +194,15 @@ namespace can_bus {
         static constexpr uint32_t MESSAGE_TYPE = 67;
         static constexpr size_t SIZE_BYTES = 1;
 
+        // AMP has three power outputs; bits 6..8 are unused padding.
         PowerOutputOverwrite out1;
         PowerOutputOverwrite out2;
         PowerOutputOverwrite out3;
-        PowerOutputOverwrite out4;
 
         AmpOverwriteMessage(PowerOutputOverwrite o1 = PowerOutputOverwrite::NoOverwrite,
                             PowerOutputOverwrite o2 = PowerOutputOverwrite::NoOverwrite,
-                            PowerOutputOverwrite o3 = PowerOutputOverwrite::NoOverwrite,
-                            PowerOutputOverwrite o4 = PowerOutputOverwrite::NoOverwrite) noexcept
-            : out1(o1), out2(o2), out3(o3), out4(o4) {}
+                            PowerOutputOverwrite o3 = PowerOutputOverwrite::NoOverwrite) noexcept
+            : out1(o1), out2(o2), out3(o3) {}
 
         static constexpr uint8_t PRIORITY = 2;
 
@@ -176,7 +211,6 @@ namespace can_bus {
             b |= (static_cast<uint8_t>(out1) & 0x03) << 6;
             b |= (static_cast<uint8_t>(out2) & 0x03) << 4;
             b |= (static_cast<uint8_t>(out3) & 0x03) << 2;
-            b |= (static_cast<uint8_t>(out4) & 0x03);
             buffer[0] = b;
         }
 
@@ -186,7 +220,6 @@ namespace can_bus {
             msg.out1 = static_cast<PowerOutputOverwrite>((b >> 6) & 0x03);
             msg.out2 = static_cast<PowerOutputOverwrite>((b >> 4) & 0x03);
             msg.out3 = static_cast<PowerOutputOverwrite>((b >> 2) & 0x03);
-            msg.out4 = static_cast<PowerOutputOverwrite>(b & 0x03);
             return msg;
         }
     };
@@ -239,10 +272,10 @@ namespace can_bus {
         static constexpr size_t SIZE_BYTES = 6;
         
         uint16_t shared_battery_mv;
+        // AMP has three power outputs; byte 5 is unused padding.
         AmpOutputStatus out1;
         AmpOutputStatus out2;
         AmpOutputStatus out3;
-        AmpOutputStatus out4;
 
         static constexpr uint8_t PRIORITY = 5;
 
@@ -252,7 +285,6 @@ namespace can_bus {
             buffer[2] = out1.to_byte();
             buffer[3] = out2.to_byte();
             buffer[4] = out3.to_byte();
-            buffer[5] = out4.to_byte();
         }
 
         static AmpStatusMessage deserialize(const uint8_t* buffer) noexcept {
@@ -261,7 +293,6 @@ namespace can_bus {
             msg.out1 = AmpOutputStatus::from_byte(buffer[2]);
             msg.out2 = AmpOutputStatus::from_byte(buffer[3]);
             msg.out3 = AmpOutputStatus::from_byte(buffer[4]);
-            msg.out4 = AmpOutputStatus::from_byte(buffer[5]);
             return msg;
         }
     };
@@ -734,6 +765,28 @@ namespace can_bus {
         uint32_t sg_3_raw;
         uint32_t sg_4_raw;
 
+        // An absent channel is carried as NaN, same as the Rust Option<f32>.
+        static OzysMeasurementMessage new_msg(std::optional<float> sg_1, std::optional<float> sg_2,
+                                              std::optional<float> sg_3, std::optional<float> sg_4) noexcept {
+            OzysMeasurementMessage msg;
+            msg.sg_1_raw = bit_cast<uint32_t>(sg_1.value_or(NAN));
+            msg.sg_2_raw = bit_cast<uint32_t>(sg_2.value_or(NAN));
+            msg.sg_3_raw = bit_cast<uint32_t>(sg_3.value_or(NAN));
+            msg.sg_4_raw = bit_cast<uint32_t>(sg_4.value_or(NAN));
+            return msg;
+        }
+
+        static std::optional<float> sg(uint32_t raw) noexcept {
+            float v = bit_cast<float>(raw);
+            if (std::isnan(v)) return std::nullopt;
+            return v;
+        }
+
+        std::optional<float> sg_1() const noexcept { return sg(sg_1_raw); }
+        std::optional<float> sg_2() const noexcept { return sg(sg_2_raw); }
+        std::optional<float> sg_3() const noexcept { return sg(sg_3_raw); }
+        std::optional<float> sg_4() const noexcept { return sg(sg_4_raw); }
+
         static constexpr uint8_t PRIORITY = 5;
 
         void serialize(uint8_t* buffer) const noexcept {
@@ -927,13 +980,13 @@ namespace can_bus {
         static constexpr uint32_t MESSAGE_TYPE = 64;
         static constexpr size_t SIZE_BYTES = 1;
 
+        // AMP has three power outputs; bits 3..8 are unused padding.
         bool out1_enable;
         bool out2_enable;
         bool out3_enable;
-        bool out4_enable;
 
-        AmpControlMessage(bool o1 = false, bool o2 = false, bool o3 = false, bool o4 = false) noexcept
-            : out1_enable(o1), out2_enable(o2), out3_enable(o3), out4_enable(o4) {}
+        AmpControlMessage(bool o1 = false, bool o2 = false, bool o3 = false) noexcept
+            : out1_enable(o1), out2_enable(o2), out3_enable(o3) {}
 
         static constexpr uint8_t PRIORITY = 2;
 
@@ -942,7 +995,6 @@ namespace can_bus {
             if (out1_enable) byte |= (1 << 7); // MSB0 bit 0 -> 7 in LSB
             if (out2_enable) byte |= (1 << 6);
             if (out3_enable) byte |= (1 << 5);
-            if (out4_enable) byte |= (1 << 4);
             // Remaining bits are 0
             buffer[0] = byte;
         }
@@ -953,7 +1005,6 @@ namespace can_bus {
             msg.out1_enable = (byte & (1 << 7)) != 0;
             msg.out2_enable = (byte & (1 << 6)) != 0;
             msg.out3_enable = (byte & (1 << 5)) != 0;
-            msg.out4_enable = (byte & (1 << 4)) != 0;
             return msg;
         }
     };
@@ -1032,8 +1083,6 @@ namespace can_bus {
 
     class CanBusMultiFrameEncoder {
     public:
-        static constexpr size_t MAX_CAN_MESSAGE_SIZE = 64;
-
         CanBusMultiFrameEncoder(const CanBusMessage& message) noexcept
             : offset(0), toggle(false) {
             std::visit([this](const auto& msg) {
@@ -1122,7 +1171,45 @@ namespace can_bus {
         }
     };
 
-    inline std::optional<CanBusMessage> decode(uint8_t message_type, const uint8_t* buffer) noexcept {
+    // Serialized length of a message type, std::nullopt if the type is unknown.
+    inline std::optional<size_t> serialized_len(uint8_t message_type) noexcept {
+        switch(message_type) {
+            case AckMessage::MESSAGE_TYPE: return AckMessage::SIZE_BYTES;
+            case AirBrakesControlMessage::MESSAGE_TYPE: return AirBrakesControlMessage::SIZE_BYTES;
+            case AmpControlMessage::MESSAGE_TYPE: return AmpControlMessage::SIZE_BYTES;
+            case AmpOverwriteMessage::MESSAGE_TYPE: return AmpOverwriteMessage::SIZE_BYTES;
+            case AmpResetOutputMessage::MESSAGE_TYPE: return AmpResetOutputMessage::SIZE_BYTES;
+            case AmpStatusMessage::MESSAGE_TYPE: return AmpStatusMessage::SIZE_BYTES;
+            case BaroMeasurementMessage::MESSAGE_TYPE: return BaroMeasurementMessage::SIZE_BYTES;
+            case BrightnessMeasurementMessage::MESSAGE_TYPE: return BrightnessMeasurementMessage::SIZE_BYTES;
+            case CustomPayloadStatusMessage::MESSAGE_TYPE: return CustomPayloadStatusMessage::SIZE_BYTES;
+            case DataTransferMessage::MESSAGE_TYPE: return DataTransferMessage::SIZE_BYTES;
+            case IcarusStatusMessage::MESSAGE_TYPE: return IcarusStatusMessage::SIZE_BYTES;
+            case IMUMeasurementMessage::MESSAGE_TYPE: return IMUMeasurementMessage::SIZE_BYTES;
+            case MagMeasurementMessage::MESSAGE_TYPE: return MagMeasurementMessage::SIZE_BYTES;
+            case NodeStatusMessage::MESSAGE_TYPE: return NodeStatusMessage::SIZE_BYTES;
+            case OzysMeasurementMessage::MESSAGE_TYPE: return OzysMeasurementMessage::SIZE_BYTES;
+            case PreUnixTimeMessage::MESSAGE_TYPE: return PreUnixTimeMessage::SIZE_BYTES;
+            case ResetMessage::MESSAGE_TYPE: return ResetMessage::SIZE_BYTES;
+            case RocketStateMessage::MESSAGE_TYPE: return RocketStateMessage::SIZE_BYTES;
+            case UnixTimeMessage::MESSAGE_TYPE: return UnixTimeMessage::SIZE_BYTES;
+            case VLStatusMessage::MESSAGE_TYPE: return VLStatusMessage::SIZE_BYTES;
+            default:
+                return std::nullopt;
+        }
+    }
+
+    // `len` must be the exact serialized length of the message type, mirroring
+    // Rust's PackedStructSlice; a short or long buffer decodes to std::nullopt
+    // instead of reading out of bounds.
+    inline std::optional<CanBusMessage> decode(uint8_t message_type, const uint8_t* buffer, size_t len) noexcept {
+        auto expected_len = serialized_len(message_type);
+        if (!expected_len) return std::nullopt;
+        // PreUnixTime carries no payload and ignores whatever the frame holds.
+        if (message_type != PreUnixTimeMessage::MESSAGE_TYPE && len != *expected_len) {
+            return std::nullopt;
+        }
+
         switch(message_type) {
             case AckMessage::MESSAGE_TYPE:
                 return CanBusMessage(AckMessage::deserialize(buffer));
@@ -1195,8 +1282,8 @@ namespace can_bus {
                     if (tail_byte.toggle) return std::nullopt;
 
                     size_t data_len = frame_len - 1;
-                    uint8_t message_type = (frame_id >> 18) & 0xFF;
-                    auto decoded = decode(message_type, frame_data);
+                    uint8_t message_type = CanBusExtendedId::message_type_from_raw(frame_id);
+                    auto decoded = decode(message_type, frame_data, data_len);
                     if (decoded) {
                         return ReceivedCanBusMessage{frame_id, calculate_crc(frame_data, data_len), *decoded};
                     }
@@ -1228,7 +1315,7 @@ namespace can_bus {
                     if (tail_byte.start_of_transfer) return std::nullopt;
 
                     size_t new_data_len = frame_len - 1;
-                    if (multi_frame.data_len + new_data_len > 256) {
+                    if (multi_frame.data_len + new_data_len > MAX_CAN_MESSAGE_SIZE) {
                         type = Type::Empty;
                         return std::nullopt;
                     }
@@ -1243,8 +1330,8 @@ namespace can_bus {
                             return std::nullopt;
                         }
 
-                        uint8_t message_type = (multi_frame.id >> 18) & 0xFF;
-                        auto decoded = decode(message_type, multi_frame.data);
+                        uint8_t message_type = CanBusExtendedId::message_type_from_raw(multi_frame.id);
+                        auto decoded = decode(message_type, multi_frame.data, multi_frame.data_len);
                         ReceivedCanBusMessage result_msg;
                         bool success = false;
                         if (decoded) {
@@ -1270,7 +1357,7 @@ namespace can_bus {
                 uint32_t id;
                 uint64_t first_frame_timestamp_us;
                 uint16_t crc;
-                uint8_t data[256];
+                uint8_t data[MAX_CAN_MESSAGE_SIZE];
                 size_t data_len;
             } multi_frame;
 
@@ -1298,8 +1385,10 @@ namespace can_bus {
         CanBusMultiFrameDecoder() noexcept {}
 
         std::optional<ReceivedCanBusMessage> process_frame(uint32_t frame_id, const uint8_t* frame_data, size_t frame_len, uint64_t timestamp_us) noexcept {
-            uint8_t message_type = (frame_id >> 18) & 0xFF;
-            if (message_type == 255) { // LOG_MESSAGE_TYPE is 255 in Rust
+            uint8_t message_type = CanBusExtendedId::message_type_from_raw(frame_id);
+            if (message_type == LOG_MESSAGE_TYPE) {
+                // Log frames are a raw byte stream, not an encoded message, and
+                // are handled elsewhere. The decoder simply ignores them.
                 return std::nullopt;
             }
 

@@ -94,7 +94,7 @@ pub struct SelfTestResultPacket {
     pub amp_out1_power_good: bool,
     pub amp_out2_power_good: bool,
     pub amp_out3_power_good: bool,
-    pub amp_out4_power_good: bool,
+    // pub amp_out4_power_good: bool,
     pub main_continuity: bool,
     pub drogue_continuity: bool,
 }
@@ -113,7 +113,7 @@ impl SelfTestResultPacket {
             amp_out1_power_good: self.amp_out1_power_good,
             amp_out2_power_good: self.amp_out2_power_good,
             amp_out3_power_good: self.amp_out3_power_good,
-            amp_out4_power_good: self.amp_out4_power_good,
+            // amp_out4_power_good: self.amp_out4_power_good,
             main_continuity: self.main_continuity,
             drogue_continuity: self.drogue_continuity,
 
@@ -152,7 +152,7 @@ pub struct SelfTestResultPacketBuilderState {
     pub amp_out1_power_good: bool,
     pub amp_out2_power_good: bool,
     pub amp_out3_power_good: bool,
-    pub amp_out4_power_good: bool,
+    // pub amp_out4_power_good: bool,
     pub main_continuity: bool,
     pub drogue_continuity: bool,
 }
@@ -182,7 +182,7 @@ impl<M: RawMutex> SelfTestResultPacketBuilder<M> {
                 amp_out1_power_good: false,
                 amp_out2_power_good: false,
                 amp_out3_power_good: false,
-                amp_out4_power_good: false,
+                // amp_out4_power_good: false,
                 main_continuity: false,
                 drogue_continuity: false,
             })),
@@ -214,7 +214,7 @@ impl<M: RawMutex> SelfTestResultPacketBuilder<M> {
                 amp_out1_power_good: state.amp_out1_power_good,
                 amp_out2_power_good: state.amp_out2_power_good,
                 amp_out3_power_good: state.amp_out3_power_good,
-                amp_out4_power_good: state.amp_out4_power_good,
+                // amp_out4_power_good: state.amp_out4_power_good,
                 main_continuity: state.main_continuity,
                 drogue_continuity: state.drogue_continuity,
             }

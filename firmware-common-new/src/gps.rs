@@ -80,6 +80,7 @@ pub async fn run_gps_uart_receiver(
                         }
                     }
                 }
+                yield_now().await;
             }
             Err(e) => {
                 log_error!("Error reading from UART: {:?}", Debug2DefmtWrapper(e));
