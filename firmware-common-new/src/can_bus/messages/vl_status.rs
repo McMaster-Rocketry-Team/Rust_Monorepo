@@ -4,6 +4,14 @@ use serde::{Deserialize, Serialize};
 use super::{CanBusMessage, CanBusMessageEnum};
 
 /// may skip stages, may go back to a previous stage
+///
+/// `LowPower` / `SelfTest` / `Armed` are device modes; the remaining values
+/// mirror the deployment estimator's `RocketState` variants 1:1 — nothing is
+/// folded (`MachLockout` and `FailedToReachMinApogee` report as themselves).
+/// The `coasting` burn-timer flag and the chutes' `deployed` bools are
+/// orthogonal to the stage and travel as separate bools next to it
+/// (`RocketStateMessage::is_coasting` on CAN, dedicated bools in the VLP
+/// telemetry packet, `coasting` / pyro fire flags in the flight data records).
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PrimitiveEnum_u8, Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[rkyv(derive(Clone, Copy, Debug))]
@@ -11,12 +19,14 @@ use super::{CanBusMessage, CanBusMessageEnum};
 pub enum FlightStage {
     LowPower = 0,
     SelfTest = 1,
+    /// Armed, still on the pad (`RocketState::OnPad`).
     Armed = 2,
-    PoweredAscent = 3,
-    Coasting = 4,
-    DrogueDeployed = 5,
-    MainDeployed = 6,
+    Ascent = 3,
+    MachLockout = 4,
+    DrogueChute = 5,
+    MainChute = 6,
     Landed = 7,
+    FailedToReachMinApogee = 8,
 }
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
@@ -69,22 +79,27 @@ mod test {
             }
             .into(),
             VLStatusMessage {
-                flight_stage: FlightStage::PoweredAscent,
+                flight_stage: FlightStage::Ascent,
                 battery_mv: 0,
             }
             .into(),
             VLStatusMessage {
-                flight_stage: FlightStage::Coasting,
+                flight_stage: FlightStage::MachLockout,
                 battery_mv: 0,
             }
             .into(),
             VLStatusMessage {
-                flight_stage: FlightStage::DrogueDeployed,
+                flight_stage: FlightStage::DrogueChute,
                 battery_mv: 0,
             }
             .into(),
             VLStatusMessage {
-                flight_stage: FlightStage::MainDeployed,
+                flight_stage: FlightStage::MainChute,
+                battery_mv: 0,
+            }
+            .into(),
+            VLStatusMessage {
+                flight_stage: FlightStage::FailedToReachMinApogee,
                 battery_mv: 0,
             }
             .into(),

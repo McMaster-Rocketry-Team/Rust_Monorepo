@@ -69,8 +69,14 @@ pub struct TelemetryPacket {
     #[packed_field(element_size_bits = "8")]
     tilt_deg: Integer<TiltDegFacBase, packed_bits::Bits<TILT_DEG_FAC_BITS>>,
 
-    #[packed_field(element_size_bits = "3", ty = "enum")]
+    #[packed_field(element_size_bits = "4", ty = "enum")]
     flight_stage: FlightStage,
+    /// Burn-timer flag from the deployment estimator — orthogonal to
+    /// `flight_stage`, never folded into it.
+    coasting: bool,
+    /// `deployed` from `RocketState::DrogueChute` / `MainChute`.
+    drogue_deployed: bool,
+    main_deployed: bool,
 
     amp_online: bool,
     amp_rebooted_in_last_5s: bool,
@@ -173,6 +179,9 @@ impl TelemetryPacket {
         tilt_deg: f32,
 
         flight_stage: FlightStage,
+        coasting: bool,
+        drogue_deployed: bool,
+        main_deployed: bool,
 
         amp_online: bool,
         amp_rebooted_in_last_5s: bool,
@@ -243,6 +252,9 @@ impl TelemetryPacket {
             tilt_deg: TiltDegFac::to_fixed_point_capped(tilt_deg),
 
             flight_stage: flight_stage.into(),
+            coasting,
+            drogue_deployed,
+            main_deployed,
 
             amp_online,
             amp_rebooted_in_last_5s,
@@ -382,6 +394,18 @@ impl TelemetryPacket {
 
     pub fn flight_stage(&self) -> FlightStage {
         self.flight_stage
+    }
+
+    pub fn coasting(&self) -> bool {
+        self.coasting
+    }
+
+    pub fn drogue_deployed(&self) -> bool {
+        self.drogue_deployed
+    }
+
+    pub fn main_deployed(&self) -> bool {
+        self.main_deployed
     }
 
     pub fn amp_online(&self) -> bool {
@@ -543,6 +567,9 @@ impl TelemetryPacket {
             max_air_speed: self.max_air_speed(),
             tilt_deg: self.tilt_deg(),
             flight_stage: format!("{:?}", self.flight_stage()),
+            coasting: self.coasting(),
+            drogue_deployed: self.drogue_deployed(),
+            main_deployed: self.main_deployed(),
 
             amp_online: self.amp_online(),
             amp_rebooted_in_last_5s: self.amp_rebooted_in_last_5s(),
@@ -633,6 +660,12 @@ pub struct TelemetryPacketBuilderState {
     pub tilt_deg: f32,
 
     pub flight_stage: FlightStage,
+    /// Burn-timer flag from the deployment estimator — orthogonal to
+    /// `flight_stage`, never folded into it.
+    pub coasting: bool,
+    /// `deployed` from `RocketState::DrogueChute` / `MainChute`.
+    pub drogue_deployed: bool,
+    pub main_deployed: bool,
 
     pub amp_online: bool,
     pub amp_uptime_s: u32,
@@ -708,6 +741,9 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 tilt_deg: 0.0,
 
                 flight_stage: FlightStage::Armed,
+                coasting: false,
+                drogue_deployed: false,
+                main_deployed: false,
 
                 amp_online: false,
                 amp_uptime_s: 0,
@@ -786,6 +822,9 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 state.max_air_speed,
                 state.tilt_deg,
                 state.flight_stage,
+                state.coasting,
+                state.drogue_deployed,
+                state.main_deployed,
                 state.amp_online,
                 state.amp_uptime_s < 5,
                 state.shared_battery_v,

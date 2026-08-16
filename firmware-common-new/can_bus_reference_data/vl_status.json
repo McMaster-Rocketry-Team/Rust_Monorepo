@@ -110,7 +110,7 @@
   {
     "message": {
       "VLStatus": {
-        "flight_stage": "PoweredAscent",
+        "flight_stage": "Ascent",
         "battery_mv": 0
       }
     },
@@ -137,7 +137,7 @@
   {
     "message": {
       "VLStatus": {
-        "flight_stage": "Coasting",
+        "flight_stage": "MachLockout",
         "battery_mv": 0
       }
     },
@@ -164,7 +164,7 @@
   {
     "message": {
       "VLStatus": {
-        "flight_stage": "DrogueDeployed",
+        "flight_stage": "DrogueChute",
         "battery_mv": 0
       }
     },
@@ -191,7 +191,7 @@
   {
     "message": {
       "VLStatus": {
-        "flight_stage": "MainDeployed",
+        "flight_stage": "MainChute",
         "battery_mv": 0
       }
     },
@@ -207,6 +207,33 @@
     "encoded_data": [
       [
         6,
+        0,
+        0,
+        0,
+        0,
+        192
+      ]
+    ]
+  },
+  {
+    "message": {
+      "VLStatus": {
+        "flight_stage": "FailedToReachMinApogee",
+        "battery_mv": 0
+      }
+    },
+    "message_type": 36,
+    "serialized_data": [
+      8,
+      0,
+      0,
+      0,
+      0
+    ],
+    "frame_id": 143695892,
+    "encoded_data": [
+      [
+        8,
         0,
         0,
         0,

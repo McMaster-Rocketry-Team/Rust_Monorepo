@@ -103,7 +103,7 @@ pub struct AirbrakesConfig {
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Clone, Debug)]
 pub struct MachLockoutConfig {
-    /// Earliest possible time the rocket can be below Mach 0.75, measured
+    /// Earliest possible time the rocket can be below Mach 0.8, measured
     /// from ignition detection (sim-derived). The vote is not consulted
     /// before this.
     pub t_min_us: u64,

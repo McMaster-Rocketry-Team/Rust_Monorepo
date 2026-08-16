@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use firmware_common_new::flight_data_record::{
     FlightDataRecord, PYRO_DROGUE_CONTINUITY, PYRO_DROGUE_FIRE, PYRO_MAIN_CONTINUITY,
-    PYRO_MAIN_FIRE, PYRO_SHORT_CIRCUIT, AB_ACCEL_CLIPPED, AB_APOGEE, AB_BARO_TRUSTED,
+    PYRO_MAIN_FIRE, PYRO_SHORT_CIRCUIT, AB_APOGEE, AB_BARO_TRUSTED,
     AB_VOTE_BARO_RATE, AB_VOTE_DEPLOYMENT, AB_VOTE_INERTIAL, VALID_AIRBRAKES_ACTUAL,
     VALID_AIRBRAKES_COMMANDED,
     VALID_BARO, VALID_BATTERY, VALID_GPS_ALT, VALID_GPS_FIX, VALID_IMU, VALID_MAG,
@@ -238,9 +238,9 @@ fn parse_records(data: &[u8]) -> Result<(u32, Vec<FlightDataRecord>)> {
     }
     let log = parse_log_records(log_record_count, blocks, block_count).ok_or_else(|| {
         anyhow!(
-            "failed to decode the log stream — it was likely written by older firmware \
-             (storage format v3 or earlier). Use an older rocket-cli to download it, or \
-             clear the storage."
+            "failed to decode the log stream — it was likely written by firmware using an \
+             older storage version. Use a matching rocket-cli to download it, or clear \
+             the storage."
         )
     })?;
     let merged = merge_log_records(&log);
@@ -278,7 +278,6 @@ fn write_csv(path: &str, records: &[FlightDataRecord]) -> Result<()> {
         "ab_vote_baro_rate",
         "ab_baro_trusted",
         "ab_apogee",
-        "ab_accel_clipped",
         "battery_voltage",
         "lat",
         "lon",
@@ -288,6 +287,7 @@ fn write_csv(path: &str, records: &[FlightDataRecord]) -> Result<()> {
         "vdop",
         "pdop",
         "flight_stage",
+        "coasting",
         "imu_valid",
         "baro_valid",
         "mag_valid",
@@ -332,7 +332,6 @@ fn write_csv(path: &str, records: &[FlightDataRecord]) -> Result<()> {
             bit(r.ab_flags, AB_VOTE_BARO_RATE),
             bit(r.ab_flags, AB_BARO_TRUSTED),
             bit(r.ab_flags, AB_APOGEE),
-            bit(r.ab_flags, AB_ACCEL_CLIPPED),
             r.battery_voltage.to_string(),
             r.lat_lon.0.to_string(),
             r.lat_lon.1.to_string(),
@@ -342,6 +341,7 @@ fn write_csv(path: &str, records: &[FlightDataRecord]) -> Result<()> {
             r.vdop.to_string(),
             r.pdop.to_string(),
             format!("{:?}", r.flight_stage),
+            r.coasting.to_string(),
             bit(v, VALID_IMU),
             bit(v, VALID_BARO),
             bit(v, VALID_MAG),

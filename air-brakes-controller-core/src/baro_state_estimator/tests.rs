@@ -43,14 +43,17 @@ fn simulate_flight(
 
     let mut feed = |estimator: &mut RocketStateEstimator, altitude_asl: f32| {
         let pyro = estimator.update(altitude_asl + noise.next());
+        // Pyros only fire in chute stages, where the KF is live — reading
+        // the raw KF altitude here is safe.
+        let kf_agl = estimator.kf_altitude_asl() - estimator.launch_pad_altitude_asl();
         match pyro {
             Some(PyroSelect::PyroDrogue) => {
                 assert!(drogue.is_none(), "drogue fired more than once");
-                drogue = Some((sample_i, estimator.altitude_agl()));
+                drogue = Some((sample_i, kf_agl));
             }
             Some(PyroSelect::PyroMain) => {
                 assert!(main.is_none(), "main fired more than once");
-                main = Some((sample_i, estimator.altitude_agl()));
+                main = Some((sample_i, kf_agl));
             }
             None => {}
         }
@@ -383,10 +386,22 @@ fn mach_lockout_survives_supersonic_garbage() {
             altitude + noise.next()
         };
         let pyro = estimator.update(measured);
-        if estimator.in_mach_lockout() {
+        // While locked out the estimator must say so honestly: the reported
+        // state is MachLockout carrying only the pad altitude — the frozen
+        // KF altitude/velocity are not reachable through `state()` at all.
+        if let RocketState::MachLockout {
+            launch_pad_altitude_asl,
+        } = estimator.state()
+        {
             entered_lockout = true;
             coasted_in_lockout |= estimator.is_coasting();
             fired_in_lockout |= pyro.is_some();
+            assert!(
+                (launch_pad_altitude_asl - pad).abs() < 5.0,
+                "lockout pad asl={} expected ~{}",
+                launch_pad_altitude_asl,
+                pad
+            );
         }
         if matches!(pyro, Some(PyroSelect::PyroDrogue)) {
             drogue_agl = Some(altitude - pad);
@@ -395,7 +410,10 @@ fn mach_lockout_survives_supersonic_garbage() {
 
     assert!(entered_lockout, "lockout never engaged");
     assert!(!fired_in_lockout, "pyro fired during lockout");
-    assert!(!estimator.in_mach_lockout(), "lockout never exited");
+    assert!(
+        !matches!(estimator.state(), RocketState::MachLockout { .. }),
+        "lockout never exited"
+    );
     assert!(
         coasted_in_lockout,
         "burn timer should latch coasting while still locked out"
@@ -505,7 +523,10 @@ fn void_lake_flight_replay() {
     let mut main = None;
     for (i, &alt) in grid.iter().enumerate() {
         let pyro = estimator.update(alt);
-        assert!(!estimator.in_mach_lockout());
+        assert!(!matches!(
+            estimator.state(),
+            RocketState::MachLockout { .. }
+        ));
         if ignition_i.is_none() && !matches!(estimator.state(), RocketState::OnPad) {
             ignition_i = Some(i);
         }

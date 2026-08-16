@@ -28,9 +28,15 @@ pub struct FlightDataFastRecord {
     /// Airbrakes estimator tilt from vertical (deg). NaN before ignition.
     pub ab_tilt_deg: f32,
     /// Airbrakes estimator status bits (`AB_*` consts): the three
-    /// lockout-exit votes, filter-born, apogee, accel-clip.
+    /// lockout-exit votes, filter-born, apogee.
     pub ab_flags: u8,
+    /// Honest mirror of the deployment estimator's `RocketState` (plus the
+    /// device modes). The chutes' `deployed` bools ride in the slow record's
+    /// `pyro_flags` fire bits.
     pub flight_stage: FlightStage,
+    /// Deployment estimator burn-timer flag — orthogonal to `flight_stage`,
+    /// never folded into it.
+    pub coasting: bool,
     pub valid: u8,
 }
 
@@ -115,6 +121,8 @@ pub struct FlightDataRecord {
 
     /// Full-rate stage from the fast record.
     pub flight_stage: FlightStage,
+    /// Full-rate burn-timer flag from the fast record.
+    pub coasting: bool,
 
     /// Bitmask for pyro continuity/fire state (see firmware `ContinuityUpdate`).
     pub pyro_flags: u8,
@@ -149,6 +157,7 @@ impl FlightDataRecord {
             vdop: slow.vdop,
             pdop: slow.pdop,
             flight_stage: fast.flight_stage,
+            coasting: fast.coasting,
             pyro_flags: slow.pyro_flags,
             air_brakes_commanded_extension: slow.air_brakes_commanded_extension,
             air_brakes_actual_extension: slow.air_brakes_actual_extension,
@@ -188,9 +197,7 @@ pub const AB_VOTE_BARO_RATE: u8 = 1 << 2;
 /// The vertical filter is born (baro trusted; MPC state is live).
 pub const AB_BARO_TRUSTED: u8 = 1 << 3;
 pub const AB_APOGEE: u8 = 1 << 4;
-/// At least one accel sample hit the ±16 g rail since ignition — the
-/// dead-reckoned velocity (and the inertial vote) are degraded.
-pub const AB_ACCEL_CLIPPED: u8 = 1 << 5;
+// 1 << 5 is free (was AB_ACCEL_CLIPPED, removed in storage v6).
 
 pub const PYRO_MAIN_CONTINUITY: u8 = 1 << 0;
 pub const PYRO_MAIN_FIRE: u8 = 1 << 1;

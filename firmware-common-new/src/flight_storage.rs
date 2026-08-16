@@ -52,7 +52,10 @@ pub const DEFAULT_TARGET_APOGEE_AGL: f32 = 4000.0;
 /// logs written at any other version are treated as absent.
 /// v5: fast record gains the airbrakes estimator's altitude / vertical
 /// velocity / tilt and its status flags (lockout votes, born, clip).
-pub const STORAGE_VERSION: u32 = 5;
+/// v6: `FlightStage` mirrors `RocketState` 1:1 (`MachLockout` and
+/// `FailedToReachMinApogee` are their own values), the fast record gains the
+/// `coasting` burn-timer flag, and the `AB_ACCEL_CLIPPED` flag is removed.
+pub const STORAGE_VERSION: u32 = 6;
 
 /// USB/superblock `record_len` field for the tagged stream (variable per record).
 pub const RECORD_LEN_TAGGED: u32 = 0;
@@ -376,7 +379,8 @@ mod tests {
             ab_vertical_velocity: 0.3 * i as f32,
             ab_tilt_deg: 5.0,
             ab_flags: 0,
-            flight_stage: FlightStage::PoweredAscent,
+            flight_stage: FlightStage::Ascent,
+            coasting: true,
             valid: VALID_IMU | VALID_BARO,
         }
     }
@@ -507,7 +511,8 @@ mod tests {
         assert_eq!(merged.len(), 20);
         assert_eq!(merged[0].record_count, 0);
         // Stage comes from the fast record at full rate, not the slow snapshot.
-        assert_eq!(merged[0].flight_stage, FlightStage::PoweredAscent);
+        assert_eq!(merged[0].flight_stage, FlightStage::Ascent);
+        assert!(merged[0].coasting);
         assert_eq!(merged[0].kf_altitude_asl, 271.5);
 
         let sb = encode_superblock(n, blocks.len() as u32, last_off);

@@ -397,6 +397,17 @@ impl View for DownlinkPacketDisplay {
                         ],
                         &[
                             ("state", true, format!("{:?}", p.flight_stage()).into()),
+                            ("coasting", true, Self::format_bool(p.coasting())),
+                            (
+                                "drogue deployed",
+                                true,
+                                Self::format_bool(p.drogue_deployed()),
+                            ),
+                            (
+                                "main deployed",
+                                true,
+                                Self::format_bool(p.main_deployed()),
+                            ),
                             (
                                 "altitude agl",
                                 false,

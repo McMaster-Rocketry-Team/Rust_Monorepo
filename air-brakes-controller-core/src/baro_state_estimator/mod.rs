@@ -139,6 +139,14 @@ impl DeploymentProfile {
 }
 
 /// Vertical-only rocket state for telemetry / airbrakes.
+///
+/// Each variant carries only numbers that are live and trustworthy in that
+/// state — most prominently, [`RocketState::MachLockout`] has no altitude
+/// and no velocity, because the KF is frozen there and any value would be
+/// stale. A caller who needs the raw (possibly frozen) KF numbers for
+/// logging must ask for them explicitly via
+/// [`RocketStateEstimator::kf_altitude_asl`] /
+/// [`RocketStateEstimator::kf_vertical_velocity`].
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum RocketState {
@@ -148,6 +156,12 @@ pub enum RocketState {
         altitude_asl: f32,
         launch_pad_altitude_asl: f32,
     },
+    /// Ascending around/above Mach 1 with the baro locked out: the KF is
+    /// frozen (no predict, no update), so there is no altitude or velocity
+    /// to report — the fields are deliberately absent, making a stale read
+    /// unrepresentable rather than merely discouraged. The pad altitude
+    /// (latched at ignition detection) is the only live number.
+    MachLockout { launch_pad_altitude_asl: f32 },
     DrogueChute {
         deployed: bool,
         vertical_velocity: f32,
@@ -208,7 +222,9 @@ enum Stage {
     Landed {
         launch_pad_altitude_asl: f32,
     },
-    FailedToReachMinApogee,
+    FailedToReachMinApogee {
+        launch_pad_altitude_asl: f32,
+    },
 }
 
 /// Baro-only state estimator + flight state machine.
@@ -329,7 +345,9 @@ impl RocketStateEstimator {
                             min_agl,
                             apogee_agl
                         );
-                        self.stage = Stage::FailedToReachMinApogee;
+                        self.stage = Stage::FailedToReachMinApogee {
+                            launch_pad_altitude_asl: *launch_pad_altitude_asl,
+                        };
                     } else {
                         log_info!("descent detected: peak agl={}m", apogee_agl);
                         self.stage = Stage::DrogueDelay {
@@ -423,7 +441,7 @@ impl RocketStateEstimator {
                     };
                 }
             }
-            Stage::Landed { .. } | Stage::FailedToReachMinApogee => {}
+            Stage::Landed { .. } | Stage::FailedToReachMinApogee { .. } => {}
         }
 
         deploy_pyro
@@ -445,14 +463,12 @@ impl RocketStateEstimator {
                 altitude_asl: altitude,
                 launch_pad_altitude_asl: *launch_pad_altitude_asl,
             },
-            // Reported as Ascent with the frozen (stale) KF values; check
-            // `in_mach_lockout()` before acting on them.
+            // The frozen KF values are deliberately NOT reported here — the
+            // variant has no fields to put them in (see [`RocketState`]).
             Stage::MachLockout {
                 launch_pad_altitude_asl,
                 ..
-            } => RocketState::Ascent {
-                vertical_velocity: velocity,
-                altitude_asl: altitude,
+            } => RocketState::MachLockout {
                 launch_pad_altitude_asl: *launch_pad_altitude_asl,
             },
             Stage::DrogueDelay {
@@ -491,7 +507,7 @@ impl RocketStateEstimator {
                 launch_pad_altitude_asl: *launch_pad_altitude_asl,
             },
             Stage::Landed { .. } => RocketState::Landed,
-            Stage::FailedToReachMinApogee => RocketState::FailedToReachMinApogee,
+            Stage::FailedToReachMinApogee { .. } => RocketState::FailedToReachMinApogee,
         }
     }
 
@@ -509,24 +525,30 @@ impl RocketStateEstimator {
             .unwrap_or(false)
     }
 
-    /// True while the baro is locked out around/above Mach 1: the KF is
-    /// frozen and everything derived from it (state, altitude, velocity) is
-    /// stale — nothing downstream should act on those values.
-    pub fn in_mach_lockout(&self) -> bool {
-        matches!(self.stage, Stage::MachLockout { .. })
-    }
-
-    pub fn altitude_asl(&self) -> f32 {
+    /// Raw KF altitude ASL (m) for the fast flight-log record ONLY. During
+    /// the Mach lockout the KF is frozen, so this value may be stale by tens
+    /// of seconds — for logging/diagnostics, never for control decisions.
+    /// The honest interface is [`Self::state`], whose
+    /// [`RocketState::MachLockout`] variant carries no altitude at all.
+    pub fn kf_altitude_asl(&self) -> f32 {
         self.kf.as_ref().map(|kf| kf.altitude()).unwrap_or(0.0)
     }
 
-    pub fn vertical_velocity(&self) -> f32 {
+    /// Raw KF vertical velocity (m/s) for the fast flight-log record ONLY.
+    /// Like [`Self::kf_altitude_asl`], may be frozen/stale during the Mach
+    /// lockout — for logging/diagnostics, never for control decisions. The
+    /// honest interface is [`Self::state`].
+    pub fn kf_vertical_velocity(&self) -> f32 {
         self.kf
             .as_ref()
             .map(|kf| kf.vertical_velocity())
             .unwrap_or(0.0)
     }
 
+    /// Launch pad altitude ASL (m), available in every stage: while on the
+    /// pad this is the current low-passed pad estimate (tracking slow baro
+    /// drift); from ignition detection onward it is the value latched at
+    /// detection.
     pub fn launch_pad_altitude_asl(&self) -> f32 {
         match &self.stage {
             Stage::OnPad { pad_altitude_asl } => *pad_altitude_asl,
@@ -555,12 +577,10 @@ impl RocketStateEstimator {
             }
             | Stage::Landed {
                 launch_pad_altitude_asl,
+            }
+            | Stage::FailedToReachMinApogee {
+                launch_pad_altitude_asl,
             } => *launch_pad_altitude_asl,
-            Stage::FailedToReachMinApogee => 0.0,
         }
-    }
-
-    pub fn altitude_agl(&self) -> f32 {
-        self.altitude_asl() - self.launch_pad_altitude_asl()
     }
 }
