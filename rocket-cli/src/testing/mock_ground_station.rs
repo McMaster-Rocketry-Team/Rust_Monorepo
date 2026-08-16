@@ -70,7 +70,20 @@ impl MockVLPClient {
                     false,
                     false,
                     false,
-                    PayloadSDRMCustomStatus::new(),
+                    // A realistic mid-flight stack: both boards up, rails
+                    // energized, one experiment running, SDRM logging but SEM
+                    // not. A mix rather than all-false, so the panel shows both
+                    // colours of flag and a wrong one is visible on sight.
+                    PayloadSDRMCustomStatus {
+                        epm_alive: true,
+                        sem_alive: true,
+                        epm_rails_on: true,
+                        exp1_active: false,
+                        exp2_active: true,
+                        exp3_active: false,
+                        sdrm_sd_logging: true,
+                        sem_sd_logging: false,
+                    },
                     Some(12600),
                     [Some(120), Some(340), Some(55), Some(780), Some(1500), None],
                     [Some(0), Some(1200), Some(34567)],

@@ -7,7 +7,7 @@ use anyhow::Result;
 use cursive::{
     Cursive,
     theme::{Color, ColorStyle, Palette, PaletteStyle, Style},
-    view::{Nameable, Resizable},
+    view::{Nameable, Resizable, Scrollable},
     views::{
         Button, Dialog, EditView, HideableView, LinearLayout, PaddedView, Panel, RadioGroup,
         TextView,
@@ -547,9 +547,17 @@ pub fn tui_task(
                 .full_height(),
             )
             .child(
-                Panel::new(DownlinkPacketDisplay::new().with_name("downlink_packet"))
-                    .title("Ground Station Downlink")
-                    .full_screen(),
+                // Scrollable because the telemetry body is now grouped into
+                // headed sections and is taller than a short terminal. Without
+                // it the bottom rows — the payload rails and actuators — would
+                // be clipped with nothing on screen to say they exist.
+                Panel::new(
+                    DownlinkPacketDisplay::new()
+                        .with_name("downlink_packet")
+                        .scrollable(),
+                )
+                .title("Ground Station Downlink")
+                .full_screen(),
             ),
     );
 
