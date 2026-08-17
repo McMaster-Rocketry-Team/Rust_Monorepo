@@ -13,8 +13,9 @@ use crate::{
 };
 
 use super::{
-    BATTERY_V_FAC_BITS, BatteryVFac, BatteryVFacBase, TEMPERATURE_FAC_BITS, TemperatureFac,
-    TemperatureFacBase, VLPDownlinkPacket, decode_shared_battery_v, encode_shared_battery_v,
+    BATTERY_V_FAC_BITS, BatteryVFac, BatteryVFacBase, EPM_BATT_V_FAC_BITS, EpmBattVFacBase,
+    TEMPERATURE_FAC_BITS, TemperatureFac, TemperatureFacBase, VLPDownlinkPacket,
+    decode_epm_batt_v, decode_shared_battery_v, encode_epm_batt_v, encode_shared_battery_v,
 };
 
 /// Largest satellite count a 5-bit packet field can hold. Counts above this are
@@ -43,15 +44,11 @@ fixed_point_factory!(VerticalVelocityFac, f32, -400.0, 1050.0, 2.0);
 fixed_point_factory!(AirBrakesExtensionPercentFac, f32, 0.0, 1.0, 0.04);
 fixed_point_factory!(TiltDegFac, f32, -90.0, 90.0, 1.0);
 
-// EPM battery bus, a 4S-ish pack sitting well above the regulated rails.
-// 11 bits over 0..17V, so (17 - 0) / (2^11 - 1) = 8.3mV per code. The floor is
-// 0 rather than 11 V because a collapsed / disconnected battery bus reading
-// 0.0 V is a real fault the ground should see; a floor of 11 would have
-// decoded that as a plausible 11.0 V. Absence is the all-ones code (see
-// `EPM_BATT_V_UNAVAILABLE_CODE`), not 0, precisely so that 0.0 V stays
-// available for that fault. Real readings therefore cap one code below full
-// scale, at 16.992 V.
-fixed_point_factory!(EpmBattVFac, f32, 0.0, 17.0, 0.01);
+// The EPM battery bus factory, its sentinel and its codec live in `super`:
+// `LowPowerTelemetryPacket` carries the same voltage, so — like
+// `shared_battery_v` — it has to decode identically on both. See
+// `super::EPM_BATT_V_UNAVAILABLE_CODE`.
+
 // Load current of one EPM switched rail. 5A is the stack's design maximum, so
 // the old 0..10.23A range was spending two bits per rail on current the
 // hardware cannot draw; 7 bits over 0..5A is (5000 - 0) / (2^7 - 1) = 39.4mA
@@ -71,19 +68,20 @@ fixed_point_factory!(ActuatorStepsFac, f32, 0.0, 65535.0, 64.0);
 
 // The all-ones code of each payload-relayed field, spent on "the payload could
 // not take this reading" instead of on a value. The top of the range is the
-// cheapest code to give up: the bottom of every one of these three ranges is a
+// cheapest code to give up: the bottom of every one of these ranges is a
 // reading the ground genuinely needs to be able to see — 0.0 V is a collapsed
 // battery bus, 0mA is a switched rail that is off, 0 steps is an actuator at
 // home — whereas the top is saturation, which is already an approximation.
 // `encode_*` therefore clamps real values one code below full scale, so a
 // present reading can never collide with the sentinel.
-const EPM_BATT_V_UNAVAILABLE_CODE: EpmBattVFacBase = (1 << EPM_BATT_V_FAC_BITS) - 1;
 const EPM_RAIL_MA_UNAVAILABLE_CODE: EpmRailMaFacBase = (1 << EPM_RAIL_MA_FAC_BITS) - 1;
 const ACTUATOR_STEPS_UNAVAILABLE_CODE: ActuatorStepsFacBase = (1 << ACTUATOR_STEPS_FAC_BITS) - 1;
 
-// `shared_battery_v` uses the same trick, but its factory, sentinel and codec
-// live in `super` — all three downlink packets carry that field, and it has to
-// decode identically on each. See `super::SHARED_BATTERY_V_UNAVAILABLE_CODE`.
+// `shared_battery_v` and `epm_batt_v` use the same trick, but their factories,
+// sentinels and codecs live in `super` — each is carried by more than one
+// downlink packet, and has to decode identically on every one of them. See
+// `super::SHARED_BATTERY_V_UNAVAILABLE_CODE` and
+// `super::EPM_BATT_V_UNAVAILABLE_CODE`.
 
 /// Collapses NaN into `None`. A NaN reading is an absent reading that lost its
 /// `Option` somewhere upstream, and every `fixed_point_factory` panics on one
@@ -543,7 +541,7 @@ impl TelemetryPacket {
 
             // An unavailable reading is sent as the field's all-ones code
             // rather than carrying its own validity bit.
-            epm_batt_v: Self::encode_batt_v(epm_batt_mv),
+            epm_batt_v: encode_epm_batt_v(epm_batt_mv),
 
             epm_sys_3v3_ma: Self::encode_rail_ma(epm_rail_ma[0]),
             epm_sys_5v_ma: Self::encode_rail_ma(epm_rail_ma[1]),
@@ -555,30 +553,6 @@ impl TelemetryPacket {
             sem_actuator_1_steps: Self::encode_steps(sem_actuator_steps[0]),
             sem_actuator_2_steps: Self::encode_steps(sem_actuator_steps[1]),
             sem_actuator_3_steps: Self::encode_steps(sem_actuator_steps[2]),
-        }
-    }
-
-    fn encode_batt_v(
-        batt_mv: Option<u16>,
-    ) -> Integer<EpmBattVFacBase, packed_bits::Bits<EPM_BATT_V_FAC_BITS>> {
-        match batt_mv {
-            None => EPM_BATT_V_UNAVAILABLE_CODE.into(),
-            Some(mv) => {
-                let code: EpmBattVFacBase =
-                    EpmBattVFac::to_fixed_point_capped(mv as f32 / 1000.0).into();
-                code.min(EPM_BATT_V_UNAVAILABLE_CODE - 1).into()
-            }
-        }
-    }
-
-    fn decode_batt_v(
-        batt_v: Integer<EpmBattVFacBase, packed_bits::Bits<EPM_BATT_V_FAC_BITS>>,
-    ) -> Option<f32> {
-        let code: EpmBattVFacBase = batt_v.into();
-        if code == EPM_BATT_V_UNAVAILABLE_CODE {
-            None
-        } else {
-            Some(EpmBattVFac::to_float(batt_v))
         }
     }
 
@@ -895,7 +869,7 @@ impl TelemetryPacket {
     /// as absence; that distinction is the reason the sentinel is the top code
     /// rather than the bottom one.
     pub fn epm_batt_v(&self) -> Option<f32> {
-        Self::decode_batt_v(self.epm_batt_v)
+        decode_epm_batt_v(self.epm_batt_v)
     }
 
     /// `None` when EPM could not read the rail. A rail that is switched off
@@ -1667,6 +1641,57 @@ mod tests {
         assert_relative_eq!(flat.shared_battery_v().unwrap(), 2.5, epsilon = 0.01);
     }
 
+    /// The EPM battery is carried by this packet *and* by
+    /// `LowPowerTelemetryPacket`, which is the mode the payload spends its pad
+    /// hours in. The two must decode a reading identically: a pack that showed
+    /// 12.60 V in low power and 12.55 V once armed would have the operator
+    /// watching a step that is not there. The shared codec in `super` is what
+    /// makes that true; this is the test that notices if it stops being.
+    #[test]
+    fn epm_battery_decodes_identically_on_both_packets() {
+        init_logger();
+
+        let low_power = |mv: Option<u16>| {
+            LowPowerTelemetryPacket::new(
+                12,
+                5,
+                true,
+                Some((45.5, -73.6)),
+                8.1,
+                true,
+                Some(8.2),
+                27.0,
+                mv,
+            )
+            .epm_batt_v()
+        };
+        let armed = |mv: Option<u16>| {
+            let mut p = packet_with_everything(12);
+            p.epm_batt_v = encode_epm_batt_v(mv);
+            round_trip(p).epm_batt_v()
+        };
+
+        // Absence, a collapsed bus, a nominal pack, and an over-range reading
+        // that has to cap one code short of the sentinel on both.
+        for mv in [None, Some(0), Some(3300), Some(12600), Some(u16::MAX)] {
+            assert_eq!(
+                low_power(mv),
+                armed(mv),
+                "{:?}mV must decode identically on both packets",
+                mv
+            );
+        }
+
+        assert_eq!(low_power(None), None);
+        assert_relative_eq!(low_power(Some(0)).unwrap(), 0.0, epsilon = 0.01);
+        assert_relative_eq!(low_power(Some(12600)).unwrap(), 12.6, epsilon = 0.01);
+        assert_relative_eq!(
+            low_power(Some(u16::MAX)).unwrap(),
+            16.9917,
+            epsilon = 0.001
+        );
+    }
+
     /// The satellite count is 5 bits in all three downlink packets, so
     /// packed_struct truncates rather than clamps. Without the saturation in
     /// `new`, 32 satellites downlink as 0 -- the reading that means "no fix, do
@@ -1706,6 +1731,7 @@ mod tests {
                 true,
                 Some(8.2),
                 27.0,
+                Some(12600),
             )
             .num_of_fix_satellites()
         };

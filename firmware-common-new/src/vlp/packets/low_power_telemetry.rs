@@ -7,8 +7,9 @@ use serde::{Deserialize, Serialize};
 use crate::fixed_point_factory;
 
 use super::{
-    BATTERY_V_FAC_BITS, BatteryVFac, BatteryVFacBase, TEMPERATURE_FAC_BITS, TemperatureFac,
-    TemperatureFacBase, VLPDownlinkPacket, decode_shared_battery_v, encode_shared_battery_v,
+    BATTERY_V_FAC_BITS, BatteryVFac, BatteryVFacBase, EPM_BATT_V_FAC_BITS, EpmBattVFacBase,
+    TEMPERATURE_FAC_BITS, TemperatureFac, TemperatureFacBase, VLPDownlinkPacket,
+    decode_epm_batt_v, decode_shared_battery_v, encode_epm_batt_v, encode_shared_battery_v,
     telemetry::MAX_REPORTED_FIX_SATELLITES,
 };
 
@@ -19,11 +20,16 @@ fixed_point_factory!(LonFac, f64, -180.0, 180.0, 0.00002146);
 
 // `BatteryVFac` and the `shared_battery_v` sentinel live in `super`, shared with
 // the other two downlink packets — a battery reading must not change meaning
-// when the rocket drops into low power mode.
+// when the rocket drops into low power mode. `EpmBattVFac` and its sentinel
+// live there for the same reason, shared with `TelemetryPacket`.
 
-// 87 bits = 11 bytes, 1 spare bit.
+// 98 bits = 13 bytes, 6 spare bits. The twelfth and thirteenth bytes were paid
+// for by `epm_batt_v`: the packet had one spare bit and that field is 11 wide.
+// At 5 s that is affordable in a way it would not be on the 2 s
+// `TelemetryPacket`, which is already at the last size fitting its symbol
+// count.
 #[derive(PackedStruct, Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "11")]
+#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "13")]
 pub struct LowPowerTelemetryPacket {
     #[packed_field(bits = "0..4")]
     nonce: Integer<u8, packed_bits::Bits<4>>,
@@ -58,6 +64,20 @@ pub struct LowPowerTelemetryPacket {
 
     #[packed_field(element_size_bits = "9")]
     air_temperature: Integer<TemperatureFacBase, packed_bits::Bits<TEMPERATURE_FAC_BITS>>,
+
+    /// The payload stack's EPM battery bus, relayed from
+    /// `CustomPayloadStatusMessage`. Absence is the all-ones code (see
+    /// [`super::EPM_BATT_V_UNAVAILABLE_CODE`]) rather than a validity bit, the
+    /// same encoding `TelemetryPacket` uses — so the pad reading the operator
+    /// watches in low power is the same number, decoded the same way, as the
+    /// one they watch once armed.
+    ///
+    /// This is the pack the payload sits on for the hours between power-up and
+    /// launch, and low power is the mode it spends those hours in, so "is the
+    /// payload still alive on the rail" was the one question the downlink
+    /// could not answer without arming.
+    #[packed_field(element_size_bits = "11")]
+    epm_batt_v: Integer<EpmBattVFacBase, packed_bits::Bits<EPM_BATT_V_FAC_BITS>>,
 }
 
 impl LowPowerTelemetryPacket {
@@ -71,6 +91,10 @@ impl LowPowerTelemetryPacket {
         // `None` when AMP has not reported a shared battery voltage.
         shared_battery_v: Option<f32>,
         air_temperature: f32,
+        // Millivolts, as `CustomPayloadStatusMessage` carries it. `None` when
+        // the payload has not reported, or reported the reading as one it
+        // could not take.
+        epm_batt_mv: Option<u16>,
     ) -> Self {
         Self {
             nonce: nonce.into(),
@@ -97,6 +121,7 @@ impl LowPowerTelemetryPacket {
             amp_online,
             shared_battery_v: encode_shared_battery_v(shared_battery_v),
             air_temperature: TemperatureFac::to_fixed_point_capped(air_temperature),
+            epm_batt_v: encode_epm_batt_v(epm_batt_mv),
         }
     }
 
@@ -140,6 +165,15 @@ impl LowPowerTelemetryPacket {
         TemperatureFac::to_float(self.air_temperature)
     }
 
+    /// The payload's EPM battery bus voltage. `None` when the payload has not
+    /// reported one, or reported it as a reading it could not take (`0xFFFF`
+    /// on CAN). A collapsed or disconnected pack decodes as `Some(0.0)`, not
+    /// as absence — which is why the sentinel is the top code, exactly as on
+    /// [`super::telemetry::TelemetryPacket::epm_batt_v`].
+    pub fn epm_batt_v(&self) -> Option<f32> {
+        decode_epm_batt_v(self.epm_batt_v)
+    }
+
     #[cfg(feature = "json")]
     pub fn to_json(&self) -> json::JsonValue {
         json::object! {
@@ -151,6 +185,7 @@ impl LowPowerTelemetryPacket {
             amp_online: self.amp_online,
             shared_battery_v: self.shared_battery_v(),
             air_temperature: self.air_temperature(),
+            epm_batt_v: self.epm_batt_v(),
         }
     }
 }
@@ -184,6 +219,13 @@ pub struct LowPowerTelemetryPacketBuilderState {
     /// pack.
     pub shared_battery_v: Option<f32>,
     pub air_temperature: f32,
+    /// The payload's EPM battery bus, in millivolts, from
+    /// `CustomPayloadStatusMessage`. `None` until one arrives — and back to
+    /// `None` when the payload's status stream goes quiet, which is the
+    /// caller's job: nothing else writes this field, so a payload that stops
+    /// reporting would otherwise have its last voltage transmitted for the
+    /// rest of the mode.
+    pub epm_batt_mv: Option<u16>,
 }
 
 pub struct LowPowerTelemetryPacketBuilder<M: RawMutex> {
@@ -202,6 +244,7 @@ impl<M: RawMutex> LowPowerTelemetryPacketBuilder<M> {
                 amp_online: false,
                 shared_battery_v: None,
                 air_temperature: 0.0,
+                epm_batt_mv: None,
             })),
         }
     }
@@ -222,6 +265,7 @@ impl<M: RawMutex> LowPowerTelemetryPacketBuilder<M> {
                 state.amp_online,
                 state.shared_battery_v,
                 state.air_temperature,
+                state.epm_batt_mv,
             )
         })
     }
@@ -245,13 +289,23 @@ mod tests {
 
     #[test]
     fn test_serialize_deserialize() {
-        let packet = LowPowerTelemetryPacket::new(12, 5, true, Some((45.5, -73.6)), 8.1, true, Some(8.2), 27.0);
+        let packet = LowPowerTelemetryPacket::new(
+            12,
+            5,
+            true,
+            Some((45.5, -73.6)),
+            8.1,
+            true,
+            Some(8.2),
+            27.0,
+            Some(12600),
+        );
         let packet: VLPDownlinkPacket = packet.into();
 
         let mut buffer = [0u8; 64];
         let len = packet.serialize(&mut buffer);
-        // 1 byte packet type + the 11 byte packed struct.
-        assert_eq!(len, 12);
+        // 1 byte packet type + the 13 byte packed struct.
+        assert_eq!(len, 14);
 
         let deserialized_packet = VLPDownlinkPacket::deserialize(&buffer[..len]).unwrap();
         assert_eq!(deserialized_packet, packet);
@@ -269,13 +323,15 @@ mod tests {
     /// rocket at Null Island.
     #[test]
     fn no_fix_reports_no_position() {
-        let packet = LowPowerTelemetryPacket::new(12, 0, false, None, 8.1, true, Some(8.2), 27.0);
+        let packet =
+            LowPowerTelemetryPacket::new(12, 0, false, None, 8.1, true, Some(8.2), 27.0, None);
         assert!(!packet.gps_fixed());
         assert_eq!(packet.lat_lon(), None);
 
         // And a caller that claims a fix without supplying one does not get to
         // downlink (0, 0) as a position.
-        let packet = LowPowerTelemetryPacket::new(12, 4, true, None, 8.1, true, Some(8.2), 27.0);
+        let packet =
+            LowPowerTelemetryPacket::new(12, 4, true, None, 8.1, true, Some(8.2), 27.0, None);
         assert!(!packet.gps_fixed());
         assert_eq!(packet.lat_lon(), None);
     }
@@ -285,8 +341,17 @@ mod tests {
     /// which reads as a flat pack rather than as a silent AMP.
     #[test]
     fn absent_shared_battery_survives_the_wire_as_none() {
-        let packet =
-            LowPowerTelemetryPacket::new(12, 5, true, Some((45.5, -73.6)), 8.1, false, None, 27.0);
+        let packet = LowPowerTelemetryPacket::new(
+            12,
+            5,
+            true,
+            Some((45.5, -73.6)),
+            8.1,
+            false,
+            None,
+            27.0,
+            None,
+        );
         let packet: VLPDownlinkPacket = packet.into();
 
         let mut buffer = [0u8; 64];
@@ -304,12 +369,54 @@ mod tests {
         // A present reading comes back present, and a collapsed pack comes back
         // as a reading rather than as absence.
         let present =
-            LowPowerTelemetryPacket::new(12, 5, true, None, 8.1, true, Some(8.2), 27.0);
+            LowPowerTelemetryPacket::new(12, 5, true, None, 8.1, true, Some(8.2), 27.0, None);
         assert_relative_eq!(present.shared_battery_v().unwrap(), 8.2, epsilon = 0.01);
-        let flat = LowPowerTelemetryPacket::new(12, 5, true, None, 8.1, true, Some(0.0), 27.0);
+        let flat =
+            LowPowerTelemetryPacket::new(12, 5, true, None, 8.1, true, Some(0.0), 27.0, None);
         assert_relative_eq!(flat.shared_battery_v().unwrap(), 2.5, epsilon = 0.01);
         // And an over-range reading caps one code short of the sentinel.
-        let over = LowPowerTelemetryPacket::new(12, 5, true, None, 8.1, true, Some(100.0), 27.0);
+        let over =
+            LowPowerTelemetryPacket::new(12, 5, true, None, 8.1, true, Some(100.0), 27.0, None);
         assert_relative_eq!(over.shared_battery_v().unwrap(), 8.4941, epsilon = 0.001);
+    }
+
+    /// The payload relays this one over CAN, so it can be missing, and — unlike
+    /// the two battery voltages above — 0.0 V is a fault the ground has to be
+    /// able to see rather than the bottom of the range. Absence is therefore
+    /// the top code, and this test is what holds the two apart on the wire.
+    #[test]
+    fn epm_battery_absence_is_distinct_from_a_collapsed_pack() {
+        let round_trip = |epm_batt_mv| {
+            let packet: VLPDownlinkPacket = LowPowerTelemetryPacket::new(
+                12,
+                5,
+                true,
+                Some((45.5, -73.6)),
+                8.1,
+                true,
+                Some(8.2),
+                27.0,
+                epm_batt_mv,
+            )
+            .into();
+
+            let mut buffer = [0u8; 64];
+            let len = packet.serialize(&mut buffer);
+            let VLPDownlinkPacket::LowPowerTelemetry(p) =
+                VLPDownlinkPacket::deserialize(&buffer[..len]).unwrap()
+            else {
+                unreachable!()
+            };
+            p.epm_batt_v()
+        };
+
+        // Nothing reported, or the payload's own "could not read this".
+        assert_eq!(round_trip(None), None);
+        // A collapsed or disconnected bus is a reading, not absence.
+        assert_relative_eq!(round_trip(Some(0)).unwrap(), 0.0, epsilon = 0.01);
+        assert_relative_eq!(round_trip(Some(12600)).unwrap(), 12.6, epsilon = 0.01);
+        // Over-range caps one code short of the sentinel, so it cannot be
+        // mistaken for absence.
+        assert_relative_eq!(round_trip(Some(u16::MAX)).unwrap(), 16.9917, epsilon = 0.001);
     }
 }

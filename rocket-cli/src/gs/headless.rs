@@ -251,6 +251,7 @@ fn downlink_json(packet: &VLPDownlinkPacket, status: &PacketStatus) -> Value {
             "air_temperature": p.air_temperature(),
             "vl_battery_v": p.vl_battery_v(),
             "shared_battery_v": p.shared_battery_v(),
+            "epm_batt_v": p.epm_batt_v(),
             "amp_online": p.amp_online,
         }),
         VLPDownlinkPacket::SelfTestResult(p) => json!({

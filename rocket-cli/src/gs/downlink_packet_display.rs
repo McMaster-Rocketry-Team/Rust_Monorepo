@@ -285,6 +285,18 @@ impl DownlinkPacketDisplay {
                             ),
                         ]],
                     ),
+                    // The payload's own pack, relayed over CAN. "n/a" here is
+                    // the payload saying nothing (or saying it could not read
+                    // the bus) — distinct from a real 0.00V, which is a
+                    // collapsed or disconnected pack.
+                    Section::new(
+                        "Payload",
+                        vec![vec![(
+                            "epm batt",
+                            false,
+                            Self::format_optional(p.epm_batt_v(), |v| format!("{:.2}V", v)),
+                        )]],
+                    ),
                 ]
             }
             VLPDownlinkPacket::LandedTelemetry(p) => {

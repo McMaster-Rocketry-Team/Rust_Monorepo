@@ -87,6 +87,61 @@ fn decode_shared_battery_v(
     }
 }
 
+// EPM battery bus, a 4S-ish pack sitting well above the regulated rails.
+// 11 bits over 0..17V, so (17 - 0) / (2^11 - 1) = 8.3mV per code. The floor is
+// 0 rather than 11 V because a collapsed / disconnected battery bus reading
+// 0.0 V is a real fault the ground should see; a floor of 11 would have
+// decoded that as a plausible 11.0 V. Absence is the all-ones code (see
+// `EPM_BATT_V_UNAVAILABLE_CODE`), not 0, precisely so that 0.0 V stays
+// available for that fault. Real readings therefore cap one code below full
+// scale, at 16.992 V.
+//
+// Lives here rather than in `telemetry`, for the same reason as `BatteryVFac`
+// above: `TelemetryPacket` and `LowPowerTelemetryPacket` both carry this
+// voltage, and the pad reading must not change meaning when the rocket drops
+// into low power mode.
+fixed_point_factory!(EpmBattVFac, f32, 0.0, 17.0, 0.01);
+
+/// The code reserved for "the payload could not take this reading", spent on
+/// `epm_batt_v` in both packets that carry it.
+///
+/// The top of the range is the cheapest code to give up: the bottom is a
+/// reading the ground genuinely needs to be able to see — 0.0 V is a collapsed
+/// or disconnected pack — whereas the top is saturation, which is already an
+/// approximation. [`encode_epm_batt_v`] therefore clamps real values one code
+/// below full scale, so a present reading can never collide with the sentinel.
+const EPM_BATT_V_UNAVAILABLE_CODE: EpmBattVFacBase = (1 << EPM_BATT_V_FAC_BITS) - 1;
+
+/// Encode the payload's EPM battery bus voltage from the millivolts the CAN
+/// message carries. `None` — including the payload's own `0xFFFF` "could not
+/// read this", which `CustomPayloadStatusMessage`'s accessors have already
+/// turned into `None` — becomes the sentinel.
+fn encode_epm_batt_v(
+    batt_mv: Option<u16>,
+) -> Integer<EpmBattVFacBase, packed_bits::Bits<EPM_BATT_V_FAC_BITS>> {
+    match batt_mv {
+        None => EPM_BATT_V_UNAVAILABLE_CODE.into(),
+        Some(mv) => {
+            let code: EpmBattVFacBase =
+                EpmBattVFac::to_fixed_point_capped(mv as f32 / 1000.0).into();
+            code.min(EPM_BATT_V_UNAVAILABLE_CODE - 1).into()
+        }
+    }
+}
+
+/// `None` when the packet carries the sentinel. A real 0.0 V decodes as
+/// `Some(0.0)`, which is the whole point of putting absence at the top.
+fn decode_epm_batt_v(
+    batt_v: Integer<EpmBattVFacBase, packed_bits::Bits<EPM_BATT_V_FAC_BITS>>,
+) -> Option<f32> {
+    let code: EpmBattVFacBase = batt_v.into();
+    if code == EPM_BATT_V_UNAVAILABLE_CODE {
+        None
+    } else {
+        Some(EpmBattVFac::to_float(batt_v))
+    }
+}
+
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum VLPDownlinkPacket {
