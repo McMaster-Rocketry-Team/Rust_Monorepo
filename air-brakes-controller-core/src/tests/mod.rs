@@ -4,6 +4,7 @@ use core::fmt::Write;
 use log::LevelFilter;
 use nalgebra::SMatrix;
 
+mod osiris_sim;
 pub mod plot;
 
 pub fn init_logger() {
