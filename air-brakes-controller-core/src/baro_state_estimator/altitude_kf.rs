@@ -1,6 +1,5 @@
 use crate::baro_gate::BaroGateOutcome;
 use crate::baro_state_estimator::{DT, SAMPLES_PER_S};
-use micromath::F32Ext;
 use nalgebra::{Matrix2, SMatrix, SVector, Vector1, Vector2};
 
 /// Classic (linear) Kalman filter for a 1-D altitude + vertical-speed model,
@@ -66,7 +65,7 @@ const INNOVATION_GATE_M: f32 = 500.0;
 /// re-converge instead of flying blind.
 const MAX_REJECTED_SAMPLES: u32 = SAMPLES_PER_S as u32;
 
-/// Velocity variance used by [`BaroAltitudeKF::reseed`]: after a Mach lockout
+/// Velocity variance used by [`BaroAltitudeKF::born_in_flight`]: after a Mach lockout
 /// the velocity is unknown; (300 m/s)^2 covers any post-lockout speed and lets
 /// the filter pull the true velocity out of the altitude stream within a few
 /// hundred ms.
@@ -80,11 +79,16 @@ impl BaroAltitudeKF {
         let h = SMatrix::<f32, 1, 2>::new(1.0, 0.0);
 
         // Simplified process-noise model: integrate white acceleration noise
+        // Written as plain multiplications rather than `DT.powi(n)`: the
+        // method form resolves to a different implementation under `no_std`
+        // than under std (see `utils::approximate_air_density`), and these
+        // are exact either way as products.
+        const DT2: f32 = DT * DT;
         let q = Matrix2::new(
-            0.25 * DT.powi(4),
-            0.5 * DT.powi(3),
-            0.5 * DT.powi(3),
-            DT.powi(2),
+            0.25 * DT2 * DT2,
+            0.5 * DT2 * DT,
+            0.5 * DT2 * DT,
+            DT2,
         ) * PROCESS_ACCELERATION_VARIANCE;
 
         let r = SMatrix::<f32, 1, 1>::new(BARO_ALTITUDE_MEASUREMENT_VARIANCE);
@@ -153,19 +157,28 @@ impl BaroAltitudeKF {
         outcome
     }
 
-    /// Re-initialize after a Mach lockout: altitude from the current
-    /// measurement, velocity unknown (large variance). Cheaper and much
-    /// faster-converging than letting the stale pre-lockout state fight the
-    /// innovation gate.
-    pub fn reseed(&mut self, altitude_asl: f32) {
-        self.x = Vector2::new(altitude_asl, 0.0);
-        self.p = Matrix2::new(
+    /// Build a filter for a rocket that is already flying — the Mach
+    /// lockout has just ended and this is the first honest baro reading
+    /// since ignition.
+    ///
+    /// Same altitude seed as [`Self::new`], but the velocity prior is wide
+    /// open rather than "at rest": the airframe is doing a few hundred m/s
+    /// and a confident zero would take a second of altitude data to argue
+    /// down through the innovation gate.
+    ///
+    /// A constructor and not a reset, because nothing survives the lockout.
+    /// The estimator drops its filter outright at ignition rather than
+    /// freezing one, so there is no stale state here to overwrite — see
+    /// [`RocketStateEstimator::update`](super::RocketStateEstimator::update).
+    pub fn born_in_flight(altitude_asl: f32) -> Self {
+        let mut kf = Self::new(altitude_asl);
+        kf.p = Matrix2::new(
             BARO_ALTITUDE_MEASUREMENT_VARIANCE,
             0.0,
             0.0,
             RESEED_VELOCITY_VARIANCE,
         );
-        self.rejected_streak = 0;
+        kf
     }
 
     pub fn altitude_asl(&self) -> f32 {

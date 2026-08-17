@@ -163,7 +163,6 @@ name = "air-brakes-controller-core"
 version = "0.1.0"
 dependencies = [
  "approx",
- "biquad",
  "csv",
  "defmt 1.0.1",
  "env_logger",
@@ -173,7 +172,6 @@ dependencies = [
  "icao-units",
  "libm",
  "log",
- "micromath",
  "nalgebra 0.34.0",
  "plotters",
  "serde",
@@ -613,15 +611,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bf95709a440f45e986983918d0e8a1f30a9b1df04918fc828670606804ac3c09"
 dependencies = [
  "virtue",
-]
-
-[[package]]
-name = "biquad"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8580925877eb35ab50f987a1c2c193eb46000c8827c871bc3425070f086408cc"
-dependencies = [
- "num-traits",
 ]
 
 [[package]]

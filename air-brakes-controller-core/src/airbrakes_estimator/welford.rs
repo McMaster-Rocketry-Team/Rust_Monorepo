@@ -1,13 +1,19 @@
 use nalgebra::SVector;
 
 
-/// Online estimator for mean and variance of N-component f32 samples.
+/// Online estimator for the mean of N-component f32 samples, by Welford's
+/// incremental update rather than a running sum: the pad collector feeds
+/// it thousands of ~9.81 m/s^2 samples and reads a difference of hundredths
+/// off the result, which is exactly where a naive sum loses its f32 digits.
+///
+/// It also tracked the variance until 2026-08-17. Nothing ever read it —
+/// see `screen_pad_windows`, which decides whether a window is a pad
+/// window from its mean alone.
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone)]
 pub struct Welford<const N: usize> {
     count: u32,
     mean: SVector<f32, N>,
-    m2:   SVector<f32, N>,
 }
 
 impl<const N: usize> Welford<N> {
@@ -16,7 +22,6 @@ impl<const N: usize> Welford<N> {
         Self {
             count: 0,
             mean:  SVector::zeros(),
-            m2:    SVector::zeros(),
         }
     }
 
@@ -25,12 +30,7 @@ impl<const N: usize> Welford<N> {
         let n = self.count as f32;
 
         for i in 0..x.len() {
-            let delta = x[i] - self.mean[i];
-            // update mean
-            self.mean[i] += delta / n;
-            // update sum of squares of differences
-            let delta2 = x[i] - self.mean[i];
-            self.m2[i] += delta * delta2;
+            self.mean[i] += (x[i] - self.mean[i]) / n;
         }
     }
 
@@ -38,18 +38,6 @@ impl<const N: usize> Welford<N> {
         self.mean
     }
 
-    pub fn variance(&self) -> Option<SVector<f32, N>> {
-        if self.count > 0 {
-            let n = self.count as f32;
-            Some(self.m2 / n)
-        } else {
-            None
-        }
-    }
-
-    pub fn variance_magnitude(&self) -> Option<f32> {
-        self.variance().map(|v|v.magnitude())
-    }
 }
 
 #[cfg(test)]

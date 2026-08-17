@@ -1,14 +1,10 @@
-use biquad::{
-    Biquad as _, Coefficients, DirectForm2Transposed, Q_BUTTERWORTH_F32, ToHertz as _, Type,
-};
 use heapless::Deque;
-use micromath::F32Ext;
 use nalgebra::{SVector, UnitQuaternion, UnitVector3, Vector2, Vector3};
 
 use crate::{
     airbrakes_estimator::{
-        AirbrakesConfig, MAX_DT_S, Measurement, NOMINAL_DT, NOMINAL_SAMPLES_PER_S,
-        dead_reckoner::DeadReckoner, vertical_kf::VerticalKF, welford::Welford,
+        AirbrakesConfig, MAX_DT_S, Measurement, NOMINAL_DT, dead_reckoner::DeadReckoner,
+        vertical_kf::VerticalKF, welford::Welford,
     },
     baro_gate::BaroGateOutcome,
     utils::{approximate_air_density, approximate_speed_of_sound},
@@ -20,34 +16,98 @@ const UP: Vector3<f32> = Vector3::new(0.0, 0.0, 1.0);
 // Everything flight needs to learn while the rocket is still — gyro bias,
 // gravity direction (pad orientation), and pad altitude — comes from ONE
 // structure: finished 2 s window means (gyro + accel + baro together),
-// median-screened so that windows polluted by rail sway or a pressure
-// transient are thrown out. There is no fallback path: until enough
-// screened windows agree, the estimator is not launch-ready and refuses to
-// detect ignition (see `calibration_complete`).
+// averaged over the windows that look like a rocket sitting on a rail.
+// There is no fallback path: until enough windows qualify, the estimator
+// is not launch-ready and refuses to detect ignition (see
+// `calibration_complete`).
+//
+// The screen is ABSOLUTE — "is this a pad window at all" — and not a
+// comparison between windows. It has to be, because the case it exists
+// for is a recorder that started too late to see the pad: ignition is
+// never detected, the estimator stays here, and it goes on closing
+// windows THROUGH THE FLIGHT (`short_pad_refuses_ignition`, on the raw
+// LC'25 log, whose pad segment is 1.2 s). Screening those out by mutual
+// disagreement worked only because they happened to disagree with each
+// other; a log that was uniformly in flight would have calibrated.
+//
+// This used to be a median across the windows plus a per-channel reject
+// radius. Measured on Void Lake — the only log in the archive with a real
+// pad segment (11.4 s, five windows) — that apparatus moved the gyro bias
+// 0.03 deg/s and the gravity direction 0.002 deg, against a 5 deg tilt
+// budget, and moved the pad altitude 0.1 m the WRONG way. Deleting it
+// outright left 45 of 46 tests passing; the 46th is the in-flight-windows
+// case above, which the absolute check covers directly. The one
+// disturbance it ever fired on was Void Lake's ~8 Hz airframe ring, 19
+// deg/s peak at 0.3 deg of amplitude — which a 2 s mean already averages
+// away, and which never moved the accelerometer more than 0.1 m/s^2.
 /// Each completed calibration window is this long (s of measured time).
 const PAD_WINDOW_S: f32 = 2.0;
 /// How many window means we keep (32 x 2 s = about the last minute on pad).
 const MAX_PAD_WINDOWS: usize = 32;
-/// A window whose gyro mean is further than this (rad/s, per axis) from
-/// the median of all windows is thrown out: its "bias" was really rail
-/// sway.
-const BIAS_REJECT_RAD_S: f32 = 0.00262; // 0.15 deg/s
-/// Accel screen, same idea: sway that tilts the airframe by half a degree
-/// moves the measured gravity by ~0.09 m/s^2 on an axis, while a quiet
-/// pad's window means agree to ~0.04 m/s^2 (measured, Void Lake pad).
-/// Surviving windows therefore pin the gravity direction to well under a
-/// degree.
-const PAD_ACCEL_REJECT_M_S2: f32 = 0.1;
-/// Baro screen: quiet pad window means agree to a few tenths of a meter
-/// (measured); a window further than this from the median saw a pressure
-/// transient (gust on the port, neighboring-pad exhaust), not the pad.
-const PAD_BARO_REJECT_M: f32 = 2.0;
-/// The calibration exists once this many windows SURVIVE the screening.
-/// Three is the floor at which median screening means anything — a
-/// majority must exist to out-vote one polluted window — and three
-/// agreeing windows are 6 s of mutually consistent data, pinning the bias
-/// well inside the 0.15 deg/s reject radius. The rocket sits armed on the
-/// rail for minutes, so waiting for window 3 costs nothing operationally.
+/// A pad window's mean specific force must be this close to 1 g.
+///
+/// Sized by accelerometer SCALE error, not by motion: the pads in the
+/// archive read |a| = 10.00 m/s^2 (Void Lake) and 9.75 (LC'25), so the
+/// radius has to swallow ~0.25 m/s^2 of calibration error before it can
+/// reject anything at all. What it catches is a window that is not a pad:
+/// coasting (|a| ~ 0), boosting, or descending under drogue.
+const PAD_GRAVITY_TOLERANCE_M_S2: f32 = 0.5;
+/// ...and a pad window's mean rotation rate must be under this.
+///
+/// Generous for the same kind of reason: this is a MEAN, so an
+/// uncalibrated gyro bias lands in it whole (Void Lake's pad reads
+/// 2.05 deg/s of pure bias). Sway does not — the mean of a rate over a
+/// window is net rotation divided by the window, so an oscillation
+/// averages toward zero. The 2 s window, not this threshold, is what
+/// rejects motion. In-flight windows are tens to hundreds of deg/s and
+/// are nowhere near a near miss.
+const PAD_ROTATION_LIMIT_RAD_S: f32 = 0.174_53; // 10 deg/s
+/// The pre-ignition rolling buffer spans this much MEASURED time. On
+/// ignition the whole span is replayed through the dead reckoner (the
+/// "rewind"), which is what recovers the thrust that had already built up
+/// while the low pass and the threshold were still catching up.
+const PAD_RING_SPAN_S: f32 = 2.0;
+/// Capacity for that span. Trimming is by time, not by count, so this only
+/// has to be large enough that a faster-than-nominal sensor still buffers
+/// the whole span instead of quietly rewinding less of it: 1024 covers 2 s
+/// at up to 512 Hz. Past that the ring saturates and the rewind gets
+/// shorter, which is exactly what the old count-based buffer did at ANY
+/// rate above nominal — degraded, not broken (see the readiness gate in
+/// `State::OnPad`).
+const PAD_RING_CAP: usize = 1024;
+/// Time constant of the low pass in front of the ignition threshold,
+/// a 10 Hz corner (`1 / 2*pi*10`).
+///
+/// This used to be a 2nd-order Butterworth biquad *designed at the nominal
+/// sample rate* — the last thing in this estimator that assumed one. A
+/// one-pole driven by the measured dt has the same nominal corner and no
+/// rate assumption at all, and it is the same idiom as `drag_lp` below.
+/// Order is not what this filter is buying: the threshold is 4 g against a
+/// 0.04 m/s^2 pad noise floor, three orders of magnitude of margin, so
+/// what it actually rejects is a knock on the rail.
+///
+/// The swap also fixed something the old filter was hiding. Measured on
+/// the Osiris replay, where the motor takes the axial channel from 12 to
+/// 83 m/s^2 in 20 ms: the biquad's output had moved 9.81 -> 11.06 over
+/// that whole ramp — nothing like a 10 Hz filter, which is where its
+/// ~65 ms of detection lag came from. Ignition detection now lands at
+/// ignition+24 ms instead of ignition+77 ms.
+///
+/// That matters beyond the detector, because detection is the ORIGIN every
+/// lockout timer is measured from ([`MachLockoutConfig`]), while the
+/// constants themselves come from the simulation's time-since-ignition. A
+/// detector that lags biases all of them late by exactly that lag, so
+/// removing it is what makes those constants mean what they say. It also
+/// spends 53 ms of the drag check's margin, which the 1 s sustain covers
+/// with ~0.9 s to spare; see `clipped_accel_still_flies_the_profile`.
+///
+/// [`MachLockoutConfig`]: crate::airbrakes_estimator::MachLockoutConfig
+const IGNITION_LP_TAU_S: f32 = 0.0159;
+/// The calibration exists once this many windows pass the screen. Three
+/// windows are 6 s of pad data, which is what buys the averaging — the
+/// screen itself is a plausibility test and does not sharpen the numbers.
+/// The rocket sits armed on the rail for minutes, so waiting for window 3
+/// costs nothing operationally.
 const MIN_CALIBRATION_WINDOWS: usize = 3;
 
 // --- Stage 1 (thrust-vector alignment) ------------------------------------
@@ -123,14 +183,23 @@ const TILT_CAP_RAD: f32 = 1.396; // 80 deg
 struct PadCalibration {
     /// Mean gyro of the surviving windows (rad/s).
     gyro_bias: Vector3<f32>,
-    /// How much the surviving windows still disagree (rad/s). Logged at
-    /// ignition as a calibration-quality readout.
-    bias_spread: f32,
     /// Mean accel of the surviving windows: gravity in the avionics
     /// frame, i.e. the pad orientation.
     gravity_av_frame: Vector3<f32>,
     /// Mean baro altitude of the surviving windows.
     launch_pad_altitude_asl: f32,
+}
+
+/// One buffered pre-ignition sample: everything the rewind replays, and
+/// nothing else. The baro altitude is deliberately absent — the rewind
+/// only drives the dead reckoner, and the pad altitude it starts from
+/// comes from the screened windows. At 32 bytes against `Measurement`'s
+/// 40, dropping it pays for the ring's capacity headroom outright.
+#[derive(Debug, Clone, Copy)]
+struct PadSample {
+    timestamp_us: u64,
+    acc: Vector3<f32>,
+    gyro: Vector3<f32>,
 }
 
 #[derive(Debug)]
@@ -141,10 +210,10 @@ enum State {
     /// rolling buffer's ONLY job is that rewind — calibration comes
     /// entirely from the windows.
     OnPad {
-        imu_data_list: Deque<Measurement, { NOMINAL_SAMPLES_PER_S * 2 }>,
-        x_acc_low_pass: DirectForm2Transposed<f32>,
-        y_acc_low_pass: DirectForm2Transposed<f32>,
-        z_acc_low_pass: DirectForm2Transposed<f32>,
+        pad_ring: Deque<PadSample, PAD_RING_CAP>,
+        /// Low-passed accelerometer feeding the ignition threshold. `None`
+        /// until the first sample.
+        acc_lp: Option<Vector3<f32>>,
         /// Finished window means, packed like `Measurement`: acc[0..3],
         /// gyro[3..6], baro altitude [6].
         pad_windows: heapless::Vec<SVector<f32, 7>, MAX_PAD_WINDOWS>,
@@ -231,19 +300,10 @@ pub struct AirbrakesEstimator {
 
 impl AirbrakesEstimator {
     pub fn new(config: AirbrakesConfig) -> Self {
-        let acc_low_pass_coeff = Coefficients::<f32>::from_params(
-            Type::LowPass,
-            (NOMINAL_SAMPLES_PER_S as f32).hz(),
-            10f32.hz(),
-            Q_BUTTERWORTH_F32,
-        )
-        .unwrap();
         Self {
             state: State::OnPad {
-                imu_data_list: Deque::new(),
-                x_acc_low_pass: DirectForm2Transposed::<f32>::new(acc_low_pass_coeff),
-                y_acc_low_pass: DirectForm2Transposed::<f32>::new(acc_low_pass_coeff),
-                z_acc_low_pass: DirectForm2Transposed::<f32>::new(acc_low_pass_coeff),
+                pad_ring: Deque::new(),
+                acc_lp: None,
                 pad_windows: heapless::Vec::new(),
                 window_welford: Welford::new(),
                 window_elapsed: 0.0,
@@ -274,25 +334,42 @@ impl AirbrakesEstimator {
 
         match &mut self.state {
             State::OnPad {
-                imu_data_list,
-                x_acc_low_pass,
-                y_acc_low_pass,
-                z_acc_low_pass,
+                pad_ring,
+                acc_lp,
                 pad_windows,
                 window_welford,
                 window_elapsed,
                 calibration,
             } => {
-                let acc_low_passed = [
-                    x_acc_low_pass.run(acc[0]),
-                    y_acc_low_pass.run(acc[1]),
-                    z_acc_low_pass.run(acc[2]),
-                ];
+                // Ignition low pass: one pole on the measured dt. Clamped
+                // at alpha = 1 so a long stall snaps to the sample rather
+                // than overshooting past it.
+                let acc_low_passed = match *acc_lp {
+                    Some(prev) => prev + (dt / IGNITION_LP_TAU_S).min(1.0) * (acc - prev),
+                    None => acc,
+                };
+                *acc_lp = Some(acc_low_passed);
 
-                if imu_data_list.is_full() {
-                    imu_data_list.pop_front().unwrap();
+                if pad_ring.is_full() {
+                    pad_ring.pop_front();
                 }
-                imu_data_list.push_back(z.clone()).unwrap();
+                let _ = pad_ring.push_back(PadSample {
+                    timestamp_us: z.timestamp_us,
+                    acc,
+                    gyro,
+                });
+                // Trim to the span, but keep the one sample that has just
+                // aged out of it, so the ring always COVERS the span
+                // instead of sitting a sample short of it — which is what
+                // lets the readiness gate below be an honest `>=`.
+                while pad_ring.len() >= 2 {
+                    let second = pad_ring.iter().nth(1).unwrap().timestamp_us;
+                    if (z.timestamp_us.saturating_sub(second)) as f32 * 1e-6 >= PAD_RING_SPAN_S {
+                        pad_ring.pop_front();
+                    } else {
+                        break;
+                    }
+                }
 
                 // Calibration window collector: finished 2 s windows are
                 // kept as candidate (bias, gravity, pad-altitude)
@@ -326,7 +403,14 @@ impl AirbrakesEstimator {
                     }
                 }
 
-                if !imu_data_list.is_full() {
+                // Readiness: the rewind must have a full span to replay
+                // before ignition may be detected. `is_full` is the
+                // degraded path — at a sample rate high enough to saturate
+                // the ring before the span fills, detection still happens,
+                // just with a shorter rewind. That is what the old
+                // count-based buffer did at every rate; here it is the
+                // fallback rather than the rule.
+                if !pad_ring.is_full() && pad_ring_span_s(pad_ring) < PAD_RING_SPAN_S {
                     return;
                 }
                 // Calibration is a hard precondition of ignition
@@ -339,15 +423,14 @@ impl AirbrakesEstimator {
                 let Some(cal) = *calibration else {
                     return;
                 };
-                let acc_magnitude_squared: f32 = acc_low_passed.iter().map(|a| a * a).sum();
                 let threshold = self.config.ignition_detection_acc_threshold;
-                if acc_magnitude_squared <= threshold * threshold {
+                if acc_low_passed.magnitude_squared() <= threshold * threshold {
                     return;
                 }
                 log_info!("ignition detected, rewinding pad buffer");
                 log_info!(
-                    "pad calibration: bias spread {} deg/s, pad altitude {} m",
-                    cal.bias_spread.to_degrees(),
+                    "pad calibration: gyro bias {} deg/s, pad altitude {} m",
+                    cal.gyro_bias.magnitude().to_degrees(),
                     cal.launch_pad_altitude_asl
                 );
 
@@ -363,7 +446,7 @@ impl AirbrakesEstimator {
                 // gravity, pad altitude and bias all came from the
                 // screened windows above.
                 let mut prev_t: Option<u64> = None;
-                for past in imu_data_list.iter() {
+                for past in pad_ring.iter() {
                     let past_dt = match prev_t {
                         Some(p) => {
                             ((past.timestamp_us.saturating_sub(p)) as f32 * 1e-6).clamp(0.0, MAX_DT_S)
@@ -374,11 +457,7 @@ impl AirbrakesEstimator {
                     if past_dt > 0.0 {
                         // integrating through the still part too is
                         // harmless (rates are ~bias there)
-                        reckoner.update(
-                            &past.acceleration(),
-                            &(past.angular_velocity() - cal.gyro_bias),
-                            past_dt,
-                        );
+                        reckoner.update(&past.acc, &(past.gyro - cal.gyro_bias), past_dt);
                     }
                 }
 
@@ -729,7 +808,7 @@ impl AirbrakesEstimator {
             } => {
                 let vv = kf.vertical_velocity();
                 let tilt = axis_tilt(q_av_to_rocket, reckoner).min(TILT_CAP_RAD);
-                Some(Vector2::new((vv * tilt.tan()).abs(), vv))
+                Some(Vector2::new((vv * libm::tanf(tilt)).abs(), vv))
             }
             _ => None,
         }
@@ -819,20 +898,18 @@ impl AirbrakesEstimator {
     }
 
     /// True once the pad screening has produced a trustworthy calibration:
-    /// at least `MIN_CALIBRATION_WINDOWS` (3) finished 2 s windows agree
-    /// with the median on every channel (gyro, accel, baro). Three is the
-    /// floor at which median screening means anything — a majority must
-    /// exist to out-vote one polluted window — and three agreeing windows
-    /// are 6 s of mutually consistent data, pinning the bias well inside
-    /// the 0.15 deg/s reject radius and the gravity direction to well
-    /// under a degree. The rocket sits armed on the rail for minutes, so
-    /// this costs nothing operationally.
+    /// at least `MIN_CALIBRATION_WINDOWS` (3) finished 2 s windows each
+    /// read 1 g and no net rotation, i.e. 6 s of data taken while the
+    /// airframe was demonstrably on the rail. The rocket sits armed for
+    /// minutes, so this costs nothing operationally.
     ///
     /// While this is false the estimator REFUSES to detect ignition (there
     /// is no fallback calibration to fly on), so it must be surfaced as an
-    /// arming/self-test condition. A pad whose windows never agree (heavy
-    /// sway) honestly stays not-launch-ready here instead of flying on a
-    /// guess.
+    /// arming/self-test condition. What holds it false is a pad that was
+    /// never observed — a recorder started too late, or an airframe still
+    /// being handled — and not merely a windy one: sway degrades the
+    /// numbers slightly rather than withholding them, which at hundredths
+    /// of a deg/s against a 5 deg tilt budget is the right trade.
     pub fn calibration_complete(&self) -> bool {
         match &self.state {
             State::OnPad { calibration, .. } => calibration.is_some(),
@@ -843,19 +920,18 @@ impl AirbrakesEstimator {
     }
 }
 
-/// Screen the finished pad windows and, if enough of them agree, produce
-/// the pad calibration. Per component (accel, gyro, baro together) take
-/// the median over all windows, throw out any window that sits too far
-/// from it on ANY channel — rail sway shows up in the gyro AND tilts the
-/// measured gravity; a pressure transient shows up in the baro — and
-/// average the rest. The window is screened as a unit: if anything was
-/// moving during those 2 s, none of its numbers are trusted.
+/// Screen the finished pad windows and, if enough of them qualify,
+/// produce the pad calibration: keep the windows during which the
+/// airframe was demonstrably sitting on a rail, and average them.
 ///
 /// Returns `None` until at least `MIN_CALIBRATION_WINDOWS` windows
-/// survive. There is no fallback: too few windows, or a pad where the
-/// windows never agree (heavy sway), is not-launch-ready — never a silent
-/// guess. `bias_spread` is how much the surviving windows still disagree
-/// — carried into the Mach-check margin.
+/// qualify. There is no fallback: too few windows is not-launch-ready,
+/// never a silent guess.
+///
+/// Note what this deliberately does NOT do: reject a window for
+/// disagreeing with the other windows. See the constants above for the
+/// measurement that retired that, and for why the disagreement test was
+/// the wrong shape for the one job it was doing.
 fn screen_pad_windows(
     windows: &heapless::Vec<SVector<f32, 7>, MAX_PAD_WINDOWS>,
 ) -> Option<PadCalibration> {
@@ -863,53 +939,45 @@ fn screen_pad_windows(
         return None;
     }
 
-    let mut median = SVector::<f32, 7>::zeros();
-    for c in 0..7 {
-        let mut vals: heapless::Vec<f32, MAX_PAD_WINDOWS> = heapless::Vec::new();
-        for w in windows.iter() {
-            let _ = vals.push(w[c]);
-        }
-        vals.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
-        median[c] = vals[vals.len() / 2];
-    }
-
-    let survives = |w: &SVector<f32, 7>| -> bool {
-        let d = w - median;
-        let d_acc: Vector3<f32> = d.fixed_view::<3, 1>(0, 0).into();
-        let d_gyro: Vector3<f32> = d.fixed_view::<3, 1>(3, 0).into();
-        d_acc.abs().max() <= PAD_ACCEL_REJECT_M_S2
-            && d_gyro.abs().max() <= BIAS_REJECT_RAD_S
-            && d[6].abs() <= PAD_BARO_REJECT_M
+    // A rocket on a rail reads 1 g and is not turning. Nothing else about
+    // a pad window is knowable in absolute terms — the gyro bias and the
+    // pad orientation are precisely what this function exists to measure
+    // — so nothing else is asserted. In particular the baro channel is
+    // unscreened: a pressure transient is not evidence that the airframe
+    // moved, and the old unit-screen let one throw away good gyro data.
+    let on_the_pad = |w: &SVector<f32, 7>| -> bool {
+        let acc: Vector3<f32> = w.fixed_view::<3, 1>(0, 0).into();
+        let gyro: Vector3<f32> = w.fixed_view::<3, 1>(3, 0).into();
+        (acc.magnitude() - 9.81).abs() <= PAD_GRAVITY_TOLERANCE_M_S2
+            && gyro.magnitude() <= PAD_ROTATION_LIMIT_RAD_S
     };
 
     let mut sum = SVector::<f32, 7>::zeros();
     let mut n = 0usize;
-    for w in windows.iter() {
-        if survives(w) {
-            sum += w;
-            n += 1;
-        }
+    for w in windows.iter().filter(|w| on_the_pad(w)) {
+        sum += w;
+        n += 1;
     }
     if n < MIN_CALIBRATION_WINDOWS {
         return None;
     }
     let mean = sum / n as f32;
 
-    let gyro_bias: Vector3<f32> = mean.fixed_view::<3, 1>(3, 0).into();
-    let mut bias_spread = 0.0f32;
-    for w in windows.iter() {
-        if survives(w) {
-            let g: Vector3<f32> = w.fixed_view::<3, 1>(3, 0).into();
-            bias_spread = bias_spread.max((g - gyro_bias).magnitude());
-        }
-    }
-
     Some(PadCalibration {
-        gyro_bias,
-        bias_spread,
+        gyro_bias: mean.fixed_view::<3, 1>(3, 0).into(),
         gravity_av_frame: mean.fixed_view::<3, 1>(0, 0).into(),
         launch_pad_altitude_asl: mean[6],
     })
+}
+
+/// Measured time from the oldest to the newest buffered pad sample.
+fn pad_ring_span_s(ring: &Deque<PadSample, PAD_RING_CAP>) -> f32 {
+    match (ring.front(), ring.back()) {
+        (Some(front), Some(back)) => {
+            (back.timestamp_us.saturating_sub(front.timestamp_us)) as f32 * 1e-6
+        }
+        _ => 0.0,
+    }
 }
 
 fn ring_span_s(ring: &Deque<(u64, f32), BARO_RING_CAP>) -> f32 {
@@ -928,7 +996,7 @@ fn drag_airspeed(a_drag: f32, altitude_asl: f32, cda_over_mass: f32) -> Option<f
     if !(cda_over_mass > 0.0) || !(rho > 0.0) || !(a_drag >= 0.0) {
         return None;
     }
-    Some((2.0 * a_drag / (rho * cda_over_mass)).sqrt())
+    Some(libm::sqrtf(2.0 * a_drag / (rho * cda_over_mass)))
 }
 
 /// Median of 9 samples spaced evenly across the ring — a transient can't

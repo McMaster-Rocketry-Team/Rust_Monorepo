@@ -4,7 +4,8 @@ use nalgebra::{UnitQuaternion, UnitVector3, Vector3};
 
 use super::*;
 use crate::{
-    DeploymentProfile, FlightConfig, FlightEstimators, FlightProfile, ImuSample,
+    DeploymentProfile, FlightConfig, FlightEstimators, FlightProfile, ImuSample, RocketState,
+    RocketStateEstimator,
     controller::RocketParameters,
     tests::init_logger,
 };
@@ -555,9 +556,14 @@ fn lc25_clipped_accel_replay() {
 /// finishes on the pad. The old fallback would have flown this on a
 /// ring-buffer guess with a pessimistic spread; now the pad never
 /// calibrates and the estimator must REFUSE to detect ignition: it stays
-/// on pad through the entire flight and says so. (Windows collected
-/// in-flight must not fake a calibration either — the screening rejects
-/// them because the baro/gyro/accel means never agree.) In the real
+/// on pad through the entire flight and says so.
+///
+/// The windows it keeps closing DURING that flight are the whole point:
+/// they must not fake a calibration. This is the only test that fails if
+/// `screen_pad_windows` is reduced to a plain average, and it is what the
+/// absolute 1 g / no-rotation check exists for — in-flight windows do not
+/// look like a pad, which is a stronger reason to drop them than the old
+/// one (that they disagreed with each other). In the real
 /// system arming is blocked on `calibration_complete()`, so this flight
 /// would never have left the rail.
 #[test]
@@ -1236,6 +1242,7 @@ fn airbrakes_half_retires_at_apogee_and_stays_retired() {
     let mut est = FlightEstimators::new(FlightConfig {
         profile: FlightProfile {
             mach_lockout_duration_us: None,
+            ignition_detection_acc_threshold: 4.0 * 9.81,
             deployment: DeploymentProfile::Single {
                 minimum_deployment_altitude_agl: 300.0,
                 delay_us: 0,
@@ -1308,4 +1315,81 @@ fn airbrakes_half_retires_at_apogee_and_stays_retired() {
         "retired {:.1}s before baro apogee ({retired_s:.1}s vs {apogee_s:.1}s)",
         apogee_s - retired_s
     );
+}
+
+// ---------------------------------------------------------------------------
+// Diagnostic, not a regression test (run with --ignored --nocapture): what
+// does the ignition threshold cost on a real thrust curve?
+//
+// Ignition detection is the accelerometer's alone now, so this number is not
+// a convenience — a threshold the motor never sustains is a rocket that never
+// leaves the pad as far as this estimator is concerned. Runs the SAME
+// estimator over the same real flight at a sweep of thresholds and reports
+// when each latched, plus the worst low-passed |accel| while genuinely
+// stationary, which is the margin at the other end.
+// ---------------------------------------------------------------------------
+#[test]
+#[ignore]
+fn deployment_ignition_threshold_sweep() {
+    init_logger();
+
+    fn detect_at(rows: &[Measurement], threshold: f32) -> Option<f32> {
+        let mut est = RocketStateEstimator::new(FlightProfile {
+            mach_lockout_duration_us: None,
+            ignition_detection_acc_threshold: threshold,
+            deployment: DeploymentProfile::Single {
+                minimum_deployment_altitude_agl: 300.0,
+                delay_us: 0,
+            },
+        });
+        for (i, z) in rows.iter().enumerate() {
+            est.update(z.timestamp_us, Some(z.acceleration()), z.altitude_asl());
+            if !matches!(est.state(), RocketState::OnPad) {
+                return Some(t_s(rows, i));
+            }
+        }
+        None
+    }
+
+    for (name, rows) in [
+        ("void lake (subsonic)", extend_pad(void_lake_rows(), 8.0)),
+        ("LC'25 (supersonic)", extend_pad(lc25_rows(), 12.0)),
+    ] {
+        eprintln!("--- {name} ---");
+        let reference = detect_at(&rows, 4.0 * 9.81);
+        for g in [4.0f32, 6.0, 8.0, 10.0, 12.0] {
+            let t = detect_at(&rows, g * 9.81);
+            let cost = match (t, reference) {
+                (Some(t), Some(r)) => format!("{:+.3} s vs 4 g", t - r),
+                (None, _) => "NEVER LATCHED — this motor never sustains it".into(),
+                _ => "-".into(),
+            };
+            eprintln!("  {g:>4.1} g : {t:?}  ({cost})");
+        }
+
+        let quiet_until = reference.unwrap_or(f32::MAX) - 1.0;
+        let mut lp: Option<Vector3<f32>> = None;
+        let mut worst = 0.0f32;
+        for (i, z) in rows.iter().enumerate() {
+            let dt = if i == 0 {
+                NOMINAL_DT
+            } else {
+                ((z.timestamp_us - rows[i - 1].timestamp_us) as f32 * 1e-6).min(MAX_DT_S)
+            };
+            // Mirrors the estimator's own 5 Hz ignition low pass.
+            let v = match lp {
+                Some(prev) => prev + (dt / 0.031831).min(1.0) * (z.acceleration() - prev),
+                None => z.acceleration(),
+            };
+            lp = Some(v);
+            if t_s(&rows, i) < quiet_until {
+                worst = worst.max(v.magnitude());
+            }
+        }
+        eprintln!(
+            "  worst low-passed |acc| while stationary (to {quiet_until:.1}s): \
+             {worst:.3} m/s^2 = {:.2} g",
+            worst / 9.81
+        );
+    }
 }

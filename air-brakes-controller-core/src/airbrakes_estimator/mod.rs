@@ -29,9 +29,13 @@
 //! reads as a false low speed), and the brakes must be stowed (they are —
 //! this gate is what opens them).
 //!
-//! Every integration step uses the measured time between samples (the
-//! `Measurement` carries a timestamp) — nothing assumes a perfect sample
-//! rate. The flight log that motivated this had 104 ms sensor stalls.
+//! Every step uses the measured time between samples (the `Measurement`
+//! carries a timestamp) — nothing here assumes a sample rate, including
+//! the pieces that are not integrations: the 2 s pad calibration windows,
+//! the pre-ignition rewind buffer, the ignition low pass, and every
+//! sustain timer are all spans of measured time. The flight log that
+//! motivated this had 104 ms sensor stalls, and the part whose ODR is
+//! written "416 Hz" measures 427.02 Hz.
 
 use nalgebra::{SVector, Vector3};
 
@@ -46,8 +50,11 @@ pub(crate) mod welford;
 
 pub use estimator::AirbrakesEstimator;
 
-/// Nominal sample rate, used ONLY to size buffers and pick nominal window
-/// lengths. All integration uses measured per-sample dt.
+/// Nominal sample rate. Nothing in this estimator is clocked by it any
+/// more — every integration, window, sustain timer and buffer span is
+/// measured — so its ONLY remaining job is [`NOMINAL_DT`], the dt assumed
+/// for the very first sample, where there is no previous timestamp to
+/// difference against.
 pub(crate) const NOMINAL_SAMPLES_PER_S: usize = 416;
 pub(crate) const NOMINAL_DT: f32 = 1f32 / (NOMINAL_SAMPLES_PER_S as f32);
 /// Per-sample dt clamp: a gap longer than this is integrated as this long

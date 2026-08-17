@@ -2,17 +2,30 @@
 //! them, in one struct, so firmware holds ONE thing behind ONE mutex.
 //!
 //! Composition philosophy: the two estimators are fully independent — zero
-//! shared state, different sensors, different clocks, different consumers.
+//! shared state, different clocks, different consumers. They do both read
+//! the accelerometer, but only ever the raw vector off the wire, and for
+//! unrelated purposes; neither can see what the other made of it.
 //!
-//! * The **deployment** half ([`RocketStateEstimator`]) is baro-only and
-//!   sample-clocked: it assumes the real ~416 Hz stream (which armed mode
-//!   provides) and its output is trusted outright — it fires the pyros.
-//!   It never reads anything from the airbrakes half.
+//! * The **deployment** half ([`RocketStateEstimator`]) is baro-driven, and
+//!   its output is trusted outright — it fires the pyros. It never reads
+//!   anything from the airbrakes half. The one non-baro input it takes is
+//!   the raw accelerometer, feeding a magnitude check that can only make
+//!   ignition detection *earlier* than the baro pair would (see
+//!   [`FlightProfile::ignition_detection_acc_threshold`]); everything after
+//!   that instant is barometric. Its *filter* is sample-clocked on
+//!   purpose (a fixed `DT` step per sample, so no clock can surprise it);
+//!   its *timers* read the sample timestamp, so a lockout configured as
+//!   26 s lasts 26 seconds and not 26 seconds' worth of nominal ticks.
 //! * The **airbrakes** half ([`AirbrakesEstimator`]) is IMU+baro and
-//!   wall-clock: every integration step uses the measured dt carried in
-//!   the [`Measurement`] timestamp, so sensor stalls and skipped samples
-//!   are integrated honestly. It is accuracy-only: its output feeds the
-//!   MPC, never the pyros.
+//!   wall-clock throughout: every integration step, every window and every
+//!   sustain timer uses the measured dt carried in the [`Measurement`]
+//!   timestamp, so sensor stalls and skipped samples are integrated
+//!   honestly. It is accuracy-only: its output feeds the MPC, never the
+//!   pyros.
+//!
+//! Both halves therefore take their time from the one `timestamp_us`
+//! handed to [`FlightEstimators::update`], and neither has to be told what
+//! rate the sensors actually run at.
 //!
 //! **Exactly one thing crosses between the halves**, in
 //! [`FlightEstimators::update`]: the deployment estimator's apogee is one
@@ -122,12 +135,13 @@ impl FlightEstimators {
         }
     }
 
-    /// The ONLY mutating function — call once per ~416 Hz sample.
+    /// The ONLY mutating function — call once per sensor sample, with the
+    /// timestamp that sample was taken at (us, one monotonic clock).
     ///
-    /// Baro is always present: the deployment estimator is sample-clocked
-    /// and must see every sample. IMU is optional: when `imu` is `None`
-    /// the airbrakes estimator is skipped entirely for this sample — its
-    /// measured-dt integration bridges the gap at the next IMU sample.
+    /// Baro is always present: the deployment estimator's KF steps once per
+    /// call and must see every sample. IMU is optional: when `imu` is
+    /// `None` the airbrakes estimator is skipped entirely for this sample —
+    /// its measured-dt integration bridges the gap at the next IMU sample.
     ///
     /// Returns the deployment estimator's pyro command passed through
     /// UNTOUCHED — this struct adds no policy to recovery.
@@ -155,9 +169,18 @@ impl FlightEstimators {
         imu: Option<&ImuSample>,
         baro_altitude_asl: f32,
     ) -> Option<PyroSelect> {
-        // (a) Deployment first: baro-only, sample-clocked, trusted
-        // outright. Its pyro command is returned as-is at the bottom.
-        let pyro = self.deployment.update(baro_altitude_asl);
+        // (a) Deployment first, trusted outright. Its pyro command is
+        // returned as-is at the bottom.
+        //
+        // It gets the RAW accelerometer vector, straight off the wire —
+        // never anything the airbrakes half derived from it. That half is
+        // not consulted here and is not even constructed yet at the only
+        // moment this value matters. See
+        // `FlightProfile::ignition_detection_acc_threshold` for what it
+        // does with it, which is one magnitude check and nothing else.
+        let pyro = self
+            .deployment
+            .update(timestamp_us, imu.map(|imu| imu.acc), baro_altitude_asl);
 
         // (b) Airbrakes, only when this sample actually carries IMU data.
         if let Some(airbrakes) = self.airbrakes.as_mut()
@@ -277,6 +300,7 @@ impl FlightEstimators {
                 baro_trusted: ab.baro_trusted(),
                 is_apogee: ab.is_apogee(),
                 baro_gate: ab.baro_gate(),
+                calibration_complete: ab.calibration_complete(),
             }),
         }
     }
@@ -314,6 +338,17 @@ pub struct AirbrakesLogSample {
     pub baro_trusted: bool,
     pub is_apogee: bool,
     pub baro_gate: BaroGateOutcome,
+    /// The pad calibration exists (see
+    /// [`AirbrakesEstimator::calibration_complete`]).
+    ///
+    /// The only field here that says something while the rocket is still on
+    /// the rail, and the reason it is logged: without a calibration the
+    /// estimator refuses to detect ignition, so the airbrakes silently do
+    /// not fly. Every other flag below is retrospective.
+    ///
+    /// [`AirbrakesEstimator::calibration_complete`]:
+    ///     crate::airbrakes_estimator::AirbrakesEstimator::calibration_complete
+    pub calibration_complete: bool,
 }
 
 #[cfg(test)]
@@ -330,6 +365,7 @@ mod tests {
     fn test_profile() -> FlightProfile {
         FlightProfile {
             mach_lockout_duration_us: None,
+            ignition_detection_acc_threshold: 4.0 * 9.81,
             deployment: DeploymentProfile::Single {
                 minimum_deployment_altitude_agl: 300.0,
                 delay_us: 0,
@@ -388,7 +424,13 @@ mod tests {
         // descent, 8 s on the ground (landed detection needs 5 s still).
         let pad_altitude_asl = 200.0f32;
         let mut samples: Vec<f32> = Vec::new();
+        // Axial specific force per sample, since ignition detection is the
+        // accelerometer's job: 1 g held on the rail, thrust plus 1 g under
+        // power, nothing while ballistic, 1 g again once the descent is
+        // aerodynamically supported.
+        let mut specific_force: Vec<f32> = Vec::new();
         samples.extend(core::iter::repeat(pad_altitude_asl).take(5 * SAMPLES_PER_S));
+        specific_force.extend(core::iter::repeat(9.81).take(5 * SAMPLES_PER_S));
         let mut altitude_asl = pad_altitude_asl;
         let mut velocity = 0.0f32;
         let mut t = 0.0f32;
@@ -401,15 +443,29 @@ mod tests {
                 break;
             }
             samples.push(altitude_asl);
+            specific_force.push(if t < 3.0 {
+                80.0 + 9.81
+            } else if velocity <= -25.0 {
+                9.81
+            } else {
+                0.0
+            });
         }
         samples.extend(core::iter::repeat(pad_altitude_asl).take(8 * SAMPLES_PER_S));
+        specific_force.extend(core::iter::repeat(9.81).take(8 * SAMPLES_PER_S));
 
-        // No IMU: the airbrakes half is skipped, the deployment half
-        // (the one under test here) sees every sample either way.
+        // Both halves get the same stream; the deployment half (the one
+        // under test here) is what the assertions compare.
         let mut fires = Vec::new();
-        for (i, &alt) in samples.iter().enumerate() {
-            let expected = bare.update(alt);
-            let got = composed.update(i as u64 * SAMPLE_DT_US, None, alt);
+        for (i, (&alt, &sf)) in samples.iter().zip(specific_force.iter()).enumerate() {
+            let t_us = i as u64 * SAMPLE_DT_US;
+            let acc = Some(Vector3::new(0.0, 0.0, sf));
+            let expected = bare.update(t_us, acc, alt);
+            let imu = ImuSample {
+                acc: acc.unwrap(),
+                gyro: Vector3::zeros(),
+            };
+            let got = composed.update(t_us, Some(&imu), alt);
             assert_eq!(expected, got, "pyro mismatch at sample {i}");
             if let Some(pyro) = got {
                 fires.push(pyro);

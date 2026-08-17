@@ -1,14 +1,51 @@
-//! Baro-only *deployment* state machine.
+//! *Deployment* state machine, baro-driven.
 //!
-//! Detects ignition, apogee, and landing from barometric altitude alone via a
+//! Detects apogee and landing from barometric altitude alone via a
 //! deliberately slow (~1 s bandwidth) 2-state Kalman filter whose output is
 //! trusted outright — the COTS-altimeter shape: innovation gate as bus input
 //! validation, a timed Mach lockout started at ignition detection, apogee by
 //! peak-drop on the filtered altitude, coasting by burn timer, and
-//! "condition holds for N samples" persistence on every transition. Accuracy
+//! "condition holds for N seconds" persistence on every transition. Accuracy
 //! is explicitly not a goal (boost lag is hundreds of metres); the airbrakes
 //! use a separate fast estimator. Supports single (both pyros at apogee) and
 //! dual (drogue at apogee, main at altitude) deployment via [`FlightProfile`].
+//!
+//! **Ignition is the one decision the barometer does not make.** It is a
+//! magnitude check on the raw accelerometer and nothing else
+//! ([`FlightProfile::ignition_detection_acc_threshold`]): a 5 Hz low pass, a
+//! threshold, and a 0.1 s sustain. It carries no state across from the
+//! airbrakes estimator and needs no pad calibration, no mounting
+//! orientation, no gyro bias.
+//!
+//! The barometric detector it replaced (10 m/s of filtered climb AND 15 m of
+//! rise) decided the most load-bearing instant in the flight — the anchor
+//! for the Mach lockout — using the very static port that was about to stop
+//! telling the truth, through a filter with ~1 s of bandwidth, finishing
+//! only 0.75 s ahead of it on Osiris. It also ran ~1.1 s later than the
+//! accelerometer on every flight measured.
+//!
+//! **This estimator therefore does not detect a launch without a working
+//! accelerometer.** There is no second opinion. An IMU that reads
+//! successfully but reports low leaves it on the pad, and no pyro fires.
+//! That is a deliberate trade: one detector that is right about the moment
+//! that matters, over a second one that is specifically wrong about it.
+//!
+//! # What the filter is for, and when it exists
+//!
+//! Only for apogee and landing, and so only from the moment the barometer
+//! is worth filtering:
+//!
+//! * **On the pad** there is no filter. The barometer's one job is the pad
+//!   altitude reference, which is a gated low pass over a constant — see
+//!   [`PAD_ALTITUDE_GATE_M`].
+//! * **Through the Mach lockout** there is no filter. It is dropped at
+//!   ignition rather than frozen, so no caller can read a pre-ignition
+//!   altitude out of it while the rocket is kilometres away.
+//! * **After the lockout** (or at ignition, on a subsonic profile) one is
+//!   built from the first honest reading and runs to landing.
+//!
+//! `Option<BaroAltitudeKF>` is the whole of that rule. Absence is a fact
+//! about the type rather than something every reader has to remember.
 
 mod altitude_kf;
 
@@ -18,17 +55,47 @@ mod tests;
 pub use altitude_kf::BaroAltitudeKF;
 
 use firmware_common_new::vlp::packets::fire_pyro::PyroSelect;
+use nalgebra::Vector3;
 
 use crate::baro_gate::BaroGateOutcome;
 
-/// Baro sample rate the estimator is designed for (matches IMU ODR).
+/// Baro sample rate the KF is designed for (matches IMU ODR).
+///
+/// The **filter** is clocked by this and nothing else: one fixed `DT`
+/// predict step per sample, forever. That is deliberate. This is the half
+/// that fires the pyros, and a fixed-step filter cannot be surprised by a
+/// clock — no timestamp it is handed can change its bandwidth, its gains,
+/// or how far it propagates. It is meant to be dumb.
+///
+/// Every *duration* in this module is wall-clock instead — see
+/// [`RocketStateEstimator::update`]. Those are the numbers that have to be
+/// right in seconds (a 26 s Mach lockout, a 1 s drogue delay), and they
+/// were measurably wrong while they were counted in samples: the part
+/// actually runs at 427.02 Hz, so every one of them expired 2.65% early.
 pub const SAMPLES_PER_S: usize = 416;
 pub const DT: f32 = 1f32 / (SAMPLES_PER_S as f32);
 
-/// Vertical velocity above which (together with altitude rise) ignition is detected
-const IGNITION_VELOCITY_THRESHOLD: f32 = 10.0; // m/s
-/// Altitude rise above launch pad required for ignition detection
-const IGNITION_ALTITUDE_RISE: f32 = 15.0; // m
+/// Time constant of the low pass in front of the accelerometer ignition
+/// check — a 5 Hz corner (`1 / 2*pi*5`), deliberately narrower than the
+/// airbrakes estimator's 10 Hz detector. This one starts a Mach lockout
+/// that drops the pyro filter for tens of seconds, so it buys quiet at
+/// the cost of a few tens of milliseconds it can well afford out of the
+/// ~1.1 s it wins.
+///
+/// The vector is filtered and then measured, not the other way round:
+/// |accel| is rectified, so low-passing the magnitude would let airframe
+/// vibration bias the channel upward toward the threshold.
+const IGNITION_ACC_LP_TAU_S: f32 = 0.031831;
+/// How long the accelerometer has to stay above the threshold before it
+/// latches ignition.
+///
+/// The low pass alone already needs a few tens of milliseconds of sustained
+/// thrust to reach the threshold, so this is belt-and-braces — but this
+/// detector starts a Mach lockout that freezes the pyro filter for tens of
+/// seconds, and a false latch on the pad is expensive enough to be worth
+/// 0.1 s of the ~1.3 s this detector wins. Every other latch in the two
+/// estimators is sustained the same way.
+const IGNITION_ACC_SUSTAIN_S: f32 = 0.1;
 /// Apogee detection: filtered altitude this far below its running maximum
 /// counts as descending. Must exceed the worst transient dip a gate-leaking
 /// blast can put on the slow filter (~30 m from a 25-sample 500 m offset,
@@ -36,24 +103,48 @@ const IGNITION_ALTITUDE_RISE: f32 = 15.0; // m
 const APOGEE_DROP_M: f32 = 30.0; // m
 /// How long the altitude has to stay below (peak - APOGEE_DROP_M) before
 /// descent is acted upon
-const APOGEE_DROP_SAMPLES: usize = SAMPLES_PER_S / 2; // 0.5 s
+const APOGEE_DROP_SUSTAIN_S: f32 = 0.5;
 /// |KF vertical velocity| below this counts as standing still. The slow
 /// filter's stationary velocity noise is ~0.012 m/s std (peaks ~0.05 m/s), so
 /// this is sized by canopy-swing and post-touchdown-drift rejection, not
 /// noise; descent under main (>= ~4.5 m/s) keeps the counter pinned at zero.
 const LANDED_VELOCITY_THRESHOLD: f32 = 2.0; // m/s
 /// How long the rocket has to stand still before it is considered landed
-const LANDED_DETECTION_SAMPLES: usize = SAMPLES_PER_S * 5; // 5 s
+const LANDED_DETECTION_S: f32 = 5.0;
 /// Time constant of the launch pad altitude low-pass filter
 const PAD_ALTITUDE_FILTER_TIME_CONSTANT: f32 = 10.0; // s
+/// Input validation for the pad altitude tracker: a reading this far from
+/// the running pad estimate is not the pad.
+///
+/// The tracker used to be fed the deployment KF's output, which meant it
+/// inherited that filter's innovation gate for free. No filter exists on
+/// the pad any more (there is nothing for one to do until the rocket
+/// moves), so the same job is done here directly. It has to be done
+/// somewhere: a bad SPI read decoding to pressure ~0 is a ~30 km reading,
+/// and one of those through a bare 10 s low pass would drag the pad
+/// altitude — the reference every AGL deployment decision is measured
+/// against — by about 7 m.
+///
+/// 100 m rather than the KF's 500 m because this estimate is of something
+/// that is not moving: baro noise on a still pad is under a metre and
+/// weather drift is metres over minutes, so anything at this scale is a
+/// bus fault, not the pad.
+const PAD_ALTITUDE_GATE_M: f32 = 100.0;
+/// ...but a gate that can never be wrong is a trap. If the very first
+/// sample was garbage, the estimate anchors to it and rejects every honest
+/// reading afterwards. Rejecting continuously for this long means the
+/// estimate is what is wrong, so it re-anchors to what the sensor is
+/// actually saying.
+const PAD_ALTITUDE_RESYNC_S: f32 = 1.0;
 
 /// Per-rocket flight configuration for the deployment estimator.
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, PartialEq)]
 pub struct FlightProfile {
-    /// Baro Mach lockout: starting at THIS estimator's baro ignition
-    /// detection, the KF is frozen (no predict, no update) for this long,
-    /// then re-seeded — supersonic static-port readings are garbage.
+    /// Baro Mach lockout: starting at THIS estimator's ignition detection,
+    /// the KF is dropped for this long and then rebuilt in flight from the
+    /// first reading after it — supersonic static-port readings are garbage,
+    /// and so is anything a filter carried into them.
     ///
     /// From the flight sim: time from ignition detection until decelerated
     /// back below Mach 0.75, with ~1.4x margin; it must still end well
@@ -71,6 +162,47 @@ pub struct FlightProfile {
     /// runs from a different sensor's ignition detection. Equal values in a
     /// config are coincidence, not a link.
     pub mach_lockout_duration_us: Option<u32>,
+
+    /// Low-passed |accel| (m/s^2) above which ignition is latched. **The
+    /// only ignition detector this estimator has.**
+    ///
+    /// It is not the airbrakes estimator's detector reused, and it is not
+    /// wired to it: an independent magnitude check on the raw
+    /// accelerometer, which is all this half needs. No pad calibration to
+    /// wait for, no gyro bias, no mounting orientation, no dead reckoner —
+    /// a sensor and a threshold.
+    ///
+    /// This replaced a barometric pair (10 m/s of filtered climb AND 15 m
+    /// of rise) that used to run alongside it. The barometric version
+    /// decided the single most load-bearing instant in the flight — the
+    /// anchor for the Mach lockout — from the very static port that was
+    /// about to go transonic, through a filter with ~1 s of bandwidth, and
+    /// it finished only 0.75 s before that port started lying on Osiris.
+    /// It also completed ~1.1 s later than the accelerometer on every
+    /// flight measured (1.04 s Osiris bench, 1.26 s Void Lake, 1.32 s
+    /// LC'25), and its filter was the only reason one had to exist on the
+    /// pad at all.
+    ///
+    /// Not an `Option`, because a profile with no ignition detector is a
+    /// profile that never leaves the pad and never fires a pyro. There is
+    /// nothing to fall back to: if the accelerometer is silent or lying low
+    /// this estimator does not detect a launch. That is the trade — a
+    /// detector that is right about the moment it matters, against a second
+    /// opinion from a sensor that is wrong about exactly that moment.
+    ///
+    /// ~4 g suits most motors: far above pad handling and wind, far below
+    /// liftoff thrust (the O3400 pulls ~15 g, held for the whole 6.3 s
+    /// burn). The quietest measured pad sits at 1.02 g. Raising it is
+    /// nearly free on a punchy motor — on Osiris, 8 g latches only 20 ms
+    /// later than 4 g — but it is airframe-specific: on LC'25's softer
+    /// curve, 8 g costs 0.45 s and 10 g never latches at all.
+    ///
+    /// Same units as
+    /// [`AirbrakesConfig::ignition_detection_acc_threshold`](crate::airbrakes_estimator::AirbrakesConfig::ignition_detection_acc_threshold),
+    /// but a separate setting for a separate estimator; equal values are a
+    /// convenience rather than a constraint.
+    pub ignition_detection_acc_threshold: f32,
+
     pub deployment: DeploymentProfile,
 }
 
@@ -189,16 +321,26 @@ pub enum RocketState {
 #[derive(Debug, Clone)]
 enum Stage {
     OnPad {
-        /// low-passed launch pad altitude, tracks slow baro drift
-        pad_altitude_asl: f32,
+        /// Low-passed launch pad altitude, tracking slow baro drift.
+        /// `None` until the first sample anchors it.
+        ///
+        /// This is the only thing the barometer is for before the rocket
+        /// moves, and it is tracked here rather than by a Kalman filter:
+        /// there is nothing to estimate on a pad but a constant, and a
+        /// filter that exists only to smooth one is a filter somebody can
+        /// read a velocity out of.
+        pad_altitude_asl: Option<f32>,
+        /// How long the pad gate has been rejecting continuously (s).
+        gate_rejected_s: f32,
     },
     Ascent {
         launch_pad_altitude_asl: f32,
         /// running maximum of the filtered altitude; apogee is detected when
         /// the altitude drops [`APOGEE_DROP_M`] below it
         peak_altitude_asl: f32,
-        /// consecutive samples with altitude below (peak - APOGEE_DROP_M)
-        below_peak_samples: usize,
+        /// how long the altitude has been continuously below
+        /// (peak - APOGEE_DROP_M), in seconds of measured time
+        below_peak_s: f32,
     },
     /// Baro readings are garbage around and above Mach 1 (shocks over the
     /// static port), and with baro as the only sensor there is no trustworthy
@@ -209,23 +351,27 @@ enum Stage {
     /// transition can trigger.
     MachLockout {
         launch_pad_altitude_asl: f32,
-        samples_left: usize,
+        /// seconds of measured time still to wait
+        remaining_s: f32,
     },
     DrogueDelay {
         launch_pad_altitude_asl: f32,
-        samples_left: usize,
+        /// seconds of measured time still to wait
+        remaining_s: f32,
     },
     DrogueDeployed {
         launch_pad_altitude_asl: f32,
     },
     MainDelay {
         launch_pad_altitude_asl: f32,
-        samples_left: usize,
+        /// seconds of measured time still to wait
+        remaining_s: f32,
     },
     MainDeployed {
         launch_pad_altitude_asl: f32,
-        /// consecutive samples with |velocity| below the landed threshold
-        still_samples: usize,
+        /// how long |velocity| has been continuously below the landed
+        /// threshold, in seconds of measured time
+        still_s: f32,
     },
     Landed {
         launch_pad_altitude_asl: f32,
@@ -235,9 +381,13 @@ enum Stage {
     },
 }
 
-/// Baro-only state estimator + flight state machine.
+/// Deployment state estimator + flight state machine.
 ///
-/// Feed it baro altitude ASL at [`SAMPLES_PER_S`] via [`Self::update`].
+/// Feed it every timestamped baro altitude ASL sample via [`Self::update`].
+/// The KF wants them at roughly [`SAMPLES_PER_S`] — it steps a fixed `DT`
+/// per sample — but the state machine's timers read the timestamps, so the
+/// actual rate does not have to be exactly that, and does not have to be
+/// known.
 #[derive(Debug, Clone)]
 pub struct RocketStateEstimator {
     profile: FlightProfile,
@@ -247,12 +397,17 @@ pub struct RocketStateEstimator {
     /// processed. `Accepted` while the KF is frozen in Mach lockout —
     /// nothing is fused there, so nothing is rejected either.
     last_baro_gate: BaroGateOutcome,
-}
-
-fn us_to_ticks(us: u32) -> usize {
-    // Round up so a non-zero delay always waits at least one sample.
-    let ticks = (us as u64 * SAMPLES_PER_S as u64).div_ceil(1_000_000);
-    ticks as usize
+    /// Previous sample's timestamp, for the timer dt. `None` before the
+    /// first sample.
+    prev_timestamp_us: Option<u64>,
+    /// Low-passed accelerometer, for the ignition magnitude check. `None`
+    /// until the first sample that carries one — an IMU that is missing,
+    /// glitching or absent entirely simply never advances this, and the
+    /// baro condition carries ignition detection on its own.
+    acc_lp: Option<Vector3<f32>>,
+    /// How long the low-passed accelerometer has been continuously above
+    /// the threshold, in seconds of measured time.
+    ignition_acc_sustain_s: f32,
 }
 
 impl RocketStateEstimator {
@@ -261,86 +416,233 @@ impl RocketStateEstimator {
             profile,
             kf: None,
             stage: Stage::OnPad {
-                pad_altitude_asl: 0.0,
+                pad_altitude_asl: None,
+                gate_rejected_s: 0.0,
             },
             last_baro_gate: BaroGateOutcome::Accepted,
+            prev_timestamp_us: None,
+            acc_lp: None,
+            ignition_acc_sustain_s: 0.0,
         }
     }
 
-    /// Process one baro altitude ASL sample (m).
-    /// Returns `Some(pyro)` when a pyro channel should be fired.
-    pub fn update(&mut self, baro_altitude_asl: f32) -> Option<PyroSelect> {
-        let kf = match &mut self.kf {
-            Some(kf) => {
-                // During Mach lockout the KF is frozen: predicting on the
-                // constant-velocity model while decelerating at 2-3 g would
-                // accumulate km of error, and the measurements are garbage.
-                if !matches!(self.stage, Stage::MachLockout { .. }) {
-                    kf.predict();
-                    self.last_baro_gate = kf.update(baro_altitude_asl);
-                } else {
-                    self.last_baro_gate = BaroGateOutcome::Accepted;
-                }
-                kf
-            }
-            None => {
-                self.stage = Stage::OnPad {
-                    pad_altitude_asl: baro_altitude_asl,
-                };
-                self.kf.insert(BaroAltitudeKF::new(baro_altitude_asl))
-            }
+    /// Run the accelerometer ignition check for this sample and report
+    /// whether it has latched.
+    ///
+    /// Independent of the baro condition in every respect — different
+    /// sensor, different filter, no shared state — so the two can only
+    /// agree by both being right. A sample without an IMU reading leaves
+    /// the filter and the sustain exactly where they were rather than
+    /// resetting them: a one-sample SPI glitch mid-boost is not evidence
+    /// that the motor stopped.
+    fn ignition_by_accel(&mut self, acc: Option<Vector3<f32>>, dt: f32) -> bool {
+        let threshold = self.profile.ignition_detection_acc_threshold;
+        let Some(acc) = acc else {
+            return false;
         };
+
+        let lp = match self.acc_lp {
+            Some(prev) => prev + (dt / IGNITION_ACC_LP_TAU_S).min(1.0) * (acc - prev),
+            None => acc,
+        };
+        self.acc_lp = Some(lp);
+
+        if lp.magnitude_squared() > threshold * threshold {
+            self.ignition_acc_sustain_s += dt;
+        } else {
+            self.ignition_acc_sustain_s = 0.0;
+        }
+        self.ignition_acc_sustain_s >= IGNITION_ACC_SUSTAIN_S
+    }
+
+    /// Measured time since the previous sample, for the state machine's
+    /// timers only — the KF keeps its fixed `DT` step regardless.
+    ///
+    /// Deliberately unclamped. A long gap between samples is real elapsed
+    /// time, and counting it is the entire point of reading a timestamp: a
+    /// ceiling would put back exactly the error this removed, under-counting
+    /// a Mach lockout or a pyro delay by whatever the sample stream lost.
+    /// The one caller stamps every sample from the same monotonic clock, so
+    /// a large delta means a gap, not a bad reading.
+    ///
+    /// Zero on the first sample, where there is no previous timestamp to
+    /// difference against. Nothing is timing anything yet there, and the pad
+    /// altitude that the `OnPad` low pass would move is initialised from
+    /// that very sample.
+    fn timer_dt(&mut self, timestamp_us: u64) -> f32 {
+        let dt = match self.prev_timestamp_us {
+            Some(prev) => (timestamp_us.saturating_sub(prev)) as f32 * 1e-6,
+            None => 0.0,
+        };
+        self.prev_timestamp_us = Some(timestamp_us);
+        dt
+    }
+
+    /// Process one baro altitude ASL sample (m) with the timestamp it was
+    /// taken at (us, same monotonic clock every call), and the raw
+    /// accelerometer specific force from the same sample if there was one.
+    ///
+    /// `acc` is the RAW sensor vector, not anything another estimator
+    /// derived from it, and it feeds exactly one decision: the ignition
+    /// magnitude check (see
+    /// [`FlightProfile::ignition_detection_acc_threshold`]). Nothing else in
+    /// this estimator reads it, and it can only ever move ignition
+    /// detection earlier — `None`, a dead IMU, or a threshold of `None`
+    /// leaves the baro condition to fire on its own exactly as before.
+    ///
+    /// Returns `Some(pyro)` when a pyro channel should be fired.
+    ///
+    /// The timestamp drives every *duration* below — the Mach lockout, the
+    /// pyro delays, the apogee and landing persistence, the pad-altitude
+    /// low pass — so all of them are in honest seconds no matter what the
+    /// sensor's real output rate turns out to be, or how many samples the
+    /// caller dropped getting here. The KF is untouched by it and still
+    /// steps a fixed `DT` per sample; see [`SAMPLES_PER_S`] for why that
+    /// split is deliberate rather than an oversight.
+    pub fn update(
+        &mut self,
+        timestamp_us: u64,
+        acc: Option<Vector3<f32>>,
+        baro_altitude_asl: f32,
+    ) -> Option<PyroSelect> {
+        let dt = self.timer_dt(timestamp_us);
+        // Run every sample so the low pass and the sustain are already warm
+        // when the motor lights; the result is only consulted on the pad.
+        let accel_says_ignition = self.ignition_by_accel(acc, dt);
+
+        // Mach lockout, handled here and not in the stage machine below,
+        // because there is no filter during it to run that machine on.
+        //
+        // The filter is DROPPED at ignition detection rather than frozen.
+        // Frozen was already the behaviour — predicting a constant-velocity
+        // model through a 2-3 g deceleration would accumulate kilometres of
+        // error, and the measurements it would fuse are shock garbage — but
+        // a frozen filter is still an object holding pre-ignition numbers
+        // that somebody can read. Dropping it makes "there is no altitude
+        // here" a fact about the type rather than a rule to be remembered,
+        // and it means the filter that comes out the other side has no
+        // history to unlearn: it is built fresh, in flight, from the first
+        // honest reading (`BaroAltitudeKF::born_in_flight`).
+        //
+        // Nothing else can happen in this window. No transition, no pyro.
+        if let Stage::MachLockout {
+            launch_pad_altitude_asl,
+            remaining_s,
+        } = &mut self.stage
+        {
+            // Nothing is fused, so nothing is rejected.
+            self.last_baro_gate = BaroGateOutcome::Accepted;
+            *remaining_s -= dt;
+            if *remaining_s <= 0.0 {
+                log_info!(
+                    "mach lockout over, building KF in flight at {}m",
+                    baro_altitude_asl
+                );
+                self.kf = Some(BaroAltitudeKF::born_in_flight(baro_altitude_asl));
+                self.stage = Stage::Ascent {
+                    launch_pad_altitude_asl: *launch_pad_altitude_asl,
+                    peak_altitude_asl: baro_altitude_asl,
+                    below_peak_s: 0.0,
+                };
+            }
+            return None;
+        }
+
+        // On the pad, also handled before the stage machine, and for the
+        // same reason: no filter exists yet. The barometer's only job here
+        // is the pad altitude reference, tracked directly.
+        if let Stage::OnPad {
+            pad_altitude_asl,
+            gate_rejected_s,
+        } = &mut self.stage
+        {
+            self.last_baro_gate = match pad_altitude_asl {
+                // First sample: nothing to compare against, so it IS the pad.
+                None => {
+                    *pad_altitude_asl = Some(baro_altitude_asl);
+                    *gate_rejected_s = 0.0;
+                    BaroGateOutcome::Accepted
+                }
+                Some(pad) if (baro_altitude_asl - *pad).abs() > PAD_ALTITUDE_GATE_M => {
+                    *gate_rejected_s += dt;
+                    if *gate_rejected_s >= PAD_ALTITUDE_RESYNC_S {
+                        log_info!("pad altitude re-anchored to {}m", baro_altitude_asl);
+                        *pad = baro_altitude_asl;
+                        *gate_rejected_s = 0.0;
+                        BaroGateOutcome::Resynced
+                    } else {
+                        BaroGateOutcome::Rejected
+                    }
+                }
+                Some(pad) => {
+                    *gate_rejected_s = 0.0;
+                    let alpha = (dt / PAD_ALTITUDE_FILTER_TIME_CONSTANT).min(1.0);
+                    *pad += alpha * (baro_altitude_asl - *pad);
+                    BaroGateOutcome::Accepted
+                }
+            };
+            // Copied out so the borrow of `self.stage` ends here.
+            let pad = pad_altitude_asl.unwrap_or(baro_altitude_asl);
+
+            if accel_says_ignition {
+                log_info!("ignition detected by accel, pad asl={}m", pad);
+                self.stage = match self.profile.mach_lockout_duration_us {
+                    Some(duration_us) => {
+                        log_info!("mach lockout for {}us, no KF until it ends", duration_us);
+                        Stage::MachLockout {
+                            launch_pad_altitude_asl: pad,
+                            remaining_s: duration_us as f32 * 1e-6,
+                        }
+                    }
+                    // Subsonic profile: the static port never stops telling
+                    // the truth, so the filter starts now — at rest, which
+                    // is what it is, the rocket having moved centimetres in
+                    // the ~0.15 s the detector took.
+                    None => {
+                        self.kf = Some(BaroAltitudeKF::new(baro_altitude_asl));
+                        Stage::Ascent {
+                            launch_pad_altitude_asl: pad,
+                            peak_altitude_asl: baro_altitude_asl,
+                            below_peak_s: 0.0,
+                        }
+                    }
+                };
+            }
+            return None;
+        }
+
+        // Past the pad and past the lockout, a filter always exists. If it
+        // somehow does not, do nothing rather than panic: this is the code
+        // path that fires pyros.
+        let Some(kf) = self.kf.as_mut() else {
+            return None;
+        };
+        kf.predict();
+        self.last_baro_gate = kf.update(baro_altitude_asl);
         let altitude_asl = kf.altitude_asl();
         let velocity = kf.vertical_velocity();
 
         let mut deploy_pyro = None;
 
         match &mut self.stage {
-            Stage::OnPad { pad_altitude_asl } => {
-                let alpha = DT / PAD_ALTITUDE_FILTER_TIME_CONSTANT;
-                *pad_altitude_asl += alpha * (altitude_asl - *pad_altitude_asl);
-
-                if velocity > IGNITION_VELOCITY_THRESHOLD
-                    && altitude_asl - *pad_altitude_asl > IGNITION_ALTITUDE_RISE
-                {
-                    log_info!(
-                        "ignition detected: v={}m/s, pad asl={}m",
-                        velocity,
-                        *pad_altitude_asl
-                    );
-                    let pad = *pad_altitude_asl;
-                    self.stage = match self.profile.mach_lockout_duration_us {
-                        Some(duration_us) => {
-                            log_info!("mach lockout for {}us", duration_us);
-                            Stage::MachLockout {
-                                launch_pad_altitude_asl: pad,
-                                samples_left: us_to_ticks(duration_us),
-                            }
-                        }
-                        None => Stage::Ascent {
-                            launch_pad_altitude_asl: pad,
-                            peak_altitude_asl: altitude_asl,
-                            below_peak_samples: 0,
-                        },
-                    };
-                }
-            }
+            // Handled before the filter runs, above: there is none on the pad.
+            Stage::OnPad { .. } => {}
             Stage::Ascent {
                 launch_pad_altitude_asl,
                 peak_altitude_asl,
-                below_peak_samples,
+                below_peak_s,
             } => {
                 if altitude_asl > *peak_altitude_asl {
                     *peak_altitude_asl = altitude_asl;
                 }
 
                 if *peak_altitude_asl - altitude_asl > APOGEE_DROP_M {
-                    *below_peak_samples += 1;
+                    *below_peak_s += dt;
                 } else {
-                    *below_peak_samples = 0;
+                    *below_peak_s = 0.0;
                 }
 
-                if *below_peak_samples >= APOGEE_DROP_SAMPLES {
+                if *below_peak_s >= APOGEE_DROP_SUSTAIN_S {
                     let apogee_agl = *peak_altitude_asl - *launch_pad_altitude_asl;
                     let min_agl = self.profile.deployment.minimum_deployment_agl();
                     if apogee_agl < min_agl {
@@ -356,33 +658,23 @@ impl RocketStateEstimator {
                         log_info!("descent detected: peak agl={}m", apogee_agl);
                         self.stage = Stage::DrogueDelay {
                             launch_pad_altitude_asl: *launch_pad_altitude_asl,
-                            samples_left: us_to_ticks(self.profile.deployment.drogue_delay_us()),
+                            remaining_s: self.profile.deployment.drogue_delay_us() as f32 * 1e-6,
                         };
                     }
                 }
             }
-            Stage::MachLockout {
-                launch_pad_altitude_asl,
-                samples_left,
-            } => {
-                *samples_left = samples_left.saturating_sub(1);
-                if *samples_left == 0 {
-                    log_info!("mach lockout over, reseeding KF at {}m", baro_altitude_asl);
-                    if let Some(kf) = &mut self.kf {
-                        kf.reseed(baro_altitude_asl);
-                    }
-                    self.stage = Stage::Ascent {
-                        launch_pad_altitude_asl: *launch_pad_altitude_asl,
-                        peak_altitude_asl: baro_altitude_asl,
-                        below_peak_samples: 0,
-                    };
-                }
-            }
+            // Unreachable: handled at the top of `update`, which returns
+            // before this match, because there is no filter to run the stage
+            // machine on during the lockout. Deliberately not `unreachable!`
+            // — this is the code path that fires pyros, and a panic here
+            // would reset the board mid-flight over a logic error whose
+            // honest degradation is simply staying locked out.
+            Stage::MachLockout { .. } => {}
             Stage::DrogueDelay {
                 launch_pad_altitude_asl,
-                samples_left,
+                remaining_s,
             } => {
-                if *samples_left == 0 {
+                if *remaining_s <= 0.0 {
                     deploy_pyro = Some(PyroSelect::PyroDrogue);
                     let pad = *launch_pad_altitude_asl;
                     if self.profile.deployment.is_single() {
@@ -390,7 +682,7 @@ impl RocketStateEstimator {
                         // (main_delay_us() == 0), so it fires on the next sample.
                         self.stage = Stage::MainDelay {
                             launch_pad_altitude_asl: pad,
-                            samples_left: us_to_ticks(self.profile.deployment.main_delay_us()),
+                            remaining_s: self.profile.deployment.main_delay_us() as f32 * 1e-6,
                         };
                     } else {
                         self.stage = Stage::DrogueDeployed {
@@ -398,7 +690,7 @@ impl RocketStateEstimator {
                         };
                     }
                 } else {
-                    *samples_left -= 1;
+                    *remaining_s -= dt;
                 }
             }
             Stage::DrogueDeployed {
@@ -410,35 +702,35 @@ impl RocketStateEstimator {
                 {
                     self.stage = Stage::MainDelay {
                         launch_pad_altitude_asl: *launch_pad_altitude_asl,
-                        samples_left: us_to_ticks(self.profile.deployment.main_delay_us()),
+                        remaining_s: self.profile.deployment.main_delay_us() as f32 * 1e-6,
                     };
                 }
             }
             Stage::MainDelay {
                 launch_pad_altitude_asl,
-                samples_left,
+                remaining_s,
             } => {
-                if *samples_left == 0 {
+                if *remaining_s <= 0.0 {
                     deploy_pyro = Some(PyroSelect::PyroMain);
                     self.stage = Stage::MainDeployed {
                         launch_pad_altitude_asl: *launch_pad_altitude_asl,
-                        still_samples: 0,
+                        still_s: 0.0,
                     };
                 } else {
-                    *samples_left -= 1;
+                    *remaining_s -= dt;
                 }
             }
             Stage::MainDeployed {
                 launch_pad_altitude_asl,
-                still_samples,
+                still_s,
             } => {
                 if velocity.abs() < LANDED_VELOCITY_THRESHOLD {
-                    *still_samples += 1;
+                    *still_s += dt;
                 } else {
-                    *still_samples = 0;
+                    *still_s = 0.0;
                 }
 
-                if *still_samples >= LANDED_DETECTION_SAMPLES {
+                if *still_s >= LANDED_DETECTION_S {
                     log_info!("landed");
                     self.stage = Stage::Landed {
                         launch_pad_altitude_asl: *launch_pad_altitude_asl,
@@ -522,29 +814,17 @@ impl RocketStateEstimator {
         self.last_baro_gate
     }
 
-    /// The filter, but only on samples where its contents are an actual
-    /// reading of the present: `None` before the first [`Self::update`]
-    /// births it, and `None` for the whole Mach lockout, where it is frozen
-    /// (no predict, no update) and still holds whatever it last saw before
-    /// ignition. Both public KF accessors funnel through here so they cannot
-    /// disagree about whether this sample has a reading at all — one handing
-    /// out a number while the other admits it has none would be a worse lie
-    /// than either alone.
-    fn live_kf(&self) -> Option<&BaroAltitudeKF> {
-        if matches!(self.stage, Stage::MachLockout { .. }) {
-            return None;
-        }
-        self.kf.as_ref()
-    }
-
     /// KF altitude ASL (m) for the fast flight-log record, or `None` when
-    /// there is genuinely no altitude to report: before the filter is born,
-    /// and throughout the Mach lockout, where it is frozen and what it holds
-    /// is a pre-ignition reading that can be tens of seconds and kilometres
-    /// out of date. Absence is reported as absence rather than as a
-    /// plausible-looking zero, so the SD log and the telemetry packet now
-    /// describe the lockout window the same way instead of one recording the
-    /// frozen value and the other recording 0.
+    /// there is genuinely no altitude to report: before the first
+    /// [`Self::update`] builds a filter, and throughout the Mach lockout,
+    /// where there is no filter at all — it is dropped at ignition and a new
+    /// one is built in flight when the lockout ends.
+    ///
+    /// This used to need a guard that checked the stage before handing over
+    /// the filter, because during the lockout one existed but was frozen and
+    /// holding a pre-ignition reading tens of seconds and kilometres out of
+    /// date. Now the `Option` is the whole story, and absence cannot be
+    /// reported as a plausible-looking zero by any caller that forgets.
     ///
     /// Every other stage returns `Some` — including `OnPad`, `Landed` and
     /// `FailedToReachMinApogee`, whose [`RocketState`] variants carry no
@@ -558,18 +838,18 @@ impl RocketStateEstimator {
     /// over the stage and the numbers as one value, so a caller cannot read
     /// an altitude without also learning which flight phase produced it.
     pub fn kf_altitude_asl(&self) -> Option<f32> {
-        self.live_kf().map(|kf| kf.altitude_asl())
+        self.kf.as_ref().map(|kf| kf.altitude_asl())
     }
 
     /// KF vertical velocity (m/s) for the fast flight-log record. Present in
     /// exactly the samples [`Self::kf_altitude_asl`] is present in, and
-    /// absent for the same two reasons — unborn filter, or frozen filter
-    /// during the Mach lockout — so the logged altitude and velocity always
-    /// come from the same live filter state or from no filter state at all.
+    /// absent for the same two reasons — no filter yet, or no filter during
+    /// the Mach lockout — so the logged altitude and velocity always come
+    /// from one filter or from none, and never from a half of each.
     /// [`Self::state`] remains the interface to prefer for control, for the
     /// stage-plus-numbers reason given there.
     pub fn kf_vertical_velocity(&self) -> Option<f32> {
-        self.live_kf().map(|kf| kf.vertical_velocity())
+        self.kf.as_ref().map(|kf| kf.vertical_velocity())
     }
 
     /// Launch pad altitude ASL (m), available in every stage: while on the
@@ -578,7 +858,12 @@ impl RocketStateEstimator {
     /// detection.
     pub fn launch_pad_altitude_asl(&self) -> f32 {
         match &self.stage {
-            Stage::OnPad { pad_altitude_asl } => *pad_altitude_asl,
+            // Zero before the first sample anchors it; there is genuinely
+            // no reading yet, and every caller of this is on the pad where
+            // that is about to be replaced microseconds later.
+            Stage::OnPad {
+                pad_altitude_asl, ..
+            } => pad_altitude_asl.unwrap_or(0.0),
             Stage::Ascent {
                 launch_pad_altitude_asl,
                 ..

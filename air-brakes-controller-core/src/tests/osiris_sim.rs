@@ -88,6 +88,9 @@ fn osiris_config() -> FlightConfig {
     FlightConfig {
         profile: FlightProfile {
             mach_lockout_duration_us: Some(26_000_000),
+            // Mirrors VLF5's `FLIGHT_CONFIG`: 8 g, double the airbrakes
+            // half's threshold, because this one starts the 26 s lockout.
+            ignition_detection_acc_threshold: 8.0 * 9.81,
             deployment: DeploymentProfile::Dual {
                 drogue_chute_minimum_altitude_agl: 2000.0,
                 drogue_chute_delay_us: 1_000_000,
@@ -407,17 +410,23 @@ impl Rng {
 
 /// Everything invented about the sensors, in one place.
 ///
-/// The noise numbers are the Void Lake pad segment, measured: accelerometer
-/// 0.02-0.18 m/s^2 per axis (the spread is mounting-axis dependent; 0.15 is
-/// used on all three), gyro 0.2-0.3 deg/s about the quiet axes, static
-/// pressure 5.5 Pa RMS, which is ~0.46 m of altitude at that site.
+/// The IMU noise is measured, not guessed: `VLF5/firmware`'s `imu_bench`
+/// binary run against the flight board's own LSM6DSM, 57 stationary 2 s
+/// windows over 114 s, median window sigma per axis. It is quite unlike the
+/// Void Lake pad figures these tests first used — the accelerometer is
+/// 4-10x quieter than that flight's pad (which had rail sway and a live
+/// motor next to it), while gyro X is nearly twice as noisy. Static
+/// pressure is still the Void Lake pad's 5.5 Pa RMS; the MS5607 bench
+/// measurement lives in `hil/baro_sim.rs` as 0.36 m, which is the same
+/// number in altitude form.
 struct SensorModel {
     /// Accelerometer full scale, m/s^2. The LSM6DSM is configured for
     /// +-16 g in `drivers/lsm6dsm.rs`, and Osiris exceeds that in the
     /// middle of the burn — see [`clipped_accel_still_flies_the_profile`].
     accel_full_scale: f32,
-    accel_noise: f32,
-    gyro_noise_rad_s: f32,
+    /// Per-axis, because the measured axes are genuinely not equal.
+    accel_noise: Vector3<f32>,
+    gyro_noise_rad_s: Vector3<f32>,
     gyro_bias_rad_s: Vector3<f32>,
     /// RMS of the pressure noise, Pa.
     pressure_noise_pa: f32,
@@ -426,10 +435,28 @@ struct SensorModel {
     transonic_port_error: f32,
     /// Rotation from the airframe frame into the IMU chip frame.
     mount: UnitQuaternion<f32>,
+    /// Mimic `VLF5/firmware/src/hil/osiris.rs` instead of this file's own
+    /// model: identity mounting, and specific force taken as purely axial
+    /// `(0, 0, (thrust - drag)/mass)` rather than differentiated from the
+    /// velocity columns. Used by `bench_vs_host_sensor_model` to find out
+    /// why the two disagree about when the lockout opens.
+    bench_model: bool,
+    /// Liftoff time for the bench model (s): before it, the accelerometer
+    /// reads pad-supported gravity rather than thrust minus drag.
+    bench_liftoff_s: f32,
+    /// Scales the transverse component of pad gravity. 1.0 models the rod
+    /// angle honestly; 0.0 is what the first version of `hil/osiris.rs` did
+    /// — pad gravity exactly on the airframe axis, so Stage 1 finds no
+    /// launch angle at all.
+    bench_rod_angle_scale: f32,
     /// Seconds of pad prepended before ignition.
     pad_s: f32,
     /// Stop generating samples after this truth time.
     until_s: f32,
+    /// Nominal sample interval (us). 2404 is the 416 Hz the firmware
+    /// assumes; the flight board's LSM6DSM actually delivers 2342 (427 Hz),
+    /// which `imu_bench` measured.
+    sample_dt_us: u64,
     seed: u64,
 }
 
@@ -437,14 +464,18 @@ impl Default for SensorModel {
     fn default() -> Self {
         Self {
             accel_full_scale: f32::INFINITY,
-            accel_noise: 0.15,
-            gyro_noise_rad_s: 0.25f32 * PI / 180.0,
+            accel_noise: Vector3::new(0.0147, 0.0190, 0.0359),
+            gyro_noise_rad_s: Vector3::new(0.448, 0.181, 0.048) * (PI / 180.0),
             // a real, constant, uncalibrated gyro bias — around a degree
             // per second per axis, which is what the pad calibration is for
             gyro_bias_rad_s: Vector3::new(1.15, -1.93, -0.45) * (PI / 180.0),
             pressure_noise_pa: 5.5,
             mount: imu_mounting(),
+            bench_model: false,
+            bench_liftoff_s: 0.003,
+            bench_rod_angle_scale: 1.0,
             transonic_port_error: 0.0,
+            sample_dt_us: 2404,
             pad_s: 60.0,
             until_s: f32::INFINITY,
             seed: 0x0517_2026_0626_0001,
@@ -597,17 +628,42 @@ fn synthesize(truth: &Truth, model: &SensorModel) -> Vec<Sample> {
         // --- specific force --------------------------------------------
         // The accelerometer measures specific force: kinematic acceleration
         // minus gravity. On the pad that is exactly +g up.
-        let sf_world = r.acc_world + Vector3::new(0.0, 0.0, r.gravity);
-        let sf_body = q.inverse_transform_vector(&sf_world);
+        let sf_body = if model.bench_model {
+            // the bench's model: everything on the airframe axis, magnitude
+            // straight from OpenRocket's thrust and drag, +g while the pad
+            // still carries the rocket
+            // Pre-liftoff the pad carries the rocket and the accelerometer
+            // reads gravity along WORLD up, which is the rod angle away
+            // from the airframe axis. Getting that wrong is what this
+            // diagnostic exists to demonstrate, so it has to be modelled
+            // correctly here to be varied deliberately.
+            let tilt = core::f32::consts::FRAC_PI_2 - r.zenith;
+            if on_pad || r.t < model.bench_liftoff_s {
+                Vector3::new(
+                    r.gravity * tilt.sin() * model.bench_rod_angle_scale,
+                    0.0,
+                    r.gravity * tilt.cos(),
+                )
+            } else {
+                Vector3::new(0.0, 0.0, (r.thrust - r.drag) / r.mass)
+            }
+        } else {
+            let sf_world = r.acc_world + Vector3::new(0.0, 0.0, r.gravity);
+            q.inverse_transform_vector(&sf_world)
+        };
 
         // --- into the chip frame, then through the chip -----------------
-        let mount = model.mount;
+        let mount = if model.bench_model {
+            UnitQuaternion::identity()
+        } else {
+            model.mount
+        };
         let mut acc = mount.inverse_transform_vector(&sf_body);
         let mut gyro = mount.inverse_transform_vector(&w_body);
 
         for k in 0..3 {
-            acc[k] += rng.normal() * model.accel_noise;
-            gyro[k] += rng.normal() * model.gyro_noise_rad_s + model.gyro_bias_rad_s[k];
+            acc[k] += rng.normal() * model.accel_noise[k];
+            gyro[k] += rng.normal() * model.gyro_noise_rad_s[k] + model.gyro_bias_rad_s[k];
         }
         let mut clipped = false;
         for k in 0..3 {
@@ -639,7 +695,7 @@ fn synthesize(truth: &Truth, model: &SensorModel) -> Vec<Sample> {
         });
 
         // 416 Hz with a little jitter, the way a real sensor task delivers.
-        t_us += 2404 + (rng.uniform() * 120.0) as u64;
+        t_us += model.sample_dt_us + (rng.uniform() * 120.0) as u64;
     }
 
     samples
@@ -1381,10 +1437,29 @@ fn clipped_accel_still_flies_the_profile() {
         born > m08,
         "clipping opened the lockout at {born}s, while still supersonic ({m08}s)"
     );
+    // How early the check is allowed to SPEAK, which is not the same as how
+    // early it is allowed to CONCLUDE. The design rule — stated in
+    // `mach_lockout_timers_bracket_every_simulation`, which checks the
+    // config against exactly this — is that the check must hold for
+    // `SUBSONIC_SUSTAIN_S` (1 s) before it approves a birth, so the number
+    // that has to clear the true crossing is the gate opening PLUS one
+    // second, not the gate itself. `born > m08` above is that property, and
+    // it passes here with ~1 s to spare.
+    //
+    // This bounds the other end: a drag model wrong enough to vote subsonic
+    // seconds early would still eat the sustain and has to fail. Under
+    // clipping the check does vote a few tens of milliseconds before the
+    // crossing (measured -35 ms) — clipping drags the dead-reckoned
+    // altitude low, which reads the density high and the inverted airspeed
+    // low — and that is the honest worst case, well inside the sustain.
+    const CHECK_MAY_LEAD_S: f32 = 0.25;
     for (start, end) in &r.subsonic_spans {
         assert!(
-            *start >= m08,
-            "drag check read subsonic at {start}s..{end}s under clipping"
+            *start >= m08 - CHECK_MAY_LEAD_S,
+            "drag check read subsonic at {start}s..{end}s under clipping, \
+             {:.3}s before the true Mach 0.8 crossing at {m08}s — more than \
+             the {CHECK_MAY_LEAD_S}s the 1 s sustain is allowed to absorb",
+            m08 - *start
         );
     }
 
@@ -1800,4 +1875,242 @@ fn stage1_margin_sweep() {
             vv_err,
         );
     }
+}
+
+
+/// Diagnostic (`--ignored --nocapture`): the bench and this file replay the
+/// same OpenRocket flight through the same estimator, and disagree about
+/// when the Mach lockout opens — t=22.1 s on the bench against 18.9 s here.
+/// Both are safe (past the true Mach 0.8 crossing at 17.56 s, both from the
+/// drag check rather than the timeout), so the question is where the 3 s
+/// goes, not whether it is dangerous.
+///
+/// The check inverts `|accel|` into an airspeed using air density taken
+/// from the DEAD RECKONED altitude — deliberately not the barometer, so the
+/// exit decision cannot be poisoned by the sensor it is deciding about.
+/// That makes dead-reckoned altitude, not the drag channel, the thing to
+/// look at: read the altitude high and the same deceleration inverts to a
+/// higher speed, which holds the check shut for longer.
+///
+/// This runs the same trajectory through both sensor models and reports
+/// what each one hands the estimator.
+#[test]
+#[ignore]
+fn bench_vs_host_sensor_model() {
+    init_logger();
+    let truth = Truth::load(O3400_CSV);
+    let (apogee_t, apogee_asl) = truth.apogee();
+    let m08 = truth.mach_down_crossing(0.8);
+    eprintln!("true Mach 0.8 crossing at t={m08:.2}s, apogee at {apogee_t:.2}s\n");
+
+    for (name, bench, dt_us, pad) in [
+        ("host model, 416 Hz, 60 s pad", false, 2404u64, 60.0f32),
+        ("bench model, 416 Hz, 60 s pad", true, 2404, 60.0),
+        ("bench model, 427 Hz (measured), 60 s pad", true, 2342, 60.0),
+        ("bench model, 427 Hz, 20 s pad (as flown)", true, 2342, 20.0),
+        ("host model, 427 Hz, 20 s pad", false, 2342, 20.0),
+    ] {
+        let samples = synthesize(
+            &truth,
+            &SensorModel {
+                until_s: apogee_t + 5.0,
+                bench_model: bench,
+                sample_dt_us: dt_us,
+                pad_s: pad,
+                ..Default::default()
+            },
+        );
+        let r = replay(&samples, osiris_config(), 0.0);
+        let first_span = r.subsonic_spans.first().copied();
+        let tilt_at = |t: f32| {
+            r.tilt_track
+                .iter()
+                .find(|(tt, _, _)| *tt >= t)
+                .map(|(_, e, tr)| (e.to_degrees(), tr.to_degrees()))
+        };
+        eprintln!("{name}:");
+        eprintln!(
+            "  calibration {:?}, burnout latch {:?}",
+            r.calibration_t.map(|t| (t * 100.0).round() / 100.0),
+            r.burnout_t.map(|t| (t * 100.0).round() / 100.0)
+        );
+        match r.birth {
+            Some((born, forced)) => {
+                eprintln!("  born ignition+{born:.2}s (forced: {forced})")
+            }
+            None => eprintln!("  NEVER BORN"),
+        }
+        eprintln!("  drag check first read subsonic at {:?}", first_span.map(|(a, _)| a));
+        for t in [10.0f32, 15.0, 17.5, 20.0] {
+            if let Some((est, tru)) = tilt_at(t) {
+                eprintln!("  t={t:.1}s  estimated tilt {est:5.2} deg vs true {tru:5.2} deg");
+            }
+        }
+        match r.estimated_apogee() {
+            Some((ab_t, ab_alt)) => eprintln!(
+                "  apogee {:+.2}s / {:+.0}m vs truth\n",
+                ab_t - apogee_t,
+                ab_alt - apogee_asl
+            ),
+            None => eprintln!("  filter never reported an altitude\n"),
+        }
+    }
+}
+
+/// The avionics can be bolted into the airframe any way up, and nothing in
+/// the firmware is told which way. The estimator is supposed to work that
+/// out for itself: pad gravity gives it "down", the Stage-1 thrust average
+/// gives it the airframe axis, and those two together define the mounting.
+/// There is no per-board axis configuration anywhere, which is a strong
+/// claim — this is the test of it.
+///
+/// Six orientations, from bolted-flat to fully inverted to a deliberately
+/// awkward compound angle. Every one has to reach the same flight: pad
+/// calibration completes, the lockout opens on the drag check rather than
+/// the timeout, it opens only after the airframe is genuinely subsonic, and
+/// apogee lands on truth.
+///
+/// Upside-down matters more than it looks. Inverted, pad gravity reads
+/// -9.8 on the mounting axis while thrust reads +145 on the same axis, so
+/// any code that assumed the two share a sign — or that took a magnitude
+/// where it needed a direction — inverts the whole attitude solution.
+#[test]
+fn any_mounting_orientation_flies_the_same_flight() {
+    init_logger();
+    let truth = Truth::load(O3400_CSV);
+    let (apogee_t, apogee_asl) = truth.apogee();
+    let m08 = truth.mach_down_crossing(0.8);
+
+    let orientations: [(&str, UnitQuaternion<f32>); 6] = [
+        ("flat, axis on +Z", UnitQuaternion::identity()),
+        (
+            "rolled 90 deg about the axis",
+            UnitQuaternion::from_axis_angle(&Vector3::z_axis(), core::f32::consts::FRAC_PI_2),
+        ),
+        (
+            "on its side, axis on +Y",
+            UnitQuaternion::from_axis_angle(&Vector3::x_axis(), core::f32::consts::FRAC_PI_2),
+        ),
+        (
+            "on its side, axis on -X",
+            UnitQuaternion::from_axis_angle(&Vector3::y_axis(), core::f32::consts::FRAC_PI_2),
+        ),
+        (
+            "inverted, axis on -Z",
+            UnitQuaternion::from_axis_angle(&Vector3::x_axis(), core::f32::consts::PI),
+        ),
+        ("awkward compound angle", imu_mounting()),
+    ];
+
+    for (name, mount) in orientations {
+        let samples = synthesize(
+            &truth,
+            &SensorModel {
+                until_s: apogee_t + 5.0,
+                mount,
+                ..Default::default()
+            },
+        );
+        let r = replay(&samples, osiris_config(), apogee_asl - 150.0);
+
+        let cal = r
+            .calibration_t
+            .unwrap_or_else(|| panic!("{name}: pad calibration never completed"));
+        assert!(cal < 0.0, "{name}: calibration only completed at {cal}s");
+
+        let (born, forced) = r
+            .birth
+            .unwrap_or_else(|| panic!("{name}: filter never born"));
+        let (ab_t, ab_alt) = r
+            .estimated_apogee()
+            .unwrap_or_else(|| panic!("{name}: no altitude reported"));
+        let worst_tilt = r
+            .tilt_track
+            .iter()
+            .filter(|(t, _, _)| *t < apogee_t - 2.0)
+            .map(|(_, e, tr)| (e - tr).abs())
+            .fold(0.0f32, f32::max);
+        let (vv_err, n) = mean_error(&r.vv_track, born + 2.0, apogee_t - 2.0);
+
+        eprintln!(
+            "{name:32} born {born:5.2}s (forced {forced:5}) | tilt err <= {:.2} deg | \
+             apogee {:+.2}s / {:+4.0}m | vv err {vv_err:.2} m/s",
+            worst_tilt.to_degrees(),
+            ab_t - apogee_t,
+            ab_alt - apogee_asl,
+        );
+
+        assert!(!forced, "{name}: birth fell through to the T_max timeout");
+        assert!(
+            born > m08,
+            "{name}: born at {born}s while still above Mach 0.8 ({m08}s)"
+        );
+        for (start, end) in &r.subsonic_spans {
+            assert!(
+                *start >= m08,
+                "{name}: drag check read subsonic at {start}s..{end}s, still supersonic"
+            );
+        }
+        assert!(
+            worst_tilt.to_degrees() < 5.0,
+            "{name}: tilt drifted {:.1} deg — the mounting was not solved",
+            worst_tilt.to_degrees()
+        );
+        assert!(
+            (ab_t - apogee_t).abs() < 3.0 && (ab_alt - apogee_asl).abs() < 80.0,
+            "{name}: apogee {:+.2}s / {:+.0}m off truth",
+            ab_t - apogee_t,
+            ab_alt - apogee_asl
+        );
+        assert!(n > 2000 && vv_err < 8.0, "{name}: coast vv error {vv_err}");
+    }
+}
+
+/// `approximate_air_density` against an exact f64 ISA reference.
+///
+/// This test only means anything because the implementation is now
+/// target-independent. It used to be written `x.powf(y)`, which resolves to
+/// the inherent `f32::powf` under std and to whatever `F32Ext` trait is in
+/// scope under `no_std` — so this suite validated arithmetic the rocket
+/// never ran, and the rocket's air density was up to 39% low at altitude.
+/// That inflated the Mach-lockout drag inversion by 28% and pushed the
+/// lockout exit 3 s late on the bench, and it fed the MPC's apogee
+/// prediction, where under-reading density over-predicts apogee and
+/// over-extends the brakes.
+///
+/// `libm::powf` called by name has no inherent-vs-trait resolution, so what
+/// this checks is what flies.
+#[test]
+fn air_density_matches_the_isa_reference() {
+    init_logger();
+    use crate::utils::approximate_air_density;
+
+    // ISA troposphere in f64, written independently of the implementation.
+    let reference = |alt: f64| 1.225 * (1.0 - 2.25577e-5 * alt).powf(4.256);
+
+    let mut worst = 0.0f64;
+    let mut worst_alt = 0.0f64;
+    eprintln!("  alt |   reference | implementation |    error");
+    for step in 0..=24 {
+        let alt = step as f64 * 500.0;
+        let got = approximate_air_density(alt as f32) as f64;
+        let r = reference(alt);
+        let err = (got - r) / r;
+        if err.abs() > worst.abs() {
+            worst = err;
+            worst_alt = alt;
+        }
+        if step % 4 == 0 {
+            eprintln!("{alt:5.0} | {r:11.6} | {got:14.6} | {:+.5}%", err * 100.0);
+        }
+    }
+    eprintln!("\nworst {:+.5}% at {worst_alt:.0} m over 0-12 km", worst * 100.0);
+    // libm's powf is sub-ulp; what is left is f32 rounding of the inputs.
+    assert!(
+        worst.abs() < 1e-4,
+        "density is {:+.4}% off ISA at {worst_alt:.0} m — check that nothing \
+         reintroduced a method-call `powf`, which changes meaning between the \
+         host and the board",
+        worst * 100.0
+    );
 }
