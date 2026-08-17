@@ -1,5 +1,9 @@
 #![macro_use]
 #![allow(unused_macros)]
+// This file is the logging shim, copied between crates. Which items it actually
+// uses depends on the `log` / `defmt` feature combination the crate is built
+// with, so unused ones here are expected rather than dead.
+#![allow(dead_code)]
 
 #[cfg(feature = "defmt")]
 #[derive(defmt::Format, Debug)]

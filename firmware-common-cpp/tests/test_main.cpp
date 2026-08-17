@@ -202,6 +202,7 @@ TEST(AmpStatusTest, ReferenceData) {
             if (s == "Disabled") return firmware_common::can_bus::PowerOutputStatus::Disabled;
             if (s == "PowerGood") return firmware_common::can_bus::PowerOutputStatus::PowerGood;
             if (s == "PowerBad") return firmware_common::can_bus::PowerOutputStatus::PowerBad;
+            if (s == "Unknown") return firmware_common::can_bus::PowerOutputStatus::Unknown;
             throw std::runtime_error("Unknown status enum: " + s);
         };
 
@@ -226,6 +227,25 @@ TEST(AmpStatusTest, ReferenceData) {
     }
 }
 
+// 0b11 is on the wire whether or not anything means to put it there — the field
+// is 2 bits and only three codes used to be defined. It now names a variant of
+// its own, and it is emphatically not Disabled, which is AMP reporting an
+// output as commanded off.
+TEST(AmpStatusTest, AllOnesOutputCodeDecodesAsUnknown) {
+    using firmware_common::can_bus::AmpOutputStatus;
+    using firmware_common::can_bus::PowerOutputStatus;
+
+    auto unpacked = AmpOutputStatus::from_byte(0b0'11'00000);
+    EXPECT_EQ(unpacked.status, PowerOutputStatus::Unknown);
+    EXPECT_FALSE(unpacked.overwrote);
+    EXPECT_NE(unpacked.status, PowerOutputStatus::Disabled);
+
+    // And it survives a round trip through the byte it came from.
+    AmpOutputStatus status{true, PowerOutputStatus::Unknown};
+    EXPECT_EQ(status.to_byte(), 0b1'11'00000);
+    EXPECT_EQ(AmpOutputStatus::from_byte(status.to_byte()).status, PowerOutputStatus::Unknown);
+}
+
 TEST(BaroMeasurementTest, ReferenceData) {
     json data = read_json(resolve_path("baro_measurement.json"));
 
@@ -235,7 +255,7 @@ TEST(BaroMeasurementTest, ReferenceData) {
         uint32_t expected_id = item["frame_id"];
         
         uint32_t expected_pressure_raw = message_content["pressure_raw"];
-        uint16_t expected_temp_raw = message_content["temperature_raw"];
+        int16_t expected_temp_raw = message_content["temperature_raw"];
         uint64_t expected_timestamp = message_content["timestamp_us"];
 
         auto msg = firmware_common::can_bus::BaroMeasurementMessage::deserialize(serialized_data.data());
@@ -250,6 +270,32 @@ TEST(BaroMeasurementTest, ReferenceData) {
         
         check_encoder(msg, item, "BaroMeasurement");
     }
+}
+
+// The whole point of the signed raw field: sub-zero readings used to be
+// unrepresentable and came back as a balmy 0.0C.
+TEST(BaroMeasurementTest, SubZeroTemperaturesSurvive) {
+    using firmware_common::can_bus::BaroMeasurementMessage;
+
+    EXPECT_FLOAT_EQ(BaroMeasurementMessage::new_msg(0, 0.0f, -15.5f).temperature(), -15.5f);
+    EXPECT_FLOAT_EQ(BaroMeasurementMessage::new_msg(0, 0.0f, -40.0f).temperature(), -40.0f);
+    // And a real zero is still a zero, not an underflowed negative.
+    EXPECT_FLOAT_EQ(BaroMeasurementMessage::new_msg(0, 0.0f, 0.0f).temperature(), 0.0f);
+
+    // Negative raw values go out and come back as themselves.
+    auto msg = BaroMeasurementMessage::new_msg(1, 101325.0f, -15.5f);
+    EXPECT_EQ(msg.temperature_raw, -155);
+    uint8_t buffer[BaroMeasurementMessage::SIZE_BYTES];
+    msg.serialize(buffer);
+    EXPECT_EQ(buffer[4], 0xFF);
+    EXPECT_EQ(buffer[5], 0x65);
+    EXPECT_EQ(BaroMeasurementMessage::deserialize(buffer).temperature_raw, -155);
+
+    // Rust's `as` saturates and maps NaN to 0; C++ would be undefined
+    // behaviour without the clamp, so the two ends have to agree here.
+    EXPECT_EQ(BaroMeasurementMessage::new_msg(0, 0.0f, 1.0e9f).temperature_raw, 32767);
+    EXPECT_EQ(BaroMeasurementMessage::new_msg(0, 0.0f, -1.0e9f).temperature_raw, -32768);
+    EXPECT_EQ(BaroMeasurementMessage::new_msg(0, 0.0f, NAN).temperature_raw, 0);
 }
 
 TEST(BrightnessMeasurementTest, ReferenceData) {
@@ -398,6 +444,63 @@ TEST(CustomPayloadStatusTest, UnavailableReadingsAreNulloptAndZerosAreNot) {
     EXPECT_EQ(round_tripped.epm_sys_3v3_ma_reading().value(), 0);
 }
 
+// 65535 is a legal sem_actuator_*_steps value — the field is documented as the
+// full uint16_t step range — and it is also the code for "no reading". The
+// constructor is where that collision has to be broken, because on the wire the
+// two are indistinguishable.
+TEST(CustomPayloadStatusTest, FullScaleActuatorDoesNotReportItselfAsUnreadable) {
+    using firmware_common::can_bus::CustomPayloadStatusMessage;
+    constexpr uint16_t MAX_REPORTED = CustomPayloadStatusMessage::MAX_REPORTED_PAYLOAD_READING;
+
+    constexpr uint16_t FULL_SCALE = 0xFFFF;
+    auto msg = CustomPayloadStatusMessage::new_msg(
+        FULL_SCALE,
+        {FULL_SCALE, FULL_SCALE, FULL_SCALE, FULL_SCALE, FULL_SCALE, FULL_SCALE},
+        {FULL_SCALE, FULL_SCALE, FULL_SCALE});
+
+    EXPECT_EQ(msg.epm_batt_mv_reading().value(), MAX_REPORTED);
+    for (const auto& rail : msg.rail_ma()) EXPECT_EQ(rail.value(), MAX_REPORTED);
+    for (const auto& step : msg.actuator_steps()) {
+        ASSERT_TRUE(step.has_value());
+        EXPECT_EQ(step.value(), MAX_REPORTED);
+    }
+}
+
+// The constructor has to carry absence and a genuine zero through unchanged;
+// everything below 65535 is a value.
+TEST(CustomPayloadStatusTest, ConstructorRoundTripsAbsenceAndZero) {
+    using firmware_common::can_bus::CustomPayloadStatusMessage;
+
+    auto msg = CustomPayloadStatusMessage::new_msg(
+        uint16_t{0},
+        {uint16_t{0}, std::nullopt, uint16_t{120}, uint16_t{0}, std::nullopt, uint16_t{2400}},
+        {uint16_t{0}, std::nullopt, uint16_t{34567}});
+
+    EXPECT_EQ(msg.epm_batt_mv_reading().value(), 0);
+
+    auto rails = msg.rail_ma();
+    EXPECT_EQ(rails[0].value(), 0);
+    EXPECT_FALSE(rails[1].has_value());
+    EXPECT_EQ(rails[2].value(), 120);
+    EXPECT_EQ(rails[3].value(), 0);
+    EXPECT_FALSE(rails[4].has_value());
+    EXPECT_EQ(rails[5].value(), 2400);
+
+    auto steps = msg.actuator_steps();
+    EXPECT_EQ(steps[0].value(), 0);
+    EXPECT_FALSE(steps[1].has_value());
+    EXPECT_EQ(steps[2].value(), 34567);
+
+    // new_unavailable() is the all-std::nullopt case of the same constructor.
+    auto unavailable = CustomPayloadStatusMessage::new_unavailable();
+    EXPECT_EQ(unavailable.epm_batt_mv, CustomPayloadStatusMessage::PAYLOAD_READING_UNAVAILABLE);
+    EXPECT_EQ(CustomPayloadStatusMessage::encode(std::nullopt),
+              CustomPayloadStatusMessage::PAYLOAD_READING_UNAVAILABLE);
+    EXPECT_EQ(CustomPayloadStatusMessage::encode(uint16_t{0}), 0);
+    EXPECT_EQ(CustomPayloadStatusMessage::encode(uint16_t{0xFFFE}),
+              CustomPayloadStatusMessage::MAX_REPORTED_PAYLOAD_READING);
+}
+
 // Matches Rust's data(): the bytes past data_len are padding.
 TEST(DataTransferTest, DataSizeClampsToCapacity) {
     using firmware_common::can_bus::DataTransferMessage;
@@ -528,7 +631,7 @@ TEST(IcarusStatusTest, ReferenceData) {
         uint32_t expected_id = item["frame_id"];
         
         uint16_t expected_ext = message_content["actual_extension_percentage"];
-        uint16_t expected_temp = message_content["servo_temperature_raw"];
+        int16_t expected_temp = message_content["servo_temperature_raw"];
 
         auto msg = firmware_common::can_bus::IcarusStatusMessage::deserialize(serialized_data.data());
         EXPECT_EQ(msg.actual_extension_percentage, expected_ext);
@@ -541,6 +644,28 @@ TEST(IcarusStatusTest, ReferenceData) {
         
         check_encoder(msg, item, "IcarusStatus");
     }
+}
+
+// Sub-zero servo temperatures used to be unrepresentable. A servo sitting on a
+// cold pad is precisely the reading this field exists to show.
+TEST(IcarusStatusTest, SubZeroTemperaturesSurvive) {
+    using firmware_common::can_bus::IcarusStatusMessage;
+
+    EXPECT_FLOAT_EQ(IcarusStatusMessage::new_msg(0.0f, -15.5f).servo_temperature(), -15.5f);
+    EXPECT_FLOAT_EQ(IcarusStatusMessage::new_msg(0.0f, -40.0f).servo_temperature(), -40.0f);
+    EXPECT_FLOAT_EQ(IcarusStatusMessage::new_msg(0.0f, 0.0f).servo_temperature(), 0.0f);
+
+    auto msg = IcarusStatusMessage::new_msg(0.0f, -15.5f);
+    EXPECT_EQ(msg.servo_temperature_raw, -155);
+    uint8_t buffer[IcarusStatusMessage::SIZE_BYTES];
+    msg.serialize(buffer);
+    EXPECT_EQ(buffer[2], 0xFF);
+    EXPECT_EQ(buffer[3], 0x65);
+    EXPECT_EQ(IcarusStatusMessage::deserialize(buffer).servo_temperature_raw, -155);
+
+    EXPECT_EQ(IcarusStatusMessage::new_msg(0.0f, 1.0e9f).servo_temperature_raw, 32767);
+    EXPECT_EQ(IcarusStatusMessage::new_msg(0.0f, -1.0e9f).servo_temperature_raw, -32768);
+    EXPECT_EQ(IcarusStatusMessage::new_msg(0.0f, NAN).servo_temperature_raw, 0);
 }
 
 TEST(ImuMeasurementTest, ReferenceData) {

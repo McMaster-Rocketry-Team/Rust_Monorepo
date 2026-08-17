@@ -1,4 +1,5 @@
 use air_brakes_controller_core::{AirBrakesMPC, RocketParameters};
+use nalgebra::Vector2;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn get_air_brakes_extension_percentage(
@@ -20,7 +21,17 @@ pub extern "C" fn get_air_brakes_extension_percentage(
         reference_area,
     };
 
-    let mut airbrakes_mpc = AirBrakesMPC::new(rocket_parameters, target_apogee_asl);
+    let airbrakes_mpc = AirBrakesMPC::new(rocket_parameters, target_apogee_asl);
 
-    airbrakes_mpc.update(current_altitude_asl, current_vertical_velocity)
+    // The core solver takes (horizontal, vertical) since it models drag on the
+    // full velocity vector. This entry point only receives the vertical
+    // component, so horizontal is 0.0 — which is what the solver saw back when
+    // `update` took a scalar, so behaviour through this export is unchanged.
+    // Widening the export to carry horizontal velocity would be an ABI change.
+    airbrakes_mpc
+        .update(
+            current_altitude_asl,
+            Vector2::new(0.0, current_vertical_velocity),
+        )
+        .extension_percentage
 }

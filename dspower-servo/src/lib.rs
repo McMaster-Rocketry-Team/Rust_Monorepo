@@ -303,6 +303,11 @@ where
         Ok(measurements_raw.into())
     }
 
+    /// Exercised only by `hardware_tests::test_read_register`, so the lib build
+    /// sees it as dead. The driver's own paths read everything they need
+    /// through `read_measurements`; this stays because it mirrors a documented
+    /// command in the servo's protocol and the test pins its framing.
+    #[allow(dead_code)]
     async fn read_register(
         &mut self,
         address: u8,

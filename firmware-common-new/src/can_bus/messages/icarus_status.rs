@@ -10,8 +10,14 @@ use super::{CanBusMessage, CanBusMessageEnum};
 pub struct IcarusStatusMessage {
     /// Unit: 0.1%, e.g. 10 = 1%
     actual_extension_percentage: u16,
-    /// Unit: 0.1C, e.g. 10 = 1C
-    servo_temperature_raw: u16,
+    /// Unit: 0.1C, e.g. 10 = 1C, -155 = -15.5C
+    ///
+    /// Signed, for the same reason as `BaroMeasurementMessage`: float-to-int
+    /// `as` saturates, so an unsigned raw field reported every sub-zero servo
+    /// as exactly 0.0C. A servo sitting on a cold pad is precisely the reading
+    /// this field exists to show. `get_builtin_type_bit_width` maps `u16` and
+    /// `i16` alike to 16, so the packed message is still 4 bytes.
+    servo_temperature_raw: i16,
 }
 
 impl IcarusStatusMessage {
@@ -19,7 +25,7 @@ impl IcarusStatusMessage {
     pub fn new(actual_extension_percentage: f32, servo_temperature: f32) -> Self {
         Self {
             actual_extension_percentage: (actual_extension_percentage * 1000.0) as u16,
-            servo_temperature_raw: (servo_temperature * 10.0) as u16,
+            servo_temperature_raw: (servo_temperature * 10.0) as i16,
         }
     }
 
@@ -52,8 +58,21 @@ mod test {
     fn create_test_messages() -> Vec<CanBusMessageEnum> {
         vec![
             IcarusStatusMessage::new(0.0, 0.0).into(),
-            IcarusStatusMessage::new(65.535, 6553.5).into(),
+            IcarusStatusMessage::new(65.535, 3276.7).into(),
+            // A servo on a cold pad. The raw field used to be unsigned, which
+            // reported this as 0.0C.
+            IcarusStatusMessage::new(0.0, -15.5).into(),
         ]
+    }
+
+    /// Sub-zero servo temperatures used to saturate to 0 on the way in.
+    #[test]
+    fn sub_zero_temperatures_survive() {
+        init_logger();
+
+        assert_eq!(IcarusStatusMessage::new(0.0, -15.5).servo_temperature(), -15.5);
+        assert_eq!(IcarusStatusMessage::new(0.0, -40.0).servo_temperature(), -40.0);
+        assert_eq!(IcarusStatusMessage::new(0.0, 0.0).servo_temperature(), 0.0);
     }
 
     #[test]

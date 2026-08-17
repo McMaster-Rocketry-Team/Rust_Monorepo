@@ -23,7 +23,7 @@ use firmware_common_new::flight_data_record::{
 use firmware_common_new::can_bus::messages::amp_status::PowerOutputStatus;
 use firmware_common_new::flight_storage::{
     BLOCK_SIZE, HEADER_LEN, RESPONSE_MAGIC, STORAGE_VERSION, decode_response_header,
-    parse_log_records, verify_data_block,
+    parse_log_records,
 };
 use firmware_common_new::vlp::usb::CliRequest;
 use packed_struct::PrimitiveEnum as _;
@@ -218,29 +218,37 @@ fn parse_records(data: &[u8]) -> Result<(u32, Vec<FlightDataRecord>)> {
         );
     }
     let blocks = &data[HEADER_LEN..];
-
-    let mut crc_errors = 0u32;
-    for i in 0..block_count as usize {
-        let start = i * BLOCK_SIZE;
-        let block: &[u8; BLOCK_SIZE] = blocks
-            .get(start..start + BLOCK_SIZE)
-            .ok_or_else(|| anyhow!("response truncated at block {}", i))?
-            .try_into()
-            .unwrap();
-        if !verify_data_block(block) {
-            crc_errors += 1;
-        }
-    }
-    if crc_errors > 0 {
-        eprintln!(
-            "warning: {} block(s) failed their CRC check — data may be corrupt",
-            crc_errors
+    let expected_bytes = block_count as usize * BLOCK_SIZE;
+    if blocks.len() < expected_bytes {
+        bail!(
+            "response truncated: {} of {} block bytes arrived",
+            blocks.len(),
+            expected_bytes
         );
     }
 
-    let log = parse_log_records(log_record_count, blocks, block_count)
+    // A CRC failure no longer aborts the export. One bad block out of thousands
+    // must not make a whole flight unrecoverable, so the parser keeps going and
+    // tags every record it read out of a bad block; those rows carry
+    // `source_block_crc_failed` in the CSV. The warning stays, because the
+    // per-row column is only useful to someone who knows to look for it.
+    let parsed = parse_log_records(log_record_count, blocks, block_count)
         .ok_or_else(|| anyhow!("failed to decode the log stream — data may be corrupt"))?;
-    let merged = merge_log_records(&log);
+    if parsed.crc_failed_blocks > 0 {
+        eprintln!(
+            "warning: {} block(s) failed their CRC check — their rows are exported with \
+             source_block_crc_failed=true and every value on them may be wrong",
+            parsed.crc_failed_blocks
+        );
+    }
+    if parsed.invalid_records > 0 {
+        eprintln!(
+            "warning: {} record(s) in those blocks held values their own types cannot \
+             represent and were skipped entirely",
+            parsed.invalid_records
+        );
+    }
+    let merged = merge_log_records(&parsed.records);
 
     Ok((log_record_count, merged))
 }
@@ -266,6 +274,11 @@ fn bit(mask: Option<u8>, flag: u8) -> String {
 /// `out_status` byte (out1 in the LSBs). `None` is an AMP that has never sent
 /// an `AmpStatusMessage`, which blanks all three output columns rather than
 /// reporting them as `Disabled`.
+///
+/// Every discriminant is printed by name, never folded into `Disabled`. That
+/// includes `Unknown` — "the AMP never told us what this output is doing" — and
+/// the `Invalid` fallback for a code the enum does not define, both of which
+/// mean something entirely different from an output that was commanded off.
 fn amp_out(status: Option<u8>, out_index: u8) -> String {
     let Some(status) = status else {
         return String::new();
@@ -307,9 +320,23 @@ fn write_csv(path: &str, records: &[FlightDataRecord]) -> Result<()> {
     // when it is, which is why there are no longer any `*_valid` columns: a
     // reader learns the same thing from the data column itself, and cannot end
     // up pairing a validity bit with the wrong row.
+    //
+    // `source_block_crc_failed` sits second because it qualifies every other
+    // cell on the row: the record came out of a 512-byte block whose CRC32 did
+    // not match, so any value here may be silently wrong. Such rows are still
+    // exported — a bad block must not cost a whole flight — but they are not
+    // evidence of anything on their own.
+    //
+    // `slow_timestamp_us` is the clock of the snapshot the slow columns were
+    // copied from. `timestamp_us - slow_timestamp_us` bounds how old the
+    // snapshot is (≤ ~100 ms). It does NOT bound the age of the readings inside
+    // it: `air_brakes_actual_extension` and `air_brakes_servo_temp` arrive from
+    // Icarus at 10 Hz, so they can be a further ~100 ms older still.
     w.write_record([
         "record_count",
+        "source_block_crc_failed",
         "timestamp_us",
+        "slow_timestamp_us",
         "unix_time_us",
         "acc_x",
         "acc_y",
@@ -402,7 +429,9 @@ fn write_csv(path: &str, records: &[FlightDataRecord]) -> Result<()> {
 
         let mut row = vec![
             r.record_count.to_string(),
+            r.source_block_crc_failed.to_string(),
             r.timestamp_us.to_string(),
+            cell(r.slow_timestamp_us),
             cell(r.unix_time_us),
             cell(imu.map(|imu| imu.acc[0])),
             cell(imu.map(|imu| imu.acc[1])),
@@ -538,7 +567,7 @@ mod tests {
     use super::*;
     use firmware_common_new::can_bus::messages::vl_status::FlightStage;
     use firmware_common_new::flight_data_record::{
-        DeploymentEstimatorRecord, FlightDataFastRecord, FlightDataRecord, LogRecord,
+        DeploymentEstimatorRecord, FlightDataFastRecord, LogRecord, ParsedLogRecord,
         merge_log_records,
     };
 
@@ -567,9 +596,20 @@ mod tests {
             flight_stage: FlightStage::Ascent,
             pyro_flags: None,
         };
-        // No slow record ahead of it, so every slow column is absent too.
-        let records = merge_log_records(&[LogRecord::Fast(lockout)]);
-        assert_eq!(records.len(), 1);
+        // No slow record ahead of it, so every slow column is absent too. The
+        // second row is the same sample read out of a block that failed its
+        // CRC, which is exported all the same — but marked.
+        let records = merge_log_records(&[
+            ParsedLogRecord::good(LogRecord::Fast(lockout.clone())),
+            ParsedLogRecord {
+                record: LogRecord::Fast(FlightDataFastRecord {
+                    sequence: 1,
+                    ..lockout
+                }),
+                block_crc_ok: false,
+            },
+        ]);
+        assert_eq!(records.len(), 2);
 
         let path = std::env::temp_dir().join("rocket_cli_csv_width_test.csv");
         let path = path.to_str().unwrap();
@@ -580,6 +620,7 @@ mod tests {
         let mut lines = text.lines();
         let header: Vec<&str> = lines.next().expect("header").split(',').collect();
         let row: Vec<&str> = lines.next().expect("row").split(',').collect();
+        let bad_row: Vec<&str> = lines.next().expect("second row").split(',').collect();
         assert_eq!(
             header.len(),
             row.len(),
@@ -587,14 +628,15 @@ mod tests {
             header.len(),
             row.len()
         );
+        assert_eq!(header.len(), bad_row.len());
 
-        let col = |name: &str| {
-            let i = header
+        let col_index = |name: &str| {
+            header
                 .iter()
                 .position(|h| *h == name)
-                .unwrap_or_else(|| panic!("no {} column", name));
-            row[i]
+                .unwrap_or_else(|| panic!("no {} column", name))
         };
+        let col = |name: &str| row[col_index(name)];
         // The whole point: frozen filter reads empty, not zero.
         assert_eq!(col("deployment_kf_altitude_asl"), "");
         assert_eq!(col("deployment_kf_vertical_velocity"), "");
@@ -604,5 +646,14 @@ mod tests {
         assert_eq!(col("pressure"), "101325");
         // The deleted `valid` bitmask must not have left a column behind.
         assert!(!header.contains(&"imu_valid"));
+
+        // No slow snapshot precedes either row, so the snapshot clock is empty
+        // rather than 0 — a 0 here would read as "sampled at T=0".
+        assert_eq!(col("slow_timestamp_us"), "");
+        // A row from a good block says so, and a row from a CRC-failed block
+        // says so too. Both are present: the export does not drop the bad one.
+        assert_eq!(col("source_block_crc_failed"), "false");
+        assert_eq!(bad_row[col_index("source_block_crc_failed")], "true");
+        assert_eq!(bad_row[col_index("pressure")], "101325");
     }
 }

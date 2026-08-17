@@ -64,11 +64,61 @@ impl CanMessageSaver {
         })
     }
 
-    pub async fn append_message(&mut self, message: &DecodedMessage) -> Result<()> {
+    /// Seconds since the monitor started, in the fixed-width form every line of
+    /// the file begins with.
+    fn relative_time(&self) -> String {
         let elapsed = self.start_time.elapsed();
-        let seconds = elapsed.as_secs();
-        let nanos = elapsed.subsec_nanos();
-        let relative_time = format!("{:05}.{:06}", seconds, nanos / 1000);
+        format!("{:05}.{:06}", elapsed.as_secs(), elapsed.subsec_nanos() / 1000)
+    }
+
+    async fn write_imu_csv_header(&mut self) -> Result<()> {
+        if !self.imu_csv_header_written {
+            self.imu_csv_file
+                .write_all(
+                    "relative_time_s,timestamp_us,acc_x_mps2,acc_y_mps2,acc_z_mps2,gyro_x_degs,gyro_y_degs,gyro_z_degs\n"
+                        .as_bytes(),
+                )
+                .await?;
+            self.imu_csv_header_written = true;
+        }
+        Ok(())
+    }
+
+    /// Record a gap in both outputs. The broadcast channel dropped `dropped`
+    /// messages before this one because this task fell behind the CAN stream.
+    ///
+    /// Both files get the marker: the `.message.log` as a JSON object with a
+    /// key no `DecodedMessage` carries, so a reader parsing the file line by
+    /// line sees it rather than choking on it, and the `.imu.csv` as a `#`
+    /// comment, because a hole in an IMU trace with nothing marking it reads as
+    /// a stretch of flight where the rocket simply did not accelerate.
+    pub async fn append_dropped_marker(&mut self, dropped: u64) -> Result<()> {
+        let relative_time = self.relative_time();
+        self.file
+            .write_all(
+                format!(
+                    "{} {{\"rocket_cli_dropped_messages\":{}}}\n",
+                    relative_time, dropped
+                )
+                .as_bytes(),
+            )
+            .await?;
+
+        self.write_imu_csv_header().await?;
+        self.imu_csv_file
+            .write_all(
+                format!(
+                    "# {} CAN message(s) dropped at {}s: rocket-cli fell behind the bus\n",
+                    dropped, relative_time
+                )
+                .as_bytes(),
+            )
+            .await?;
+        Ok(())
+    }
+
+    pub async fn append_message(&mut self, message: &DecodedMessage) -> Result<()> {
+        let relative_time = self.relative_time();
 
         self.file
             .write_all(
@@ -83,16 +133,7 @@ impl CanMessageSaver {
 
         // Handle IMU measurements and save to CSV
         if let CanBusMessageEnum::IMUMeasurement(imu_msg) = &message.message {
-            // Write CSV header if not already written
-            if !self.imu_csv_header_written {
-                self.imu_csv_file
-                    .write_all(
-                        "relative_time_s,timestamp_us,acc_x_mps2,acc_y_mps2,acc_z_mps2,gyro_x_degs,gyro_y_degs,gyro_z_degs\n"
-                            .as_bytes(),
-                    )
-                    .await?;
-                self.imu_csv_header_written = true;
-            }
+            self.write_imu_csv_header().await?;
 
             // Extract IMU data
             let acc = imu_msg.acc();

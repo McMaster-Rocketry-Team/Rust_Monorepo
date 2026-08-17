@@ -6,14 +6,20 @@ use serde::{Deserialize, Serialize};
 
 use crate::fixed_point_factory;
 
-use super::{TEMPERATURE_FAC_BITS, TemperatureFac, TemperatureFacBase, VLPDownlinkPacket};
+use super::{
+    BATTERY_V_FAC_BITS, BatteryVFac, BatteryVFacBase, TEMPERATURE_FAC_BITS, TemperatureFac,
+    TemperatureFacBase, VLPDownlinkPacket, decode_shared_battery_v, encode_shared_battery_v,
+    telemetry::MAX_REPORTED_FIX_SATELLITES,
+};
 
 // 23 bits for latitude, 24 bits for longitude
 // resolution of 2.4m at equator (same facs as `TelemetryPacket`)
 fixed_point_factory!(LatFac, f64, -90.0, 90.0, 0.00002146);
 fixed_point_factory!(LonFac, f64, -180.0, 180.0, 0.00002146);
 
-fixed_point_factory!(BatteryVFac, f32, 2.5, 8.5, 0.01);
+// `BatteryVFac` and the `shared_battery_v` sentinel live in `super`, shared with
+// the other two downlink packets — a battery reading must not change meaning
+// when the rocket drops into low power mode.
 
 // 87 bits = 11 bytes, 1 spare bit.
 #[derive(PackedStruct, Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -38,6 +44,15 @@ pub struct LowPowerTelemetryPacket {
     vl_battery_v: Integer<BatteryVFacBase, packed_bits::Bits<BATTERY_V_FAC_BITS>>,
 
     pub amp_online: bool,
+    /// The AMP-relayed shared battery bus. Absence is the all-ones code (see
+    /// [`super::SHARED_BATTERY_V_UNAVAILABLE_CODE`]), not a validity bit — this packet
+    /// has one spare bit, but the identical field on `LandedTelemetryPacket`
+    /// has none, and the encoding is shared deliberately.
+    ///
+    /// `amp_online` is not a substitute: the CAN heartbeat starts at boot,
+    /// before the first status message, and in that window this field would
+    /// otherwise hold its 0.0 initial value — which clamps to 2.5V, the reading
+    /// that means the pack is flat.
     #[packed_field(element_size_bits = "10")]
     shared_battery_v: Integer<BatteryVFacBase, packed_bits::Bits<BATTERY_V_FAC_BITS>>,
 
@@ -53,12 +68,21 @@ impl LowPowerTelemetryPacket {
         lat_lon: Option<(f64, f64)>,
         vl_battery_v: f32,
         amp_online: bool,
-        shared_battery_v: f32,
+        // `None` when AMP has not reported a shared battery voltage.
+        shared_battery_v: Option<f32>,
         air_temperature: f32,
     ) -> Self {
         Self {
             nonce: nonce.into(),
-            num_of_fix_satellites,
+            // Saturate rather than let packed_struct truncate: the field is
+            // 5 bits, so 32 satellites would wrap to 0 -- the reading that
+            // means "no fix, do not fly". `TelemetryPacket` has always clamped
+            // here; this packet is 5 bits wide for the same reason and so
+            // clamps against the same constant. Today's receiver (u-blox
+            // CAM-M8Q, NMEA GGA numSV) tops out around 12, so this is
+            // unreachable -- which is exactly why it must not be left to the
+            // next receiver to rediscover.
+            num_of_fix_satellites: num_of_fix_satellites.min(MAX_REPORTED_FIX_SATELLITES),
             // `gps_fixed` is the validity bit for the position, so it cannot be
             // allowed to claim a fix the packet has no coordinates for. Every
             // caller already passes `gps_data.lat_lon.is_some()`; the `&&`
@@ -71,11 +95,13 @@ impl LowPowerTelemetryPacket {
             lon: LonFac::to_fixed_point_capped(lat_lon.unwrap_or((0.0, 0.0)).1),
             vl_battery_v: BatteryVFac::to_fixed_point_capped(vl_battery_v),
             amp_online,
-            shared_battery_v: BatteryVFac::to_fixed_point_capped(shared_battery_v),
+            shared_battery_v: encode_shared_battery_v(shared_battery_v),
             air_temperature: TemperatureFac::to_fixed_point_capped(air_temperature),
         }
     }
 
+
+    /// Saturating: [`MAX_REPORTED_FIX_SATELLITES`] means "at least that many".
     pub fn num_of_fix_satellites(&self) -> u8 {
         self.num_of_fix_satellites
     }
@@ -103,8 +129,11 @@ impl LowPowerTelemetryPacket {
         BatteryVFac::to_float(self.vl_battery_v)
     }
 
-    pub fn shared_battery_v(&self) -> f32 {
-        BatteryVFac::to_float(self.shared_battery_v)
+    /// The AMP-relayed shared battery bus voltage. `None` when AMP has not
+    /// reported one. A genuinely flat pack decodes as `Some(2.5)`, the bottom
+    /// of the range, which is why absence is the top code and not the bottom.
+    pub fn shared_battery_v(&self) -> Option<f32> {
+        decode_shared_battery_v(self.shared_battery_v)
     }
 
     pub fn air_temperature(&self) -> f32 {
@@ -149,7 +178,11 @@ pub struct LowPowerTelemetryPacketBuilderState {
     pub lat_lon: Option<(f64, f64)>,
     pub vl_battery_v: f32,
     pub amp_online: bool,
-    pub shared_battery_v: f32,
+    /// The shared battery bus, from AMP's status message. `None` until one
+    /// arrives — which is later than `amp_online` goes true. Pass `None` rather
+    /// than 0.0: 0.0 clamps to the bottom of the range and downlinks as a dead
+    /// pack.
+    pub shared_battery_v: Option<f32>,
     pub air_temperature: f32,
 }
 
@@ -167,7 +200,7 @@ impl<M: RawMutex> LowPowerTelemetryPacketBuilder<M> {
                 lat_lon: None,
                 vl_battery_v: 0.0,
                 amp_online: false,
-                shared_battery_v: 0.0,
+                shared_battery_v: None,
                 air_temperature: 0.0,
             })),
         }
@@ -212,7 +245,7 @@ mod tests {
 
     #[test]
     fn test_serialize_deserialize() {
-        let packet = LowPowerTelemetryPacket::new(12, 5, true, Some((45.5, -73.6)), 8.1, true, 8.2, 27.0);
+        let packet = LowPowerTelemetryPacket::new(12, 5, true, Some((45.5, -73.6)), 8.1, true, Some(8.2), 27.0);
         let packet: VLPDownlinkPacket = packet.into();
 
         let mut buffer = [0u8; 64];
@@ -236,14 +269,47 @@ mod tests {
     /// rocket at Null Island.
     #[test]
     fn no_fix_reports_no_position() {
-        let packet = LowPowerTelemetryPacket::new(12, 0, false, None, 8.1, true, 8.2, 27.0);
+        let packet = LowPowerTelemetryPacket::new(12, 0, false, None, 8.1, true, Some(8.2), 27.0);
         assert!(!packet.gps_fixed());
         assert_eq!(packet.lat_lon(), None);
 
         // And a caller that claims a fix without supplying one does not get to
         // downlink (0, 0) as a position.
-        let packet = LowPowerTelemetryPacket::new(12, 4, true, None, 8.1, true, 8.2, 27.0);
+        let packet = LowPowerTelemetryPacket::new(12, 4, true, None, 8.1, true, Some(8.2), 27.0);
         assert!(!packet.gps_fixed());
         assert_eq!(packet.lat_lon(), None);
+    }
+
+    /// AMP relays this one, so it can be missing, and the packet has to say so
+    /// rather than clamping the 0.0 filler to 2.5V — the bottom of the range,
+    /// which reads as a flat pack rather than as a silent AMP.
+    #[test]
+    fn absent_shared_battery_survives_the_wire_as_none() {
+        let packet =
+            LowPowerTelemetryPacket::new(12, 5, true, Some((45.5, -73.6)), 8.1, false, None, 27.0);
+        let packet: VLPDownlinkPacket = packet.into();
+
+        let mut buffer = [0u8; 64];
+        let len = packet.serialize(&mut buffer);
+        let VLPDownlinkPacket::LowPowerTelemetry(p) =
+            VLPDownlinkPacket::deserialize(&buffer[..len]).unwrap()
+        else {
+            unreachable!()
+        };
+
+        assert_eq!(p.shared_battery_v(), None);
+        // The board's own battery is measured locally, so it is never absent.
+        assert_relative_eq!(p.vl_battery_v(), 8.1, epsilon = 0.01);
+
+        // A present reading comes back present, and a collapsed pack comes back
+        // as a reading rather than as absence.
+        let present =
+            LowPowerTelemetryPacket::new(12, 5, true, None, 8.1, true, Some(8.2), 27.0);
+        assert_relative_eq!(present.shared_battery_v().unwrap(), 8.2, epsilon = 0.01);
+        let flat = LowPowerTelemetryPacket::new(12, 5, true, None, 8.1, true, Some(0.0), 27.0);
+        assert_relative_eq!(flat.shared_battery_v().unwrap(), 2.5, epsilon = 0.01);
+        // And an over-range reading caps one code short of the sentinel.
+        let over = LowPowerTelemetryPacket::new(12, 5, true, None, 8.1, true, Some(100.0), 27.0);
+        assert_relative_eq!(over.shared_battery_v().unwrap(), 8.4941, epsilon = 0.001);
     }
 }

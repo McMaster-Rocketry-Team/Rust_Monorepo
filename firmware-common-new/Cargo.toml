@@ -12,7 +12,17 @@ defmt = [
     "lora-phy/defmt-03",
     "nalgebra/defmt",
 ]
-std = []
+# Host-side builds (rocket-cli, `cargo test`). Turning this on also turns on
+# rkyv's `bytecheck`, which is what lets `flight_storage` decode SD blocks
+# through rkyv's *checked* API instead of `from_bytes_unchecked`.
+#
+# Kept host-only on purpose. `rkyv/bytecheck` is a no_std, no_alloc feature
+# (rkyv depends on `bytecheck` with `default-features = false`), so this is not
+# a portability constraint — but the firmware only ever *writes* records, and
+# every embedded byte of validation code it would gain is code it cannot use.
+# The firmware builds this crate with `default-features = false`, so it sees
+# exactly the dependency graph it saw before this feature existed.
+std = ["rkyv/bytecheck"]
 json = ["dep:json", "std"]
 
 [dependencies]

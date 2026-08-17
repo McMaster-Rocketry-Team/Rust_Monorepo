@@ -307,13 +307,11 @@ mod tests {
         let encoder_crc = encoder.crc;
 
         let mut decoder = CanBusMultiFrameDecoder::<1>::new();
-        let mut decoded_message: Option<SensorReading<BootTimestamp, ReceivedCanBusMessage>> = None;
         let data = encoder.next().unwrap();
         let frame = (0u64, id, data.as_slice());
         log_info!("{:?}", frame);
-        decoded_message = decoder.process_frame(&frame);
 
-        let decoded_message = decoded_message.unwrap();
+        let decoded_message = decoder.process_frame(&frame).unwrap();
         assert_eq!(decoded_message.data.crc, encoder_crc);
         log_info!("Decoded message: {:?}", decoded_message);
     }

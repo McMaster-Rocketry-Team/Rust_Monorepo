@@ -130,7 +130,7 @@ impl MockVLPClient {
     }
 
     fn low_power_telemetry() -> VLPDownlinkPacket {
-        LowPowerTelemetryPacket::new(0, 9, true, Some((10.1, 20.2)), 7.4, true, 8.4, 21.0).into()
+        LowPowerTelemetryPacket::new(0, 9, true, Some((10.1, 20.2)), 7.4, true, Some(8.4), 21.0).into()
     }
 
     fn landed_telemetry() -> VLPDownlinkPacket {
@@ -141,7 +141,7 @@ impl MockVLPClient {
             7.2,
             true,
             false,
-            8.3,
+            Some(8.3),
             false,
             PowerOutputStatus::PowerGood,
             false,
@@ -186,7 +186,7 @@ impl MockVLPClient {
                     3000.0,
                     false,
                     false,
-                    8.4,
+                    Some(8.4),
                     false,
                     PowerOutputStatus::Disabled,
                     false,

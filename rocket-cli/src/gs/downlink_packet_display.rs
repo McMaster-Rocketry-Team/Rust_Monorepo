@@ -215,6 +215,14 @@ impl DownlinkPacketDisplay {
                 "power bad",
                 Style::from_color_style(ColorStyle::front(BaseColor::Red.dark())),
             ),
+            // AMP has said nothing about this output. Rendered with the same
+            // muted "n/a" the rest of the panel uses for absent readings, and
+            // deliberately not as "disabled" — that is a report AMP made, and
+            // this is the absence of one.
+            PowerOutputStatus::Unknown => s.append_styled(
+                "n/a",
+                Style::from_color_style(ColorStyle::front(MUTED)),
+            ),
         }
 
         s.append_plain("".pad_to_width(21 - s.width()));
@@ -273,7 +281,7 @@ impl DownlinkPacketDisplay {
                             (
                                 "shared battery",
                                 false,
-                                format!("{:.2}V", p.shared_battery_v()).into(),
+                                Self::format_optional(p.shared_battery_v(), |v| format!("{:.2}V", v)),
                             ),
                         ]],
                     ),
@@ -315,7 +323,7 @@ impl DownlinkPacketDisplay {
                                 (
                                     "shared battery",
                                     false,
-                                    format!("{:.2}V", p.shared_battery_v()).into(),
+                                    Self::format_optional(p.shared_battery_v(), |v| format!("{:.2}V", v)),
                                 ),
                             ],
                             vec![
@@ -515,7 +523,7 @@ impl DownlinkPacketDisplay {
                                 (
                                     "shared battery",
                                     false,
-                                    format!("{:.2}V", p.shared_battery_v()).into(),
+                                    Self::format_optional(p.shared_battery_v(), |v| format!("{:.2}V", v)),
                                 ),
                             ],
                             vec![

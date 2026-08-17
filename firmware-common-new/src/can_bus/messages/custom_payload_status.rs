@@ -4,7 +4,22 @@ use serde::{Deserialize, Serialize};
 use super::{CanBusMessage, CanBusMessageEnum};
 
 /// Reported for a reading that is invalid or unavailable.
+///
+/// Reserved: it is not a value, and no field in this message may carry it as
+/// one. See [`MAX_REPORTED_PAYLOAD_READING`].
 pub const PAYLOAD_READING_UNAVAILABLE: u16 = 0xFFFF;
+
+/// Largest value any field here may report, one below the reserved sentinel.
+///
+/// Seven of the ten fields are safe from the collision by physics — 0xFFFF mA
+/// is 65 A and 0xFFFF mV is 65 V, neither of which the stack can produce — but
+/// `sem_actuator_*_steps` is not: `TelemetryPacket` documents it as "the full
+/// u16 step range", so 65535 is a legal actuator position that would relay to
+/// the ground as "SEM could not read this actuator". [`CustomPayloadStatusMessage::new`] caps every
+/// reading here rather than only the three that need it, because "which fields
+/// happen to be out of physical reach today" is not a rule anyone can be
+/// expected to re-derive when a rail or a sensor is rescaled.
+pub const MAX_REPORTED_PAYLOAD_READING: u16 = PAYLOAD_READING_UNAVAILABLE - 1;
 
 /// Extended EPM / SEM telemetry from the payload SDRM node, sent every 500ms.
 ///
@@ -45,20 +60,60 @@ pub struct CustomPayloadStatusMessage {
 }
 
 impl CustomPayloadStatusMessage {
+    /// Build a message from readings that may or may not have been taken,
+    /// which is the only way to build one that cannot lie.
+    ///
+    /// The struct's fields are public raw `u16`s because a `PackedStruct`
+    /// literal has to be built from them, and until this constructor existed
+    /// that literal was the only way to build the message — so nothing stopped
+    /// a caller writing a real 65535-step actuator position straight into a
+    /// field whose 65535 means "no reading". The sender is the only place that
+    /// collision can be resolved (once it is on the wire, the two are the same
+    /// sixteen bits), so this is where it is resolved: `Some` is clamped to
+    /// [`MAX_REPORTED_PAYLOAD_READING`] and only `None` produces
+    /// [`PAYLOAD_READING_UNAVAILABLE`].
+    ///
+    /// Losing one step at the very top of the actuator range is the whole cost.
+    /// The alternative — an actuator at full extension reporting itself as
+    /// unreadable — is worse than an actuator at full extension reporting
+    /// itself one step short of it.
+    ///
+    /// Rail index order: 0 `SYS_3V3`, 1 `SYS_5V`, 2 `PER_3V3`, 3 `PER_5V`,
+    /// 4 `PER_9V`, 5 `PER_12V`. Actuator index order: experiment channels 1..3.
+    pub fn new(
+        epm_batt_mv: Option<u16>,
+        epm_rail_ma: [Option<u16>; 6],
+        sem_actuator_steps: [Option<u16>; 3],
+    ) -> Self {
+        Self {
+            epm_batt_mv: Self::encode(epm_batt_mv),
+
+            epm_sys_3v3_ma: Self::encode(epm_rail_ma[0]),
+            epm_sys_5v_ma: Self::encode(epm_rail_ma[1]),
+            epm_per_3v3_ma: Self::encode(epm_rail_ma[2]),
+            epm_per_5v_ma: Self::encode(epm_rail_ma[3]),
+            epm_per_9v_ma: Self::encode(epm_rail_ma[4]),
+            epm_per_12v_ma: Self::encode(epm_rail_ma[5]),
+
+            sem_actuator_1_steps: Self::encode(sem_actuator_steps[0]),
+            sem_actuator_2_steps: Self::encode(sem_actuator_steps[1]),
+            sem_actuator_3_steps: Self::encode(sem_actuator_steps[2]),
+        }
+    }
+
+    /// The write-side inverse of [`Self::reading`]: absence becomes the
+    /// reserved code, and a present reading is capped one below it so it can
+    /// never become absence on the way out.
+    pub fn encode(reading: Option<u16>) -> u16 {
+        match reading {
+            None => PAYLOAD_READING_UNAVAILABLE,
+            Some(value) => value.min(MAX_REPORTED_PAYLOAD_READING),
+        }
+    }
+
     /// Every reading unavailable, e.g. before EPM / SEM have reported.
     pub fn new_unavailable() -> Self {
-        Self {
-            epm_batt_mv: PAYLOAD_READING_UNAVAILABLE,
-            epm_sys_3v3_ma: PAYLOAD_READING_UNAVAILABLE,
-            epm_sys_5v_ma: PAYLOAD_READING_UNAVAILABLE,
-            epm_per_3v3_ma: PAYLOAD_READING_UNAVAILABLE,
-            epm_per_5v_ma: PAYLOAD_READING_UNAVAILABLE,
-            epm_per_9v_ma: PAYLOAD_READING_UNAVAILABLE,
-            epm_per_12v_ma: PAYLOAD_READING_UNAVAILABLE,
-            sem_actuator_1_steps: PAYLOAD_READING_UNAVAILABLE,
-            sem_actuator_2_steps: PAYLOAD_READING_UNAVAILABLE,
-            sem_actuator_3_steps: PAYLOAD_READING_UNAVAILABLE,
-        }
+        Self::new(None, [None; 6], [None; 3])
     }
 
     /// `None` if the reading is invalid or unavailable.
@@ -276,6 +331,52 @@ mod test {
             [Some(0), None, Some(0), Some(0), Some(0), Some(0)]
         );
         assert_eq!(message.actuator_steps(), [Some(0), None, Some(0)]);
+    }
+
+    /// 65535 is a legal `sem_actuator_*_steps` value — the field is documented
+    /// as the full u16 step range — and it is also the code for "no reading".
+    /// The constructor is where that collision has to be broken, because on the
+    /// wire the two are indistinguishable.
+    #[test]
+    fn a_full_scale_actuator_does_not_report_itself_as_unreadable() {
+        let message = CustomPayloadStatusMessage::new(
+            Some(u16::MAX),
+            [Some(u16::MAX); 6],
+            [Some(u16::MAX); 3],
+        );
+
+        assert_eq!(message.epm_batt_mv(), Some(MAX_REPORTED_PAYLOAD_READING));
+        assert_eq!(message.rail_ma(), [Some(MAX_REPORTED_PAYLOAD_READING); 6]);
+        assert_eq!(
+            message.actuator_steps(),
+            [Some(MAX_REPORTED_PAYLOAD_READING); 3]
+        );
+        for steps in message.actuator_steps() {
+            assert_ne!(steps, None);
+        }
+    }
+
+    /// The constructor has to carry absence and a genuine zero through
+    /// unchanged; everything below 65535 is a value.
+    #[test]
+    fn constructor_round_trips_absence_and_zero() {
+        let message = CustomPayloadStatusMessage::new(
+            Some(0),
+            [Some(0), None, Some(120), Some(0), None, Some(2400)],
+            [Some(0), None, Some(34567)],
+        );
+
+        assert_eq!(message.epm_batt_mv(), Some(0));
+        assert_eq!(
+            message.rail_ma(),
+            [Some(0), None, Some(120), Some(0), None, Some(2400)]
+        );
+        assert_eq!(message.actuator_steps(), [Some(0), None, Some(34567)]);
+
+        assert_eq!(
+            CustomPayloadStatusMessage::new_unavailable(),
+            CustomPayloadStatusMessage::new(None, [None; 6], [None; 3])
+        );
     }
 
     #[test]

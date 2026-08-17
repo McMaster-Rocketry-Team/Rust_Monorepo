@@ -12,11 +12,19 @@ use crate::{
     gps::GPSData,
 };
 
-use super::{TEMPERATURE_FAC_BITS, TemperatureFac, TemperatureFacBase, VLPDownlinkPacket};
+use super::{
+    BATTERY_V_FAC_BITS, BatteryVFac, BatteryVFacBase, TEMPERATURE_FAC_BITS, TemperatureFac,
+    TemperatureFacBase, VLPDownlinkPacket, decode_shared_battery_v, encode_shared_battery_v,
+};
 
-/// Largest satellite count the 5-bit packet field can hold. Counts above this
-/// are reported as this value; the SD log and the low-power / landed packets
-/// carry the full `u8`.
+/// Largest satellite count a 5-bit packet field can hold. Counts above this are
+/// reported as this value.
+///
+/// Shared by all three downlink packets: `LowPowerTelemetryPacket` and
+/// `LandedTelemetryPacket` carry the same 5-bit field and saturate against this
+/// same constant, so one count cannot read differently depending on which
+/// packet it arrived on. Only the SD log carries the full `u8`, because it has
+/// the room.
 pub const MAX_REPORTED_FIX_SATELLITES: u8 = 31;
 
 // 23 bits for latitude, 24 bits for longitude
@@ -24,7 +32,6 @@ pub const MAX_REPORTED_FIX_SATELLITES: u8 = 31;
 fixed_point_factory!(LatFac, f64, -90.0, 90.0, 0.00002146);
 fixed_point_factory!(LonFac, f64, -180.0, 180.0, 0.00002146);
 
-fixed_point_factory!(BatteryVFac, f32, 2.5, 8.5, 0.01);
 // 14 bits, ~0.62m resolution. Shared by every altitude in the packet, so they
 // all clamp at the same ceiling rather than at four different ones.
 fixed_point_factory!(AltitudeFac, f32, -100.0, 10000.0, 1.0);
@@ -74,6 +81,10 @@ const EPM_BATT_V_UNAVAILABLE_CODE: EpmBattVFacBase = (1 << EPM_BATT_V_FAC_BITS) 
 const EPM_RAIL_MA_UNAVAILABLE_CODE: EpmRailMaFacBase = (1 << EPM_RAIL_MA_FAC_BITS) - 1;
 const ACTUATOR_STEPS_UNAVAILABLE_CODE: ActuatorStepsFacBase = (1 << ACTUATOR_STEPS_FAC_BITS) - 1;
 
+// `shared_battery_v` uses the same trick, but its factory, sentinel and codec
+// live in `super` — all three downlink packets carry that field, and it has to
+// decode identically on each. See `super::SHARED_BATTERY_V_UNAVAILABLE_CODE`.
+
 /// Collapses NaN into `None`. A NaN reading is an absent reading that lost its
 /// `Option` somewhere upstream, and every `fixed_point_factory` panics on one
 /// (see the comment in [`TelemetryPacket::new`]), so it is folded back into
@@ -82,7 +93,7 @@ fn defined(value: Option<f32>) -> Option<f32> {
     value.filter(|v| !v.is_nan())
 }
 
-// 299 bits = 37.375 bytes, so 38 with five spare bits. On air the packet costs
+// 300 bits of declared fields = 37.5 bytes, so 38 with four spare bits. On air the packet costs
 // `n + 1` bytes of data plus `(n + 1) / 4` of reed-solomon ecc, which puts
 // this at 48 bytes on air. The symbol count steps at 50 / 55 / 60 bytes on
 // air, so 38 bytes is the last size that still fits in the current symbol
@@ -138,23 +149,28 @@ pub struct TelemetryPacket {
     /// other.
     ///
     /// Absent in exactly two cases, matching
-    /// `RocketStateEstimator::kf_altitude_asl`: before the filter is born (it
-    /// has had no sample to run on yet), and throughout the Mach lockout,
-    /// where it is frozen and holds a pre-ignition reading that goes stale by
-    /// tens of seconds and kilometres.
+    /// `RocketStateEstimator::kf_altitude_asl` — which is to say, in exactly
+    /// the two windows where the deployment filter does not exist. On the pad
+    /// there is no filter at all: the barometer's only job there is the pad
+    /// altitude reference, a gated low pass over a constant. And through the
+    /// Mach lockout there is no filter either — it is dropped at ignition
+    /// rather than frozen, precisely so that no reader can pull a pre-ignition
+    /// altitude out of it while the rocket is kilometres away. See the module
+    /// doc of `air-brakes-controller-core`'s `baro_state_estimator`, which is
+    /// where that rule lives.
     ///
-    /// Present in every other state, INCLUDING on the pad, after touchdown and
-    /// in `FailedToReachMinApogee`. Those `RocketState` variants carry no
-    /// altitude field of their own, but the filter is running and fusing baro
-    /// in all of them — the variants omit the number because the state machine
-    /// has nothing to decide from it there, not because it is untrustworthy.
-    /// The pad case is worth the bit on its own: a real near-zero AGL before
-    /// launch is what tells the ground the baro and the filter are alive,
-    /// which the hard 0.0 this replaced could never distinguish itself from.
+    /// Present after touchdown and in `FailedToReachMinApogee`. Those
+    /// `RocketState` variants carry no altitude field of their own, but the
+    /// filter is alive and fusing baro in both — the variants omit the number
+    /// because the state machine has nothing to decide from it there, not
+    /// because it is untrustworthy.
     ///
     /// The bit exists because the Mach lockout window used to downlink a hard
-    /// 0.0 while the SD log kept the frozen stale value, so a ground display
+    /// 0.0 while the SD log kept a stale last-good value, so a ground display
     /// and a post-flight plot disagreed about the same seconds of the flight.
+    /// Both channels now report absence there — the SD log's
+    /// `EstimatorLogSample::deployment_altitude_asl` is `None` for the same
+    /// samples — and this bit is the downlink's half of that agreement.
     /// `flight_stage` cannot substitute for it: the lockout is folded into
     /// `Ascent` on the wire, so the stage does not change when the numbers
     /// stop being real.
@@ -230,6 +246,16 @@ pub struct TelemetryPacket {
 
     amp_online: bool,
     amp_rebooted_in_last_5s: bool,
+    /// The AMP-relayed shared battery bus. Absence is the all-ones code (see
+    /// [`super::SHARED_BATTERY_V_UNAVAILABLE_CODE`]), not a validity bit.
+    ///
+    /// `amp_online` is not a substitute, for the same reason `icarus_online` is
+    /// not one for the Icarus readings: the heartbeat starts at boot, and in
+    /// the window between boot and the first `AmpStatusMessage` this field
+    /// would otherwise hold its initial 0.0 — which clamps to 2.5V, the bottom
+    /// of the range, i.e. the reading that means "the pack is dead". A
+    /// startup transient that looks like a flat battery is exactly the kind of
+    /// wrong answer that scrubs a launch.
     #[packed_field(element_size_bits = "10")]
     shared_battery_v: Integer<BatteryVFacBase, packed_bits::Bits<BATTERY_V_FAC_BITS>>,
     amp_out1_overwrote: bool,
@@ -292,7 +318,7 @@ pub struct TelemetryPacket {
     /// reading the payload could not take (`0xFFFF` on CAN) is sent as the
     /// all-ones code of the field, which the getters decode back to `None`.
     /// These three groups keep a sentinel instead of taking validity bits
-    /// because ten readings would cost ten bits and the packet has five left;
+    /// because ten readings would cost ten bits and the packet has four left;
     /// spending the top code of each field costs nothing but one quantum of
     /// headroom at full scale, which for a battery bus, a rail current and an
     /// actuator position is headroom nothing real ever reaches.
@@ -374,7 +400,8 @@ impl TelemetryPacket {
 
         amp_online: bool,
         amp_rebooted_in_last_5s: bool,
-        shared_battery_v: f32,
+        // `None` when AMP has not reported a shared battery voltage.
+        shared_battery_v: Option<f32>,
         amp_out1_overwrote: bool,
         amp_out1: PowerOutputStatus,
         amp_out2_overwrote: bool,
@@ -471,7 +498,9 @@ impl TelemetryPacket {
 
             amp_online,
             amp_rebooted_in_last_5s,
-            shared_battery_v: BatteryVFac::to_fixed_point_capped(shared_battery_v),
+            // An unreported bus is the field's all-ones code, not the 2.5V
+            // floor a 0.0 would clamp to.
+            shared_battery_v: encode_shared_battery_v(shared_battery_v),
 
             amp_out1_overwrote,
             amp_out1,
@@ -661,9 +690,11 @@ impl TelemetryPacket {
     }
 
     /// `None` whenever the deployment estimator had no altitude for this
-    /// packet. Notably `None` for the whole Mach lockout, where the SD log
-    /// holds the frozen last-good value instead — the two are meant to
-    /// disagree there, and this is how the downlink says so.
+    /// packet. Notably `None` for the whole Mach lockout, where the filter is
+    /// dropped rather than frozen and there is no last-good value to report.
+    /// The SD log records `None` for those same samples, so the downlink and
+    /// the post-flight plot agree that nothing was measured there — this getter
+    /// is how the downlink half says it.
     pub fn deployment_kf_altitude_agl(&self) -> Option<f32> {
         self.deployment_kf().map(|s| s.altitude_agl)
     }
@@ -740,8 +771,12 @@ impl TelemetryPacket {
         self.amp_rebooted_in_last_5s
     }
 
-    pub fn shared_battery_v(&self) -> f32 {
-        BatteryVFac::to_float(self.shared_battery_v)
+    /// The AMP-relayed shared battery bus voltage. `None` when AMP has not
+    /// reported one — it is offline, or has not sent its first status message
+    /// yet. A genuinely flat pack decodes as `Some(2.5)`, the bottom of the
+    /// range, which is why absence is the top code and not the bottom one.
+    pub fn shared_battery_v(&self) -> Option<f32> {
+        decode_shared_battery_v(self.shared_battery_v)
     }
 
     pub fn amp_out1_overwrote(&self) -> bool {
@@ -1061,7 +1096,12 @@ pub struct TelemetryPacketBuilderState {
 
     pub amp_online: bool,
     pub amp_uptime_s: u32,
-    pub shared_battery_v: f32,
+    /// The shared battery bus, from AMP's status message. `None` until one
+    /// arrives — which is later than `amp_online` goes true, because the CAN
+    /// heartbeat starts at boot and the status message does not. Pass `None`
+    /// rather than 0.0: 0.0 clamps to the bottom of the range and downlinks as
+    /// a dead pack.
+    pub shared_battery_v: Option<f32>,
     pub amp_out1_overwrote: bool,
     pub amp_out1: PowerOutputStatus,
     pub amp_out2_overwrote: bool,
@@ -1129,7 +1169,7 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
 
                 amp_online: false,
                 amp_uptime_s: 0,
-                shared_battery_v: 0.0,
+                shared_battery_v: None,
                 amp_out1_overwrote: false,
                 amp_out1: PowerOutputStatus::Disabled,
                 amp_out2_overwrote: false,
@@ -1243,6 +1283,11 @@ mod tests {
     use approx::assert_relative_eq;
 
     use crate::tests::init_logger;
+    // The 5-bit satellite field is duplicated in these two, so the saturation
+    // regression test covers all three packets from one place.
+    use crate::vlp::packets::{
+        landed_telemetry::LandedTelemetryPacket, low_power_telemetry::LowPowerTelemetryPacket,
+    };
 
     use super::*;
 
@@ -1271,7 +1316,7 @@ mod tests {
             3000.0,
             true,
             false,
-            8.2,
+            Some(8.2),
             false,
             PowerOutputStatus::PowerGood,
             false,
@@ -1327,7 +1372,7 @@ mod tests {
             3000.0,
             false,
             false,
-            8.2,
+            None,
             false,
             PowerOutputStatus::Disabled,
             false,
@@ -1428,6 +1473,8 @@ mod tests {
         assert_relative_eq!(steps[1].unwrap() as f32, 1200.0, epsilon = 64.1);
         assert_relative_eq!(steps[2].unwrap() as f32, 34567.0, epsilon = 64.1);
 
+        assert_relative_eq!(p.shared_battery_v().unwrap(), 8.2, epsilon = 0.01);
+
         // The stack flags are individual packet fields now, not a relayed
         // 11 bit blob.
         assert!(p.payload_epm_alive());
@@ -1457,6 +1504,9 @@ mod tests {
         assert_eq!(p.epm_batt_v(), None);
         assert_eq!(p.epm_rail_ma(), [None; 6]);
         assert_eq!(p.sem_actuator_steps(), [None; 3]);
+        // AMP has not reported. This must not decode as 2.5V, which is the
+        // bottom of the range and reads as a dead pack.
+        assert_eq!(p.shared_battery_v(), None);
 
         // Fields that are always present stay present.
         assert_relative_eq!(p.vl_battery_v(), 7.4, epsilon = 0.01);
@@ -1494,7 +1544,7 @@ mod tests {
             3000.0,
             true,
             false,
-            8.2,
+            Some(8.2),
             false,
             PowerOutputStatus::PowerGood,
             false,
@@ -1552,7 +1602,7 @@ mod tests {
             3000.0,
             false,
             false,
-            8.2,
+            Some(8.2),
             false,
             PowerOutputStatus::Disabled,
             false,
@@ -1588,16 +1638,82 @@ mod tests {
         assert_eq!(p.sem_actuator_steps()[0], Some(0));
     }
 
-    /// The satellite count is 5 bits, so packed_struct truncates rather than
-    /// clamps. Without the saturation in `new`, 32 satellites downlink as 0 --
-    /// the reading that means "no fix, do not fly". Anything at or above the
-    /// cap must read as the cap, never wrap.
+    /// The shared battery bus is relayed from AMP, so it can be absent, and it
+    /// pays for that with its top code. A real reading must therefore never
+    /// encode to the top code — a bus pegged above 8.5V reporting itself as
+    /// "AMP said nothing" would blank the one number the pad crew is watching.
+    #[test]
+    fn full_scale_shared_battery_does_not_collide_with_the_sentinel() {
+        init_logger();
+
+        let p = round_trip(packet_with_everything(12));
+        assert_relative_eq!(p.shared_battery_v().unwrap(), 8.2, epsilon = 0.01);
+
+        // Above the top of the range, so it caps one code short of full scale
+        // and stays emphatically `Some`.
+        let mut over_range = packet_with_everything(12);
+        over_range.shared_battery_v = encode_shared_battery_v(Some(100.0));
+        let over_range = round_trip(over_range);
+        assert_relative_eq!(
+            over_range.shared_battery_v().unwrap(),
+            8.4941,
+            epsilon = 0.001
+        );
+
+        // And a collapsed pack is still a reading, at the bottom of the range.
+        let mut flat = packet_with_everything(12);
+        flat.shared_battery_v = encode_shared_battery_v(Some(0.0));
+        let flat = round_trip(flat);
+        assert_relative_eq!(flat.shared_battery_v().unwrap(), 2.5, epsilon = 0.01);
+    }
+
+    /// The satellite count is 5 bits in all three downlink packets, so
+    /// packed_struct truncates rather than clamps. Without the saturation in
+    /// `new`, 32 satellites downlink as 0 -- the reading that means "no fix, do
+    /// not fly". Anything at or above the cap must read as the cap, never wrap,
+    /// and it must do so identically whichever packet carried it: a count that
+    /// meant one thing on the flight packet and another on the landed packet
+    /// would be worse than either.
     #[test]
     fn satellite_count_saturates_instead_of_wrapping() {
         init_logger();
 
+        let landed = |n: u8| {
+            LandedTelemetryPacket::new(
+                12,
+                Some((45.5, -73.6)),
+                n,
+                7.9,
+                true,
+                false,
+                Some(8.2),
+                false,
+                PowerOutputStatus::PowerGood,
+                true,
+                PowerOutputStatus::PowerBad,
+                false,
+                PowerOutputStatus::Disabled,
+            )
+            .num_of_fix_satellites()
+        };
+        let low_power = |n: u8| {
+            LowPowerTelemetryPacket::new(
+                12,
+                n,
+                true,
+                Some((45.5, -73.6)),
+                8.1,
+                true,
+                Some(8.2),
+                27.0,
+            )
+            .num_of_fix_satellites()
+        };
+
         for n in 0..=MAX_REPORTED_FIX_SATELLITES {
             assert_eq!(packet_with_everything(n).num_of_fix_satellites(), n);
+            assert_eq!(landed(n), n);
+            assert_eq!(low_power(n), n);
         }
         for n in [
             MAX_REPORTED_FIX_SATELLITES + 1,
@@ -1609,7 +1725,19 @@ mod tests {
             assert_eq!(
                 packet_with_everything(n).num_of_fix_satellites(),
                 MAX_REPORTED_FIX_SATELLITES,
-                "{} satellites must saturate, not wrap",
+                "{} satellites must saturate, not wrap, on TelemetryPacket",
+                n
+            );
+            assert_eq!(
+                landed(n),
+                MAX_REPORTED_FIX_SATELLITES,
+                "{} satellites must saturate, not wrap, on LandedTelemetryPacket",
+                n
+            );
+            assert_eq!(
+                low_power(n),
+                MAX_REPORTED_FIX_SATELLITES,
+                "{} satellites must saturate, not wrap, on LowPowerTelemetryPacket",
                 n
             );
         }

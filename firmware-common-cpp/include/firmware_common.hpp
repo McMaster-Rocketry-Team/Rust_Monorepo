@@ -109,6 +109,13 @@ namespace can_bus {
         buffer[1] = value & 0xFF;
     }
 
+    // Two's-complement counterpart of write_u16_be. int16_t -> uint16_t is
+    // well defined in every C++ standard (it wraps modulo 2^16), so this needs
+    // no special handling; the read direction does, see read_i16_be.
+    inline void write_i16_be(uint8_t* buffer, int16_t value) noexcept {
+        write_u16_be(buffer, static_cast<uint16_t>(value));
+    }
+
     inline void write_u24_be(uint8_t* buffer, uint32_t value) noexcept {
         buffer[0] = (value >> 16) & 0xFF;
         buffer[1] = (value >> 8) & 0xFF;
@@ -139,6 +146,43 @@ namespace can_bus {
 
     inline uint16_t read_u16_be(const uint8_t* buffer) noexcept {
         return (static_cast<uint16_t>(buffer[0]) << 8) | buffer[1];
+    }
+
+    // Two's-complement counterpart of read_u16_be.
+    //
+    // The conversion is spelled out instead of being left to
+    // static_cast<int16_t>(uint16_t): CMakeLists.txt sets CMAKE_CXX_STANDARD 17,
+    // and narrowing an out-of-range unsigned value to a signed type is only
+    // implementation-defined before C++20 (P0907 made it the two's-complement
+    // wrap that the wire format needs). Subtracting 0x10000 in int32_t produces
+    // a value that already fits in int16_t, so the remaining static_cast is
+    // in-range and well defined under C++17.
+    inline int16_t read_i16_be(const uint8_t* buffer) noexcept {
+        uint16_t raw = read_u16_be(buffer);
+        return raw <= 0x7FFF
+                   ? static_cast<int16_t>(raw)
+                   : static_cast<int16_t>(static_cast<int32_t>(raw) - 0x10000);
+    }
+
+    // Rust's `as` cast from a float to an integer saturates at the target
+    // type's bounds and maps NaN to 0. C++'s static_cast is undefined behaviour
+    // as soon as the truncated value does not fit, so every float -> int16_t
+    // wire field goes through here to get Rust's semantics rather than UB.
+    inline int16_t saturating_i16_from_float(float value) noexcept {
+        if (std::isnan(value)) return 0;
+        if (value >= 32767.0f) return 32767;
+        if (value <= -32768.0f) return -32768;
+        return static_cast<int16_t>(value);
+    }
+
+    // Unsigned companion, matching Rust's `as u16`: saturate at both ends and
+    // map NaN to 0. An out-of-range float-to-integer cast is undefined
+    // behaviour in C++, so this is not merely a rounding difference.
+    inline uint16_t saturating_u16_from_float(float value) noexcept {
+        if (std::isnan(value)) return 0;
+        if (value >= 65535.0f) return 65535;
+        if (value <= 0.0f) return 0;
+        return static_cast<uint16_t>(value);
     }
 
     inline uint32_t read_u24_be(const uint8_t* buffer) noexcept {
@@ -282,13 +326,32 @@ namespace can_bus {
     enum class PowerOutputStatus : uint8_t {
         Disabled = 0,
         PowerGood = 1,
-        PowerBad = 2
+        PowerBad = 2,
+        // AMP has not reported this output's status.
+        //
+        // Not the same as PowerOutputStatus::Disabled, which is an output AMP
+        // is actively reporting as commanded off — a normal, deliberate state.
+        // This one means nobody has said anything about the output at all: AMP
+        // is offline, has not sent its first AmpStatusMessage yet, or the field
+        // was never populated. Rendering that as "disabled" would put a report
+        // on screen that the rocket never made.
+        //
+        // It also has to exist for a second reason. The field is 2 bits wide
+        // everywhere it appears, so 0b11 is on the wire whether or not anything
+        // means to put it there. While the code was undefined, Rust's
+        // from_primitive returned None for it and unpacking failed for the
+        // WHOLE containing packet — one stray bit pattern in an AMP status
+        // field would drop an entire telemetry frame rather than one output's
+        // status.
+        Unknown = 3
     };
 
     struct AmpOutputStatus {
         bool overwrote;
         PowerOutputStatus status;
 
+        // All four codes of the 2-bit field name a variant now, so there is no
+        // bit pattern left that fails to decode.
         static AmpOutputStatus from_byte(uint8_t b) noexcept {
             AmpOutputStatus s;
             s.overwrote = (b & 0x80) != 0;
@@ -338,7 +401,17 @@ namespace can_bus {
         static constexpr size_t SIZE_BYTES = 13;
 
         uint32_t pressure_raw;
-        uint16_t temperature_raw;
+
+        // Unit: 0.1C, e.g. 250 = 25C, -155 = -15.5C
+        //
+        // Signed. It was a uint16_t on both sides, and Rust's float-to-int `as`
+        // saturates rather than wrapping, so every sub-zero reading landed on
+        // exactly 0 and downlinked as 0.0C — a plausible-looking number, not an
+        // obvious fault. Sub-freezing pad mornings and altitude are both
+        // routinely negative. Rust's packed_struct gives u16 and i16 the same
+        // 16-bit width, so the message is still 13 bytes on the wire.
+        int16_t temperature_raw;
+
         uint64_t timestamp_us;
 
         // Helpers
@@ -346,7 +419,10 @@ namespace can_bus {
             BaroMeasurementMessage msg;
             msg.timestamp_us = ts;
             msg.pressure_raw = bit_cast<uint32_t>(pressure);
-            msg.temperature_raw = static_cast<uint16_t>(temperature * 10.0f);
+            // Clamped, not static_cast directly: C++ has the same hazard as
+            // Rust in the other direction — an out-of-range float-to-int cast
+            // is undefined behaviour here rather than saturation.
+            msg.temperature_raw = saturating_i16_from_float(temperature * 10.0f);
             return msg;
         }
 
@@ -354,6 +430,7 @@ namespace can_bus {
             return bit_cast<float>(pressure_raw);
         }
 
+        // Temperature in C
         float temperature() const noexcept {
             return static_cast<float>(temperature_raw) / 10.0f;
         }
@@ -362,14 +439,14 @@ namespace can_bus {
 
         void serialize(uint8_t* buffer) const noexcept {
              write_u32_be(buffer, pressure_raw);
-             write_u16_be(buffer + 4, temperature_raw);
+             write_i16_be(buffer + 4, temperature_raw);
              write_u56_be(buffer + 6, timestamp_us);
         }
 
         static BaroMeasurementMessage deserialize(const uint8_t* buffer) noexcept {
             BaroMeasurementMessage msg;
             msg.pressure_raw = read_u32_be(buffer);
-            msg.temperature_raw = read_u16_be(buffer + 4);
+            msg.temperature_raw = read_i16_be(buffer + 4);
             msg.timestamp_us = read_u56_be(buffer + 6);
             return msg;
         }
@@ -422,7 +499,24 @@ namespace can_bus {
         static constexpr size_t SIZE_BYTES = 20;
 
         // Reported for a reading that is invalid or unavailable.
+        //
+        // Reserved: it is not a value, and no field in this message may carry
+        // it as one. See MAX_REPORTED_PAYLOAD_READING.
         static constexpr uint16_t PAYLOAD_READING_UNAVAILABLE = 0xFFFF;
+
+        // Largest value any field here may report, one below the reserved
+        // sentinel.
+        //
+        // Seven of the ten fields are safe from the collision by physics —
+        // 0xFFFF mA is 65 A and 0xFFFF mV is 65 V, neither of which the stack
+        // can produce — but sem_actuator_*_steps is not: the field is
+        // documented as the full uint16_t step range, so 65535 is a legal
+        // actuator position that would relay to the ground as "SEM could not
+        // read this actuator". new_msg caps every reading rather than only the
+        // three that need it, because "which fields happen to be out of
+        // physical reach today" is not a rule anyone can be expected to
+        // re-derive when a rail or a sensor is rescaled.
+        static constexpr uint16_t MAX_REPORTED_PAYLOAD_READING = PAYLOAD_READING_UNAVAILABLE - 1;
 
         uint16_t epm_batt_mv;
 
@@ -439,20 +533,60 @@ namespace can_bus {
 
         static constexpr uint8_t PRIORITY = 5;
 
+        // The write-side inverse of reading(): absence becomes the reserved
+        // code, and a present reading is capped one below it so it can never
+        // become absence on the way out.
+        static uint16_t encode(std::optional<uint16_t> value) noexcept {
+            if (!value) return PAYLOAD_READING_UNAVAILABLE;
+            if (*value > MAX_REPORTED_PAYLOAD_READING) return MAX_REPORTED_PAYLOAD_READING;
+            return *value;
+        }
+
+        // Build a message from readings that may or may not have been taken,
+        // which is the only way to build one that cannot lie.
+        //
+        // The struct's fields stay raw uint16_t because that is what goes on the
+        // wire and what the aggregate initializers downstream are built from —
+        // so nothing stopped a caller writing a real 65535-step actuator
+        // position straight into a field whose 65535 means "no reading". The
+        // sender is the only place that collision can be resolved (once it is
+        // on the wire, the two are the same sixteen bits), so this is where it
+        // is resolved: a present value is clamped to
+        // MAX_REPORTED_PAYLOAD_READING and only std::nullopt produces
+        // PAYLOAD_READING_UNAVAILABLE.
+        //
+        // Losing one step at the very top of the actuator range is the whole
+        // cost. The alternative — an actuator at full extension reporting
+        // itself as unreadable — is worse than an actuator at full extension
+        // reporting itself one step short of it.
+        //
+        // Rail index order: 0 SYS_3V3, 1 SYS_5V, 2 PER_3V3, 3 PER_5V,
+        // 4 PER_9V, 5 PER_12V. Actuator index order: experiment channels 1..3.
+        static CustomPayloadStatusMessage new_msg(
+            std::optional<uint16_t> epm_batt_mv,
+            const std::array<std::optional<uint16_t>, 6>& epm_rail_ma,
+            const std::array<std::optional<uint16_t>, 3>& sem_actuator_steps) noexcept {
+            CustomPayloadStatusMessage msg;
+            msg.epm_batt_mv = encode(epm_batt_mv);
+
+            msg.epm_sys_3v3_ma = encode(epm_rail_ma[0]);
+            msg.epm_sys_5v_ma = encode(epm_rail_ma[1]);
+            msg.epm_per_3v3_ma = encode(epm_rail_ma[2]);
+            msg.epm_per_5v_ma = encode(epm_rail_ma[3]);
+            msg.epm_per_9v_ma = encode(epm_rail_ma[4]);
+            msg.epm_per_12v_ma = encode(epm_rail_ma[5]);
+
+            msg.sem_actuator_1_steps = encode(sem_actuator_steps[0]);
+            msg.sem_actuator_2_steps = encode(sem_actuator_steps[1]);
+            msg.sem_actuator_3_steps = encode(sem_actuator_steps[2]);
+            return msg;
+        }
+
         // Every reading unavailable, e.g. before EPM / SEM have reported.
         static CustomPayloadStatusMessage new_unavailable() noexcept {
-            CustomPayloadStatusMessage msg;
-            msg.epm_batt_mv = PAYLOAD_READING_UNAVAILABLE;
-            msg.epm_sys_3v3_ma = PAYLOAD_READING_UNAVAILABLE;
-            msg.epm_sys_5v_ma = PAYLOAD_READING_UNAVAILABLE;
-            msg.epm_per_3v3_ma = PAYLOAD_READING_UNAVAILABLE;
-            msg.epm_per_5v_ma = PAYLOAD_READING_UNAVAILABLE;
-            msg.epm_per_9v_ma = PAYLOAD_READING_UNAVAILABLE;
-            msg.epm_per_12v_ma = PAYLOAD_READING_UNAVAILABLE;
-            msg.sem_actuator_1_steps = PAYLOAD_READING_UNAVAILABLE;
-            msg.sem_actuator_2_steps = PAYLOAD_READING_UNAVAILABLE;
-            msg.sem_actuator_3_steps = PAYLOAD_READING_UNAVAILABLE;
-            return msg;
+            return new_msg(std::nullopt,
+                           std::array<std::optional<uint16_t>, 6>{},
+                           std::array<std::optional<uint16_t>, 3>{});
         }
 
         // std::nullopt if the reading is invalid or unavailable.
@@ -618,12 +752,22 @@ namespace can_bus {
         static constexpr size_t SIZE_BYTES = 4;
 
         uint16_t actual_extension_percentage; // 0.1%
-        uint16_t servo_temperature_raw; // 0.1C
+
+        // Unit: 0.1C, e.g. 10 = 1C, -155 = -15.5C
+        //
+        // Signed, for the same reason as BaroMeasurementMessage: Rust's
+        // float-to-int `as` saturates, so an unsigned raw field reported every
+        // sub-zero servo as exactly 0.0C. A servo sitting on a cold pad is
+        // precisely the reading this field exists to show. u16 and i16 pack to
+        // the same 16 bits, so the message is still 4 bytes on the wire.
+        int16_t servo_temperature_raw;
 
         static IcarusStatusMessage new_msg(float extension, float temp) noexcept {
             IcarusStatusMessage msg;
-            msg.actual_extension_percentage = static_cast<uint16_t>(extension * 1000.0f);
-            msg.servo_temperature_raw = static_cast<uint16_t>(temp * 10.0f);
+            msg.actual_extension_percentage = saturating_u16_from_float(extension * 1000.0f);
+            // Clamped: an out-of-range float-to-int cast is undefined behaviour
+            // in C++, not the saturation Rust's `as` performs.
+            msg.servo_temperature_raw = saturating_i16_from_float(temp * 10.0f);
             return msg;
         }
 
@@ -638,13 +782,13 @@ namespace can_bus {
 
         void serialize(uint8_t* buffer) const noexcept {
             write_u16_be(buffer, actual_extension_percentage);
-            write_u16_be(buffer + 2, servo_temperature_raw);
+            write_i16_be(buffer + 2, servo_temperature_raw);
         }
 
         static IcarusStatusMessage deserialize(const uint8_t* buffer) noexcept {
             IcarusStatusMessage msg;
             msg.actual_extension_percentage = read_u16_be(buffer);
-            msg.servo_temperature_raw = read_u16_be(buffer + 2);
+            msg.servo_temperature_raw = read_i16_be(buffer + 2);
             return msg;
         }
     };
@@ -1010,7 +1154,7 @@ namespace can_bus {
         // 0 - 100 overload: two constructors differing only by a factor of 100
         // is a silent 100x error waiting to happen.
         static AirBrakesControlMessage new_msg(float percentage) noexcept {
-            return AirBrakesControlMessage(static_cast<uint16_t>(percentage * 1000.0f));
+            return AirBrakesControlMessage(saturating_u16_from_float(percentage * 1000.0f));
         }
 
         float extension_percentage_float() const noexcept {

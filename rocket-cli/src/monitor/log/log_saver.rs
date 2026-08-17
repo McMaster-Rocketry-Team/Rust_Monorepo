@@ -48,11 +48,34 @@ impl LogSaver {
         })
     }
 
-    pub async fn append_log(&mut self, log: &TargetLog) -> Result<()> {
+    /// Seconds since the monitor started, in the fixed-width form every line of
+    /// the file begins with.
+    fn relative_time(&self) -> String {
         let elapsed = self.start_time.elapsed();
-        let seconds = elapsed.as_secs();
-        let nanos = elapsed.subsec_nanos();
-        let relative_time = format!("{:05}.{:06}", seconds, nanos / 1000);
+        format!("{:05}.{:06}", elapsed.as_secs(), elapsed.subsec_nanos() / 1000)
+    }
+
+    /// Record a gap. The saver fell behind the target and the broadcast channel
+    /// dropped `dropped` lines before this one; nothing else in the file would
+    /// show that, and a gap that looks like silence from the target is worse
+    /// than no log at all.
+    pub async fn append_dropped_marker(&mut self, dropped: u64) -> Result<()> {
+        self.file
+            .write_all(
+                format!(
+                    "{} !!! xxx {} log line(s) dropped here: the log saver fell behind the \
+                     target output\n",
+                    self.relative_time(),
+                    dropped,
+                )
+                .as_bytes(),
+            )
+            .await?;
+        Ok(())
+    }
+
+    pub async fn append_log(&mut self, log: &TargetLog) -> Result<()> {
+        let relative_time = self.relative_time();
 
         self.file
             .write_all(

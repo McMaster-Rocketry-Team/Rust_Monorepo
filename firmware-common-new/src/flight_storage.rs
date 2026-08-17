@@ -16,12 +16,20 @@
 use crate::flight_data_record::{
     FlightDataFastRecord, FlightDataSlowRecord, LogRecord, RECORD_TAG_FAST, RECORD_TAG_SLOW,
 };
+#[cfg(any(feature = "std", test))]
+use crate::flight_data_record::ParsedLogRecord;
 
 use rkyv::{
-    api::low::{from_bytes_unchecked, to_bytes_in_with_alloc},
+    api::low::to_bytes_in_with_alloc,
     rancor::Failure,
     ser::{allocator::SubAllocator, writer::Buffer},
 };
+
+/// Host decode goes through rkyv's checked API; see [`deserialize_fast_body`].
+#[cfg(feature = "std")]
+use rkyv::api::low::from_bytes;
+#[cfg(not(feature = "std"))]
+use rkyv::api::low::from_bytes_unchecked;
 
 /// Raw SD block size in bytes.
 pub const BLOCK_SIZE: usize = 512;
@@ -128,6 +136,54 @@ fn serialize_slow_body(slow: &FlightDataSlowRecord) -> [u8; SLOW_BODY_LEN] {
     scratch.0
 }
 
+/// Decode one FAST body.
+///
+/// # Why this is split by feature
+///
+/// The archived record is full of `#[repr(u8)]` discriminants: an
+/// `ArchivedOption` tag is valid only as 0 or 1, `NodeHealth` / `NodeMode` /
+/// `FlightStage` only over their listed values, and a `bool` only as 0 or 1.
+/// rkyv's unchecked deserialize reads those bytes and `match`es on them
+/// directly, so a single wrong byte is undefined behaviour, not a decode error.
+///
+/// That is not hypothetical here: it is the ordinary outcome of a block that
+/// failed its CRC. Records are fixed width, so a corrupt body byte never
+/// desynchronizes the stream — and with only ~4-5 tag bytes per 508-byte block,
+/// well over 99% of single-byte corruptions land in a body and would otherwise
+/// "decode" straight into that `match`.
+///
+/// On the host (`std`, which turns on `rkyv/bytecheck`) the bytes therefore go
+/// through rkyv's checked API, which validates every discriminant before
+/// anything reads them; a bad record comes back as `None` and the caller skips
+/// it. The firmware only ever writes records — it never reads a card back — so
+/// it keeps the unchecked path rather than carrying validation code it cannot
+/// use.
+#[cfg(feature = "std")]
+fn deserialize_fast_body(bytes: &[u8]) -> Option<FlightDataFastRecord> {
+    if bytes.len() < FAST_BODY_LEN {
+        return None;
+    }
+    let mut aligned = AlignedBuf([0u8; FAST_BODY_LEN]);
+    aligned.0.copy_from_slice(&bytes[..FAST_BODY_LEN]);
+    from_bytes::<FlightDataFastRecord, Failure>(&aligned.0).ok()
+}
+
+/// See [`deserialize_fast_body`] for why the host and firmware paths differ.
+#[cfg(feature = "std")]
+fn deserialize_slow_body(bytes: &[u8]) -> Option<FlightDataSlowRecord> {
+    if bytes.len() < SLOW_BODY_LEN {
+        return None;
+    }
+    let mut aligned = AlignedBuf([0u8; SLOW_BODY_LEN]);
+    aligned.0.copy_from_slice(&bytes[..SLOW_BODY_LEN]);
+    from_bytes::<FlightDataSlowRecord, Failure>(&aligned.0).ok()
+}
+
+/// Firmware path: no validation. See [`deserialize_fast_body`].
+///
+/// Safe only against bytes this firmware itself just serialised. Anything that
+/// decodes a card whose CRC has failed must use the `std` build.
+#[cfg(not(feature = "std"))]
 fn deserialize_fast_body(bytes: &[u8]) -> Option<FlightDataFastRecord> {
     if bytes.len() < FAST_BODY_LEN {
         return None;
@@ -137,6 +193,8 @@ fn deserialize_fast_body(bytes: &[u8]) -> Option<FlightDataFastRecord> {
     unsafe { from_bytes_unchecked::<FlightDataFastRecord, Failure>(&aligned.0) }.ok()
 }
 
+/// Firmware path: no validation. See [`deserialize_fast_body`].
+#[cfg(not(feature = "std"))]
 fn deserialize_slow_body(bytes: &[u8]) -> Option<FlightDataSlowRecord> {
     if bytes.len() < SLOW_BODY_LEN {
         return None;
@@ -176,6 +234,12 @@ pub fn log_record_wire_len(bytes: &[u8]) -> Option<usize> {
 }
 
 /// Deserialise one tagged record from a block slice at `offset`.
+///
+/// `None` means the record did not decode: an unknown tag, a truncated body,
+/// or — on the host, where bodies are validated — a discriminant byte that is
+/// not a value its type can hold. The record's wire length is still recoverable
+/// from the tag via [`log_record_wire_len`], so a caller can skip a rejected
+/// record and keep parsing the rest of the block.
 pub fn deserialize_log_record_at(block: &[u8], offset: usize) -> Option<(LogRecord, usize)> {
     let wire_len = log_record_wire_len(&block[offset..])?;
     let end = offset + wire_len;
@@ -352,34 +416,67 @@ pub fn decode_response_header(buf: &[u8]) -> Option<(u32, u32, u32)> {
     Some((record_count, storage_version, block_count))
 }
 
+/// Everything one downloaded block stream decodes to.
+#[cfg(any(feature = "std", test))]
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParsedLog {
+    /// The records, each tagged with whether its source block passed CRC.
+    pub records: std::vec::Vec<ParsedLogRecord>,
+    /// Data blocks whose CRC32 trailer did not match. Their records are still
+    /// in `records`, marked.
+    pub crc_failed_blocks: u32,
+    /// Records whose archived body failed validation and were skipped rather
+    /// than deserialised. Only a corrupt block can produce these.
+    pub invalid_records: u32,
+}
+
 /// Parse tagged records from block bytes. Host only. Returns `None` when the
 /// stream does not decode cleanly (e.g. a log written by older firmware).
+///
+/// A block that fails its CRC is *not* fatal: its records are parsed and
+/// returned with `block_crc_ok: false` so the caller can mark them, because one
+/// bad block must not make an otherwise good flight log unrecoverable. A record
+/// whose body fails validation is skipped and counted — records are fixed
+/// width, so the parser knows where the next one starts and the rest of the
+/// block survives.
 #[cfg(any(feature = "std", test))]
-pub fn parse_log_records(
-    record_count: u32,
-    blocks: &[u8],
-    block_count: u32,
-) -> Option<std::vec::Vec<LogRecord>> {
+pub fn parse_log_records(record_count: u32, blocks: &[u8], block_count: u32) -> Option<ParsedLog> {
     let mut records = std::vec::Vec::with_capacity(record_count as usize);
+    let mut crc_failed_blocks = 0u32;
+    let mut invalid_records = 0u32;
     let mut read = 0u32;
     for i in 0..block_count as usize {
         let start = i * BLOCK_SIZE;
-        let block = blocks.get(start..start + BLOCK_SIZE)?;
+        let block: &[u8; BLOCK_SIZE] = blocks.get(start..start + BLOCK_SIZE)?.try_into().ok()?;
+        let block_crc_ok = verify_data_block(block);
+        if !block_crc_ok {
+            crc_failed_blocks += 1;
+        }
         let mut off = 0usize;
         while read < record_count {
-            let Some((rec, wire_len)) = deserialize_log_record_at(block, off) else {
+            let Some(wire_len) = log_record_wire_len(&block[off..]) else {
                 break;
             };
             if off + wire_len > USABLE_PER_BLOCK {
                 break;
             }
-            records.push(rec);
+            match deserialize_log_record_at(block, off) {
+                Some((record, _)) => records.push(ParsedLogRecord {
+                    record,
+                    block_crc_ok,
+                }),
+                None => invalid_records += 1,
+            }
             off += wire_len;
             read += 1;
         }
     }
-    if records.len() as u32 == record_count {
-        Some(records)
+    if read == record_count {
+        Some(ParsedLog {
+            records,
+            crc_failed_blocks,
+            invalid_records,
+        })
     } else {
         None
     }
@@ -392,8 +489,13 @@ mod tests {
     use crate::can_bus::messages::node_status::{NodeHealth, NodeMode};
     use crate::flight_data_record::{
         AirBrakesRecord, AirbrakesEstimatorRecord, AmpRecord, DeploymentEstimatorRecord, ImuRecord,
-        NodeStatusRecord, PayloadRecord, merge_log_records,
+        NodeStatusRecord, ParsedLogRecord, PayloadRecord, merge_log_records,
     };
+
+    /// Records straight out of a block whose CRC checked out.
+    fn good(records: &[LogRecord]) -> Vec<ParsedLogRecord> {
+        records.iter().cloned().map(ParsedLogRecord::good).collect()
+    }
 
     fn sample_fast(i: u32) -> FlightDataFastRecord {
         FlightDataFastRecord {
@@ -613,12 +715,22 @@ mod tests {
             decode_response_header(&wire).unwrap();
         assert_eq!(record_count, n);
         assert_eq!(storage_version, STORAGE_VERSION);
-        let recovered = parse_log_records(record_count, &wire[HEADER_LEN..], block_count).unwrap();
+        let parsed = parse_log_records(record_count, &wire[HEADER_LEN..], block_count).unwrap();
+        assert_eq!(parsed.crc_failed_blocks, 0);
+        assert_eq!(parsed.invalid_records, 0);
+        let recovered: Vec<LogRecord> =
+            parsed.records.iter().map(|r| r.record.clone()).collect();
         assert_eq!(recovered, log);
+        assert!(parsed.records.iter().all(|r| r.block_crc_ok));
 
-        let merged = merge_log_records(&recovered);
+        let merged = merge_log_records(&parsed.records);
         assert_eq!(merged.len(), 20);
         assert_eq!(merged[0].record_count, 0);
+        assert!(!merged[0].source_block_crc_failed);
+        // The snapshot's own clock rides along, so a reader can bound how stale
+        // the slow columns on this row are.
+        assert_eq!(merged[0].slow_timestamp_us, Some(0));
+        assert_eq!(merged[19].slow_timestamp_us, Some(15_000_000));
         // Stage and pyro flags come from the fast record at full rate, not
         // the slow snapshot; the AMP snapshot rides in the slow record.
         assert_eq!(merged[0].flight_stage, FlightStage::Ascent);
@@ -642,23 +754,183 @@ mod tests {
     fn merge_before_first_slow_record_reports_nothing() {
         // A fast record logged before any slow snapshot has no slow data to
         // borrow, and says so rather than inventing a plausible zero.
-        let merged = merge_log_records(&[LogRecord::Fast(sample_fast(0))]);
+        let merged = merge_log_records(&good(&[LogRecord::Fast(sample_fast(0))]));
         assert_eq!(merged.len(), 1);
         assert!(merged[0].temperature.is_none());
         assert!(merged[0].num_of_fix_satellites.is_none());
         assert!(merged[0].air_brakes.is_none());
         assert!(merged[0].payload.is_none());
         assert!(merged[0].amp.is_none());
+        assert!(merged[0].slow_timestamp_us.is_none());
         // Fast-record columns are unaffected.
         assert_eq!(merged[0].pressure, 101325.0);
 
-        let merged = merge_log_records(&[
+        let merged = merge_log_records(&good(&[
             LogRecord::Slow(sample_slow(0)),
             LogRecord::Fast(sample_fast(0)),
-        ]);
+        ]));
         assert_eq!(merged[0].temperature, Some(21.5));
         assert_eq!(merged[0].num_of_fix_satellites, Some(9));
         assert_eq!(merged[0].payload.as_ref().unwrap().rail_ma[2], None);
     }
 
+    /// A session boundary is the same situation as
+    /// [`merge_before_first_slow_record_reports_nothing`], except a stale
+    /// snapshot is sitting there ready to be borrowed.
+    ///
+    /// One stored log spans several armed sessions and power cycles, because
+    /// the logger resumes the existing log instead of starting a new one, and
+    /// `sequence` stepping backwards is the only mark of where one ends. Left
+    /// unhandled, every session after the first opened with ~42 rows carrying
+    /// the *previous* session's GPS fix, node heartbeats, AMP and payload —
+    /// data that looks exactly like a live reading.
+    #[test]
+    fn merge_drops_the_slow_snapshot_at_a_session_boundary() {
+        let stale = FlightDataSlowRecord {
+            temperature: 40.0,
+            ..sample_slow(0)
+        };
+        let fresh = FlightDataSlowRecord {
+            temperature: 21.5,
+            ..sample_slow(9)
+        };
+        let merged = merge_log_records(&good(&[
+            LogRecord::Slow(stale),
+            LogRecord::Fast(sample_fast(5)),
+            // `sequence` restarts: session two begins here.
+            LogRecord::Fast(sample_fast(0)),
+            LogRecord::Fast(sample_fast(1)),
+            LogRecord::Slow(fresh),
+            LogRecord::Fast(sample_fast(2)),
+        ]));
+        assert_eq!(merged.len(), 4);
+
+        // Session one reads its own snapshot, as before.
+        assert_eq!(merged[0].temperature, Some(40.0));
+        assert_eq!(merged[0].slow_timestamp_us, Some(0));
+
+        // Session two, before its first snapshot: nothing at all, exactly as if
+        // the log had begun here. Not 40.0 C from a session that is over.
+        for row in &merged[1..3] {
+            assert!(row.temperature.is_none());
+            assert!(row.lat_lon.is_none());
+            assert!(row.gps_altitude_asl.is_none());
+            assert!(row.num_of_fix_satellites.is_none());
+            assert!(row.amp.is_none());
+            assert!(row.amp_node.is_none());
+            assert!(row.payload.is_none());
+            assert!(row.air_brakes.is_none());
+            assert!(row.slow_timestamp_us.is_none());
+        }
+        // Fast-record columns are untouched by the reset.
+        assert_eq!(merged[1].record_count, 0);
+        assert_eq!(merged[1].pressure, 101325.0);
+
+        // ...and the slow columns come back once session two takes a snapshot.
+        assert_eq!(merged[3].temperature, Some(21.5));
+        assert_eq!(merged[3].slow_timestamp_us, Some(9_000_000));
+    }
+
+    /// A record from a CRC-failed block is exported, but marked — and the mark
+    /// follows the snapshot, not just the record it arrived in.
+    #[test]
+    fn crc_failure_marks_every_row_it_touches() {
+        let merged = merge_log_records(&[
+            ParsedLogRecord {
+                record: LogRecord::Slow(sample_slow(0)),
+                block_crc_ok: false,
+            },
+            // A good fast record — but it carries the suspect snapshot, so the
+            // row it produces is suspect too.
+            ParsedLogRecord::good(LogRecord::Fast(sample_fast(0))),
+            ParsedLogRecord {
+                record: LogRecord::Fast(sample_fast(1)),
+                block_crc_ok: false,
+            },
+        ]);
+        assert_eq!(merged.len(), 2);
+        assert!(merged[0].source_block_crc_failed);
+        assert!(merged[1].source_block_crc_failed);
+        // The data is still there to look at.
+        assert_eq!(merged[0].temperature, Some(21.5));
+
+        // A later good snapshot clears the taint for rows that only read it.
+        let merged = merge_log_records(&[
+            ParsedLogRecord {
+                record: LogRecord::Slow(sample_slow(0)),
+                block_crc_ok: false,
+            },
+            ParsedLogRecord::good(LogRecord::Slow(sample_slow(1))),
+            ParsedLogRecord::good(LogRecord::Fast(sample_fast(0))),
+        ]);
+        assert!(!merged[0].source_block_crc_failed);
+    }
+
+    /// The important half of the CRC-failure fix: a corrupt discriminant must
+    /// be rejected, not fed to a `match`.
+    ///
+    /// Every `Option` in these records archives to a `#[repr(u8)]` tag valid
+    /// only as 0 or 1, and `FlightStage` / `NodeHealth` / `NodeMode` / `bool`
+    /// are just as narrow. rkyv's unchecked deserialize would read a corrupted
+    /// one straight into the generated `Deserialize` impl's `match`, which is
+    /// undefined behaviour — reachable from a condition (a failed block CRC)
+    /// the exporter already detects. Records are fixed width, so a corrupt body
+    /// byte does not break parsing; it just quietly becomes an invalid value,
+    /// which makes this the *typical* result of a CRC failure rather than a
+    /// corner case.
+    #[test]
+    fn a_corrupt_body_is_rejected_rather_than_deserialized() {
+        for (tag, wire_len) in [
+            (RECORD_TAG_FAST, FAST_WIRE_LEN),
+            (RECORD_TAG_SLOW, SLOW_WIRE_LEN),
+        ] {
+            let mut garbage = [0xAAu8; MAX_WIRE_LEN];
+            garbage[0] = tag;
+            assert!(
+                deserialize_log_record_at(&garbage[..wire_len], 0).is_none(),
+                "a body of 0xAA bytes decoded as a valid record"
+            );
+            // The width is still recoverable from the tag, which is what lets
+            // the parser skip the bad record and keep going.
+            assert_eq!(log_record_wire_len(&garbage[..wire_len]), Some(wire_len));
+        }
+    }
+
+    /// The whole-log path: a bad block does not abort the export, its records
+    /// are marked, and any record that fails validation is skipped instead of
+    /// deserialised.
+    #[test]
+    fn a_crc_failed_block_still_exports_and_is_marked() {
+        let log: Vec<LogRecord> = vec![
+            LogRecord::Slow(sample_slow(0)),
+            LogRecord::Fast(sample_fast(0)),
+            LogRecord::Fast(sample_fast(1)),
+        ];
+        let n = log.len() as u32;
+        let (mut blocks, _) = pack_log(&log);
+
+        // Corrupt a byte inside the first record's body of every block and
+        // leave the CRC trailers alone, which is what a bit-rotted card looks
+        // like. Byte 3 is never a record tag, so the stream still walks.
+        for block in blocks.iter_mut() {
+            block[3] ^= 0xFF;
+        }
+
+        let mut wire = Vec::new();
+        for b in &blocks {
+            wire.extend_from_slice(b);
+        }
+        let parsed = parse_log_records(n, &wire, blocks.len() as u32).expect("still parses");
+        assert_eq!(parsed.crc_failed_blocks, blocks.len() as u32);
+        // Whatever survived validation is exported, and marked.
+        assert!(parsed.records.iter().all(|r| !r.block_crc_ok));
+        assert_eq!(
+            parsed.records.len() as u32 + parsed.invalid_records,
+            n,
+            "every record is either returned or counted as skipped"
+        );
+        for row in merge_log_records(&parsed.records) {
+            assert!(row.source_block_crc_failed);
+        }
+    }
 }

@@ -6,13 +6,20 @@ use serde::{Deserialize, Serialize};
 
 use crate::{can_bus::messages::amp_status::PowerOutputStatus, fixed_point_factory};
 
-use super::VLPDownlinkPacket;
+use super::{
+    BATTERY_V_FAC_BITS, BatteryVFac, BatteryVFacBase, VLPDownlinkPacket, decode_shared_battery_v,
+    encode_shared_battery_v, telemetry::MAX_REPORTED_FIX_SATELLITES,
+};
 
 // 23 bits for latitude, 24 bits for longitude
 // resolution of 2.4m at equator
 fixed_point_factory!(LatFac, f64, -90.0, 90.0, 0.00002146);
 fixed_point_factory!(LonFac, f64, -180.0, 180.0, 0.00002146);
-fixed_point_factory!(BatteryVFac, f32, 2.5, 8.5, 0.01);
+// `BatteryVFac` and the `shared_battery_v` sentinel live in `super`, shared with
+// the other two downlink packets. This packet is WHY the encoding is a sentinel
+// rather than a validity bit: it is 88 bits in 11 bytes with nothing spare, so
+// an eleventh validity bit would have cost a twelfth byte on air for one
+// voltage.
 
 #[derive(PackedStruct, Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 // 88 bits = exactly 11 bytes, no spare. Same content-width as
@@ -44,6 +51,16 @@ pub struct LandedTelemetryPacket {
 
     amp_online: bool,
     amp_rebooted_in_last_5s: bool,
+    /// The AMP-relayed shared battery bus. Absence is the all-ones code (see
+    /// [`super::SHARED_BATTERY_V_UNAVAILABLE_CODE`]) because this packet has no spare
+    /// bit to spend on a validity flag.
+    ///
+    /// `amp_online` is not a substitute: the CAN heartbeat starts at boot,
+    /// before the first status message, and in that window this field would
+    /// otherwise hold its 0.0 initial value — which clamps to 2.5V, the reading
+    /// that means the pack is flat. On the packet the recovery team reads to
+    /// decide whether the rocket still has power, that is the worst possible
+    /// place to guess.
     #[packed_field(element_size_bits = "10")]
     shared_battery_v: Integer<BatteryVFacBase, packed_bits::Bits<BATTERY_V_FAC_BITS>>,
     amp_out1_overwrote: bool,
@@ -68,7 +85,8 @@ impl LandedTelemetryPacket {
         battery_v: f32,
         amp_online: bool,
         amp_rebooted_in_last_5s: bool,
-        shared_battery_v: f32,
+        // `None` when AMP has not reported a shared battery voltage.
+        shared_battery_v: Option<f32>,
         amp_out1_overwrote: bool,
         amp_out1: PowerOutputStatus,
         amp_out2_overwrote: bool,
@@ -85,11 +103,20 @@ impl LandedTelemetryPacket {
             // unless `lat_lon_valid` is set.
             lat: LatFac::to_fixed_point_capped(lat_lon.unwrap_or((0.0, 0.0)).0),
             lon: LonFac::to_fixed_point_capped(lat_lon.unwrap_or((0.0, 0.0)).1),
-            num_of_fix_satellites,
+            // Saturate rather than let packed_struct truncate: the field is
+            // 5 bits, so 32 satellites would wrap to 0 -- and on this packet a
+            // reported 0 is what tells the recovery team the position they are
+            // walking towards came from nothing. `TelemetryPacket` has always
+            // clamped here; this packet clamps against the same constant so one
+            // count cannot mean two things. Today's receiver (u-blox CAM-M8Q,
+            // NMEA GGA numSV) tops out around 12, so this is unreachable --
+            // which is why it must not be left to the next receiver to
+            // rediscover.
+            num_of_fix_satellites: num_of_fix_satellites.min(MAX_REPORTED_FIX_SATELLITES),
             battery_v: BatteryVFac::to_fixed_point_capped(battery_v),
             amp_online,
             amp_rebooted_in_last_5s,
-            shared_battery_v: BatteryVFac::to_fixed_point_capped(shared_battery_v),
+            shared_battery_v: encode_shared_battery_v(shared_battery_v),
             amp_out1_overwrote,
             amp_out1,
             amp_out2_overwrote,
@@ -113,6 +140,8 @@ impl LandedTelemetryPacket {
         }
     }
 
+
+    /// Saturating: [`MAX_REPORTED_FIX_SATELLITES`] means "at least that many".
     pub fn num_of_fix_satellites(&self) -> u8 {
         self.num_of_fix_satellites
     }
@@ -129,8 +158,12 @@ impl LandedTelemetryPacket {
         self.amp_rebooted_in_last_5s
     }
 
-    pub fn shared_battery_v(&self) -> f32 {
-        BatteryVFac::to_float(self.shared_battery_v)
+    /// The AMP-relayed shared battery bus voltage. `None` when AMP has not
+    /// reported one — it is offline, or has not sent its first status message.
+    /// A genuinely flat pack decodes as `Some(2.5)`, the bottom of the range,
+    /// which is why absence is the top code and not the bottom.
+    pub fn shared_battery_v(&self) -> Option<f32> {
+        decode_shared_battery_v(self.shared_battery_v)
     }
 
     pub fn amp_out1_overwrote(&self) -> bool {
@@ -210,7 +243,11 @@ pub struct LandedTelemetryPacketBuilderState {
     pub battery_v: f32,
     pub amp_online: bool,
     pub amp_rebooted_in_last_5s: bool,
-    pub shared_battery_v: f32,
+    /// The shared battery bus, from AMP's status message. `None` until one
+    /// arrives — which is later than `amp_online` goes true. Pass `None` rather
+    /// than 0.0: 0.0 clamps to the bottom of the range and downlinks as a dead
+    /// pack.
+    pub shared_battery_v: Option<f32>,
     pub amp_out1_overwrote: bool,
     pub amp_out1: PowerOutputStatus,
     pub amp_out2_overwrote: bool,
@@ -235,7 +272,7 @@ impl<M: RawMutex> LandedTelemetryPacketBuilder<M> {
                 battery_v: 0.0,
                 amp_online: false,
                 amp_rebooted_in_last_5s: false,
-                shared_battery_v: 0.0,
+                shared_battery_v: None,
                 amp_out1_overwrote: false,
                 amp_out1: PowerOutputStatus::Disabled,
                 amp_out2_overwrote: false,
@@ -300,7 +337,7 @@ mod tests {
             7.9,
             true,
             false,
-            8.2,
+            Some(8.2),
             false,
             PowerOutputStatus::PowerGood,
             true,
@@ -337,7 +374,76 @@ mod tests {
         assert_relative_eq!(lon, -73.6, epsilon = 0.0001);
         assert_eq!(p.num_of_fix_satellites(), 9);
         assert_relative_eq!(p.battery_v(), 7.9, epsilon = 0.01);
+        assert_relative_eq!(p.shared_battery_v().unwrap(), 8.2, epsilon = 0.01);
         assert_eq!(p.amp_out2(), PowerOutputStatus::PowerBad);
+    }
+
+    /// AMP relays the shared bus, so it can be missing. On the packet the
+    /// recovery team reads to decide whether the rocket still has power, the
+    /// 0.0 filler clamping to 2.5V would report a flat pack that nobody
+    /// measured. The bit budget here is zero, so absence is the field's
+    /// all-ones code.
+    #[test]
+    fn absent_shared_battery_survives_the_wire_as_none() {
+        let p = round_trip(LandedTelemetryPacket::new(
+            12,
+            Some((45.5, -73.6)),
+            9,
+            7.9,
+            false,
+            false,
+            None,
+            false,
+            PowerOutputStatus::Unknown,
+            false,
+            PowerOutputStatus::Unknown,
+            false,
+            PowerOutputStatus::Unknown,
+        ));
+
+        assert_eq!(p.shared_battery_v(), None);
+        // The VL's own battery is measured locally, so it is never absent.
+        assert_relative_eq!(p.battery_v(), 7.9, epsilon = 0.01);
+        // And the AMP output statuses come back as "not reported" rather than
+        // as "commanded off" -- a code that used to fail to decode at all, and
+        // took the whole packet with it.
+        assert_eq!(p.amp_out1(), PowerOutputStatus::Unknown);
+
+        // A collapsed pack is still a reading, at the bottom of the range, and
+        // an over-range one caps a code short of the sentinel.
+        let flat = round_trip(LandedTelemetryPacket::new(
+            12,
+            None,
+            0,
+            7.9,
+            true,
+            false,
+            Some(0.0),
+            false,
+            PowerOutputStatus::Disabled,
+            false,
+            PowerOutputStatus::Disabled,
+            false,
+            PowerOutputStatus::Disabled,
+        ));
+        assert_relative_eq!(flat.shared_battery_v().unwrap(), 2.5, epsilon = 0.01);
+
+        let over = round_trip(LandedTelemetryPacket::new(
+            12,
+            None,
+            0,
+            7.9,
+            true,
+            false,
+            Some(100.0),
+            false,
+            PowerOutputStatus::Disabled,
+            false,
+            PowerOutputStatus::Disabled,
+            false,
+            PowerOutputStatus::Disabled,
+        ));
+        assert_relative_eq!(over.shared_battery_v().unwrap(), 8.4941, epsilon = 0.001);
     }
 
     /// The packet a rocket that landed without a fix sends. It must say so:

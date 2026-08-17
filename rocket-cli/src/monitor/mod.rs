@@ -213,26 +213,51 @@ fn tui_task(
     Ok(())
 }
 
+/// Write every log line to the `.log` file until the producer hangs up.
+///
+/// `Lagged` is recoverable and must be treated that way. A `while let Ok(..)`
+/// here ends the loop on the first lag, flushes, and returns `Ok(())` — after
+/// which the file silently stops growing for the rest of the session, with a
+/// clean exit code and nothing in the log to say so. Lagging is not exotic:
+/// every line costs this task several blocking-pool syscall round-trips
+/// (`tokio::fs::File` does no userspace buffering) while the producer only has
+/// to format and push, so a burst of target output outruns a 256-deep channel
+/// easily. Only `Closed` ends the loop; a lag leaves a marker and continues.
 async fn log_saver_task(
     mut log_saver: LogSaver,
     mut logs_rx: broadcast::Receiver<TargetLog>,
 ) -> Result<()> {
-    while let Ok(log) = logs_rx.recv().await {
-        log_saver.append_log(&log).await.unwrap();
+    loop {
+        match logs_rx.recv().await {
+            Ok(log) => log_saver.append_log(&log).await?,
+            Err(broadcast::error::RecvError::Lagged(dropped)) => {
+                log_saver.append_dropped_marker(dropped).await?
+            }
+            Err(broadcast::error::RecvError::Closed) => break,
+        }
     }
-    log_saver.flush().await.unwrap();
+    log_saver.flush().await?;
 
     Ok(())
 }
 
+/// Same contract as [`log_saver_task`], for the `.message.log` / `.imu.csv`
+/// pair. The CAN channel is only 32 deep — roughly eight iterations of the
+/// serial read loop — so this is the one that lags first.
 async fn message_saver_task(
     mut message_saver: CanMessageSaver,
     mut messages_rx: broadcast::Receiver<DecodedMessage>,
 ) -> Result<()> {
-    while let Ok(message) = messages_rx.recv().await {
-        message_saver.append_message(&message).await.unwrap();
+    loop {
+        match messages_rx.recv().await {
+            Ok(message) => message_saver.append_message(&message).await?,
+            Err(broadcast::error::RecvError::Lagged(dropped)) => {
+                message_saver.append_dropped_marker(dropped).await?
+            }
+            Err(broadcast::error::RecvError::Closed) => break,
+        }
     }
-    message_saver.flush().await.unwrap();
+    message_saver.flush().await?;
 
     Ok(())
 }

@@ -195,6 +195,12 @@ impl MessageRow {
                 "power bad",
                 Style::from_color_style(ColorStyle::front(BaseColor::Red.dark())),
             ),
+            // AMP has said nothing about this output. Rendered like every other
+            // unavailable reading on this screen, and deliberately NOT as
+            // "disabled": that is a state AMP actively reports, and putting an
+            // absent report on screen as a commanded-off output would be a
+            // claim the rocket never made.
+            PowerOutputStatus::Unknown => s.append(Self::format_unavailable()),
         }
 
         s.append_plain("".pad_to_width(21 - s.width()));

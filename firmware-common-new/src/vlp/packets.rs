@@ -1,4 +1,5 @@
 use core::fmt::Debug;
+use packed_struct::prelude::*;
 
 use crate::{fixed_point_factory, utils::FixedLenSerializable};
 use ack::AckPacket;
@@ -31,6 +32,60 @@ pub const MAX_VLP_PACKET_SIZE: usize = 100;
 // duplicated per packet because the two copies had drifted: the low-power
 // packet's floor was 0 C, which silently clamped sub-freezing pad readings.
 fixed_point_factory!(TemperatureFac, f32, -10.0, 85.0, 0.2);
+
+// 10 bits over 2.5..8.5V, so (8.5 - 2.5) / (2^10 - 1) = 5.87mV per code.
+//
+// Shared by every packet that carries a battery voltage, for the same reason as
+// `TemperatureFac` above: all three downlink packets carry `shared_battery_v`,
+// and a voltage that decodes one way on the flight packet and another way on
+// the landed packet would be worse than either choice on its own. Three copies
+// of a factory is three chances for the ranges to drift apart, which is exactly
+// how the temperature floor got out of step.
+fixed_point_factory!(BatteryVFac, f32, 2.5, 8.5, 0.01);
+
+/// The code reserved for "this battery voltage was never reported", spent on
+/// `shared_battery_v` in all three downlink packets.
+///
+/// A sentinel rather than a validity bit, and not because any one packet is
+/// short of bits: `LandedTelemetryPacket` has exactly zero spare bits, so a
+/// validity bit could not propagate there without a twelfth byte. The top code
+/// costs 5.87mV of headroom at 8.5V — a bus that is over-range is already
+/// pegged at the top of the scale and is not read to that precision anyway. The
+/// bottom of the range stays untouchable for the usual reason: 2.5V is a
+/// collapsed pack, a fault the ground has to be able to see.
+///
+/// `vl_battery_v` / `battery_v` deliberately do NOT use this. Those are the
+/// voltage of the board building the packet, so they are always present.
+const SHARED_BATTERY_V_UNAVAILABLE_CODE: BatteryVFacBase = (1 << BATTERY_V_FAC_BITS) - 1;
+
+/// Encode a relayed battery voltage, clamping real readings one code below the
+/// sentinel so a present value can never collide with absence.
+fn encode_shared_battery_v(
+    shared_battery_v: Option<f32>,
+) -> Integer<BatteryVFacBase, packed_bits::Bits<BATTERY_V_FAC_BITS>> {
+    // NaN is absence that lost its `Option`, and it panics inside
+    // `to_fixed_point_capped`, so it is folded back into absence here.
+    match shared_battery_v.filter(|v| !v.is_nan()) {
+        None => SHARED_BATTERY_V_UNAVAILABLE_CODE.into(),
+        Some(v) => {
+            let code: BatteryVFacBase = BatteryVFac::to_fixed_point_capped(v).into();
+            code.min(SHARED_BATTERY_V_UNAVAILABLE_CODE - 1).into()
+        }
+    }
+}
+
+/// `None` when the packet carries the sentinel — the node relaying this voltage
+/// has not reported it.
+fn decode_shared_battery_v(
+    shared_battery_v: Integer<BatteryVFacBase, packed_bits::Bits<BATTERY_V_FAC_BITS>>,
+) -> Option<f32> {
+    let code: BatteryVFacBase = shared_battery_v.into();
+    if code == SHARED_BATTERY_V_UNAVAILABLE_CODE {
+        None
+    } else {
+        Some(BatteryVFac::to_float(shared_battery_v))
+    }
+}
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

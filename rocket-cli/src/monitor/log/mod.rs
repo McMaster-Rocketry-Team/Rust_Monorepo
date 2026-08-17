@@ -13,9 +13,10 @@ use cursive::{
     wrap_impl,
 };
 use log::Level;
-use target_log::TargetLog;
+use target_log::{DefmtLogInfo, TargetLog};
 use tokio::sync::broadcast;
 
+use crate::args::NodeTypeEnum;
 use crate::monitor::log::logs_view::LogsView;
 
 use super::config::MonitorConfig;
@@ -264,12 +265,39 @@ impl LogViewer {
             })
     }
 
+    /// Drain whatever the broadcast channel has for us this frame.
+    ///
+    /// Unlike the log saver this loop is re-entered every frame, so a `Lagged`
+    /// would heal on its own — but it would heal silently, and the viewer would
+    /// show a run of target output followed by an unmarked jump. Push a visible
+    /// marker instead, so a gap on screen is always labelled as one.
     pub fn receive_logs(&mut self) {
         let mut logs_rx = self.logs_rx.write().unwrap();
         let mut logs_view = self.root.find_name::<LogsView>("logs").unwrap();
-        while let Ok(log) = logs_rx.try_recv() {
-            if !*self.paused.read().unwrap() {
-                logs_view.push_log(log);
+        loop {
+            match logs_rx.try_recv() {
+                Ok(log) => {
+                    if !*self.paused.read().unwrap() {
+                        logs_view.push_log(log);
+                    }
+                }
+                Err(broadcast::error::TryRecvError::Lagged(dropped)) => {
+                    logs_view.push_log(TargetLog {
+                        node_type: NodeTypeEnum::Other,
+                        node_id: None,
+                        log_content: format!(
+                            "{} log line(s) dropped: the viewer fell behind the log stream",
+                            dropped
+                        ),
+                        defmt: Some(DefmtLogInfo {
+                            log_level: Level::Warn,
+                            timestamp: None,
+                            location: None,
+                        }),
+                    });
+                }
+                Err(broadcast::error::TryRecvError::Empty)
+                | Err(broadcast::error::TryRecvError::Closed) => break,
             }
         }
     }

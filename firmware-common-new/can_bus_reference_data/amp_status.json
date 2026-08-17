@@ -74,5 +74,43 @@
         192
       ]
     ]
+  },
+  {
+    "message": {
+      "AmpStatus": {
+        "shared_battery_mv": 7400,
+        "out1": {
+          "overwrote": false,
+          "status": "Unknown"
+        },
+        "out2": {
+          "overwrote": false,
+          "status": "Unknown"
+        },
+        "out3": {
+          "overwrote": false,
+          "status": "Unknown"
+        }
+      }
+    },
+    "message_type": 33,
+    "serialized_data": [
+      28,
+      232,
+      96,
+      96,
+      96
+    ],
+    "frame_id": 344236052,
+    "encoded_data": [
+      [
+        28,
+        232,
+        96,
+        96,
+        96,
+        192
+      ]
+    ]
   }
 ]

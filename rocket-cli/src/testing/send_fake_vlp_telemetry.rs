@@ -93,7 +93,7 @@ pub async fn send_fake_vlp_telemetry(args: SendVLPTelemetryArgs) -> Result<()> {
             3000.0,
             false,
             false,
-            8.4,
+            Some(8.4),
             false,
             PowerOutputStatus::Disabled,
             false,

@@ -17,14 +17,25 @@ pub struct VLCustomStatus {
 }
 
 impl VLCustomStatus {
+    /// Every flag starts false: a subsystem is unhealthy until it has proven
+    /// otherwise.
+    ///
+    /// These are the values the node reports for the whole window between boot
+    /// and each task's first success, and they are what it keeps reporting for
+    /// any subsystem that never gets that far. Defaulting them true meant a
+    /// sensor that was absent, unpowered or mis-wired — one that therefore
+    /// never ran the code that would have cleared its flag — was indistinguishable
+    /// on the wire from a healthy one, and the boot self-test read them
+    /// straight into its pass/fail decision. Each owning task now raises its
+    /// flag on first success and lowers it on failure.
     pub fn new() -> Self {
         Self {
-            imu_ok: true,
-            baro_ok: true,
-            mag_ok: true,
-            gps_ok: true,
-            sd_ok: true,
-            can_bus_ok: true,
+            imu_ok: false,
+            baro_ok: false,
+            mag_ok: false,
+            gps_ok: false,
+            sd_ok: false,
+            can_bus_ok: false,
         }
     }
 }

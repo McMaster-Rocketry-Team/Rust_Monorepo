@@ -12,6 +12,23 @@ pub enum PowerOutputStatus {
     Disabled = 0,
     PowerGood = 1,
     PowerBad = 2,
+    /// AMP has not reported this output's status.
+    ///
+    /// Not the same as [`PowerOutputStatus::Disabled`], which is an output AMP
+    /// is actively reporting as commanded off — a normal, deliberate state.
+    /// This one means nobody has said anything about the output at all: AMP is
+    /// offline, has not sent its first `AmpStatusMessage` yet, or the field was
+    /// never populated. Rendering that as "disabled" would put a report on
+    /// screen that the rocket never made.
+    ///
+    /// It also has to exist for a second reason. The field is 2 bits wide
+    /// everywhere it appears (here and in three VLP packets), so `0b11` is on
+    /// the wire whether or not anything means to put it there. While the code
+    /// was undefined, `from_primitive` returned `None` for it and unpacking
+    /// failed for the WHOLE containing packet — one stray bit pattern in an
+    /// AMP status field would drop an entire telemetry frame rather than one
+    /// output's status.
+    Unknown = 3,
 }
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
@@ -93,7 +110,47 @@ mod tests {
                 },
             }
             .into(),
+            // The 2-bit field's fourth code. It used to be undefined, so this
+            // message did not decode at all.
+            AmpStatusMessage {
+                shared_battery_mv: 7400,
+                out1: AmpOutputStatus {
+                    overwrote: false,
+                    status: PowerOutputStatus::Unknown,
+                },
+                out2: AmpOutputStatus {
+                    overwrote: false,
+                    status: PowerOutputStatus::Unknown,
+                },
+                out3: AmpOutputStatus {
+                    overwrote: false,
+                    status: PowerOutputStatus::Unknown,
+                },
+            }
+            .into(),
         ]
+    }
+
+    /// `0b11` is on the wire whether or not anything means to put it there —
+    /// the field is 2 bits and only three codes were defined. While it was
+    /// undefined, `from_primitive` returned `None` and unpacking failed for the
+    /// entire message, so one stray bit pattern in an output status field cost
+    /// the shared battery voltage and the other two outputs as well.
+    #[test]
+    fn all_ones_output_code_decodes_instead_of_failing() {
+        init_logger();
+
+        assert_eq!(
+            PowerOutputStatus::from_primitive(0b11),
+            Some(PowerOutputStatus::Unknown)
+        );
+
+        let unpacked = AmpOutputStatus::unpack(&[0b0_11_00000]).unwrap();
+        assert_eq!(unpacked.status, PowerOutputStatus::Unknown);
+        assert!(!unpacked.overwrote);
+        // And it is emphatically not `Disabled`, which is AMP reporting an
+        // output as commanded off.
+        assert_ne!(unpacked.status, PowerOutputStatus::Disabled);
     }
 
     #[test]

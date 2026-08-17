@@ -248,6 +248,31 @@ pub enum LogRecord {
     Slow(FlightDataSlowRecord),
 }
 
+/// One record as read back off the card, tagged with the health of the
+/// 512-byte block it was found in.
+///
+/// The block CRC is checked per block, but a block holds ~4-5 records, so the
+/// question a reader actually asks — "can I trust THIS row?" — is only
+/// answerable if the answer travels with the record. That is what this carries.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParsedLogRecord {
+    pub record: LogRecord,
+    /// `false` when the block this record came out of failed its CRC32
+    /// trailer: some byte in that block is wrong, and it may well be one of
+    /// this record's.
+    pub block_crc_ok: bool,
+}
+
+impl ParsedLogRecord {
+    /// A record from a block whose CRC checked out.
+    pub fn good(record: LogRecord) -> Self {
+        Self {
+            record,
+            block_crc_ok: true,
+        }
+    }
+}
+
 /// Merged view used for CSV export (one row per fast record).
 ///
 /// Everything sourced from the slow snapshot is `Option` here, including the
@@ -260,7 +285,29 @@ pub struct FlightDataRecord {
     /// [`FlightDataFastRecord::sequence`] — see there for what a discontinuity
     /// means (a drop forwards, a session boundary backwards).
     pub record_count: u32,
+    /// The 512-byte block behind some of this row's data failed its CRC32
+    /// trailer, so at least one byte in it is wrong. Set when either the fast
+    /// sample or the slow snapshot the row carries came out of a bad block.
+    ///
+    /// Such rows are still exported — one bad block must not make an otherwise
+    /// good flight log unrecoverable — but nothing on them is trustworthy.
+    /// Records are fixed width, so a corrupt body byte cannot desynchronize the
+    /// stream: it silently changes a value here instead of breaking parsing,
+    /// which is exactly why the row has to be marked rather than left to look
+    /// like every other row.
+    pub source_block_crc_failed: bool,
     pub timestamp_us: u64,
+    /// [`FlightDataSlowRecord::timestamp_us`] of the snapshot the slow columns
+    /// on this row were copied from, `None` when no snapshot precedes the row.
+    ///
+    /// `timestamp_us - slow_timestamp_us` bounds how stale the VL-side snapshot
+    /// is (at most one slow period, ~100 ms). That bound is about the SNAPSHOT
+    /// ONLY. It says nothing about how old the readings inside it are:
+    /// [`AirBrakesRecord::actual_extension`] and
+    /// [`AirBrakesRecord::servo_temp`] come off Icarus at 10 Hz, so they can be
+    /// a further ~100 ms older than this timestamp, and that latency is
+    /// upstream of the snapshot where nothing here can see it.
+    pub slow_timestamp_us: Option<u64>,
     /// GPS-disciplined unix clock (µs since epoch), `None` until the clock is
     /// ready.
     pub unix_time_us: Option<u64>,
@@ -314,13 +361,19 @@ pub struct FlightDataRecord {
 impl FlightDataRecord {
     /// Combine one fast sample with the most recent slow snapshot, or `None`
     /// if no slow record has been seen yet.
+    ///
+    /// `source_block_crc_failed` covers the whole row: pass `true` if either
+    /// the fast record or the snapshot came from a block that failed its CRC.
     pub fn from_fast_and_slow(
         fast: &FlightDataFastRecord,
         slow: Option<&FlightDataSlowRecord>,
+        source_block_crc_failed: bool,
     ) -> Self {
         Self {
             record_count: fast.sequence,
+            source_block_crc_failed,
             timestamp_us: fast.timestamp_us,
+            slow_timestamp_us: slow.map(|s| s.timestamp_us),
             unix_time_us: fast.unix_time_us,
             imu: fast.imu.clone(),
             pressure: fast.pressure,
@@ -349,15 +402,46 @@ impl FlightDataRecord {
 }
 
 /// Expand a tagged log into merged rows (one CSV row per fast sample).
+///
+/// The held slow snapshot is dropped at every session boundary. One stored log
+/// spans several armed sessions and several power cycles, because the firmware
+/// logger resumes an existing log rather than starting a new one, and
+/// [`FlightDataFastRecord::sequence`] stepping backwards is the only marker of
+/// where one session ends. Carrying a snapshot across it would put the previous
+/// session's GPS fix, node heartbeats, AMP and payload state on the first ~42
+/// rows of the next one, which is the same lie as inventing slow data before
+/// the first snapshot ever arrives.
+///
+/// The reset is deliberately blunt: a snapshot written after the boundary but
+/// before the new session's first fast record is discarded with it. That costs
+/// at most one slow period (~100 ms) of real data at each boundary — the
+/// records interleave at ~42 fast per slow, so a session almost always opens on
+/// a fast record — and it is the only direction that cannot mislabel a row.
 #[cfg(any(feature = "std", test))]
-pub fn merge_log_records(log: &[LogRecord]) -> std::vec::Vec<FlightDataRecord> {
+pub fn merge_log_records(log: &[ParsedLogRecord]) -> std::vec::Vec<FlightDataRecord> {
     let mut slow: Option<FlightDataSlowRecord> = None;
+    // Tracked alongside `slow` because a row is untrustworthy if EITHER half of
+    // it came from a bad block, and the snapshot outlives the record it came in.
+    let mut slow_from_bad_block = false;
+    let mut prev_sequence: Option<u32> = None;
     let mut out = std::vec::Vec::new();
-    for rec in log {
-        match rec {
-            LogRecord::Slow(s) => slow = Some(s.clone()),
+    for parsed in log {
+        match &parsed.record {
+            LogRecord::Slow(s) => {
+                slow = Some(s.clone());
+                slow_from_bad_block = !parsed.block_crc_ok;
+            }
             LogRecord::Fast(fast) => {
-                out.push(FlightDataRecord::from_fast_and_slow(fast, slow.as_ref()))
+                if prev_sequence.is_some_and(|prev| fast.sequence < prev) {
+                    slow = None;
+                    slow_from_bad_block = false;
+                }
+                prev_sequence = Some(fast.sequence);
+                out.push(FlightDataRecord::from_fast_and_slow(
+                    fast,
+                    slow.as_ref(),
+                    !parsed.block_crc_ok || slow_from_bad_block,
+                ))
             }
         }
     }
