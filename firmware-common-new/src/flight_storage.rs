@@ -50,6 +50,12 @@ pub const DEFAULT_TARGET_APOGEE_AGL: f32 = 4000.0;
 
 /// On-disk format version. Bump when the record or superblock layout changes;
 /// logs written at any other version are treated as absent.
+/// v14: `air_brakes_target_apogee_agl` added to the slow record. The log
+///     carried the MPC's prediction and its command but not the target they
+///     were computed against, which lives only in the SD config block and the
+///     live downlink — so a finished log could not distinguish a controller
+///     that failed to reach a reachable target from one correctly declining to
+///     chase an unreachable one.
 /// v13: the airbrakes flag byte is renumbered. Bit 4 was held empty for the
 ///     retired `AIRBRAKES_APOGEE` latch so pre-2026-08-17 logs kept their
 ///     meaning; every board and host now runs current code, so the hole is
@@ -77,7 +83,7 @@ pub const DEFAULT_TARGET_APOGEE_AGL: f32 = 4000.0;
 ///     `mpc_predicted_apogee_agl` added to the slow record, `VALID_BARO` dropped.
 /// v8: payload EPM rail currents + SEM actuator steps in the slow record.
 /// v7: tagged FAST/SLOW stream (see `flight_data_record`). Older formats: see git history.
-pub const STORAGE_VERSION: u32 = 13;
+pub const STORAGE_VERSION: u32 = 14;
 
 /// rkyv body sizes for tagged record types.
 pub const FAST_BODY_LEN: usize = size_of::<<FlightDataFastRecord as rkyv::Archive>::Archived>();
@@ -433,6 +439,7 @@ mod tests {
                 validation_deploy: false,
                 actual_extension: Some(0.2),
                 servo_temp: Some(41.5),
+                target_apogee_agl: Some(3000.0),
             },
             amp: Some(AmpRecord {
                 shared_battery_v: 8.2,

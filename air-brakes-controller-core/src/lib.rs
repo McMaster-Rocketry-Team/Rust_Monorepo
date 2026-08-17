@@ -1,5 +1,14 @@
 // only use std when feature = "std" is enabled or during testing
 #![cfg_attr(not(any(test, feature = "std")), no_std)]
+// `utils::sqrt` reaches the FPU's VSQRT instruction through the intrinsic;
+// `core` has no other route to it, and `libm::sqrtf` runs a 714-cycle
+// software algorithm on this target instead. Only the no_std build needs it —
+// under std the same function is `f32::sqrt`.
+#![cfg_attr(
+    not(any(test, feature = "std")),
+    feature(core_intrinsics),
+    allow(internal_features)
+)]
 
 // use java_bindgen::prelude::*;
 

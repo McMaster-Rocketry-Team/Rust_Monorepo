@@ -160,6 +160,22 @@ pub struct AirBrakesRecord {
     /// Airbrakes servo temperature (C) reported by Icarus. `None` until Icarus
     /// reports, for the same reason as `actual_extension`.
     pub servo_temp: Option<f32>,
+    /// Apogee AGL (m) the MPC is aiming at — the operator-set value persisted
+    /// in the SD config block, or the stored default.
+    ///
+    /// Logged even though it is near-constant, because without it
+    /// `predicted_apogee_agl` and `commanded_extension` cannot be read: a
+    /// prediction well above target with the brakes barely open is a broken
+    /// controller if the target was reachable and correct behaviour if it was
+    /// not, and the log alone could not tell those apart. A bench flight on
+    /// 2026-08-17 hit exactly that — a stale 9448 m target above the 9348 m
+    /// natural apogee, which is why the MPC never saturated and the validation
+    /// deploy fired.
+    ///
+    /// `None` only if the SD config has not been read yet. It can change
+    /// mid-flight, since `SetTargetApogee` is accepted while Armed, so it is
+    /// sampled per record rather than assumed constant.
+    pub target_apogee_agl: Option<f32>,
 }
 
 /// Last `AmpStatusMessage`, which is a different stream from the AMP node

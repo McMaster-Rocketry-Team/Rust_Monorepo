@@ -354,6 +354,7 @@ fn write_csv(path: &str, records: &[FlightDataRecord]) -> Result<()> {
         "air_brakes_servo_temp",
         "air_brakes_validation_deploy",
         "mpc_predicted_apogee_agl",
+        "air_brakes_target_apogee_agl",
         "amp_online",
         "amp_uptime_s",
         "amp_health",
@@ -446,6 +447,7 @@ fn write_csv(path: &str, records: &[FlightDataRecord]) -> Result<()> {
             cell(air_brakes.and_then(|a| a.servo_temp)),
             cell(air_brakes.map(|a| a.validation_deploy as u8)),
             cell(air_brakes.and_then(|a| a.predicted_apogee_agl)),
+            cell(air_brakes.and_then(|a| a.target_apogee_agl)),
         ];
         row.extend(node_cells(r.amp_node.as_ref()));
         row.extend(node_cells(r.icarus_node.as_ref()));
