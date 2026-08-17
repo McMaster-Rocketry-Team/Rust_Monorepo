@@ -163,9 +163,11 @@ fn t_s(rows: &[Row], i: usize) -> f32 {
 // ------------------------------------------------------- zero-lag reference
 
 /// Non-causal quadratic least-squares fit of baro altitude over +-`half_s`,
-/// evaluated at the centre: (altitude, vertical velocity). Zero lag, and
-/// unbiased in both under constant acceleration.
-fn reference(rows: &[Row], i: usize, half_s: f32) -> Option<(f32, f32)> {
+/// evaluated at the centre: (altitude, vertical velocity, residual RMS).
+/// Zero lag, and unbiased in both under constant acceleration. The residual
+/// is the honesty check: an ejection blast or a bad patch of baro inside the
+/// window shows up there, and those samples are dropped from scoring.
+fn reference(rows: &[Row], i: usize, half_s: f32) -> Option<(f32, f32, f32)> {
     let t0 = rows[i].timestamp_us;
     let half_us = (half_s * 1e6) as u64;
     let mut lo = i;
@@ -213,7 +215,23 @@ fn reference(rows: &[Row], i: usize, half_s: f32) -> Option<(f32, f32)> {
             - a[0][1] * (a[1][0] * a[2][2] - a[1][2] * a[2][0])
             + a[0][2] * (a[1][0] * a[2][1] - a[1][1] * a[2][0])
     };
-    Some(((col(0) / det) as f32, (col(1) / det) as f32))
+    let (a0, a1, a2) = (col(0) / det, col(1) / det, col(2) / det);
+    let mut ss = 0.0f64;
+    for j in lo..=hi {
+        let t = (rows[j].timestamp_us as f64 - t0 as f64) * 1e-6;
+        let e = rows[j].altitude_asl as f64 - (a0 + a1 * t + a2 * t * t);
+        ss += e * e;
+    }
+    let rms = (ss / (hi - lo + 1) as f64).sqrt();
+    Some((a0 as f32, a1 as f32, rms as f32))
+}
+
+/// Reference, gated on fit quality. Baro noise is ~0.7 m 1-sigma, so a
+/// residual RMS above this is a blast/garbage window, not a trajectory.
+const REF_MAX_RESIDUAL_M: f32 = 5.0;
+
+fn good_reference(rows: &[Row], i: usize) -> Option<(f32, f32)> {
+    reference(rows, i, 0.4).filter(|(_, _, r)| *r < REF_MAX_RESIDUAL_M).map(|(a, v, _)| (a, v))
 }
 
 /// (index, altitude) of the highest 1 s-smoothed baro altitude.
@@ -405,7 +423,6 @@ fn lc25_rocket() -> RocketParameters {
 }
 
 fn run_flight(name: &str, rows: Vec<Row>, config: AirbrakesConfig) {
-    let rocket = lc25_rocket();
     let (apogee_i, apogee_alt) = baro_apogee(&rows);
     let ign_i = find_ignition(&rows);
 
@@ -426,127 +443,363 @@ fn run_flight(name: &str, rows: Vec<Row>, config: AirbrakesConfig) {
     }
     let (birth_t, forced, birth_i) = birth.expect("filter never born");
 
-    // MPC target: 150 m under the stowed prediction at the scoring start,
-    // so the command sits in the live (unclamped) region.
-    let score_from = rows
-        .iter()
-        .position(|r| r.timestamp_us > birth_t + 500_000)
-        .unwrap();
-    let score_to = {
-        let mut to = apogee_i;
-        while to > 0 && t_s(&rows, apogee_i) - t_s(&rows, to) < 0.5 {
-            to -= 1;
+    let at_offset = |from: usize, secs: f32| -> usize {
+        let mut j = from;
+        while j + 1 < rows.len() && t_s(&rows, j) - t_s(&rows, from) < secs {
+            j += 1;
         }
-        to
+        j
     };
-    let (ref_alt0, ref_vv0) = reference(&rows, score_from, 0.4).unwrap();
-    let stowed = AirBrakesMPC::new(rocket.clone(), 0.0)
+    let before_apogee = |secs: f32| -> usize {
+        let mut j = apogee_i;
+        while j > 0 && t_s(&rows, apogee_i) - t_s(&rows, j) < secs {
+            j -= 1;
+        }
+        j
+    };
+
+    // ---- Is the baro even allowed to be truth here?
+    //
+    // In coast the only forces are gravity and drag, so the vertical
+    // velocity cannot fall faster than g + (drag at this speed). Fit the
+    // airframe's Cd*A/m from the HONEST late coast (low q, no port error),
+    // then walk forward from birth and find the first moment the
+    // baro-implied deceleration comes back inside physics. Everything
+    // before that is the static port still washing out its boost error --
+    // the baro is lying, and no filter scored against it there is being
+    // scored against truth.
+    // Pairs separated by a fixed span of MEASURED time, not by a sample
+    // count: the two logs run at different rates and Void Lake stalls for
+    // 104 ms at a time.
+    let index_after = |i: usize, secs: f32| -> Option<usize> {
+        let mut j = i;
+        while j + 1 < rows.len() && t_s(&rows, j) - t_s(&rows, i) < secs {
+            j += 1;
+        }
+        (t_s(&rows, j) - t_s(&rows, i) >= secs * 0.9).then_some(j)
+    };
+
+    // In free coast the accelerometer's specific force IS drag/mass -- no
+    // attitude, no integration, no baro (this is the same fact the
+    // estimator's own lockout-exit drag check inverts). So the vertical
+    // deceleration is bounded, whatever the airframe: it cannot exceed
+    // gravity plus the whole drag vector pointing straight down.
+    let mean_specific_force = |i: usize, span_s: f32| -> f32 {
+        let j = index_after(i, span_s).unwrap_or(i);
+        let n = (j - i + 1) as f32;
+        rows[i..=j].iter().map(|r| r.imu.acc.magnitude()).sum::<f32>() / n
+    };
+
+    // First sample after birth whose baro-implied deceleration is physical.
+    let baro_implied_decel = |i: usize| -> Option<(f32, f32)> {
+        let j = index_after(i, 0.5)?;
+        let (_, v0) = good_reference(&rows, i)?;
+        let (_, v1) = good_reference(&rows, j)?;
+        let implied = -(v1 - v0) / (t_s(&rows, j) - t_s(&rows, i));
+        // Loosest possible bound: gravity + the entire measured drag, as if
+        // the drag vector pointed straight down.
+        let physical = 9.81 + mean_specific_force(i, 0.5);
+        Some((implied, physical))
+    };
+
+    // A sample is DISHONEST if the baro-implied deceleration is outside what
+    // coast physics permits at either end: faster than gravity + all of the
+    // measured drag, or slower than gravity alone can manage (a coasting
+    // rocket cannot speed up). Take the LAST dishonest sample, not the
+    // first honest one -- the port error washes out in both directions and
+    // passes through "plausible" on its way.
+    // (25% slack on the upper bound for the real Cd rise near Mach 1.)
+    let baro_honest_i = {
+        let mut last_bad = None;
+        let mut i = birth_i;
+        // Only the post-burnout region is policed: that is where the static
+        // port is recovering. Near apogee the velocity signal is small
+        // enough that the implied deceleration is mostly fit noise, and
+        // there is no port error left to catch.
+        let end = before_apogee(3.0).min(at_offset(birth_i, 8.0));
+        let (mut n_over, mut n_under, mut n_all) = (0, 0, 0);
+        let (mut last_over, mut last_under) = (None, None);
+        while i < end {
+            n_all += 1;
+            if let Some((implied, physical)) = baro_implied_decel(i) {
+                if implied > physical * 1.25 {
+                    n_over += 1;
+                    last_over = Some(t_s(&rows, i) - t_s(&rows, birth_i));
+                    last_bad = Some(i);
+                } else if implied < 4.0 {
+                    n_under += 1;
+                    last_under = Some(t_s(&rows, i) - t_s(&rows, birth_i));
+                    last_bad = Some(i);
+                }
+            }
+            i = index_after(i, 0.05).unwrap_or(end);
+        }
+        println!(
+            "  coast-physics check over birth..birth+{:.1}s ({n_all} samples): {n_over} \
+             decelerating FASTER than gravity+measured drag (last at birth+{:.2}s), {n_under} \
+             slower than gravity alone (last at birth+{:.2}s)",
+            t_s(&rows, end) - t_s(&rows, birth_i),
+            last_over.unwrap_or(f32::NAN),
+            last_under.unwrap_or(f32::NAN),
+        );
+        // clear the reference window too, so no scored sample's +-0.4 s fit
+        // reaches back into the dishonest region
+        match last_bad {
+            Some(i) => index_after(i, 0.9).unwrap_or(end),
+            None => at_offset(birth_i, 0.5),
+        }
+        .max(at_offset(birth_i, 0.5))
+    };
+
+    // The apogee column is a SENSITIVITY metric: every row is flown through
+    // the same LC'25 airframe model, so the meters are comparable between
+    // rows. For LC'25 that is also the real airframe; for Void Lake it is
+    // not, so read its apogee column as "what this much state error is
+    // worth", not as that flight's predicted apogee.
+    let rocket = lc25_rocket();
+
+    // Two windows, because they answer different questions:
+    //
+    //  EARLY COAST is where the brakes have authority (high q, brakes are
+    //  effective). It starts at the first physically-honest baro sample,
+    //  because before that the reference is not truth.
+    //
+    //  LATE COAST is the last 10 s before apogee, stopping 2 s short of the
+    //  ejection blast: low speed, low q, the baro is honest and the numbers
+    //  are absolute. This is the window the existing replay tests score.
+    let windows = [
+        (
+            "early coast (baro-honest, +4.5s)",
+            baro_honest_i,
+            at_offset(baro_honest_i, 4.5),
+        ),
+        (
+            "late coast (apogee-10..-2s)",
+            before_apogee(10.0).max(at_offset(birth_i, 0.5)),
+            before_apogee(2.0),
+        ),
+    ];
+    let span_from = windows.iter().map(|w| w.1).min().unwrap();
+    let span_to = windows.iter().map(|w| w.2).max().unwrap();
+
+    // MPC target: 150 m under the stowed prediction at the start of the
+    // early-coast window, so the command sits in the live (unclamped)
+    // region rather than pinned at 0% or 100%.
+    let (ref_alt0, ref_vv0) = good_reference(&rows, windows[0].1).expect("no reference at start");
+    let target = AirBrakesMPC::new(rocket.clone(), 1e9)
         .update(ref_alt0, Vector2::new(0.0, ref_vv0))
-        .predicted_apogee_asl;
-    let target = {
-        // predicted_apogee at target 0 is the fully-braked one; get the
-        // stowed prediction by targeting something unreachably high
-        let high = AirBrakesMPC::new(rocket.clone(), 1e9)
-            .update(ref_alt0, Vector2::new(0.0, ref_vv0))
-            .predicted_apogee_asl;
-        let _ = stowed;
-        high - 150.0
-    };
+        .predicted_apogee_asl
+        - 150.0;
     let mpc = AirBrakesMPC::new(rocket.clone(), target);
 
     println!(
         "\n=== {name} ===\n  ignition t={:.1}s | filter born ignition+{:.2}s (forced: {forced}) \
-         | baro apogee t={:.1}s alt={:.0}m | scoring {:.1}s..{:.1}s ({} samples) | MPC target {:.0}m",
+         | baro apogee t={:.1}s alt={:.0}m ASL\n  baro becomes physically honest at \
+         birth+{:.2}s",
         t_s(&rows, ign_i),
         (birth_t - rows[0].timestamp_us) as f32 * 1e-6 - t_s(&rows, ign_i),
         t_s(&rows, apogee_i),
         apogee_alt,
-        t_s(&rows, score_from),
-        t_s(&rows, score_to),
-        score_to - score_from,
-        target,
+        t_s(&rows, baro_honest_i) - t_s(&rows, birth_i),
     );
+    let _ = target;
 
-    // reference + oracle command, per sample in the window
+    // How badly does the baro lie before that? Score the baro-derived
+    // velocity against the *inertial* estimate over birth..baro_honest,
+    // and check both against what physics permits.
+    if baro_honest_i > at_offset(birth_i, 0.6) {
+        let mut worst = 0.0f32;
+        let mut worst_t = 0.0f32;
+        let mut worst_decel = 0.0f32;
+        for (i, _, v) in &flown {
+            if *i < birth_i || *i >= baro_honest_i {
+                continue;
+            }
+            if let Some((_, rv)) = good_reference(&rows, *i) {
+                if (rv - v.y).abs() > worst {
+                    worst = (rv - v.y).abs();
+                    worst_t = t_s(&rows, *i) - t_s(&rows, birth_i);
+                }
+            }
+        }
+        // peak baro-implied deceleration in that region, and what physics allows
+        let mut allowed_at_worst = 0.0f32;
+        let mut i = birth_i;
+        while i < baro_honest_i {
+            if let Some((implied, physical)) = baro_implied_decel(i)
+                && implied > worst_decel
+            {
+                worst_decel = implied;
+                allowed_at_worst = physical;
+            }
+            i = index_after(i, 0.05).unwrap_or(baro_honest_i);
+        }
+
+        println!(
+            "  BEFORE that: baro-derived velocity disagrees with the inertial estimate by up to \
+             {worst:.0} m/s (at birth+{worst_t:.1}s), and implies up to {worst_decel:.0} m/s^2 of \
+             deceleration ({:.1} g), where drag+gravity permit only {allowed_at_worst:.0} m/s^2. The \
+             baro is wrong there, not the filter.",
+            worst_decel / 9.81
+        );
+    }
+
+    // reference + oracle command per sample over the union of the windows
     let mut refs: Vec<Option<(f32, f32, f32, f32)>> = vec![None; rows.len()]; // alt, vv, ap, ext
-    for i in score_from..score_to {
-        if let Some((a, v)) = reference(&rows, i, 0.4) {
+    for i in span_from..span_to {
+        if let Some((a, v)) = good_reference(&rows, i) {
             let sol = mpc.update(a, Vector2::new(0.0, v));
             refs[i] = Some((a, v, sol.predicted_apogee_asl, sol.extension_percentage));
         }
     }
 
-    let after_stall = |i: usize| -> bool {
-        i > 0 && rows[i].timestamp_us - rows[i - 1].timestamp_us > 50_000
-    };
+    let after_stall =
+        |i: usize| -> bool { i > 0 && rows[i].timestamp_us - rows[i - 1].timestamp_us > 50_000 };
 
-    println!(
-        "  {:<26} {:>7} {:>7} {:>7} {:>7} {:>8} {:>8} {:>8} {:>7} {:>7} {:>8}",
-        "estimator", "|dvv|", "max", "|dalt|", "max", "jitter", "|dapo|", "max", "|dext|", "max",
-        "stall"
-    );
-    println!(
-        "  {:<26} {:>7} {:>7} {:>7} {:>7} {:>8} {:>8} {:>8} {:>7} {:>7} {:>8}",
-        "", "m/s", "m/s", "m", "m", "m/s/10ms", "m", "m", "%pt", "%pt", "m/s"
-    );
+    // ---- candidates: the flown estimator, then baro-only at each tau
+    let mut labelled: Vec<(String, [Score; 2])> = Vec::new();
 
-    // ---- flown estimator score
-    let mut s = Score::default();
-    let mut prev: Option<(u64, f32)> = None;
-    for (i, alt, v) in &flown {
-        let i = *i;
-        if i < score_from || i >= score_to {
-            continue;
-        }
-        if let Some((ra, rv, rap, rext)) = refs[i] {
-            let sol = mpc.update(*alt, *v);
-            s.push(
-                v.y - rv,
-                alt - ra,
-                sol.predicted_apogee_asl - rap,
-                sol.extension_percentage - rext,
-                after_stall(i),
-            );
-            let _ = rext;
-        }
-        if let Some((pt, pv)) = prev {
-            s.push_jitter(v.y - pv, (rows[i].timestamp_us - pt) as f32 * 1e-6);
-        }
-        prev = Some((rows[i].timestamp_us, v.y));
-    }
-    s.row("flown (IMU-aided, t=1.73s)");
-
-    // ---- baro-only sweep, born at the same instant
-    for tau in [0.10f32, 0.20, 0.35, 0.50, 0.75, 1.00, 1.73] {
-        let (seed_alt, seed_vv) = causal_seed(&rows, birth_i, 0.5);
-        let mut kf = BaroOnlyKF::born(seed_alt, seed_vv, 30.0, tau, 3.0);
-        let mut s = Score::default();
+    {
+        let mut scores = [Score::default(), Score::default()];
         let mut prev: Option<(u64, f32)> = None;
-        for i in (birth_i + 1)..score_to {
-            let dt = ((rows[i].timestamp_us - rows[i - 1].timestamp_us) as f32 * 1e-6).min(0.25);
-            kf.predict(dt);
-            kf.update(rows[i].altitude_asl, dt);
-            if i < score_from {
-                prev = Some((rows[i].timestamp_us, kf.vel));
+        for (i, alt, v) in &flown {
+            let i = *i;
+            if i < span_from || i >= span_to {
                 continue;
             }
             if let Some((ra, rv, rap, rext)) = refs[i] {
-                // baro-only has no attitude: horizontal velocity is 0
-                let sol = mpc.update(kf.alt, Vector2::new(0.0, kf.vel));
-                s.push(
-                    kf.vel - rv,
-                    kf.alt - ra,
-                    sol.predicted_apogee_asl - rap,
-                    sol.extension_percentage - rext,
-                    after_stall(i),
-                );
+                let sol = mpc.update(*alt, *v);
+                for (w, s) in windows.iter().zip(scores.iter_mut()) {
+                    if i >= w.1 && i < w.2 {
+                        s.push(
+                            v.y - rv,
+                            alt - ra,
+                            sol.predicted_apogee_asl - rap,
+                            sol.extension_percentage - rext,
+                            after_stall(i),
+                        );
+                    }
+                }
             }
             if let Some((pt, pv)) = prev {
-                s.push_jitter(kf.vel - pv, (rows[i].timestamp_us - pt) as f32 * 1e-6);
+                let dt = (rows[i].timestamp_us - pt) as f32 * 1e-6;
+                for (w, s) in windows.iter().zip(scores.iter_mut()) {
+                    if i >= w.1 && i < w.2 {
+                        s.push_jitter(v.y - pv, dt);
+                    }
+                }
+            }
+            prev = Some((rows[i].timestamp_us, v.y));
+        }
+        labelled.push(("flown (IMU-aided, tau=1.73s)".to_string(), scores));
+    }
+
+    for tau in [0.10f32, 0.20, 0.35, 0.50, 0.75, 1.00, 1.73] {
+        let (seed_alt, seed_vv) = causal_seed(&rows, birth_i, 0.5);
+        let mut kf = BaroOnlyKF::born(seed_alt, seed_vv, 30.0, tau, 3.0);
+        let mut scores = [Score::default(), Score::default()];
+        let mut prev: Option<(u64, f32)> = None;
+        for i in (birth_i + 1)..span_to {
+            let dt = ((rows[i].timestamp_us - rows[i - 1].timestamp_us) as f32 * 1e-6).min(0.25);
+            kf.predict(dt);
+            kf.update(rows[i].altitude_asl, dt);
+            if i >= span_from
+                && let Some((ra, rv, rap, rext)) = refs[i]
+            {
+                // baro-only has no attitude: horizontal velocity is 0
+                let sol = mpc.update(kf.alt, Vector2::new(0.0, kf.vel));
+                for (w, s) in windows.iter().zip(scores.iter_mut()) {
+                    if i >= w.1 && i < w.2 {
+                        s.push(
+                            kf.vel - rv,
+                            kf.alt - ra,
+                            sol.predicted_apogee_asl - rap,
+                            sol.extension_percentage - rext,
+                            after_stall(i),
+                        );
+                    }
+                }
+            }
+            if let Some((pt, pv)) = prev {
+                let dt_j = (rows[i].timestamp_us - pt) as f32 * 1e-6;
+                for (w, s) in windows.iter().zip(scores.iter_mut()) {
+                    if i >= w.1 && i < w.2 {
+                        s.push_jitter(kf.vel - pv, dt_j);
+                    }
+                }
             }
             prev = Some((rows[i].timestamp_us, kf.vel));
         }
-        s.row(&format!("baro-only tau={tau:.2}s"));
+        labelled.push((format!("baro-only tau={tau:.2}s"), scores));
+    }
+
+    // Optional per-sample dump for eyeballing: KF_STUDY_DUMP=<path prefix>
+    if let Ok(prefix) = std::env::var("KF_STUDY_DUMP") {
+        let path = format!("{prefix}{}.csv", name.split_whitespace().next().unwrap());
+        let mut out = String::from("t_rel_s,raw_baro,ref_alt,ref_vv,flown_alt,flown_vv,bo010_vv,bo035_vv,bo173_vv\n");
+        let mut kfs: Vec<(f32, BaroOnlyKF)> = [0.10f32, 0.35, 1.73]
+            .iter()
+            .map(|t| {
+                let (a, v) = causal_seed(&rows, birth_i, 0.5);
+                (*t, BaroOnlyKF::born(a, v, 30.0, *t, 3.0))
+            })
+            .collect();
+        let mut flown_it = flown.iter().peekable();
+        for i in (birth_i + 1)..before_apogee(0.5) {
+            let dt = ((rows[i].timestamp_us - rows[i - 1].timestamp_us) as f32 * 1e-6).min(0.25);
+            for (_, kf) in kfs.iter_mut() {
+                kf.predict(dt);
+                kf.update(rows[i].altitude_asl, dt);
+            }
+            let mut fl = (f32::NAN, f32::NAN);
+            while let Some((fi, a, v)) = flown_it.peek() {
+                if *fi <= i {
+                    fl = (*a, v.y);
+                    flown_it.next();
+                } else {
+                    break;
+                }
+            }
+            if i % 40 == 0 {
+                let (ra, rv) = good_reference(&rows, i).unwrap_or((f32::NAN, f32::NAN));
+                out.push_str(&format!(
+                    "{:.3},{:.2},{:.2},{:.2},{:.2},{:.2},{:.2},{:.2},{:.2}\n",
+                    t_s(&rows, i) - t_s(&rows, birth_i),
+                    rows[i].altitude_asl,
+                    ra,
+                    rv,
+                    fl.0,
+                    fl.1,
+                    kfs[0].1.vel,
+                    kfs[1].1.vel,
+                    kfs[2].1.vel,
+                ));
+            }
+        }
+        std::fs::write(&path, out).unwrap();
+        println!("  dumped {path}");
+    }
+
+    for (wi, w) in windows.iter().enumerate() {
+        println!(
+            "\n  -- {} : {:.1}s..{:.1}s, {} samples --",
+            w.0,
+            t_s(&rows, w.1),
+            t_s(&rows, w.2),
+            labelled[0].1[wi].n
+        );
+        println!(
+            "  {:<28} {:>7} {:>7} {:>7} {:>7} {:>9} {:>8} {:>8} {:>7} {:>7} {:>7}",
+            "estimator", "|dvv|", "max", "|dalt|", "max", "jitter", "|dapo|", "max", "|dext|",
+            "max", "stall"
+        );
+        println!(
+            "  {:<28} {:>7} {:>7} {:>7} {:>7} {:>9} {:>8} {:>8} {:>7} {:>7} {:>7}",
+            "", "m/s", "m/s", "m", "m", "m/s/10ms", "m", "m", "%pt", "%pt", "m/s"
+        );
+        for (label, scores) in &labelled {
+            scores[wi].row(label);
+        }
     }
 
     // ---- what the IMU contributes beyond the KF predict: horizontal
@@ -555,39 +808,80 @@ fn run_flight(name: &str, rows: Vec<Row>, config: AirbrakesConfig) {
     let mut sum_vx = 0.0f32;
     let mut n_vx = 0usize;
     for (i, _, v) in &flown {
-        if *i >= score_from && *i < score_to {
+        if *i >= windows[0].1 && *i < windows[0].2 {
             max_vx = max_vx.max(v.x);
             sum_vx += v.x;
             n_vx += 1;
         }
     }
+    // apogee cost of assuming vx = 0, at the start of the early window
+    let (a0, v0) = good_reference(&rows, windows[0].1).unwrap();
+    let vx0 = flown
+        .iter()
+        .find(|(i, _, _)| *i >= windows[0].1)
+        .map(|(_, _, v)| v.x)
+        .unwrap_or(0.0);
+    let ap_with = AirBrakesMPC::new(rocket.clone(), 1e9)
+        .update(a0, Vector2::new(vx0, v0))
+        .predicted_apogee_asl;
+    let ap_without = AirBrakesMPC::new(rocket.clone(), 1e9)
+        .update(a0, Vector2::new(0.0, v0))
+        .predicted_apogee_asl;
     println!(
-        "  tilt-derived horizontal velocity over the window: mean {:.1} m/s, max {:.1} m/s",
+        "\n  tilt-derived horizontal velocity, early window: mean {:.1} m/s, max {:.1} m/s \
+         -- ignoring it (as baro-only must) moves the stowed apogee prediction by {:+.0} m",
         sum_vx / n_vx.max(1) as f32,
-        max_vx
+        max_vx,
+        ap_without - ap_with,
     );
 
-    // ---- what a baro-only design cannot gate: run it from ignition
+    // ---- what a baro-only design cannot gate: run it from ignition, since
+    // without an accelerometer there is no ignition detection, no burnout
+    // latch and no drag check to hold it off the lying baro.
     let (seed_alt, seed_vv) = causal_seed(&rows, ign_i, 0.5);
     let mut kf = BaroOnlyKF::born(seed_alt, seed_vv, 30.0, 0.35, 3.0);
     let mut worst_alt = 0.0f32;
     let mut worst_t = 0.0f32;
-    for i in (ign_i + 1)..score_to {
+    let mut worst_vv = 0.0f32;
+    let mut worst_vv_t = 0.0f32;
+    for i in (ign_i + 1)..span_to {
         let dt = ((rows[i].timestamp_us - rows[i - 1].timestamp_us) as f32 * 1e-6).min(0.25);
         kf.predict(dt);
         kf.update(rows[i].altitude_asl, dt);
-        if let Some((ra, _)) = reference(&rows, i, 0.4) {
-            let e = (kf.alt - ra).abs();
-            if e > worst_alt {
-                worst_alt = e;
+        if let Some((ra, rv)) = good_reference(&rows, i) {
+            if (kf.alt - ra).abs() > worst_alt {
+                worst_alt = (kf.alt - ra).abs();
                 worst_t = t_s(&rows, i) - t_s(&rows, ign_i);
+            }
+            if (kf.vel - rv).abs() > worst_vv {
+                worst_vv = (kf.vel - rv).abs();
+                worst_vv_t = t_s(&rows, i) - t_s(&rows, ign_i);
             }
         }
     }
-    // and where it stands at the moment the real filter is born
     println!(
-        "  baro-only tau=0.35s run from IGNITION (no lockout possible): worst altitude error \
-         {worst_alt:.0} m at ignition+{worst_t:.1}s"
+        "  baro-only tau=0.35s run from IGNITION (nothing to gate it with): worst altitude error \
+         {worst_alt:.0} m at ignition+{worst_t:.1}s, worst vv error {worst_vv:.0} m/s at \
+         ignition+{worst_vv_t:.1}s -- both vs the same baro, so this is the RAW baro's own \
+         boost-phase behaviour passed straight through"
+    );
+
+    // ---- raw baro during boost, for context: how far the port error moves
+    // the measurement the fast filter would be chasing
+    let mut worst_raw = 0.0f32;
+    let mut worst_raw_t = 0.0f32;
+    for i in ign_i..birth_i {
+        if let Some((ra, _)) = good_reference(&rows, i) {
+            let e = (rows[i].altitude_asl - ra).abs();
+            if e > worst_raw {
+                worst_raw = e;
+                worst_raw_t = t_s(&rows, i) - t_s(&rows, ign_i);
+            }
+        }
+    }
+    println!(
+        "  raw baro vs its own smoothed self during boost/lockout: worst {worst_raw:.0} m at \
+         ignition+{worst_raw_t:.1}s"
     );
 }
 

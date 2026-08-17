@@ -9,6 +9,9 @@
 //! restarting at zero is the only mark of a boundary, exactly as it is for
 //! `merge_log_records` on the download side.
 //!
+//! The plotted window is the flight window plus a short lead-in, so T+0 has
+//! context on both sides; see [`Session::plot_start`].
+//!
 //! The second is the **flight window** inside a session. Logging runs for as
 //! long as armed mode does, which starts on the pad and ends after landing, so a
 //! session brackets the flight with idle time at both ends — twenty seconds of
@@ -56,8 +59,17 @@ pub struct Session {
     pub start: usize,
     pub end: usize,
     /// Row range of the flight itself, always within `start..end`.
+    /// `flight_start` is liftoff, and stays the origin of the plotted time
+    /// axis even when the figure begins earlier than it.
     pub flight_start: usize,
     pub flight_end: usize,
+    /// First row actually drawn. Sits `lead_in` seconds before `flight_start`,
+    /// or at the session start if there is less pad than that on record.
+    ///
+    /// Separate from `flight_start` because the two answer different questions:
+    /// where the flight began, and where the picture begins. Collapsing them
+    /// would either move T+0 off liftoff or make the lead-in unrepresentable.
+    pub plot_start: usize,
     pub window_source: WindowSource,
     /// Wall-clock start, if the session ever had a GPS-disciplined clock.
     pub unix_time_us: Option<f64>,
@@ -83,10 +95,17 @@ impl Session {
         (log.timestamp_us[self.flight_end - 1] - log.timestamp_us[self.flight_start]) / 1e6
     }
 
-    /// Seconds from the session's first row to the flight's first row — the
-    /// pad idle that got trimmed off the front.
+    /// Seconds of pad idle dropped off the front — session start to the first
+    /// drawn row, which is not the same as session start to liftoff once a
+    /// lead-in is being shown.
     pub fn trimmed_before_s(&self, log: &FlightLog) -> f64 {
-        (log.timestamp_us[self.flight_start] - log.timestamp_us[self.start]) / 1e6
+        (log.timestamp_us[self.plot_start] - log.timestamp_us[self.start]) / 1e6
+    }
+
+    /// Seconds of pad actually drawn before liftoff. Can be less than asked for
+    /// when the rocket was armed for a shorter time than the lead-in.
+    pub fn lead_in_s(&self, log: &FlightLog) -> f64 {
+        (log.timestamp_us[self.flight_start] - log.timestamp_us[self.plot_start]) / 1e6
     }
 
     /// Seconds from the flight's last row to the session's last row.
@@ -96,7 +115,9 @@ impl Session {
 }
 
 /// Split into sessions, then locate the flight in each.
-pub fn find_sessions(log: &FlightLog) -> Vec<Session> {
+///
+/// `lead_in_s` is how much pad time to keep in front of liftoff.
+pub fn find_sessions(log: &FlightLog, lead_in_s: f64) -> Vec<Session> {
     let mut bounds = vec![0usize];
     for i in 1..log.row_count {
         // The same test `merge_log_records` uses. `sequence` is reset to 0 on
@@ -111,11 +132,11 @@ pub fn find_sessions(log: &FlightLog) -> Vec<Session> {
 
     bounds
         .windows(2)
-        .map(|w| build_session(log, w[0], w[1]))
+        .map(|w| build_session(log, w[0], w[1], lead_in_s))
         .collect()
 }
 
-fn build_session(log: &FlightLog, start: usize, end: usize) -> Session {
+fn build_session(log: &FlightLog, start: usize, end: usize, lead_in_s: f64) -> Session {
     let first_airborne = (start..end).find(|&i| log.stage[i].is_some_and(is_airborne));
 
     let (flight_start, flight_end, window_source) = match first_airborne {
@@ -138,6 +159,14 @@ fn build_session(log: &FlightLog, start: usize, end: usize) -> Session {
         None => (start, end, WindowSource::NeverLeftThePad),
     };
 
+    // Walk back from liftoff until the lead-in is covered or the session runs
+    // out. Searching by timestamp rather than by row count keeps this correct
+    // across the rate changes and dropped records the log is allowed to have.
+    let cutoff = log.timestamp_us[flight_start] - lead_in_s.max(0.0) * 1e6;
+    let plot_start = (start..flight_start)
+        .find(|&i| log.timestamp_us[i] >= cutoff)
+        .unwrap_or(flight_start);
+
     let (apogee_asl, apogee_row) = peak_altitude(log, flight_start, flight_end);
 
     Session {
@@ -145,6 +174,7 @@ fn build_session(log: &FlightLog, start: usize, end: usize) -> Session {
         end,
         flight_start,
         flight_end,
+        plot_start,
         window_source,
         unix_time_us: first_finite(log.column("unix_time_us"), start, end),
         apogee_asl,
@@ -217,7 +247,7 @@ mod tests {
             (5, "Landed"),
             (6, "Landed"),
         ]);
-        let sessions = find_sessions(&log);
+        let sessions = find_sessions(&log, 0.0);
         assert_eq!(sessions.len(), 1);
         let s = &sessions[0];
         assert_eq!((s.start, s.end), (0, 7));
@@ -241,7 +271,7 @@ mod tests {
             (2, "DrogueChute"),
             (3, "Landed"),
         ]);
-        let sessions = find_sessions(&log);
+        let sessions = find_sessions(&log, 0.0);
         assert_eq!(sessions.len(), 2);
         assert_eq!((sessions[0].flight_start, sessions[0].flight_end), (1, 2));
         assert_eq!((sessions[1].flight_start, sessions[1].flight_end), (4, 6));
@@ -259,7 +289,7 @@ mod tests {
             (2, "DrogueChute"),
             (3, "MainChute"),
         ]);
-        let s = &find_sessions(&log)[0];
+        let s = &find_sessions(&log, 0.0)[0];
         assert_eq!((s.flight_start, s.flight_end), (1, 4));
         assert_eq!(s.window_source, WindowSource::StagesNoLanding);
     }
@@ -269,7 +299,7 @@ mod tests {
     #[test]
     fn a_session_that_never_launched_keeps_all_of_its_rows() {
         let log = log_from("never_launched", &[(0, "Armed"), (1, "Armed"), (2, "Armed")]);
-        let s = &find_sessions(&log)[0];
+        let s = &find_sessions(&log, 0.0)[0];
         assert_eq!((s.flight_start, s.flight_end), (0, 3));
         assert_eq!(s.window_source, WindowSource::NeverLeftThePad);
     }
@@ -285,7 +315,7 @@ mod tests {
             (3, "DrogueChute"),
             (4, "Landed"),
         ]);
-        let s = &find_sessions(&log)[0];
+        let s = &find_sessions(&log, 0.0)[0];
         assert_eq!((s.flight_start, s.flight_end), (2, 4));
     }
 
@@ -297,7 +327,88 @@ mod tests {
             (1, "FailedToReachMinApogee"),
             (2, "Landed"),
         ]);
-        let s = &find_sessions(&log)[0];
+        let s = &find_sessions(&log, 0.0)[0];
         assert_eq!((s.flight_start, s.flight_end), (1, 2));
+    }
+}
+
+#[cfg(test)]
+mod lead_in_tests {
+    use super::*;
+    use crate::plot::log_csv::test_support::log_from_csv;
+
+    /// 100 ms per row, so a 0.3 s lead-in is three rows of pad.
+    fn log(name: &str, rows: &[(u32, &str)]) -> FlightLog {
+        let mut body = String::from("record_count,timestamp_us,flight_stage\n");
+        for (i, (count, stage)) in rows.iter().enumerate() {
+            body.push_str(&format!("{},{},{}\n", count, i * 100_000, stage));
+        }
+        log_from_csv(&format!("leadin_{name}"), &body)
+    }
+
+    /// The lead-in moves where the drawing starts. It must NOT move liftoff,
+    /// because liftoff is the axis origin — if the two moved together the axis
+    /// would silently stop meaning T+.
+    #[test]
+    fn the_lead_in_moves_the_drawn_start_but_not_liftoff() {
+        let l = log(
+            "basic",
+            &[
+                (0, "Armed"),
+                (1, "Armed"),
+                (2, "Armed"),
+                (3, "Armed"),
+                (4, "Ascent"),
+                (5, "DrogueChute"),
+                (6, "Landed"),
+            ],
+        );
+        let s = &find_sessions(&l, 0.3)[0];
+        assert_eq!(s.flight_start, 4, "liftoff must not move");
+        assert_eq!(s.plot_start, 1);
+        assert_eq!(s.lead_in_s(&l), 0.3);
+        // What is still discarded is measured to the first *drawn* row.
+        assert_eq!(s.trimmed_before_s(&l), 0.1);
+    }
+
+    /// Asking for more pad than was recorded gives all of it, not an index
+    /// before the session began — which would reach into the previous flight.
+    #[test]
+    fn a_lead_in_longer_than_the_pad_stops_at_the_session_start() {
+        let l = log("short", &[(0, "Armed"), (1, "Ascent"), (2, "Landed")]);
+        let s = &find_sessions(&l, 60.0)[0];
+        assert_eq!(s.plot_start, 0);
+        assert_eq!(s.lead_in_s(&l), 0.1);
+        assert_eq!(s.trimmed_before_s(&l), 0.0);
+    }
+
+    /// The second session's lead-in must come out of its own pad time, never
+    /// out of the tail of the flight before it.
+    #[test]
+    fn a_lead_in_never_reaches_back_into_the_previous_session() {
+        let l = log(
+            "boundary",
+            &[
+                (0, "Ascent"),
+                (1, "Landed"),
+                // Session two starts here.
+                (0, "Armed"),
+                (1, "Ascent"),
+                (2, "Landed"),
+            ],
+        );
+        let sessions = find_sessions(&l, 60.0);
+        assert_eq!(sessions.len(), 2);
+        assert_eq!(sessions[1].start, 2);
+        assert_eq!(sessions[1].plot_start, 2, "must not cross the boundary");
+    }
+
+    /// Zero lead-in is the old behaviour exactly.
+    #[test]
+    fn a_zero_lead_in_starts_on_liftoff() {
+        let l = log("zero", &[(0, "Armed"), (1, "Ascent"), (2, "Landed")]);
+        let s = &find_sessions(&l, 0.0)[0];
+        assert_eq!(s.plot_start, s.flight_start);
+        assert_eq!(s.lead_in_s(&l), 0.0);
     }
 }

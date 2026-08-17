@@ -1,36 +1,52 @@
 //! Colours and type for the rendered figures.
 //!
-//! A dark ground is not decoration here. These charts are read as overlaid
-//! traces — four or five signals sharing one panel — and saturated strokes hold
-//! their identity against a dark background far better than against white,
-//! where they have to be darkened toward each other to stay legible. It also
-//! matches every other instrument someone looks at flight data on.
+//! The figures are white-ground, which is what a chart pasted into a report or
+//! printed for a debrief needs. That constrains the traces: the bright strokes
+//! that read well on a dark ground wash out on white, so every trace colour here
+//! is chosen at a lightness that holds against white, and they are spaced around
+//! the hue circle rather than being tints of one accent — four or five of them
+//! share a panel and have to stay tellable apart.
 
 use plotters::prelude::*;
 
-pub const BG: RGBColor = RGBColor(0x0B, 0x0D, 0x12);
-pub const PANEL_BG: RGBColor = RGBColor(0x15, 0x19, 0x23);
-pub const GRID: RGBColor = RGBColor(0x22, 0x26, 0x31);
-pub const AXIS: RGBColor = RGBColor(0x39, 0x40, 0x51);
-pub const TEXT: RGBColor = RGBColor(0xD7, 0xDC, 0xE8);
-pub const MUTED: RGBColor = RGBColor(0x79, 0x83, 0x99);
+pub const BG: RGBColor = RGBColor(0xFF, 0xFF, 0xFF);
+pub const PANEL_BG: RGBColor = RGBColor(0xFF, 0xFF, 0xFF);
+pub const GRID: RGBColor = RGBColor(0xDF, 0xE3, 0xE8);
+pub const AXIS: RGBColor = RGBColor(0x8C, 0x96, 0xA3);
+pub const TEXT: RGBColor = RGBColor(0x16, 0x1A, 0x20);
+pub const MUTED: RGBColor = RGBColor(0x62, 0x6C, 0x7A);
 
 /// Trace colours, ordered so that any prefix of the list stays distinguishable —
-/// the first three carry most panels and are far apart in hue, and none of them
-/// collide with the semantic colours below.
-pub const CYAN: RGBColor = RGBColor(0x45, 0xC7, 0xE8);
-pub const AMBER: RGBColor = RGBColor(0xF0, 0xA9, 0x3B);
-pub const VIOLET: RGBColor = RGBColor(0xA9, 0x8B, 0xF5);
-pub const GREEN: RGBColor = RGBColor(0x5F, 0xD3, 0x7E);
-pub const CORAL: RGBColor = RGBColor(0xF0, 0x62, 0x5A);
-pub const BLUE: RGBColor = RGBColor(0x6E, 0x9B, 0xF7);
-pub const ROSE: RGBColor = RGBColor(0xF5, 0x71, 0xAC);
+/// the first three carry most panels and are far apart in hue.
+pub const CYAN: RGBColor = RGBColor(0x0B, 0x6E, 0x8F);
+pub const AMBER: RGBColor = RGBColor(0xB0, 0x6A, 0x00);
+pub const VIOLET: RGBColor = RGBColor(0x63, 0x3B, 0xB0);
+pub const GREEN: RGBColor = RGBColor(0x1F, 0x7A, 0x34);
+pub const CORAL: RGBColor = RGBColor(0xC0, 0x27, 0x24);
+pub const BLUE: RGBColor = RGBColor(0x1C, 0x54, 0xB8);
+pub const ROSE: RGBColor = RGBColor(0xA3, 0x12, 0x59);
 
 /// Reserved for things that mean "this went wrong" — never used as an ordinary
 /// trace colour, so its appearance always carries the same meaning.
-pub const ALERT: RGBColor = RGBColor(0xFF, 0x5C, 0x4D);
+pub const ALERT: RGBColor = RGBColor(0xC8, 0x1E, 0x1E);
+
+/// Event rules and their labels. Deliberately near-black rather than coloured:
+/// they cross every panel, and a coloured rule would read as another trace.
+pub const EVENT: RGBColor = RGBColor(0x3A, 0x42, 0x50);
 
 pub const FONT: &str = "sans-serif";
+
+// Type sizes for a 3840x2160 figure. Set explicitly rather than scaled from a
+// 1080p base — the ratios that work at 1080p give type that is technically
+// legible but small at 4K, so these are all a little more than double.
+pub const F_TITLE: i32 = 58;
+pub const F_SUBTITLE: i32 = 30;
+pub const F_CAPTION: i32 = 38;
+pub const F_TICK: i32 = 26;
+pub const F_LEGEND: i32 = 27;
+pub const F_LANE: i32 = 26;
+pub const F_NOTE: i32 = 24;
+pub const F_EVENT: i32 = 25;
 
 /// The hue a flight stage is identified by.
 ///
@@ -39,25 +55,26 @@ pub const FONT: &str = "sans-serif";
 /// it has to be readable. Deriving one from the other keeps them the same hue.
 pub fn stage_hue(stage: u8) -> RGBColor {
     match stage {
-        0 | 1 => RGBColor(0x6E, 0x78, 0x90), // LowPower / SelfTest
-        2 => RGBColor(0x8A, 0x95, 0xAD),     // Armed
+        0 | 1 => RGBColor(0x77, 0x82, 0x93), // LowPower / SelfTest
+        2 => RGBColor(0x8D, 0x98, 0xA8),     // Armed
         3 => AMBER,                          // Ascent
         4 => CYAN,                           // DrogueChute
         5 => GREEN,                          // MainChute
-        6 => RGBColor(0x6E, 0x78, 0x90),     // Landed
+        6 => RGBColor(0x77, 0x82, 0x93),     // Landed
         _ => ALERT,                          // FailedToReachMinApogee
     }
 }
 
 /// Background wash for a flight stage. Kept faint: these are context for the
-/// traces, and a band that competes with the data has failed at its job.
+/// traces, and a band that competes with the data has failed at its job. On a
+/// white ground the same alpha reads stronger than it did on a dark one, so
+/// these are lower than the equivalent dark-theme values would be.
 pub fn stage_color(stage: u8) -> RGBAColor {
     let opacity = match stage {
-        6 => 0.22,     // Landed reads as "the flight is over", so it is heavier
-        2 => 0.16,     // Armed
-        0 | 1 => 0.16, // LowPower / SelfTest
-        7 => 0.16,     // FailedToReachMinApogee
-        _ => 0.12,     // the airborne stages, behind the densest traces
+        6 => 0.14,          // Landed reads as "the flight is over"
+        0 | 1 | 2 => 0.11,  // LowPower / SelfTest / Armed
+        7 => 0.11,          // FailedToReachMinApogee
+        _ => 0.075,         // the airborne stages, behind the densest traces
     };
     stage_hue(stage).mix(opacity)
 }

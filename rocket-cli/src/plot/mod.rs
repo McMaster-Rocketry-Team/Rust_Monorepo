@@ -1,9 +1,10 @@
-//! `plot-flight-log`: turn a downloaded flight-log CSV into two 1080p figures.
+//! `plot-flight-log`: turn a downloaded flight-log CSV into two 4K figures.
 //!
 //! The three things this has to get right, in the order a reader meets them:
 //! pick the *right flight* out of a log that may hold several, cut it down to
 //! the part where the rocket was actually in the air, and then draw it.
 
+pub mod events;
 pub mod figures;
 pub mod log_csv;
 pub mod picker;
@@ -24,7 +25,7 @@ use session::{Session, WindowSource, find_sessions};
 pub fn plot_flight_log(args: &PlotFlightLogArgs) -> Result<()> {
     let input = Path::new(&args.input);
     let log = FlightLog::load(input)?;
-    let sessions = find_sessions(&log);
+    let sessions = find_sessions(&log, args.lead_in);
 
     let source_name = input
         .file_name()
@@ -116,15 +117,17 @@ fn choose(
 fn report_window(session: &Session, log: &FlightLog) {
     match session.window_source {
         WindowSource::Stages => println!(
-            "Flight window: liftoff to landing, {:.1} s — trimmed {:.1} s on the pad \
-             and {:.1} s after landing.",
+            "Flight window: T-{:.0} s to landing, {:.1} s of flight — trimmed {:.1} s \
+             on the pad and {:.1} s after landing.",
+            session.lead_in_s(log),
             session.duration_s(log),
             session.trimmed_before_s(log),
             session.trimmed_after_s(log),
         ),
         WindowSource::StagesNoLanding => println!(
-            "Flight window: liftoff to end of log, {:.1} s — trimmed {:.1} s on the pad. \
-             The log ends before landing.",
+            "Flight window: T-{:.0} s to end of log, {:.1} s of flight — trimmed {:.1} s \
+             on the pad. The log ends before landing.",
+            session.lead_in_s(log),
             session.duration_s(log),
             session.trimmed_before_s(log),
         ),
@@ -180,6 +183,7 @@ mod tests {
             input: "flight_log.csv".to_string(),
             out_dir: out_dir.map(str::to_string),
             session: None,
+            lead_in: 0.0,
         }
     }
 
@@ -216,7 +220,7 @@ mod tests {
             "mod_range",
             "record_count,timestamp_us,flight_stage\n0,0,Ascent\n1,1000,Landed\n",
         );
-        let sessions = find_sessions(&log);
+        let sessions = find_sessions(&log, 0.0);
         let mut a = args(None);
         a.session = Some(4);
         let err = choose(&sessions, &log, "x.csv", &a).unwrap_err().to_string();
@@ -233,7 +237,7 @@ mod tests {
             "record_count,timestamp_us,flight_stage\n\
              0,0,Ascent\n1,1000,Landed\n0,2000,Ascent\n1,3000,Landed\n",
         );
-        let sessions = find_sessions(&log);
+        let sessions = find_sessions(&log, 0.0);
         assert_eq!(sessions.len(), 2);
         let mut a = args(None);
         a.session = Some(2);

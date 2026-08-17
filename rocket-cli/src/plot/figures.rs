@@ -1,10 +1,18 @@
-//! Rendering the two 1920×1080 figures.
+//! Rendering the two 3840×2160 figures.
 //!
-//! Both share one time axis that starts at T+0 = liftoff and ends at landing,
-//! so a point read off one figure can be found at the same x on the other.
-//! Every panel gets the flight-stage bands washed in behind it for the same
-//! reason: it means no panel has to be read in isolation to know whether a
-//! feature happened under thrust, under drogue, or under main.
+//! Both share one time axis. T+0 is liftoff and the axis runs to landing, with
+//! a few seconds of pad in front of it so the ignition transient has something
+//! to be read against — an axis that begins exactly at liftoff shows the step
+//! but not what it stepped from. A point read off one figure is at the same x
+//! on the other.
+//!
+//! Within a figure the axis is shared in the stronger sense too: only the
+//! bottom panel of a column carries tick labels. Repeating an identical row of
+//! numbers under every panel spends about a tenth of the figure's height saying
+//! the same thing five times, and that height is worth more given to the traces.
+//! Vertical rules mark the events — burnout, apogee, deployments — and run
+//! through every panel, which is what makes a feature in one panel locatable in
+//! the next.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -15,20 +23,25 @@ use plotters::coord::types::RangedCoordf64;
 use plotters::prelude::*;
 use plotters::style::text_anchor::{HPos, Pos, VPos};
 
+use crate::plot::events::{self, Event};
 use crate::plot::log_csv::FlightLog;
 use crate::plot::series::{Trace, decimate, stage_spans, true_spans};
 use crate::plot::session::{Session, WindowSource};
 use crate::plot::theme::{self, stage_color};
 
-pub const WIDTH: u32 = 1920;
-pub const HEIGHT: u32 = 1080;
+pub const WIDTH: u32 = 3840;
+pub const HEIGHT: u32 = 2160;
 /// Height reserved for the figure's own title block.
-const HEADER_H: u32 = 68;
+const HEADER_H: u32 = 150;
 /// Width of the y-axis label gutter. One value for every panel on both figures:
 /// panels share a time axis, and an axis that starts at a different x on each
 /// row cannot be read across rows. It also has to be wide enough for the
 /// longest lane name, which is why it is larger than the numbers alone need.
-const Y_GUTTER: i32 = 92;
+const Y_GUTTER: i32 = 232;
+/// Height the x tick labels need, on the one panel per column that shows them.
+const X_LABELS_H: u32 = 74;
+/// Length of the colour swatch drawn beside each legend entry.
+const LEGEND_SWATCH: i32 = 44;
 
 type Area<'a> = DrawingArea<BitMapBackend<'a>, Shift>;
 
@@ -78,7 +91,10 @@ struct Panel {
     /// Draw a reference line at zero. Only meaningful where the sign carries
     /// information — velocity crossing zero *is* apogee.
     zero_line: bool,
-    mark_apogee: bool,
+    /// Bottom of a column: carries the tick labels for everything above it.
+    x_labels: bool,
+    /// Top of a column: carries the names of the event rules.
+    event_labels: bool,
 }
 
 impl Panel {
@@ -88,7 +104,8 @@ impl Panel {
             unit,
             lines,
             zero_line: false,
-            mark_apogee: false,
+            x_labels: false,
+            event_labels: false,
         }
     }
 
@@ -97,8 +114,13 @@ impl Panel {
         self
     }
 
-    fn with_apogee(mut self) -> Self {
-        self.mark_apogee = true;
+    fn with_x_labels(mut self) -> Self {
+        self.x_labels = true;
+        self
+    }
+
+    fn with_event_labels(mut self) -> Self {
+        self.event_labels = true;
         self
     }
 }
@@ -120,6 +142,7 @@ pub struct Renderer<'a> {
     /// Columns computed rather than logged.
     derived: HashMap<&'static str, Vec<f32>>,
     x_range: (f64, f64),
+    events: Vec<Event>,
     source_name: String,
 }
 
@@ -142,9 +165,26 @@ impl<'a> Renderer<'a> {
             derived.insert("acc_magnitude", magnitude);
         }
 
+        // T+0 stays liftoff; the axis simply starts at a negative number when
+        // there is a lead-in.
         let x_range = (
-            times[session.flight_start],
-            times[session.flight_end - 1].max(times[session.flight_start] + 0.001),
+            times[session.plot_start],
+            times[session.flight_end - 1].max(times[session.plot_start] + 0.001),
+        );
+
+        // Half a percent of the flight. Two events closer together than that
+        // cannot be told apart on the axis, so they are drawn as one.
+        let merge_within = (x_range.1 - x_range.0) * 0.005;
+        let events = events::detect(
+            &times,
+            &log.stage,
+            log.column("airbrakes_burnout"),
+            log.column("pyro_drogue_fire"),
+            log.column("pyro_main_fire"),
+            session.apogee_row,
+            session.plot_start,
+            session.flight_end,
+            merge_within,
         );
 
         Self {
@@ -153,6 +193,7 @@ impl<'a> Renderer<'a> {
             times,
             derived,
             x_range,
+            events,
             source_name,
         }
     }
@@ -174,7 +215,7 @@ impl<'a> Renderer<'a> {
         let mut trace = decimate(
             &self.times,
             values,
-            self.session.flight_start,
+            self.session.plot_start,
             self.session.flight_end,
             buckets,
         )?;
@@ -202,11 +243,12 @@ impl<'a> Renderer<'a> {
 
         // Altitude gets the most height because it is the panel everything else
         // is read against; the lane strip gets the least because a lane is
-        // legible at any height that fits its label.
-        let (p1, rest) = body.split_vertically(232);
-        let (p2, rest) = rest.split_vertically(200);
-        let (p3, rest) = rest.split_vertically(200);
-        let (p4, p5) = rest.split_vertically(190);
+        // legible at any height that fits its label. Only the last panel pays
+        // for tick labels.
+        let (p1, rest) = body.split_vertically(468);
+        let (p2, rest) = rest.split_vertically(406);
+        let (p3, rest) = rest.split_vertically(406);
+        let (p4, p5) = rest.split_vertically(346);
 
         self.draw_panel(
             &p1,
@@ -219,7 +261,7 @@ impl<'a> Renderer<'a> {
                     Line::new("GPS", "gps_altitude_asl", theme::VIOLET),
                 ],
             )
-            .with_apogee(),
+            .with_event_labels(),
         )?;
         self.draw_panel(
             &p2,
@@ -231,8 +273,7 @@ impl<'a> Renderer<'a> {
                     Line::new("airbrakes KF", "airbrakes_kf_vertical_velocity", theme::AMBER),
                 ],
             )
-            .with_zero()
-            .with_apogee(),
+            .with_zero(),
         )?;
         self.draw_panel(
             &p3,
@@ -275,6 +316,7 @@ impl<'a> Renderer<'a> {
                 ("short circuit", "pyro_short_circuit", theme::ALERT),
                 ("valid. deploy", "air_brakes_validation_deploy", theme::VIOLET),
             ],
+            true,
         )?;
 
         root.present().plot()?;
@@ -289,7 +331,13 @@ impl<'a> Renderer<'a> {
         let (header, body) = root.split_vertically(HEADER_H);
         self.draw_header(&header, "Auxiliary")?;
 
-        let cells = body.split_evenly((4, 3));
+        // Three columns of four. Only the bottom row carries tick labels, so it
+        // is the only row that has to be taller.
+        let (top, bottom) = body.split_vertically(HEIGHT - HEADER_H - 566);
+        let upper = top.split_evenly((3, 3));
+        let lower = bottom.split_evenly((1, 3));
+        let cells: Vec<_> = upper.into_iter().chain(lower).collect();
+
         let panels = [
             Panel::new(
                 "Angular rate",
@@ -300,7 +348,8 @@ impl<'a> Renderer<'a> {
                     Line::new("z", "gyro_z", theme::ROSE),
                 ],
             )
-            .with_zero(),
+            .with_zero()
+            .with_event_labels(),
             Panel::new(
                 "Magnetometer",
                 "gauss",
@@ -310,12 +359,14 @@ impl<'a> Renderer<'a> {
                     Line::new("z", "mag_z", theme::ROSE),
                 ],
             )
-            .with_zero(),
+            .with_zero()
+            .with_event_labels(),
             Panel::new(
                 "Tilt from vertical",
                 "°",
                 vec![Line::new("airbrakes KF", "airbrakes_kf_tilt_deg", theme::VIOLET)],
-            ),
+            )
+            .with_event_labels(),
             Panel::new(
                 "Barometric pressure",
                 "Pa",
@@ -369,6 +420,7 @@ impl<'a> Renderer<'a> {
                     Line::new("per 12V", "payload_per_12v_ma", theme::ROSE),
                 ],
             ),
+            // Bottom row: these three carry the shared tick labels.
             Panel::new(
                 "Payload actuators",
                 "steps",
@@ -377,7 +429,8 @@ impl<'a> Renderer<'a> {
                     Line::new("actuator 2", "payload_actuator_2_steps", theme::AMBER),
                     Line::new("actuator 3", "payload_actuator_3_steps", theme::GREEN),
                 ],
-            ),
+            )
+            .with_x_labels(),
             Panel::new(
                 "CAN node uptime",
                 "s",
@@ -387,7 +440,8 @@ impl<'a> Renderer<'a> {
                     Line::new("OZYS", "ozys_uptime_s", theme::GREEN),
                     Line::new("payload SDRM", "payload_sdrm_uptime_s", theme::VIOLET),
                 ],
-            ),
+            )
+            .with_x_labels(),
         ];
 
         for (cell, panel) in cells.iter().zip(panels.iter()) {
@@ -409,6 +463,7 @@ impl<'a> Renderer<'a> {
                 ("ab gate rej", "airbrakes_baro_gate_reject", theme::ALERT),
                 ("ab resync", "airbrakes_baro_resync", theme::ROSE),
             ],
+            true,
         )?;
 
         root.present().plot()?;
@@ -419,17 +474,17 @@ impl<'a> Renderer<'a> {
 
     fn draw_header(&self, area: &Area, kind: &str) -> Result<()> {
         area.fill(&theme::BG).plot()?;
-        let title = TextStyle::from((theme::FONT, 26).into_font())
+        let title = TextStyle::from((theme::FONT, theme::F_TITLE).into_font())
             .color(&theme::TEXT)
             .pos(Pos::new(HPos::Left, VPos::Center));
-        let sub = TextStyle::from((theme::FONT, 14).into_font())
+        let sub = TextStyle::from((theme::FONT, theme::F_SUBTITLE).into_font())
             .color(&theme::MUTED)
             .pos(Pos::new(HPos::Left, VPos::Center));
-        let right = TextStyle::from((theme::FONT, 14).into_font())
+        let right = TextStyle::from((theme::FONT, theme::F_SUBTITLE).into_font())
             .color(&theme::MUTED)
             .pos(Pos::new(HPos::Right, VPos::Center));
 
-        area.draw_text(&format!("{kind} · {}", self.source_name), &title, (28, 26))
+        area.draw_text(&format!("{kind} · {}", self.source_name), &title, (56, 54))
             .plot()?;
 
         let s = self.session;
@@ -445,7 +500,7 @@ impl<'a> Renderer<'a> {
                 apogee
             ),
             &sub,
-            (28, 50),
+            (56, 106),
         )
         .plot()?;
 
@@ -453,32 +508,34 @@ impl<'a> Renderer<'a> {
         // pad time went should not have to guess that it was removed.
         let trim = match s.window_source {
             WindowSource::Stages => format!(
-                "trimmed {:.1} s on the pad and {:.1} s after landing",
+                "from T-{:.0} s · trimmed {:.1} s on the pad and {:.1} s after landing",
+                s.lead_in_s(self.log),
                 s.trimmed_before_s(self.log),
                 s.trimmed_after_s(self.log)
             ),
             WindowSource::StagesNoLanding => format!(
-                "trimmed {:.1} s on the pad · log ends before landing",
+                "from T-{:.0} s · trimmed {:.1} s on the pad · log ends before landing",
+                s.lead_in_s(self.log),
                 s.trimmed_before_s(self.log)
             ),
             WindowSource::NeverLeftThePad => {
                 "never left the pad · showing the whole session".to_string()
             }
         };
-        area.draw_text(&trim, &right, (WIDTH as i32 - 28, 26))
+        area.draw_text(&trim, &right, (WIDTH as i32 - 56, 54))
             .plot()?;
-        self.draw_stage_key(area)?;
         if let Some(failed) = self.log.crc_failed_rows.filter(|n| *n > 0) {
-            let warn = TextStyle::from((theme::FONT, 14).into_font())
+            let warn = TextStyle::from((theme::FONT, theme::F_SUBTITLE).into_font())
                 .color(&theme::ALERT)
                 .pos(Pos::new(HPos::Right, VPos::Center));
             area.draw_text(
                 &format!("{failed} row(s) from CRC-failed blocks"),
                 &warn,
-                (WIDTH as i32 - 28, 50),
+                (WIDTH as i32 - 56, 106),
             )
             .plot()?;
         }
+        self.draw_stage_key(area)?;
         Ok(())
     }
 
@@ -500,22 +557,24 @@ impl<'a> Renderer<'a> {
             return Ok(());
         }
 
-        const CHIP_W: i32 = 26;
-        const CHIP_H: i32 = 13;
-        const GAP: i32 = 10;
+        const CHIP_W: i32 = 54;
+        const CHIP_H: i32 = 28;
+        const GAP: i32 = 26;
         let label = |s: u8| theme::stage_name(s);
-        // ~6.2 px per character at 12 px sans is close enough to centre the row;
-        // being a few pixels off is invisible, and measuring text would mean
-        // rendering it twice.
+        // ~0.52 em per character is close enough to centre the row; being a few
+        // pixels off is invisible, and measuring text would mean rendering it
+        // twice.
         let widths: Vec<i32> = stages
             .iter()
-            .map(|s| CHIP_W + 5 + (label(*s).len() as i32 * 62) / 10 + GAP)
+            .map(|s| {
+                CHIP_W + 10 + (label(*s).len() as i32 * theme::F_SUBTITLE * 52) / 100 + GAP
+            })
             .collect();
         let total: i32 = widths.iter().sum::<i32>() - GAP;
 
         let mut x = (WIDTH as i32 - total) / 2;
-        let y = 38;
-        let text = TextStyle::from((theme::FONT, 12).into_font())
+        let y = 80;
+        let text = TextStyle::from((theme::FONT, theme::F_SUBTITLE).into_font())
             .color(&theme::MUTED)
             .pos(Pos::new(HPos::Left, VPos::Center));
 
@@ -526,11 +585,11 @@ impl<'a> Renderer<'a> {
             area.draw(&Rectangle::new(chip, stage_color(*stage).filled()))
                 .plot()?;
             area.draw(&Rectangle::new(
-                [(x, y + CHIP_H / 2), (x + CHIP_W, y + CHIP_H / 2 + 2)],
+                [(x, y + CHIP_H / 2), (x + CHIP_W, y + CHIP_H / 2 + 4)],
                 theme::stage_hue(*stage).filled(),
             ))
             .plot()?;
-            area.draw_text(label(*stage), &text, (x + CHIP_W + 5, y))
+            area.draw_text(label(*stage), &text, (x + CHIP_W + 10, y))
                 .plot()?;
             x += width;
         }
@@ -541,7 +600,7 @@ impl<'a> Renderer<'a> {
         stage_spans(
             &self.times,
             &self.log.stage,
-            self.session.flight_start,
+            self.session.plot_start,
             self.session.flight_end,
         )
     }
@@ -610,7 +669,7 @@ impl<'a> Renderer<'a> {
         let (w, _) = area.dim_in_pixel();
         // One reduction bucket per horizontal pixel of plotting area. Asking for
         // more would produce points that land on the same pixel.
-        let buckets = (w as usize).saturating_sub(96).max(64);
+        let buckets = (w as usize).saturating_sub(Y_GUTTER as usize).max(64);
 
         let traces: Vec<(&Line, Option<Trace>)> = panel
             .lines
@@ -628,48 +687,51 @@ impl<'a> Renderer<'a> {
         let mut chart = ChartBuilder::on(area)
             .caption(
                 panel.title,
-                TextStyle::from((theme::FONT, 16).into_font()).color(&theme::TEXT),
+                TextStyle::from((theme::FONT, theme::F_CAPTION).into_font()).color(&theme::TEXT),
             )
-            .margin_right(16)
-            .margin_left(6)
-            .margin_bottom(6)
-            .x_label_area_size(28)
+            .margin_right(40)
+            .margin_left(14)
+            .margin_bottom(12)
+            .x_label_area_size(if panel.x_labels { X_LABELS_H } else { 0 })
             .y_label_area_size(Y_GUTTER)
             .build_cartesian_2d(self.x_range.0..self.x_range.1, y_lo..y_hi)
             .plot()?;
 
-        chart
-            .configure_mesh()
-            .light_line_style(theme::GRID.mix(0.45))
-            .bold_line_style(theme::GRID)
-            .axis_style(theme::AXIS)
-            .label_style(TextStyle::from((theme::FONT, 12).into_font()).color(&theme::MUTED))
-            .x_desc("")
-            .y_desc(panel.unit)
-            .axis_desc_style(TextStyle::from((theme::FONT, 12).into_font()).color(&theme::MUTED))
-            .draw()
-            .plot()?;
+        {
+            let mut binding = chart.configure_mesh();
+            let mesh = binding
+                .light_line_style(theme::GRID.mix(0.55))
+                .bold_line_style(theme::GRID)
+                .axis_style(theme::AXIS)
+                .label_style(
+                    TextStyle::from((theme::FONT, theme::F_TICK).into_font())
+                        .color(&theme::MUTED),
+                )
+                .y_desc(panel.unit)
+                .axis_desc_style(
+                    TextStyle::from((theme::FONT, theme::F_TICK).into_font())
+                        .color(&theme::MUTED),
+                );
+            // The gridlines stay on every panel; only the numbers under them are
+            // dropped, which is the whole saving.
+            if panel.x_labels {
+                mesh.x_desc("T+ seconds");
+            } else {
+                mesh.disable_x_axis();
+            }
+            mesh.draw().plot()?;
+        }
 
         self.draw_stage_bands(&mut chart, y_lo, y_hi)?;
+        self.draw_event_rules(&mut chart, y_lo, y_hi)?;
+        self.draw_plot_border(&mut chart, y_lo, y_hi)?;
 
         if panel.zero_line {
             chart
                 .draw_series(std::iter::once(PathElement::new(
                     vec![(self.x_range.0, 0.0), (self.x_range.1, 0.0)],
-                    theme::AXIS.stroke_width(1),
+                    theme::AXIS.stroke_width(2),
                 )))
-                .plot()?;
-        }
-        if panel.mark_apogee
-            && let Some(t) = self.apogee_at_s()
-        {
-            chart
-                .draw_series(DashedLineSeries::new(
-                    vec![(t, y_lo), (t, y_hi)],
-                    6,
-                    4,
-                    theme::MUTED.mix(0.75).stroke_width(1),
-                ))
                 .plot()?;
         }
 
@@ -678,26 +740,51 @@ impl<'a> Renderer<'a> {
             for (i, run) in trace.runs.iter().enumerate() {
                 let points: Vec<(f64, f64)> =
                     run.iter().map(|&(t, v)| (t, v as f64)).collect();
+                // Drawn segment by segment rather than as one `LineSeries`.
+                //
+                // plotters builds a thick polyline by joining quads, and at a
+                // sharp enough cusp the join projects a miter spike far outside
+                // the plotting area — on this data the temperature trace, which
+                // min/max decimation turns into a picket fence of one-bucket
+                // spikes, threw them up through the panel above and read as
+                // stray data in someone else's chart. A two-point path has no
+                // join to compute, so the failure cannot arise. At 2 px the
+                // missing joins are not visible.
+                let style = line.color.stroke_width(2);
                 let series = chart
-                    .draw_series(LineSeries::new(points, line.color.stroke_width(1)))
+                    .draw_series(
+                        points
+                            .windows(2)
+                            .map(|w| PathElement::new(vec![w[0], w[1]], style)),
+                    )
                     .plot()?;
                 // Only the first run carries the legend entry, or a gapped
                 // trace would appear once per fragment.
                 if i == 0 {
                     let color = line.color;
                     series.label(line.label).legend(move |(x, y)| {
-                        PathElement::new(vec![(x, y), (x + 18, y)], color.stroke_width(3))
+                        PathElement::new(vec![(x, y), (x + LEGEND_SWATCH, y)], color.stroke_width(6))
                     });
                 }
             }
         }
 
+        if panel.event_labels {
+            self.draw_event_labels(&mut chart, y_lo, y_hi)?;
+        }
+
         chart
             .configure_series_labels()
             .position(SeriesLabelPosition::UpperRight)
-            .background_style(theme::BG.mix(0.82))
-            .border_style(theme::AXIS)
-            .label_font(TextStyle::from((theme::FONT, 12).into_font()).color(&theme::TEXT))
+            // plotters sizes the swatch gutter from this, not from the element
+            // the closure draws; leaving it at the default puts the last few
+            // pixels of every swatch through the first letter of its label.
+            .legend_area_size(LEGEND_SWATCH as u32 + 18)
+            .background_style(theme::PANEL_BG.mix(0.88))
+            .border_style(theme::GRID)
+            .label_font(
+                TextStyle::from((theme::FONT, theme::F_LEGEND).into_font()).color(&theme::TEXT),
+            )
             .draw()
             .plot()?;
 
@@ -723,10 +810,10 @@ impl<'a> Renderer<'a> {
             let (w, _) = area.dim_in_pixel();
             area.draw_text(
                 &notes.join("   ·   "),
-                &TextStyle::from((theme::FONT, 11).into_font())
-                    .color(&theme::MUTED.mix(0.85))
+                &TextStyle::from((theme::FONT, theme::F_NOTE).into_font())
+                    .color(&theme::MUTED)
                     .pos(Pos::new(HPos::Right, VPos::Center)),
-                (w as i32 - 16, 14),
+                (w as i32 - 40, 34),
             )
             .plot()?;
         }
@@ -745,10 +832,10 @@ impl<'a> Renderer<'a> {
         // reads as one grid rather than as two kinds of thing.
         area.draw_text(
             panel.title,
-            &TextStyle::from((theme::FONT, 16).into_font())
+            &TextStyle::from((theme::FONT, theme::F_CAPTION).into_font())
                 .color(&theme::MUTED)
                 .pos(Pos::new(HPos::Center, VPos::Center)),
-            (w as i32 / 2, 14),
+            (w as i32 / 2, 34),
         )
         .plot()?;
         // Distinguishes a firmware that never wrote the column from one that
@@ -763,8 +850,8 @@ impl<'a> Renderer<'a> {
         };
         area.draw_text(
             reason,
-            &TextStyle::from((theme::FONT, 13).into_font())
-                .color(&theme::MUTED.mix(0.7))
+            &TextStyle::from((theme::FONT, theme::F_NOTE).into_font())
+                .color(&theme::MUTED)
                 .pos(Pos::new(HPos::Center, VPos::Center)),
             (w as i32 / 2, h as i32 / 2),
         )
@@ -782,6 +869,7 @@ impl<'a> Renderer<'a> {
         area: &Area,
         title: &'static str,
         lanes: &[(&str, &str, RGBColor)],
+        x_labels: bool,
     ) -> Result<()> {
         area.fill(&theme::PANEL_BG).plot()?;
         let n = lanes.len() as f64;
@@ -789,38 +877,51 @@ impl<'a> Renderer<'a> {
         let mut chart = ChartBuilder::on(area)
             .caption(
                 title,
-                TextStyle::from((theme::FONT, 16).into_font()).color(&theme::TEXT),
+                TextStyle::from((theme::FONT, theme::F_CAPTION).into_font()).color(&theme::TEXT),
             )
-            .margin_right(16)
-            .margin_left(6)
-            .margin_bottom(6)
-            .x_label_area_size(28)
+            .margin_right(40)
+            .margin_left(14)
+            .margin_bottom(12)
+            .x_label_area_size(if x_labels { X_LABELS_H } else { 0 })
             .y_label_area_size(Y_GUTTER)
             .build_cartesian_2d(self.x_range.0..self.x_range.1, 0f64..n)
             .plot()?;
 
-        chart
-            .configure_mesh()
-            .disable_y_mesh()
-            .light_line_style(theme::GRID.mix(0.45))
-            .bold_line_style(theme::GRID)
-            .axis_style(theme::AXIS)
-            .label_style(TextStyle::from((theme::FONT, 12).into_font()).color(&theme::MUTED))
-            .y_labels(0)
-            .x_desc("T+ seconds")
-            .axis_desc_style(TextStyle::from((theme::FONT, 12).into_font()).color(&theme::MUTED))
-            .draw()
-            .plot()?;
+        {
+            let mut binding = chart.configure_mesh();
+            let mesh = binding
+                .disable_y_mesh()
+                .light_line_style(theme::GRID.mix(0.55))
+                .bold_line_style(theme::GRID)
+                .axis_style(theme::AXIS)
+                .label_style(
+                    TextStyle::from((theme::FONT, theme::F_TICK).into_font())
+                        .color(&theme::MUTED),
+                )
+                .y_labels(0)
+                .axis_desc_style(
+                    TextStyle::from((theme::FONT, theme::F_TICK).into_font())
+                        .color(&theme::MUTED),
+                );
+            if x_labels {
+                mesh.x_desc("T+ seconds");
+            } else {
+                mesh.disable_x_axis();
+            }
+            mesh.draw().plot()?;
+        }
 
         self.draw_stage_bands(&mut chart, 0.0, n)?;
+        self.draw_event_rules(&mut chart, 0.0, n)?;
+        self.draw_plot_border(&mut chart, 0.0, n)?;
 
-        let label_style = TextStyle::from((theme::FONT, 11).into_font())
+        let label_style = TextStyle::from((theme::FONT, theme::F_LANE).into_font())
             .color(&theme::TEXT)
             .pos(Pos::new(HPos::Right, VPos::Center));
         // Bound rather than inlined: `color` borrows, and this style outlives
         // the statement that builds it.
         let dim = theme::MUTED.mix(0.55);
-        let absent_style = TextStyle::from((theme::FONT, 11).into_font())
+        let absent_style = TextStyle::from((theme::FONT, theme::F_LANE).into_font())
             .color(&dim)
             .pos(Pos::new(HPos::Right, VPos::Center));
 
@@ -835,11 +936,11 @@ impl<'a> Renderer<'a> {
         let plot_top = (py.start - base_y) as f64;
         let plot_h = (py.end - py.start) as f64;
         let plot_w = (px.end - px.start) as f64;
-        let label_right = px.start - base_x - 8;
+        let label_right = px.start - base_x - 16;
         // A pulse a few rows long is well under a pixel wide at this scale.
         // Widening it to a floor keeps it visible; without this a pyro fire —
         // the shortest and most important event in the log — renders as nothing.
-        let min_width = (self.x_range.1 - self.x_range.0) / plot_w.max(1.0) * 2.0;
+        let min_width = (self.x_range.1 - self.x_range.0) / plot_w.max(1.0) * 3.0;
 
         for (i, (label, column, color)) in lanes.iter().enumerate() {
             // Lane 0 at the top reads in the order the list is written.
@@ -848,11 +949,14 @@ impl<'a> Renderer<'a> {
             let inset = 0.24;
 
             let values = self.column(column);
-            let present = values.is_some();
             let y_px = plot_top + plot_h * (i as f64 + 0.5) / n;
             area.draw_text(
                 label,
-                if present { &label_style } else { &absent_style },
+                if values.is_some() {
+                    &label_style
+                } else {
+                    &absent_style
+                },
                 (label_right, y_px.round() as i32),
             )
             .plot()?;
@@ -866,14 +970,14 @@ impl<'a> Renderer<'a> {
                             (self.x_range.0, bottom + 0.5),
                             (self.x_range.1, bottom + 0.5),
                         ],
-                        theme::GRID.stroke_width(1),
+                        theme::GRID.stroke_width(2),
                     )))
                     .plot()?;
 
                 let spans = true_spans(
                     &self.times,
                     values,
-                    self.session.flight_start,
+                    self.session.plot_start,
                     self.session.flight_end,
                 );
                 chart
@@ -883,7 +987,7 @@ impl<'a> Renderer<'a> {
                                 (a, bottom + inset),
                                 (b.max(a + min_width), top - inset),
                             ],
-                            color.mix(0.85).filled(),
+                            color.mix(0.9).filled(),
                         )
                     }))
                     .plot()?;
@@ -908,6 +1012,122 @@ impl<'a> Renderer<'a> {
                 Rectangle::new([(a, y_lo), (b, y_hi)], stage_color(stage).filled())
             }))
             .plot()?;
+        Ok(())
+    }
+
+    /// Outline the plotting area.
+    ///
+    /// Only the bottom panel of a column draws an x axis, which is the point of
+    /// sharing the axis — but the axis line was also the only thing dividing one
+    /// stacked panel from the next, and without it a noisy trace appears to
+    /// spill into its neighbour. The border restores the division at no cost in
+    /// height.
+    fn draw_plot_border<DB: DrawingBackend>(
+        &self,
+        chart: &mut ChartContext<'_, DB, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
+        y_lo: f64,
+        y_hi: f64,
+    ) -> Result<()>
+    where
+        DB::ErrorType: 'static,
+    {
+        chart
+            .draw_series(std::iter::once(Rectangle::new(
+                [(self.x_range.0, y_lo), (self.x_range.1, y_hi)],
+                theme::AXIS.mix(0.55).stroke_width(2),
+            )))
+            .plot()?;
+        Ok(())
+    }
+
+    /// Dotted vertical rules at each event, on every panel.
+    ///
+    /// Drawn under the traces, not over them: the rule is there to locate a
+    /// feature in the data, and a rule that hides the feature has inverted its
+    /// own purpose.
+    fn draw_event_rules<DB: DrawingBackend>(
+        &self,
+        chart: &mut ChartContext<'_, DB, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
+        y_lo: f64,
+        y_hi: f64,
+    ) -> Result<()>
+    where
+        DB::ErrorType: 'static,
+    {
+        for event in &self.events {
+            chart
+                .draw_series(DashedLineSeries::new(
+                    vec![(event.at_s, y_lo), (event.at_s, y_hi)],
+                    5,
+                    9,
+                    theme::EVENT.mix(0.55).stroke_width(2),
+                ))
+                .plot()?;
+        }
+        Ok(())
+    }
+
+    /// Name the event rules, on the top panel of a column only.
+    ///
+    /// Once per column rather than once per panel: the rules are the same on
+    /// every panel below, so repeating the names would be eleven copies of the
+    /// same six words on the auxiliary figure.
+    fn draw_event_labels<DB: DrawingBackend>(
+        &self,
+        chart: &mut ChartContext<'_, DB, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
+        y_lo: f64,
+        y_hi: f64,
+    ) -> Result<()>
+    where
+        DB::ErrorType: 'static,
+    {
+        let span = y_hi - y_lo;
+        let x_span = self.x_range.1 - self.x_range.0;
+        let plot_w = {
+            let (px, _) = chart.plotting_area().get_pixel_range();
+            (px.end - px.start).max(1) as f64
+        };
+        // Labels are placed on the first level that is still clear at this x,
+        // rather than alternating between two. Events cluster — liftoff,
+        // burnout, apogee and drogue deployment can fall inside the first tenth
+        // of the axis — and a fixed two-level scheme overstrikes as soon as
+        // three of them are close.
+        const LEVELS: usize = 4;
+        let mut level_free = [f64::NEG_INFINITY; LEVELS];
+        for event in &self.events {
+            // ~0.52 em per character, converted from pixels into axis units so
+            // the packing holds at any figure width.
+            let text_w =
+                event.label.chars().count() as f64 * theme::F_EVENT as f64 * 0.52 / plot_w
+                    * x_span;
+            // An event in the last fifth of the axis would run its label off the
+            // right edge, so it hangs to the left of its rule instead.
+            let near_right = event.at_s > self.x_range.0 + x_span * 0.8;
+            let (anchor, dx) = if near_right {
+                (HPos::Right, -x_span * 0.006)
+            } else {
+                (HPos::Left, x_span * 0.006)
+            };
+            let left = if near_right {
+                event.at_s + dx - text_w
+            } else {
+                event.at_s + dx
+            };
+            let level = (0..LEVELS)
+                .find(|&l| left >= level_free[l])
+                .unwrap_or(LEVELS - 1);
+            level_free[level] = left + text_w + x_span * 0.012;
+            let y = y_hi - span * (0.055 + 0.075 * level as f64);
+            chart
+                .draw_series(std::iter::once(Text::new(
+                    event.label.clone(),
+                    (event.at_s + dx, y),
+                    TextStyle::from((theme::FONT, theme::F_EVENT).into_font())
+                        .color(&theme::EVENT)
+                        .pos(Pos::new(anchor, VPos::Center)),
+                )))
+                .plot()?;
+        }
         Ok(())
     }
 }

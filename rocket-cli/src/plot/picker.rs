@@ -140,6 +140,7 @@ mod tests {
             end: rows,
             flight_start: 0,
             flight_end: rows,
+            plot_start: 0,
             window_source: source,
             unix_time_us: None,
             apogee_asl: apogee,

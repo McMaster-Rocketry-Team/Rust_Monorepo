@@ -2014,3 +2014,149 @@ fn ignition_latch_time_by_threshold() {
         }
     }
 }
+
+/// TEMPORARY bandwidth study (delete when it has answered its question).
+///
+/// The archived-flight study scores against a smoothed version of the same
+/// barometer, which structurally flatters any filter that follows the baro
+/// harder. Here the truth is OpenRocket's own trajectory, so that confound
+/// is gone: `vv_track`/`alt_track` already carry (estimate, truth) pairs,
+/// and the same synthesized baro stream feeds a sweep of baro-ONLY filters
+/// for comparison.
+#[test]
+fn kf_bandwidth_vs_truth() {
+    init_logger();
+    for path in [O3400_CSV, N2900_CSV] {
+        let truth = Truth::load(path);
+        let (apogee_t, apogee_asl) = truth.apogee();
+        let samples = synthesize(
+            &truth,
+            &SensorModel {
+                until_s: apogee_t + 5.0,
+                ..Default::default()
+            },
+        );
+        let r = replay(&samples, osiris_config(), apogee_asl - 150.0);
+
+        // score from birth+0.5 s to 2 s before apogee
+        let (birth_t, _) = r.birth.expect("no birth");
+        let from = birth_t + 0.5;
+        let to = apogee_t - 2.0;
+        let score = |track: &[(f32, f32, f32)]| -> (f32, f32, usize) {
+            let (mut sum, mut max, mut n) = (0.0f32, 0.0f32, 0usize);
+            for (t, est, tru) in track {
+                if *t >= from && *t <= to {
+                    sum += (est - tru).abs();
+                    max = max.max((est - tru).abs());
+                    n += 1;
+                }
+            }
+            (sum / n.max(1) as f32, max, n)
+        };
+        let (vv_mean, vv_max, n) = score(&r.vv_track);
+        let (alt_mean, alt_max, _) = score(&r.alt_track);
+        let jitter = {
+            let (mut ss, mut cnt) = (0.0f32, 0usize);
+            for w in r.vv_track.windows(2) {
+                if w[0].0 >= from && w[1].0 <= to && w[1].0 > w[0].0 {
+                    let d = (w[1].1 - w[0].1) / (w[1].0 - w[0].0) * 0.01;
+                    ss += d * d;
+                    cnt += 1;
+                }
+            }
+            (ss / cnt.max(1) as f32).sqrt()
+        };
+        eprintln!("\n=== {path} (truth-scored, {n} samples, {from:.1}..{to:.1}s) ===");
+        eprintln!(
+            "  {:<24} {:>8} {:>8} {:>8} {:>8} {:>9}",
+            "estimator", "|dvv|", "max", "|dalt|", "max", "jitter"
+        );
+        eprintln!(
+            "  {:<24} {vv_mean:>8.2} {vv_max:>8.2} {alt_mean:>8.2} {alt_max:>8.2} {jitter:>9.3}",
+            "flown (IMU-aided)"
+        );
+
+        // baro-only sweep on the SAME synthesized baro stream, born at the
+        // same instant with a causal slope seed
+        for tau in [0.10f32, 0.20, 0.35, 0.50, 0.75, 1.00, 1.73] {
+            let born_i = samples
+                .iter()
+                .position(|s| s.truth_t >= birth_t)
+                .expect("birth outside samples");
+            // causal 0.5 s slope seed
+            let (mut st, mut sy, mut stt, mut sty, mut cnt) = (0.0f64, 0.0f64, 0.0f64, 0.0f64, 0f64);
+            let t0 = samples[born_i].truth_t;
+            for s in samples[..=born_i].iter().rev() {
+                if t0 - s.truth_t > 0.5 {
+                    break;
+                }
+                let t = (s.truth_t - t0) as f64;
+                let y = s.baro_altitude_asl as f64;
+                st += t;
+                sy += y;
+                stt += t * t;
+                sty += t * y;
+                cnt += 1.0;
+            }
+            let den = cnt * stt - st * st;
+            let slope = if den.abs() > 1e-9 { (cnt * sty - st * sy) / den } else { 0.0 };
+            let intercept = if cnt > 0.0 { (sy - slope * st) / cnt } else { 0.0 };
+
+            let (mut alt, mut vel) = (intercept as f32, slope as f32);
+            let (mut p00, mut p01, mut p10, mut p11) = (9.0f32, 0.0, 0.0, 900.0);
+            let (r_std, q_std) = (3.0f32, 3.0f32 / (2.0 * tau * tau));
+            let (mut sum, mut mx, mut nn) = (0.0f32, 0.0f32, 0usize);
+            let (mut asum, mut amx) = (0.0f32, 0.0f32);
+            let (mut ss, mut jn, mut prev) = (0.0f32, 0usize, None::<(f32, f32)>);
+            for w in samples[born_i..].windows(2) {
+                let (prev_s, s) = (&w[0], &w[1]);
+                let dt = (s.truth_t - prev_s.truth_t).clamp(0.0, 0.25);
+                alt += vel * dt;
+                let q = q_std * q_std;
+                let (a00, a01, a10, a11) = (p00, p01, p10, p11);
+                p00 = a00 + dt * (a01 + a10) + dt * dt * a11 + q * dt.powi(4) / 4.0;
+                p01 = a01 + dt * a11 + q * dt.powi(3) / 2.0;
+                p10 = a10 + dt * a11 + q * dt.powi(3) / 2.0;
+                p11 = a11 + q * dt * dt;
+                let innovation = s.baro_altitude_asl - alt;
+                if innovation.abs() <= 100.0 {
+                    let rr = r_std * r_std;
+                    let sden = p00 + rr;
+                    let (k0, k1) = (p00 / sden, p10 / sden);
+                    alt += k0 * innovation;
+                    vel += k1 * innovation;
+                    let (b00, b01, b10, b11) = (p00, p01, p10, p11);
+                    let a = 1.0 - k0;
+                    p00 = a * a * b00 + k0 * k0 * rr;
+                    p01 = a * (b01 - k1 * b00) + k0 * k1 * rr;
+                    p10 = a * (b10 - k1 * b00) + k0 * k1 * rr;
+                    p11 = b11 - k1 * (b01 + b10) + k1 * k1 * b00 + k1 * k1 * rr;
+                }
+                if s.truth_t >= from && s.truth_t <= to {
+                    sum += (vel - s.truth.vv).abs();
+                    mx = mx.max((vel - s.truth.vv).abs());
+                    asum += (alt - s.truth.altitude_asl).abs();
+                    amx = amx.max((alt - s.truth.altitude_asl).abs());
+                    nn += 1;
+                    if let Some((pt, pv)) = prev
+                        && s.truth_t > pt
+                    {
+                        let d = (vel - pv) / (s.truth_t - pt) * 0.01;
+                        ss += d * d;
+                        jn += 1;
+                    }
+                    prev = Some((s.truth_t, vel));
+                }
+            }
+            eprintln!(
+                "  {:<24} {:>8.2} {:>8.2} {:>8.2} {:>8.2} {:>9.3}",
+                format!("baro-only tau={tau:.2}s"),
+                sum / nn.max(1) as f32,
+                mx,
+                asum / nn.max(1) as f32,
+                amx,
+                (ss / jn.max(1) as f32).sqrt(),
+            );
+        }
+    }
+}
