@@ -4,6 +4,7 @@ mod elf_locator;
 mod gen_key;
 mod gs;
 mod monitor;
+mod plot;
 mod probe;
 mod serial_can;
 mod testing;
@@ -92,6 +93,7 @@ async fn main() -> Result<()> {
         ModeSelect::ListFlightLog => usb_storage::list_files(),
         ModeSelect::DownloadFlightLog(args) => usb_storage::download_file(&args.output),
         ModeSelect::ClearFlightLog => usb_storage::clear_storage(),
+        ModeSelect::PlotFlightLog(args) => plot::plot_flight_log(&args),
     }
 }
 

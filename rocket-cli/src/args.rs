@@ -46,6 +46,9 @@ pub enum ModeSelect {
     #[command(about = "erase the SD flight log on a connected VLF5")]
     ClearFlightLog,
 
+    #[command(about = "plot a downloaded flight-log CSV to two 1080p PNGs")]
+    PlotFlightLog(PlotFlightLogArgs),
+
     #[clap(subcommand)]
     #[command(about = "functions used for testing")]
     Testing(TestingModeSelect),
@@ -55,6 +58,23 @@ pub enum ModeSelect {
 pub struct DownloadFlightLogArgs {
     #[arg(default_value = "flight_log.csv")]
     pub output: String,
+}
+
+#[derive(Parser, Debug)]
+pub struct PlotFlightLogArgs {
+    #[arg(default_value = "flight_log.csv")]
+    pub input: String,
+    #[arg(
+        long,
+        help = "where to write the PNGs (default: alongside the input CSV)"
+    )]
+    pub out_dir: Option<String>,
+    #[arg(
+        long,
+        help = "flight to plot, 1-based, as numbered in the listing; \
+                skips the picker when the log holds several"
+    )]
+    pub session: Option<usize>,
 }
 
 #[derive(Parser, Debug)]

@@ -45,6 +45,17 @@ heapless = "0.8.0"
 fern = {version = "0.7.1", features = ["colored"]}
 rusb = "0.9.4"
 csv = "1.3.0"
+# `ttf` resolves a system font by family name through font-kit. The gif/svg/image
+# backends and the extra chart elements are all dead weight for two PNGs.
+plotters = { version = "0.3.7", default-features = false, features = [
+    "bitmap_backend",
+    "bitmap_encoder",
+    "line_series",
+    "area_series",
+    "point_series",
+    "full_palette",
+    "ttf",
+] }
 
 [patch.crates-io]
 embassy-sync = { git = "https://github.com/embassy-rs/embassy.git" }
