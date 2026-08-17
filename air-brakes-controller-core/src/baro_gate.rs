@@ -3,10 +3,26 @@
 //! Both estimators gate their baro channel the same way — reject a reading
 //! that disagrees with the prediction by more than a threshold, and give up
 //! and resync if the disagreement persists — so both report the outcome in
-//! this shape. It is the return value of the filter update rather than state
-//! stored on the filter, because a resync happens on exactly one sample: a
-//! caller that polls for it afterwards would have to be lucky, and the SD log
-//! polls at a different rate than the filters run.
+//! this shape. It is the return value of the update, all the way out through
+//! [`FlightEstimators::update`], and is stored nowhere.
+//!
+//! Both estimators used to keep it in a `last_baro_gate` field with an
+//! accessor, and this doc used to justify that with a polling gap that did
+//! not exist: the SD log has never polled on a clock of its own — its one
+//! caller read the outcome in the same critical section as the `update` that
+//! produced it. So the field bought nothing and cost a contract ("read this
+//! immediately after `update`, before the next sample overwrites it") that
+//! the type could not enforce. Returning the value deletes the contract:
+//! there is no stale value to read because there is no value to read.
+//!
+//! The one behaviour this changed is the sample with no IMU on it. The
+//! airbrakes half is skipped there, so its stored field used to hold the
+//! PREVIOUS sample's outcome and the SD record repeated it. Now
+//! [`FlightEstimators::update`] synthesises `Accepted` for that sample —
+//! nothing was fused, so nothing was rejected — which is what every other
+//! "no gate ran" path in both estimators already reported.
+//!
+//! [`FlightEstimators::update`]: crate::FlightEstimators::update
 
 /// The fate of one baro measurement at the innovation gate.
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]

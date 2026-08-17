@@ -29,15 +29,19 @@
 //! reads as a false low speed), and the brakes must be stowed (they are —
 //! this gate is what opens them).
 //!
-//! Every step uses the measured time between samples (the `Measurement`
-//! carries a timestamp) — nothing here assumes a sample rate, including
-//! the pieces that are not integrations: the 2 s pad calibration windows,
-//! the pre-ignition rewind buffer, the ignition low pass, and every
-//! sustain timer are all spans of measured time. The flight log that
-//! motivated this had 104 ms sensor stalls, and the part whose ODR is
-//! written "416 Hz" measures 427.02 Hz.
+//! Every step uses the measured time between samples (each sample carries
+//! its timestamp) — nothing here assumes a sample rate, including the
+//! pieces that are not integrations: the 2 s pad calibration windows, the
+//! pre-ignition rewind buffer, the ignition low pass, and every sustain
+//! timer are all spans of measured time. Since 2026-08-17 that is literally
+//! true and not a near miss: no nominal rate survives in the flight path at
+//! all, because the very first sample — the one with no predecessor to
+//! difference against, and the last thing that assumed one — is stepped by
+//! dt = 0 rather than by an assumed 1/416 s. The flight log that motivated
+//! this had 104 ms sensor stalls, and the part whose ODR is written
+//! "416 Hz" measures 427.02 Hz.
 
-use nalgebra::{SVector, Vector3};
+use nalgebra::Vector3;
 
 use crate::controller::RocketParameters;
 
@@ -46,60 +50,39 @@ mod estimator;
 #[cfg(test)]
 mod tests;
 mod vertical_kf;
-pub(crate) mod welford;
 
 pub use estimator::AirbrakesEstimator;
 
-/// Nominal sample rate. Nothing in this estimator is clocked by it any
-/// more — every integration, window, sustain timer and buffer span is
-/// measured — so its ONLY remaining job is [`NOMINAL_DT`], the dt assumed
-/// for the very first sample, where there is no previous timestamp to
-/// difference against.
-pub(crate) const NOMINAL_SAMPLES_PER_S: usize = 416;
-pub(crate) const NOMINAL_DT: f32 = 1f32 / (NOMINAL_SAMPLES_PER_S as f32);
 /// Per-sample dt clamp: a gap longer than this is integrated as this long
 /// (protects the integrators from a bogus timestamp jump). Long enough to
 /// integrate honestly through the measured 104 ms stalls.
 pub(crate) const MAX_DT_S: f32 = 0.25;
 
-/// One timestamped IMU+baro sample in the avionics (IMU chip) frame:
-/// accelerometer specific force (m/s^2), angular velocity (rad/s), baro
-/// altitude ASL (m). Acc and gyro must share one consistent right-handed
-/// frame; the estimator self-calibrates the mounting orientation on the
-/// pad, so no per-board axis configuration is needed.
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+/// One IMU sample in the avionics (IMU chip) frame, SI units at the API
+/// boundary: specific force in m/s^2, angular velocity in rad/s. Firmware
+/// converts units at the edge (e.g. deg/s -> rad/s) before constructing
+/// this.
+///
+/// Acc and gyro must share one consistent right-handed frame; the estimator
+/// self-calibrates the mounting orientation on the pad, so no per-board axis
+/// configuration is needed.
+///
+/// The timestamp and the baro altitude that go with it are passed alongside
+/// rather than folded in here, because that is the shape both callers
+/// already have: [`FlightEstimators::update`] takes one timestamp for BOTH
+/// halves and a baro reading the deployment half also needs, and it holds
+/// the IMU as an `Option` because a sample may carry baro without IMU. A
+/// combined "one timestamped IMU+baro sample" type stood here until
+/// 2026-08-17 and only ever moved those three values from that call
+/// straight into this estimator's `update`.
+///
+/// [`FlightEstimators::update`]: crate::FlightEstimators::update
 #[derive(Debug, Clone)]
-pub struct Measurement {
-    pub timestamp_us: u64,
-    #[cfg_attr(feature = "defmt", defmt(Debug2Format))]
-    data: SVector<f32, 7>,
-}
-
-impl Measurement {
-    pub fn new(
-        timestamp_us: u64,
-        acceleration: &Vector3<f32>,
-        angular_velocity: &Vector3<f32>,
-        altitude_asl: f32,
-    ) -> Self {
-        let mut data = SVector::<f32, 7>::zeros();
-        data.fixed_view_mut::<3, 1>(0, 0).copy_from(acceleration);
-        data.fixed_view_mut::<3, 1>(3, 0).copy_from(angular_velocity);
-        data[6] = altitude_asl;
-        Self { timestamp_us, data }
-    }
-
-    pub fn acceleration(&self) -> Vector3<f32> {
-        self.data.fixed_view::<3, 1>(0, 0).into()
-    }
-
-    pub fn angular_velocity(&self) -> Vector3<f32> {
-        self.data.fixed_view::<3, 1>(3, 0).into()
-    }
-
-    pub fn altitude_asl(&self) -> f32 {
-        self.data[6]
-    }
+pub struct ImuSample {
+    /// Accelerometer specific force (m/s^2).
+    pub acc: Vector3<f32>,
+    /// Angular velocity (rad/s).
+    pub gyro: Vector3<f32>,
 }
 
 /// Airbrakes estimator configuration. All numbers are per-airframe /
@@ -107,9 +90,16 @@ impl Measurement {
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Clone, Debug)]
 pub struct AirbrakesConfig {
-    /// Low-passed |accel| above this latches ignition detection (m/s^2).
+    /// Low-passed |accel| above this, held for the shared sustain, latches
+    /// ignition detection (m/s^2). The detector is
+    /// [`crate::ignition_detector`], the same implementation the pyro half
+    /// runs; this is the only parameter the two halves can differ in.
+    ///
     /// ~4 g works for most motors: well above pad handling and wind, well
-    /// below liftoff thrust.
+    /// below liftoff thrust. Raising it is nearly free on a punchy motor —
+    /// on Osiris, 8 g latches only ~20 ms later than 4 g — but it is
+    /// airframe-specific: on LC'25's softer curve 8 g costs 0.45 s and 10 g
+    /// never latches at all.
     pub ignition_detection_acc_threshold: f32,
 
     /// `Some` for flights that go near or above the speed of sound: the
@@ -178,11 +168,27 @@ pub struct AirbrakesConfig {
 /// Bounds on when the drag check is allowed to decide, both measured from
 /// **this estimator's own accelerometer ignition detection**.
 ///
-/// Note the clock: [`FlightProfile::mach_lockout_duration_us`] runs from the
-/// DEPLOYMENT estimator's baro ignition detection instead, which lags. The
-/// two lockouts are independent — different subsystems, different sensors,
-/// different thresholds — and equal values in a config are coincidence, not
-/// a relationship. Changing one does not imply changing the other.
+/// Note the clock: [`FlightProfile::mach_lockout_duration_us`] is measured
+/// from the DEPLOYMENT half's ignition detection. Since 2026-08-17 that is
+/// the same detector this half runs — one implementation
+/// ([`crate::ignition_detector`]), two instances, same 10 Hz low pass on the
+/// raw accelerometer and same 0.1 s sustain — so the only parameter that can
+/// separate the two origins is each half's own
+/// `ignition_detection_acc_threshold`. Osiris sets both to 8 g and they
+/// latch on the same sample; `osiris_sim::ignition_latch_time_by_threshold`
+/// sweeps the threshold and asserts the two halves never disagree.
+///
+/// One thing still can separate them in flight, and it is not a threshold:
+/// this half refuses to detect ignition until its pad calibration completes
+/// (three 2 s windows), so a board armed seconds before liftoff gives this
+/// half a later origin, or none, while the pyro half's is unaffected. That
+/// is why the halves hold separate instances rather than sharing one.
+///
+/// What remains independent is the two lockouts themselves — different
+/// subsystems, different exit conditions, and different Mach numbers
+/// (0.75 there, [`AirbrakesConfig::max_open_mach`] here). Equal values in a
+/// config are still coincidence, not a relationship; changing one does not
+/// imply changing the other.
 ///
 /// [`FlightProfile::mach_lockout_duration_us`]: crate::FlightProfile::mach_lockout_duration_us
 pub struct MachLockoutConfig {
@@ -190,13 +196,31 @@ pub struct MachLockoutConfig {
     /// [`AirbrakesConfig::max_open_mach`]; the drag check is not consulted
     /// before this.
     ///
-    /// This is the guard that does the most work in practice. Measured on
-    /// the Osiris sim, a Cd wrong by 5x moves the birth only from 18.89 s to
-    /// 18.52 s — against a true Mach 0.8 crossing at 17.56 s — because this
-    /// floor sits at 17.5 s and the check simply cannot speak earlier. Set
-    /// it loosely and a wrong drag model births the filter while the port is
-    /// still shocked: LC'25's floor is ~4.6 s ahead of its real crossing,
-    /// and a 2x Cd error there births at Mach 0.90.
+    /// A hard floor, and load-bearing against exactly one kind of error.
+    /// Measured on the Osiris sim, a *config* Cd wrong by 5x moves the birth
+    /// only from 18.89 s to 18.52 s — against a true Mach 0.8 crossing at
+    /// 17.56 s — because this floor sits at 17.5 s and the check simply
+    /// cannot speak earlier. Note what that sweep varies, though: the config
+    /// moves and the trajectory does not, so the floor keeps its measured
+    /// distance from the real crossing by construction. Against a wrong
+    /// *true* Cd the airframe flies a different flight and the crossing
+    /// moves out from under the floor, which this constant does nothing
+    /// about — it is a fixed time, not a measurement.
+    ///
+    /// The constant that is load-bearing in both cases is the 1 s subsonic
+    /// sustain (`estimator::SUBSONIC_SUSTAIN_S`): removing that alone takes
+    /// the share of births still above Mach 0.8 from 1.0% to 45.4%. What
+    /// this floor uniquely covers is the other half of the safety argument —
+    /// the burnout latch fires during tail-off with several hundred newtons
+    /// still on the case, and residual thrust cancels drag, so a check
+    /// allowed to speak then would invert an unrealistically low
+    /// deceleration into an unrealistically low speed. At 17.5 s the motor
+    /// has been out for eleven seconds; `osiris_sim::nominal_o3400_flight`
+    /// asserts that margin.
+    ///
+    /// Set it loosely and a wrong drag model births the filter while the
+    /// port is still shocked: LC'25's floor is ~4.6 s ahead of its real
+    /// crossing, and a 2x Cd error there births at Mach 0.90.
     ///
     /// From the flight sim: the earliest simulated time below that Mach,
     /// measured from ignition detection. Erring early is unsafe (the check

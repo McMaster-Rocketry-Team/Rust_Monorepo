@@ -29,6 +29,17 @@ pub fn calculate_state_derivatives(
     })
 }
 
+/// Hard cap on the integration walk. The loop's only physical exit is
+/// v_y <= 0, which gravity alone guarantees within v_y/9.81 s (drag only
+/// shortens that), so this cap can never be reached by a trajectory the
+/// model can actually fly: the worst case anywhere in the test suite,
+/// including every Osiris replay, is 221 steps (22.1 s of coast at
+/// DT = 0.1 s), and a vacuum ballistic coast from 400 m/s — faster than
+/// this airframe flies — is 408. 2000 steps is 200 s of simulated coast,
+/// ~9x the measured worst case. It exists purely so a numerical path the
+/// finiteness check below does not catch still terminates.
+const MAX_APOGEE_STEPS: usize = 2000;
+
 // use rk2 to simulate the rocket until apogee
 // apogee is when the vertical velocity <= 0
 // in the first timestep, use first_tick_air_brakes_extension
@@ -39,15 +50,31 @@ pub fn simulate_apogee_rk2(
     initial_state: &State,
     rocket_param: &RocketParameters,
 ) -> f32 {
+    // A non-finite entry state has no trajectory to fly, and the normal exit
+    // path would hand the caller `NaN + delta_alt` = NaN. That is the one
+    // return value worth ruling out everywhere in this function: `NaN >
+    // target` is false at every bisection step in `AirBrakesMPC::update`, the
+    // NaN survives into `drag_percentage_to_extension_percentage`, and that
+    // table walk falls through to 1.0 — full flap deploy off a garbage state
+    // (measured pre-guard: vx = inf in, extension 1.0 out).
+    //
+    // 0 m ASL is below every reachable target apogee, so the bisection reads
+    // this as an undershoot and stows instead.
+    if !initial_state.altitude_asl.is_finite()
+        || !initial_state.velocity.x.is_finite()
+        || !initial_state.velocity.y.is_finite()
+    {
+        return 0.0;
+    }
+
     // If we are already descending or stationary, return current altitude
     if initial_state.velocity.y <= 0.0 {
         return initial_state.altitude_asl;
     }
 
     let mut state = initial_state.clone();
-    let mut step_index: usize = 0;
 
-    loop {
+    for step_index in 0..MAX_APOGEE_STEPS {
         let air_brakes_drag_percentage = match step_index {
             0 => first_tick_air_brakes_drag_percentage,
             1 => first_tick_air_brakes_drag_percentage / 2.0,
@@ -71,6 +98,28 @@ pub fn simulate_apogee_rk2(
             velocity: state.velocity + k2.velocity * DT,
         };
 
+        // Divergence guard. The drag term is stiff — it grows with the square
+        // of the speed — and at DT = 0.1 s a large enough horizontal velocity
+        // makes the explicit integration blow up to inf and then NaN within a
+        // handful of steps. `NaN <= 0.0` is false, so without this check the
+        // apogee test below never fires and the loop runs to the step cap
+        // (before the cap existed, forever: measured, vx = 458196 m/s hung a
+        // 3 s watchdog).
+        //
+        // Hand back the *entry* altitude, not `state.altitude_asl`: by the
+        // time the state goes non-finite the propagated altitude may have run
+        // off to 1e30, which the caller would read as an enormous overshoot
+        // and answer with full deploy — exactly the wrong way round. The entry
+        // altitude means "no apogee above here can be predicted", the same
+        // answer the already-descending case above gives, and it sits below
+        // any reachable target so the bisection stows the flaps.
+        if !next_state.altitude_asl.is_finite()
+            || !next_state.velocity.x.is_finite()
+            || !next_state.velocity.y.is_finite()
+        {
+            return initial_state.altitude_asl;
+        }
+
         // Check for apogee crossing within this step
         let vy0 = state.velocity.y;
         let vy1 = next_state.velocity.y;
@@ -88,38 +137,22 @@ pub fn simulate_apogee_rk2(
         }
 
         state = next_state;
-        step_index += 1;
     }
+
+    // Step cap exhausted: 200 s of simulated coast without v_y reaching zero.
+    // No flyable trajectory gets here (see `MAX_APOGEE_STEPS`), so there is no
+    // better answer available than the same "no apogee above here" the guards
+    // above return.
+    initial_state.altitude_asl
 }
 
 #[cfg(test)]
 mod test {
     use nalgebra::Vector2;
 
-    use crate::tests::init_logger;
+    use crate::{controller::AirBrakesMPC, tests::init_logger};
 
     use super::*;
-
-    #[test]
-    fn test_simulate_apogee() {
-        init_logger();
-
-        let initial_state = State {
-            altitude_asl: 1032.0 + 251.0,
-            velocity: Vector2::new(66.8630616, 308.7624),
-        };
-
-        let rocket_param = RocketParameters {
-            burnout_mass: 19.417,
-            cd: [0.5; 5],
-            reference_area: 0.0136,
-        };
-
-        log_info!(
-            "simulated apogee: {}",
-            simulate_apogee_rk2(0.5, &initial_state, &rocket_param)
-        );
-    }
 
     /// The 2D sim must account for tilt: the same total speed with a
     /// horizontal component reaches a lower apogee than flying straight
@@ -153,39 +186,82 @@ mod test {
         assert!(tilted < straight - 100.0);
     }
 
+    /// A pathological horizontal velocity must terminate, and must not come
+    /// back out as a full-deploy command.
+    ///
+    /// Measured before the guards, on the host with a 3 s watchdog:
+    /// vx = 458196 m/s never returned at all — the stiff drag term blows the
+    /// explicit integration up to inf and then NaN, and `NaN <= 0.0` is
+    /// false, so the apogee test never fires — and vx = inf returned a NaN
+    /// apogee that `AirBrakesMPC::update` turned into extension 1.0, full
+    /// flap deploy off a garbage state. On the flight computer the first is a
+    /// hung MPC task and the second is the flaps out at max q.
+    ///
+    /// The only thing standing between the estimator and these inputs today
+    /// is `TILT_CAP_RAD` clamping the tilt, which is a coincidence of the
+    /// current tuning, not a guard.
+    ///
+    /// Each case runs on its own thread so a regression fails this test
+    /// instead of hanging the suite.
     #[test]
-    fn bench_simulate_apogee_rk2_100x() {
-        use core::hint::black_box;
-
+    fn pathological_horizontal_velocity_terminates_and_stows() {
         init_logger();
 
-        let initial_state = State {
-            altitude_asl: 1032.0 + 251.0,
-            velocity: Vector2::new(66.8630616, 308.7624),
-        };
-
+        // Strictly increasing cd table so the extension mapping is actually
+        // exercised; a flat table short-circuits to 0.0 on its first branch
+        // and would hide a bad answer.
         let rocket_param = RocketParameters {
             burnout_mass: 19.417,
-            cd: [0.5; 5],
+            cd: [0.3, 0.4, 0.5, 0.65, 0.8],
             reference_area: 0.0136,
         };
+        const ALT_ASL: f32 = 1032.0 + 251.0;
+        const TARGET_ASL: f32 = 3048.0; // 10000 ft, Osiris's target
 
-        let start = std::time::Instant::now();
-        let mut sum = 0.0f32;
-        for _ in 0..100 {
-            let apogee = simulate_apogee_rk2(
-                black_box(0.5f32),
-                black_box(&initial_state),
-                black_box(&rocket_param),
+        // 458196: the measured hang. inf/NaN: the measured full deploy.
+        // 1e30: squares to inf inside `magnitude_squared`, so the state goes
+        // non-finite on the very first step rather than after a few.
+        for vx in [458196.0f32, f32::INFINITY, f32::NAN, 1e30f32] {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let param = rocket_param.clone();
+            std::thread::spawn(move || {
+                let apogee = simulate_apogee_rk2(
+                    0.5,
+                    &State {
+                        altitude_asl: ALT_ASL,
+                        velocity: Vector2::new(vx, 308.7624),
+                    },
+                    &param,
+                );
+                let solution = AirBrakesMPC::new(param, TARGET_ASL)
+                    .update(ALT_ASL, Vector2::new(vx, 308.7624));
+                let _ = tx.send((apogee, solution));
+            });
+
+            let (apogee, solution) = rx
+                .recv_timeout(std::time::Duration::from_secs(3))
+                .unwrap_or_else(|_| panic!("simulate_apogee_rk2 did not return in 3 s at vx={vx}"));
+            log_info!("vx={vx}: apogee {apogee}, {solution:?}");
+
+            // A non-finite apogee is what feeds the full-deploy fall-through.
+            assert!(apogee.is_finite(), "vx={vx}: apogee {apogee} not finite");
+            assert!(
+                solution.predicted_apogee_asl.is_finite(),
+                "vx={vx}: predicted apogee {} not finite",
+                solution.predicted_apogee_asl
             );
-            sum += apogee;
+            // The bail-out is at or below the current altitude, so the MPC has
+            // to read it as an undershoot and stow. With this cd table the
+            // bisection lands on drag -0.875, i.e. extension 0.078.
+            assert!(
+                apogee <= ALT_ASL,
+                "vx={vx}: bail-out apogee {apogee} is above the current altitude"
+            );
+            assert!(
+                solution.extension_percentage < 0.1,
+                "vx={vx}: commanded extension {} on a garbage state",
+                solution.extension_percentage
+            );
         }
-        let elapsed = start.elapsed();
-
-        log_info!(
-            "bench simulate_apogee_rk2: {:?} each, result: {}",
-            elapsed / 100,
-            sum / 100.0
-        );
     }
 }

@@ -53,10 +53,10 @@ use icao_isa::calculate_isa_altitude;
 use icao_units::si::Pascals;
 use nalgebra::{UnitQuaternion, Vector2, Vector3};
 
-use crate::airbrakes_estimator::{AirbrakesConfig, MachLockoutConfig};
+use crate::airbrakes_estimator::{AirbrakesConfig, ImuSample, MachLockoutConfig};
 use crate::baro_state_estimator::{DeploymentProfile, FlightProfile};
 use crate::controller::{AirBrakesMPC, RocketParameters};
-use crate::flight_estimators::{FlightConfig, FlightEstimators, ImuSample};
+use crate::flight_estimators::{FlightConfig, FlightEstimators};
 use crate::tests::init_logger;
 
 // ---------------------------------------------------------------------------
@@ -88,8 +88,8 @@ fn osiris_config() -> FlightConfig {
     FlightConfig {
         profile: FlightProfile {
             mach_lockout_duration_us: Some(26_000_000),
-            // Mirrors VLF5's `FLIGHT_CONFIG`: 8 g, double the airbrakes
-            // half's threshold, because this one starts the 26 s lockout.
+            // Mirrors VLF5's `FLIGHT_CONFIG`. Both halves run the same
+            // detector at the same 8 g — see `crate::ignition_detector`.
             ignition_detection_acc_threshold: 8.0 * 9.81,
             deployment: DeploymentProfile::Dual {
                 drogue_chute_minimum_altitude_agl: 2000.0,
@@ -99,7 +99,7 @@ fn osiris_config() -> FlightConfig {
             },
         },
         airbrakes: AirbrakesConfig {
-            ignition_detection_acc_threshold: 4.0 * 9.81,
+            ignition_detection_acc_threshold: 8.0 * 9.81,
             mach_lockout: Some(MachLockoutConfig {
                 earliest_subsonic_after_ignition_us: 17_500_000,
                 force_birth_after_ignition_us: 25_000_000,
@@ -436,20 +436,6 @@ struct SensorModel {
     transonic_port_error: f32,
     /// Rotation from the airframe frame into the IMU chip frame.
     mount: UnitQuaternion<f32>,
-    /// Mimic `VLF5/firmware/src/hil/osiris.rs` instead of this file's own
-    /// model: identity mounting, and specific force taken as purely axial
-    /// `(0, 0, (thrust - drag)/mass)` rather than differentiated from the
-    /// velocity columns. Used by `bench_vs_host_sensor_model` to find out
-    /// why the two disagree about when the lockout opens.
-    bench_model: bool,
-    /// Liftoff time for the bench model (s): before it, the accelerometer
-    /// reads pad-supported gravity rather than thrust minus drag.
-    bench_liftoff_s: f32,
-    /// Scales the transverse component of pad gravity. 1.0 models the rod
-    /// angle honestly; 0.0 is what the first version of `hil/osiris.rs` did
-    /// — pad gravity exactly on the airframe axis, so Stage 1 finds no
-    /// launch angle at all.
-    bench_rod_angle_scale: f32,
     /// Seconds of pad prepended before ignition.
     pad_s: f32,
     /// Stop generating samples after this truth time.
@@ -472,9 +458,6 @@ impl Default for SensorModel {
             gyro_bias_rad_s: Vector3::new(1.15, -1.93, -0.45) * (PI / 180.0),
             pressure_noise_pa: 5.5,
             mount: imu_mounting(),
-            bench_model: false,
-            bench_liftoff_s: 0.003,
-            bench_rod_angle_scale: 1.0,
             transonic_port_error: 0.0,
             sample_dt_us: 2404,
             pad_s: 60.0,
@@ -629,38 +612,14 @@ fn synthesize(truth: &Truth, model: &SensorModel) -> Vec<Sample> {
         // --- specific force --------------------------------------------
         // The accelerometer measures specific force: kinematic acceleration
         // minus gravity. On the pad that is exactly +g up.
-        let sf_body = if model.bench_model {
-            // the bench's model: everything on the airframe axis, magnitude
-            // straight from OpenRocket's thrust and drag, +g while the pad
-            // still carries the rocket
-            // Pre-liftoff the pad carries the rocket and the accelerometer
-            // reads gravity along WORLD up, which is the rod angle away
-            // from the airframe axis. Getting that wrong is what this
-            // diagnostic exists to demonstrate, so it has to be modelled
-            // correctly here to be varied deliberately.
-            let tilt = core::f32::consts::FRAC_PI_2 - r.zenith;
-            if on_pad || r.t < model.bench_liftoff_s {
-                Vector3::new(
-                    r.gravity * tilt.sin() * model.bench_rod_angle_scale,
-                    0.0,
-                    r.gravity * tilt.cos(),
-                )
-            } else {
-                Vector3::new(0.0, 0.0, (r.thrust - r.drag) / r.mass)
-            }
-        } else {
+        let sf_body = {
             let sf_world = r.acc_world + Vector3::new(0.0, 0.0, r.gravity);
             q.inverse_transform_vector(&sf_world)
         };
 
         // --- into the chip frame, then through the chip -----------------
-        let mount = if model.bench_model {
-            UnitQuaternion::identity()
-        } else {
-            model.mount
-        };
-        let mut acc = mount.inverse_transform_vector(&sf_body);
-        let mut gyro = mount.inverse_transform_vector(&w_body);
+        let mut acc = model.mount.inverse_transform_vector(&sf_body);
+        let mut gyro = model.mount.inverse_transform_vector(&w_body);
 
         for k in 0..3 {
             acc[k] += rng.normal() * model.accel_noise[k];
@@ -731,12 +690,6 @@ struct Replay {
     burnout_unlatched: bool,
     /// continuous spans of truth time where `subsonic_by_drag()` was true
     subsonic_spans: Vec<(f32, f32)>,
-    /// truth time `is_apogee()` latched, and the altitude it read. Usually
-    /// `None` when driven through [`FlightEstimators`]: the airbrakes half
-    /// is retired the moment its vertical velocity reaches zero, and the
-    /// latch needs 0.5 s below 1 m/s, which the last second of a coast does
-    /// not provide. Kept as a diagnostic, not as the apogee measurement.
-    airbrakes_apogee: Option<(f32, f32)>,
     /// truth time the airbrakes half was retired (dropped by
     /// `FlightEstimators::update`)
     retired_t: Option<f32>,
@@ -771,7 +724,7 @@ fn replay(samples: &[Sample], config: FlightConfig, target_apogee_asl: f32) -> R
     let mut span_start: Option<f32> = None;
 
     for s in samples {
-        let pyro = est.update(s.t_us, Some(&s.imu), s.baro_altitude_asl);
+        let (pyro, _log) = est.update(s.t_us, Some(&s.imu), s.baro_altitude_asl);
         let t = s.truth_t;
 
         if s.clipped {
@@ -828,9 +781,6 @@ fn replay(samples: &[Sample], config: FlightConfig, target_apogee_asl: f32) -> R
                 out.vv_track.push((t, v.y, s.truth.vv));
                 out.alt_track.push((t, a, s.truth.altitude_asl));
             }
-            if ab.is_apogee() && out.airbrakes_apogee.is_none() {
-                out.airbrakes_apogee = Some((t, ab.altitude_asl().unwrap_or(f32::NAN)));
-            }
         }
 
         if out.deployment_apogee_t.is_none()
@@ -867,9 +817,15 @@ fn pyro_name(p: firmware_common_new::vlp::packets::fire_pyro::PyroSelect) -> &'s
 
 impl Replay {
     /// The airbrakes filter's own apogee: the peak of the altitude it
-    /// reported, and when. This — not `is_apogee()` — is the number worth
-    /// scoring, because the filter is retired at zero vertical velocity and
-    /// the peak it reached right before that IS its apogee estimate.
+    /// reported, and when. This is the number worth scoring, because the
+    /// filter is retired at zero vertical velocity and the peak it reached
+    /// right before that IS its apogee estimate.
+    ///
+    /// There has never been anything else to score it against here. The
+    /// estimator's own 0.5 s apogee latch — deleted on 2026-08-17 — needed
+    /// 0.5 s below 1 m/s and the airbrakes half is dropped at 0 m/s, so it
+    /// never once fired in a composed flight; this field recorded `None` on
+    /// every simulation in this file.
     fn estimated_apogee(&self) -> Option<(f32, f32)> {
         self.alt_track
             .iter()
@@ -1828,136 +1784,6 @@ fn stage1_alignment_finishes_before_the_accelerometer_rails() {
     );
 }
 
-/// Diagnostic (`--ignored --nocapture`): how much margin does the Stage-1
-/// alignment actually have? The window peaks at 15.5 g against a 16 g rail
-/// — 3%. This walks the full scale down to force the alignment itself into
-/// clipping and reports what breaks, so the size of the cliff behind that
-/// 3% is on the record rather than assumed.
-#[test]
-#[ignore]
-fn stage1_margin_sweep() {
-    init_logger();
-    let truth = Truth::load(O3400_CSV);
-    let (apogee_t, apogee_asl) = truth.apogee();
-
-    eprintln!(
-        "full scale | clipped | first clip | worst tilt err | born  | apogee err | coast vv err"
-    );
-    for fs_g in [16.0f32, 15.5, 15.0, 14.0, 12.0, 10.0] {
-        let samples = synthesize(
-            &truth,
-            &SensorModel {
-                until_s: apogee_t + 5.0,
-                accel_full_scale: fs_g * 9.81,
-                ..Default::default()
-            },
-        );
-        let r = replay(&samples, osiris_config(), 0.0);
-        let worst = r
-            .tilt_track
-            .iter()
-            .map(|(_, e, tr)| (e - tr).abs())
-            .fold(0.0f32, f32::max);
-        let born = r.birth.map(|(t, _)| t);
-        let apogee_err = r.estimated_apogee().map(|(_, a)| a - apogee_asl);
-        let (vv_err, _) = mean_error(&r.vv_track, born.unwrap_or(0.0) + 5.0, apogee_t - 2.0);
-        eprintln!(
-            "  {:>5.1} g | {:>7} | {:>10} | {:>13.2} deg | {:>5} | {:>10} | {:.2} m/s",
-            fs_g,
-            r.clipped_samples,
-            r.first_clip_t
-                .map(|t| format!("{t:.3}s"))
-                .unwrap_or_else(|| "-".into()),
-            worst.to_degrees(),
-            born.map(|t| format!("{t:.2}s")).unwrap_or_else(|| "never".into()),
-            apogee_err
-                .map(|e| format!("{e:+.0} m"))
-                .unwrap_or_else(|| "-".into()),
-            vv_err,
-        );
-    }
-}
-
-
-/// Diagnostic (`--ignored --nocapture`): the bench and this file replay the
-/// same OpenRocket flight through the same estimator, and disagree about
-/// when the Mach lockout opens — t=22.1 s on the bench against 18.9 s here.
-/// Both are safe (past the true Mach 0.8 crossing at 17.56 s, both from the
-/// drag check rather than the timeout), so the question is where the 3 s
-/// goes, not whether it is dangerous.
-///
-/// The check inverts `|accel|` into an airspeed using air density taken
-/// from the DEAD RECKONED altitude — deliberately not the barometer, so the
-/// exit decision cannot be poisoned by the sensor it is deciding about.
-/// That makes dead-reckoned altitude, not the drag channel, the thing to
-/// look at: read the altitude high and the same deceleration inverts to a
-/// higher speed, which holds the check shut for longer.
-///
-/// This runs the same trajectory through both sensor models and reports
-/// what each one hands the estimator.
-#[test]
-#[ignore]
-fn bench_vs_host_sensor_model() {
-    init_logger();
-    let truth = Truth::load(O3400_CSV);
-    let (apogee_t, apogee_asl) = truth.apogee();
-    let m08 = truth.mach_down_crossing(0.8);
-    eprintln!("true Mach 0.8 crossing at t={m08:.2}s, apogee at {apogee_t:.2}s\n");
-
-    for (name, bench, dt_us, pad) in [
-        ("host model, 416 Hz, 60 s pad", false, 2404u64, 60.0f32),
-        ("bench model, 416 Hz, 60 s pad", true, 2404, 60.0),
-        ("bench model, 427 Hz (measured), 60 s pad", true, 2342, 60.0),
-        ("bench model, 427 Hz, 20 s pad (as flown)", true, 2342, 20.0),
-        ("host model, 427 Hz, 20 s pad", false, 2342, 20.0),
-    ] {
-        let samples = synthesize(
-            &truth,
-            &SensorModel {
-                until_s: apogee_t + 5.0,
-                bench_model: bench,
-                sample_dt_us: dt_us,
-                pad_s: pad,
-                ..Default::default()
-            },
-        );
-        let r = replay(&samples, osiris_config(), 0.0);
-        let first_span = r.subsonic_spans.first().copied();
-        let tilt_at = |t: f32| {
-            r.tilt_track
-                .iter()
-                .find(|(tt, _, _)| *tt >= t)
-                .map(|(_, e, tr)| (e.to_degrees(), tr.to_degrees()))
-        };
-        eprintln!("{name}:");
-        eprintln!(
-            "  calibration {:?}, burnout latch {:?}",
-            r.calibration_t.map(|t| (t * 100.0).round() / 100.0),
-            r.burnout_t.map(|t| (t * 100.0).round() / 100.0)
-        );
-        match r.birth {
-            Some((born, forced)) => {
-                eprintln!("  born ignition+{born:.2}s (forced: {forced})")
-            }
-            None => eprintln!("  NEVER BORN"),
-        }
-        eprintln!("  drag check first read subsonic at {:?}", first_span.map(|(a, _)| a));
-        for t in [10.0f32, 15.0, 17.5, 20.0] {
-            if let Some((est, tru)) = tilt_at(t) {
-                eprintln!("  t={t:.1}s  estimated tilt {est:5.2} deg vs true {tru:5.2} deg");
-            }
-        }
-        match r.estimated_apogee() {
-            Some((ab_t, ab_alt)) => eprintln!(
-                "  apogee {:+.2}s / {:+.0}m vs truth\n",
-                ab_t - apogee_t,
-                ab_alt - apogee_asl
-            ),
-            None => eprintln!("  filter never reported an altitude\n"),
-        }
-    }
-}
-
 /// The avionics can be bolted into the airframe any way up, and nothing in
 /// the firmware is told which way. The estimator is supposed to work that
 /// out for itself: pad gravity gives it "down", the Stage-1 thrust average
@@ -2114,4 +1940,77 @@ fn air_density_matches_the_isa_reference() {
          host and the board",
         worst * 100.0
     );
+}
+
+// ---------------------------------------------------------------------------
+// Diagnostic, not a regression test (run with --ignored --nocapture): what
+// does the ignition threshold cost on THIS airframe's motors?
+//
+// The same sweep over the two archived flight logs was retired on
+// 2026-08-17; its answer is transcribed into
+// `AirbrakesConfig::ignition_detection_acc_threshold` (on LC'25's softer
+// curve 8 g costs 0.45 s and 10 g never latches at all). This one answers it
+// on the two simulated Osiris motors, which is where `FLIGHT_CONFIG`'s 8 g
+// actually has to hold. Since 2026-08-17 both halves run the same detector
+// (`crate::ignition_detector`), so one latch time describes both — the only
+// thing that could separate them is a different threshold, which is exactly
+// what this sweeps.
+//
+// Times are seconds after TRUE ignition, so they are the detector's lag,
+// which is also the error in the origin of every Mach lockout timer.
+// ---------------------------------------------------------------------------
+#[test]
+#[ignore]
+fn ignition_latch_time_by_threshold() {
+    init_logger();
+
+    for path in [O3400_CSV, N2900_CSV] {
+        let truth = Truth::load(path);
+        let samples = synthesize(&truth, &SensorModel::default());
+        eprintln!("--- {path} ---");
+
+        let mut reference: Option<f32> = None;
+        for g in [4.0f32, 6.0, 8.0, 10.0, 12.0] {
+            let mut cfg = osiris_config();
+            cfg.profile.ignition_detection_acc_threshold = g * 9.81;
+            cfg.airbrakes.ignition_detection_acc_threshold = g * 9.81;
+            let mut est = FlightEstimators::new(cfg);
+
+            let mut pyro_t: Option<f32> = None;
+            let mut ab_t: Option<f32> = None;
+            for s in &samples {
+                let _ = est.update(s.t_us, Some(&s.imu), s.baro_altitude_asl);
+                if pyro_t.is_none() && !matches!(est.state(), crate::RocketState::OnPad) {
+                    pyro_t = Some(s.truth_t);
+                }
+                if ab_t.is_none() {
+                    if let Some(ab) = est.airbrakes_estimator() {
+                        if ab.launch_pad_altitude_asl().is_some() {
+                            ab_t = Some(s.truth_t);
+                        }
+                    }
+                }
+                if pyro_t.is_some() && ab_t.is_some() {
+                    break;
+                }
+            }
+
+            if g == 4.0 {
+                reference = pyro_t;
+            }
+            let cost = match (pyro_t, reference) {
+                (Some(t), Some(r)) => format!("{:+.3} s vs 4 g", t - r),
+                (None, _) => "NEVER LATCHED".into(),
+                _ => "-".into(),
+            };
+            eprintln!(
+                "  {g:>4.1} g : pyro half {pyro_t:?}, airbrakes half {ab_t:?}  ({cost})"
+            );
+            assert_eq!(
+                pyro_t, ab_t,
+                "the two halves ran the same detector at the same threshold and \
+                 still disagreed about when the motor lit"
+            );
+        }
+    }
 }

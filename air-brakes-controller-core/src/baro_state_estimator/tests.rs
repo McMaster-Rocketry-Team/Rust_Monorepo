@@ -1,4 +1,5 @@
 use super::*;
+use crate::tests::fixtures::subsonic_profile;
 
 /// Deterministic pseudo-gaussian noise (sum of 4 LCG uniforms, mean 0)
 struct NoiseGen {
@@ -60,10 +61,6 @@ fn sf(specific_force: f32) -> Option<Vector3<f32>> {
 /// What an accelerometer reads on the rail: the pad is holding the weight.
 const PAD_SF: f32 = 9.81;
 
-/// Ignition threshold for these tests. Their scripted motors pull 5.1-11.2 g
-/// of specific force, so 4 g clears every one of them.
-const TEST_ACC_THRESHOLD: f32 = 4.0 * 9.81;
-
 struct FlightResult {
     drogue: Option<(usize, f32)>,
     main: Option<(usize, f32)>,
@@ -85,7 +82,7 @@ fn simulate_flight(
     let mut sample_i = 0usize;
 
     let mut feed = |estimator: &mut RocketStateEstimator, altitude_asl: f32, specific_force: f32| {
-        let pyro = estimator.update(clock.tick(), sf(specific_force), altitude_asl + noise.next());
+        let (pyro, _gate) = estimator.update(clock.tick(), sf(specific_force), altitude_asl + noise.next());
         // Pyros only fire in chute stages, where the KF is live, so the
         // altitude is present on exactly the samples recorded below. A
         // `None` at a fire would mean a pyro went off inside the Mach
@@ -166,14 +163,13 @@ fn simulate_flight(
 fn dual_deploys_drogue_near_apogee_and_main_at_altitude() {
     let main_agl = 457.2;
     let mut estimator = RocketStateEstimator::new(FlightProfile {
-        mach_lockout_duration_us: None,
-        ignition_detection_acc_threshold: TEST_ACC_THRESHOLD,
         deployment: DeploymentProfile::Dual {
-                drogue_chute_minimum_altitude_agl: 500.0,
-                drogue_chute_delay_us: 0,
-                main_chute_altitude_agl: main_agl,
-                main_chute_delay_us: 0,
+            drogue_chute_minimum_altitude_agl: 500.0,
+            drogue_chute_delay_us: 0,
+            main_chute_altitude_agl: main_agl,
+            main_chute_delay_us: 0,
         },
+        ..subsonic_profile()
     });
 
     let result = simulate_flight(&mut estimator, 200.0, 80.0, 3.0);
@@ -200,12 +196,13 @@ fn dual_deploys_drogue_near_apogee_and_main_at_altitude() {
 #[test]
 fn single_deploys_both_near_apogee() {
     let mut estimator = RocketStateEstimator::new(FlightProfile {
-        mach_lockout_duration_us: None,
-        ignition_detection_acc_threshold: TEST_ACC_THRESHOLD,
+        // 500 m, against an apogee the test then asserts is over 1000 m:
+        // the minimum has to be cleared for either chute to come out.
         deployment: DeploymentProfile::Single {
-                minimum_deployment_altitude_agl: 500.0,
-                delay_us: 0,
+            minimum_deployment_altitude_agl: 500.0,
+            delay_us: 0,
         },
+        ..subsonic_profile()
     });
 
     let result = simulate_flight(&mut estimator, 200.0, 80.0, 3.0);
@@ -232,14 +229,15 @@ fn single_deploys_both_near_apogee() {
 #[test]
 fn below_min_apogee_does_not_deploy() {
     let mut estimator = RocketStateEstimator::new(FlightProfile {
-        mach_lockout_duration_us: None,
-        ignition_detection_acc_threshold: TEST_ACC_THRESHOLD,
+        // 5000 m against a flight that reaches nowhere near it — this
+        // number is the whole test.
         deployment: DeploymentProfile::Dual {
-                drogue_chute_minimum_altitude_agl: 5000.0,
-                drogue_chute_delay_us: 0,
-                main_chute_altitude_agl: 457.2,
-                main_chute_delay_us: 0,
+            drogue_chute_minimum_altitude_agl: 5000.0,
+            drogue_chute_delay_us: 0,
+            main_chute_altitude_agl: 457.2,
+            main_chute_delay_us: 0,
         },
+        ..subsonic_profile()
     });
 
     let result = simulate_flight(&mut estimator, 200.0, 40.0, 1.5);
@@ -254,14 +252,8 @@ fn below_min_apogee_does_not_deploy() {
 #[test]
 fn no_false_ignition_on_pad() {
     let mut clock = SampleClock::new();
-    let mut estimator = RocketStateEstimator::new(FlightProfile {
-        mach_lockout_duration_us: None,
-        ignition_detection_acc_threshold: TEST_ACC_THRESHOLD,
-        deployment: DeploymentProfile::Single {
-                minimum_deployment_altitude_agl: 300.0,
-                delay_us: 0,
-        },
-    });
+    // The rocket never leaves the pad, so no chute number can matter here.
+    let mut estimator = RocketStateEstimator::new(subsonic_profile());
     let mut noise = NoiseGen::new(0.5);
 
     // 2 minutes armed on the pad
@@ -277,14 +269,9 @@ fn no_false_ignition_on_pad() {
 #[test]
 fn blast_transient_during_coast_does_not_deploy_early() {
     let mut clock = SampleClock::new();
-    let mut estimator = RocketStateEstimator::new(FlightProfile {
-        mach_lockout_duration_us: None,
-        ignition_detection_acc_threshold: TEST_ACC_THRESHOLD,
-        deployment: DeploymentProfile::Single {
-                minimum_deployment_altitude_agl: 300.0,
-                delay_us: 0,
-        },
-    });
+    // What is asserted is *when* apogee is latched relative to the true
+    // apogee, not what altitude the chute comes out at.
+    let mut estimator = RocketStateEstimator::new(subsonic_profile());
     let mut noise = NoiseGen::new(0.5);
     let pad = 200.0f32;
 
@@ -330,9 +317,8 @@ fn blast_transient_during_coast_does_not_deploy_early() {
         } else {
             0.0
         };
-        if let Some(PyroSelect::PyroDrogue) =
-            estimator.update(clock.tick(), sf(specific_force), measured)
-        {
+        let (pyro, _gate) = estimator.update(clock.tick(), sf(specific_force), measured);
+        if let Some(PyroSelect::PyroDrogue) = pyro {
             assert!(drogue_i.is_none());
             drogue_i = Some((i, altitude_asl - pad));
         }
@@ -367,11 +353,11 @@ fn mach_lockout_survives_supersonic_garbage() {
     // detection (~margin), ending ~23 s before apogee.
     let mut estimator = RocketStateEstimator::new(FlightProfile {
         mach_lockout_duration_us: Some(48_000_000),
-        ignition_detection_acc_threshold: TEST_ACC_THRESHOLD,
         deployment: DeploymentProfile::Single {
-                minimum_deployment_altitude_agl: 1000.0,
-                delay_us: 0,
+            minimum_deployment_altitude_agl: 1000.0,
+            delay_us: 0,
         },
+        ..subsonic_profile()
     });
     let mut noise = NoiseGen::new(0.5);
     let pad = 200.0f32;
@@ -416,7 +402,7 @@ fn mach_lockout_survives_supersonic_garbage() {
         } else {
             0.0
         };
-        let pyro = estimator.update(clock.tick(), sf(specific_force), measured);
+        let (pyro, _gate) = estimator.update(clock.tick(), sf(specific_force), measured);
         // While locked out the estimator must say so honestly: the reported
         // state is MachLockout carrying only the pad altitude — the frozen
         // KF altitude/velocity are not reachable through `state()` at all.
@@ -482,13 +468,11 @@ fn mach_lockout_survives_supersonic_garbage() {
 #[test]
 fn kf_accessors_absent_before_birth_and_during_lockout() {
     let mut clock = SampleClock::new();
+    // The 10 s lockout is one of the two ways to have no reading, so it is
+    // stated here; the chute profile never comes into it.
     let mut estimator = RocketStateEstimator::new(FlightProfile {
         mach_lockout_duration_us: Some(10_000_000),
-        ignition_detection_acc_threshold: TEST_ACC_THRESHOLD,
-        deployment: DeploymentProfile::Single {
-                minimum_deployment_altitude_agl: 300.0,
-                delay_us: 0,
-        },
+        ..subsonic_profile()
     });
 
     assert_eq!(estimator.kf_altitude_asl(), None, "no filter before the first sample");
@@ -626,22 +610,22 @@ fn void_lake_flight_replay() {
         .position(|(a, _)| *a > pad_ref + 15.0)
         .expect("no liftoff in data");
 
+    // Void Lake's own dual-deploy numbers, on the subsonic base.
     let mut estimator = RocketStateEstimator::new(FlightProfile {
-        mach_lockout_duration_us: None, // subsonic flight
-        ignition_detection_acc_threshold: TEST_ACC_THRESHOLD,
         deployment: DeploymentProfile::Dual {
-                drogue_chute_minimum_altitude_agl: 500.0,
-                drogue_chute_delay_us: 0,
-                main_chute_altitude_agl: 457.2,
-                main_chute_delay_us: 0,
+            drogue_chute_minimum_altitude_agl: 500.0,
+            drogue_chute_delay_us: 0,
+            main_chute_altitude_agl: 457.2,
+            main_chute_delay_us: 0,
         },
+        ..subsonic_profile()
     });
 
     let mut ignition_i = None;
     let mut drogue = None;
     let mut main = None;
     for (i, &(alt, acc)) in grid.iter().enumerate() {
-        let pyro = estimator.update(clock.tick(), acc, alt);
+        let (pyro, _gate) = estimator.update(clock.tick(), acc, alt);
         assert!(!matches!(
             estimator.state(),
             RocketState::MachLockout { .. }
@@ -811,6 +795,15 @@ impl AnalyticFlight {
         self.pad_asl + h.max(0.0)
     }
 
+    /// Vertical velocity (m/s) at wall-clock time `t`, differentiated from
+    /// [`Self::altitude_asl`] rather than written out again, so the two can
+    /// never disagree about the flight. `h` is well inside the shortest
+    /// phase (the 3 s burn).
+    fn vertical_velocity(&self, t: f32) -> f32 {
+        const H: f32 = 0.001;
+        (self.altitude_asl(t + H) - self.altitude_asl(t - H)) / (2.0 * H)
+    }
+
     /// Specific force along the airframe axis at wall-clock time `t`
     /// (m/s^2) — what an accelerometer measures, so gravity is absent in
     /// free flight and present whenever something is holding the airframe
@@ -880,7 +873,7 @@ fn fly_at_rate(hz: f64, profile: FlightProfile, flight: &AnalyticFlight) -> Even
         // would shave half a microsecond off every measured dt — 2.3 ms
         // over a 12 s lockout, which is the test injecting a bias rather
         // than measuring one.
-        let pyro = estimator.update(
+        let (pyro, _gate) = estimator.update(
             (ns + 500) / 1000,
             sf(flight.specific_force(t)),
             flight.altitude_asl(t) + noise.next(),
@@ -931,15 +924,18 @@ fn fly_at_rate(hz: f64, profile: FlightProfile, flight: &AnalyticFlight) -> Even
 #[test]
 fn timers_are_independent_of_the_sample_rate() {
     let flight = AnalyticFlight { pad_asl: 200.0 };
+    // Every duration below is checked against wall clock at four sample
+    // rates, so all four of them stay here where the assertion can be read
+    // against them: a 12 s lockout, a 1 s drogue delay, a 500 ms main.
     let profile = FlightProfile {
         mach_lockout_duration_us: 12_000_000.into(),
-        ignition_detection_acc_threshold: TEST_ACC_THRESHOLD,
         deployment: DeploymentProfile::Dual {
             drogue_chute_minimum_altitude_agl: 500.0,
             drogue_chute_delay_us: 1_000_000,
             main_chute_altitude_agl: 500.0,
             main_chute_delay_us: 500_000,
         },
+        ..subsonic_profile()
     };
 
     // A band comfortably wider than real part-to-part ODR variation.
@@ -1036,15 +1032,16 @@ fn a_sensor_stall_does_not_stretch_a_pyro_delay() {
     const STALL_S: f32 = 0.4;
 
     let flight = AnalyticFlight { pad_asl: 200.0 };
+    // The 1 s drogue delay is the quantity under test — it is what the
+    // 0.4 s stall is dropped into and what the assertion measures.
     let profile = FlightProfile {
-        mach_lockout_duration_us: None,
-        ignition_detection_acc_threshold: TEST_ACC_THRESHOLD,
         deployment: DeploymentProfile::Dual {
             drogue_chute_minimum_altitude_agl: 500.0,
             drogue_chute_delay_us: 1_000_000,
             main_chute_altitude_agl: 500.0,
             main_chute_delay_us: 0,
         },
+        ..subsonic_profile()
     };
 
     let mut estimator = RocketStateEstimator::new(profile);
@@ -1069,7 +1066,7 @@ fn a_sensor_stall_does_not_stretch_a_pyro_delay() {
             }
         }
 
-        let pyro = estimator.update(
+        let (pyro, _gate) = estimator.update(
             t_us,
             sf(flight.specific_force(t)),
             flight.altitude_asl(t) + noise.next(),
@@ -1111,14 +1108,9 @@ fn ignition_comes_from_the_accelerometer_alone() {
     let flight = AnalyticFlight { pad_asl: 200.0 };
 
     let detect = |feed_imu: bool| -> Option<f32> {
-        let mut estimator = RocketStateEstimator::new(FlightProfile {
-            mach_lockout_duration_us: None,
-            ignition_detection_acc_threshold: TEST_ACC_THRESHOLD,
-            deployment: DeploymentProfile::Single {
-                minimum_deployment_altitude_agl: 300.0,
-                delay_us: 0,
-            },
-        });
+        // What is measured is the instant the state leaves `OnPad`, which
+        // no chute number touches.
+        let mut estimator = RocketStateEstimator::new(subsonic_profile());
         let mut noise = NoiseGen::new(0.5);
         let mut clock = SampleClock::new();
         let end = ((flight.touchdown_s() + 20.0) * SAMPLES_PER_S as f32) as usize;
@@ -1173,12 +1165,11 @@ fn ignition_comes_from_the_accelerometer_alone() {
 fn a_knock_on_the_pad_does_not_latch_ignition() {
     let flight = AnalyticFlight { pad_asl: 200.0 };
     let mut estimator = RocketStateEstimator::new(FlightProfile {
-        mach_lockout_duration_us: None,
+        // Restated rather than inherited: the doc above is an argument
+        // about 12 g knocks against a 4 g threshold, and the number it
+        // argues from belongs next to it.
         ignition_detection_acc_threshold: 4.0 * 9.81,
-        deployment: DeploymentProfile::Single {
-            minimum_deployment_altitude_agl: 300.0,
-            delay_us: 0,
-        },
+        ..subsonic_profile()
     });
     let mut noise = NoiseGen::new(0.5);
     let mut clock = SampleClock::new();
@@ -1199,9 +1190,9 @@ fn a_knock_on_the_pad_does_not_latch_ignition() {
 
         // Mirror of the estimator's low pass, to show the transient really
         // does cross the threshold and that the sustain is what holds.
-        // Fed at the nominal tick, so one constant alpha; 0.031831 s is the
-        // estimator's own 5 Hz ignition time constant.
-        let alpha = (DT / 0.031831f32).min(1.0);
+        // Fed at the nominal tick, so one constant alpha; 0.0159 s is
+        // `ignition_detector::LP_TAU_S`, shared with the airbrakes half.
+        let alpha = (DT / 0.0159f32).min(1.0);
         let v = match lp {
             Some(prev) => prev + alpha * (acc - prev),
             None => acc,
@@ -1224,5 +1215,141 @@ fn a_knock_on_the_pad_does_not_latch_ignition() {
         peak_lp > 4.0 * 9.81,
         "the knock never crossed the threshold ({:.1} m/s^2) — this test proves nothing",
         peak_lp
+    );
+}
+
+// ===========================================================================
+// Birth of the in-flight filter
+// ===========================================================================
+
+/// One bad barometer reading landing on the sample that ends the Mach
+/// lockout must not decide the flight.
+///
+/// That sample used to be the entire birth: the filter was seeded from it
+/// and `peak_altitude_asl` was seeded from it, with nothing in between —
+/// the old filter had been dropped at ignition, so its innovation gate was
+/// not there to reject anything, and the pad gate does not run past the
+/// pad. A high reading therefore set a peak the rocket could never reach,
+/// and the first honest sample afterwards read as kilometres of descent.
+///
+/// Measured on the Osiris O3400 simulation (`tests::osiris_sim`, the flown
+/// `FLIGHT_CONFIG` with its 26 s lockout), one bad sample on the exit
+/// sample only:
+///
+/// | reading injected | drogue | true vv there |
+/// |---|---|---|
+/// | none (nominal) | 43.60 s | -25.5 m/s |
+/// | 30000 m (SPI read decoding to pressure ~0) | **28.67 s** | **+109.7 m/s** |
+/// | 12854 m (plain factor-of-2 pressure error) | **28.67 s** | **+109.7 m/s** |
+/// | 3288 m (factor of 2 the other way) | 43.60 s | -25.5 m/s |
+///
+/// Firing the drogue at +109.7 m/s of ascent is a structural failure, and
+/// it took no exotic fault to get there — half the pressure was enough.
+/// With the birth taken from a median of the last `BARO_RING_SPAN_S`
+/// instead, all four cases fire at 43.60 s, unchanged from nominal.
+///
+/// This test flies the same shape on the closed-form flight above so it
+/// owns its own numbers: a 12 s lockout that ends at +180 m/s of climb, and
+/// a 30 km reading placed on exactly the sample the filter is born from.
+/// The load-bearing assertion is the sign of the velocity at the fire — a
+/// drogue that comes out while the rocket is still going up is the failure
+/// this guards, and no tolerance on a timestamp expresses that.
+#[test]
+fn a_garbage_sample_at_lockout_exit_does_not_fire_the_drogue() {
+    const LOCKOUT_S: f32 = 12.0;
+    /// What a bad SPI read looks like once it has been through the pressure
+    /// conversion: pressure ~0 is roughly a 30 km altitude.
+    const GARBAGE_ASL: f32 = 30_000.0;
+
+    let flight = AnalyticFlight { pad_asl: 200.0 };
+    // The lockout duration decides which sample the filter is born from —
+    // the sample the garbage is injected on — and the 1 s delay is what
+    // separates the fire from that birth, so both stay here.
+    let profile = FlightProfile {
+        mach_lockout_duration_us: Some((LOCKOUT_S * 1e6) as u32),
+        deployment: DeploymentProfile::Single {
+            minimum_deployment_altitude_agl: 500.0,
+            delay_us: 1_000_000,
+        },
+        ..subsonic_profile()
+    };
+
+    // Fly once, optionally replacing the reading on sample `inject_at`.
+    // The noise is drawn on every sample whether or not it is used, so the
+    // clean and injected flights see the identical noise sequence and any
+    // difference between them is the injected sample and nothing else.
+    //
+    // Returns the index of the sample the lockout ended on — which is the
+    // sample the filter is born from — and the drogue fire as
+    // (wall-clock time, TRUE vertical velocity there).
+    let fly = |inject_at: Option<usize>| -> (Option<(usize, f32)>, Option<(f32, f32)>) {
+        let mut estimator = RocketStateEstimator::new(profile.clone());
+        let mut noise = NoiseGen::new(0.5);
+        let mut clock = SampleClock::new();
+        let mut in_lockout = false;
+        let mut exit = None;
+        let mut drogue = None;
+
+        let end = ((flight.touchdown_s() + 20.0) * SAMPLES_PER_S as f32) as usize;
+        for i in 0..end {
+            let t_us = clock.tick();
+            let t = t_us as f32 * 1e-6;
+            let honest = flight.altitude_asl(t) + noise.next();
+            let measured = if inject_at == Some(i) {
+                GARBAGE_ASL
+            } else {
+                honest
+            };
+            let (pyro, _gate) = estimator.update(t_us, sf(flight.specific_force(t)), measured);
+
+            match estimator.state() {
+                RocketState::MachLockout { .. } => in_lockout = true,
+                _ if in_lockout && exit.is_none() => exit = Some((i, t)),
+                _ => {}
+            }
+            if matches!(pyro, Some(PyroSelect::PyroDrogue)) && drogue.is_none() {
+                drogue = Some((t, flight.vertical_velocity(t)));
+            }
+        }
+        (exit, drogue)
+    };
+
+    let (exit, clean) = fly(None);
+    let (exit_i, exit_t) = exit.expect("lockout never exited");
+    let (clean_t, clean_vv) = clean.expect("no drogue on the clean flight");
+
+    // The injected sample has to land where it does damage, so check that
+    // the birth really is mid-ascent before trusting what follows.
+    let exit_vv = flight.vertical_velocity(exit_t);
+    assert!(
+        exit_vv > 100.0,
+        "the lockout ends at {exit_vv:+.1} m/s — this test only means \
+         something if the filter is born while the rocket is climbing hard"
+    );
+
+    let (_, dirty) = fly(Some(exit_i));
+    let (dirty_t, dirty_vv) = dirty.expect(
+        "no drogue fired at all after one garbage sample: the filter was born \
+         30 km up and never re-acquired — a ballistic descent",
+    );
+
+    eprintln!(
+        "garbage birth: lockout ends on sample {exit_i} at t={exit_t:.2}s \
+         ({exit_vv:+.1} m/s) | drogue clean {clean_t:.2}s ({clean_vv:+.1} m/s), \
+         with one {GARBAGE_ASL:.0} m sample on that exact sample {dirty_t:.2}s \
+         ({dirty_vv:+.1} m/s)"
+    );
+
+    assert!(
+        dirty_vv < 0.0,
+        "the drogue fired at {dirty_vv:+.1} m/s — still ascending — {:.2}s \
+         before the clean flight's apogee deployment",
+        clean_t - dirty_t
+    );
+    assert!(
+        (dirty_t - clean_t).abs() < 0.5,
+        "one garbage sample moved the drogue by {:+.2}s ({dirty_t:.2}s vs \
+         {clean_t:.2}s): the birth is still being decided by a single reading",
+        dirty_t - clean_t
     );
 }

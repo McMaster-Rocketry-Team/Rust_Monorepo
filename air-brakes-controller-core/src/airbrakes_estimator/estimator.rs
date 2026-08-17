@@ -1,16 +1,15 @@
 use heapless::Deque;
-use nalgebra::{SVector, UnitQuaternion, UnitVector3, Vector2, Vector3};
+use nalgebra::{SVector, Vector2, Vector3};
 
 use crate::{
     airbrakes_estimator::{
-        AirbrakesConfig, MAX_DT_S, Measurement, NOMINAL_DT, dead_reckoner::DeadReckoner,
-        vertical_kf::VerticalKF, welford::Welford,
+        AirbrakesConfig, ImuSample, MAX_DT_S, dead_reckoner::DeadReckoner,
+        vertical_kf::VerticalKF,
     },
     baro_gate::BaroGateOutcome,
+    ignition_detector::IgnitionDetector,
     utils::{approximate_air_density, approximate_speed_of_sound},
 };
-
-const UP: Vector3<f32> = Vector3::new(0.0, 0.0, 1.0);
 
 // --- Pad calibration (Piece 1) ---------------------------------------------
 // Everything flight needs to learn while the rocket is still — gyro bias,
@@ -66,43 +65,57 @@ const PAD_ROTATION_LIMIT_RAD_S: f32 = 0.174_53; // 10 deg/s
 /// ignition the whole span is replayed through the dead reckoner (the
 /// "rewind"), which is what recovers the thrust that had already built up
 /// while the low pass and the threshold were still catching up.
-const PAD_RING_SPAN_S: f32 = 2.0;
+///
+/// This is a SIZED number, not a generous one, and it was 2.0 s until
+/// 2026-08-17. The rewind trades two errors against each other: replay too
+/// little and the thrust before detection is lost outright, replay too much
+/// and every extra second of still rail is integrated against a hard-coded
+/// 9.81 that the pad does not actually read. Both archived logs measure
+/// their own scale error — Void Lake's pad reads |g| = 9.9967 and LC'25's
+/// 9.7529 — so a stationary second injects +0.187 and -0.057 m/s.
+///
+/// Measured error in the recovered delta-vz against thrust-only truth, i.e.
+/// the same integral with each log's own pad |g| removed instead of 9.81:
+///
+/// | ring span | Void Lake | LC'25   |
+/// |-----------|-----------|---------|
+/// | 0 s       | -15.129   | -6.973  |
+/// | 0.10 s    |  -1.026   | -0.972  |
+/// | **0.25 s**| **+0.016**|**-0.016**|
+/// | 0.50 s    |  +0.073   | -0.028  |
+/// | 1.0 s     |  +0.168   | -0.057  |
+/// | 2.0 s     |  +0.345   | -0.114  |
+///
+/// 0.25 s is where the two errors cross: it is long enough to cover the
+/// detector's own lag (~0.15 s of low pass plus the 0.1 s shared sustain),
+/// and short enough that the scale error it replays is nothing. Deleting
+/// the ring is NOT the alternative — that loses the whole pre-detection
+/// delta-vz, 15.1 m/s on Void Lake against a 15 m/s birth sigma, which is
+/// three orders worse than sizing it correctly.
+const PAD_RING_SPAN_S: f32 = 0.25;
 /// Capacity for that span. Trimming is by time, not by count, so this only
 /// has to be large enough that a faster-than-nominal sensor still buffers
-/// the whole span instead of quietly rewinding less of it: 1024 covers 2 s
-/// at up to 512 Hz. Past that the ring saturates and the rewind gets
+/// the whole span instead of quietly rewinding less of it: 128 covers
+/// 0.25 s at up to 512 Hz. Past that the ring saturates and the rewind gets
 /// shorter, which is exactly what the old count-based buffer did at ANY
-/// rate above nominal — degraded, not broken (see the readiness gate in
-/// `State::OnPad`).
-const PAD_RING_CAP: usize = 1024;
-/// Time constant of the low pass in front of the ignition threshold,
-/// a 10 Hz corner (`1 / 2*pi*10`).
-///
-/// This used to be a 2nd-order Butterworth biquad *designed at the nominal
-/// sample rate* — the last thing in this estimator that assumed one. A
-/// one-pole driven by the measured dt has the same nominal corner and no
-/// rate assumption at all, and it is the same idiom as `drag_lp` below.
-/// Order is not what this filter is buying: the threshold is 4 g against a
-/// 0.04 m/s^2 pad noise floor, three orders of magnitude of margin, so
-/// what it actually rejects is a knock on the rail.
-///
-/// The swap also fixed something the old filter was hiding. Measured on
-/// the Osiris replay, where the motor takes the axial channel from 12 to
-/// 83 m/s^2 in 20 ms: the biquad's output had moved 9.81 -> 11.06 over
-/// that whole ramp — nothing like a 10 Hz filter, which is where its
-/// ~65 ms of detection lag came from. Ignition detection now lands at
-/// ignition+24 ms instead of ignition+77 ms.
-///
-/// That matters beyond the detector, because detection is the ORIGIN every
-/// lockout timer is measured from ([`MachLockoutConfig`]), while the
-/// constants themselves come from the simulation's time-since-ignition. A
-/// detector that lags biases all of them late by exactly that lag, so
-/// removing it is what makes those constants mean what they say. It also
-/// spends 53 ms of the drag check's margin, which the 1 s sustain covers
-/// with ~0.9 s to spare; see `clipped_accel_still_flies_the_profile`.
-///
-/// [`MachLockoutConfig`]: crate::airbrakes_estimator::MachLockoutConfig
-const IGNITION_LP_TAU_S: f32 = 0.0159;
+/// rate above nominal — degraded, not broken.
+const PAD_RING_CAP: usize = 128;
+// The ignition low pass, threshold and sustain live in
+// [`crate::ignition_detector`], shared with the pyro half — this file owns
+// only the calibration gate in front of the result (`State::OnPad`) and the
+// rewind behind it.
+//
+// What stays true here is that detection is the ORIGIN every lockout timer
+// is measured from ([`MachLockoutConfig`]), while the constants themselves
+// come from the simulation's time-since-ignition. Any lag in the detector
+// biases all of them late by exactly that lag, so the detector's timing is
+// this file's business even though its code is not. The shared sustain adds
+// 0.1 s of deliberate lag on top of the low pass's own; that is spent out of
+// the drag check's margin, which `clipped_accel_still_flies_the_profile`
+// bounds.
+//
+// [`MachLockoutConfig`]: crate::airbrakes_estimator::MachLockoutConfig
+
 /// The calibration exists once this many windows pass the screen. Three
 /// windows are 6 s of pad data, which is what buys the averaging — the
 /// screen itself is a plausibility test and does not sharpen the numbers.
@@ -161,14 +174,29 @@ const FORCED_BORN_VELOCITY_STD: f32 = 30.0;
 const KF_Q_ACCEL_STD: f32 = 0.5;
 const KF_R_ALT_STD: f32 = 3.0;
 
-// --- Apogee latch ----------------------------------------------------------
-const APOGEE_VV_M_S: f32 = 1.0;
-const APOGEE_SUSTAIN_S: f32 = 0.5;
-/// For the latch the baro must be alive: an accepted update within this
-/// long...
-const BARO_FRESH_S: f32 = 0.25;
-/// ...and not frozen (identical raw readings) for longer than this.
-const BARO_FROZEN_S: f32 = 0.5;
+// --- Apogee ----------------------------------------------------------------
+// There is no apogee latch here any more, and the constants that ran it
+// (vertical velocity below 1 m/s sustained 0.5 s, guarded by a 0.25 s baro
+// freshness and a 0.5 s frozen-baro watch) are gone with it. It was dead in
+// flight, twice over:
+//
+// * `FlightEstimators::update` retires this half at `velocity().y <= 0`, and
+//   that fired FIRST on both real logs — by 0.389 s on Void Lake and 0.392 s
+//   on LC'25. The latch never got to run in a composed flight.
+// * It could not have fired anyway. The sustain needs 0.5 s below 1 m/s and
+//   the trajectory only offers 0.108 s (Void Lake) / 0.106 s (LC'25) between
+//   crossing 1 m/s and crossing zero — a rocket decelerating at ~9.8 m/s^2
+//   spends about a tenth of a second in that band, so 0.5 s was
+//   unsatisfiable, not merely slow.
+//
+// And had it somehow won the race it would have been actively harmful:
+// `velocity()` returned `None` in the apogee state (measured: `Some` on 0
+// samples after the latch on both logs), so `descending` in
+// `FlightEstimators::update` would have gone permanently false and the ONLY
+// remaining retirement conditions would have been tilt past the horizon and
+// the deployment half's apogee call.
+//
+// `AIRBRAKES_APOGEE` (SD flag bit 4) went with it; the bit stays reserved.
 
 // --- Outputs ---------------------------------------------------------------
 /// Tilt is capped here for the horizontal-velocity output (tan blows up at
@@ -192,8 +220,9 @@ struct PadCalibration {
 /// One buffered pre-ignition sample: everything the rewind replays, and
 /// nothing else. The baro altitude is deliberately absent — the rewind
 /// only drives the dead reckoner, and the pad altitude it starts from
-/// comes from the screened windows. At 32 bytes against `Measurement`'s
-/// 40, dropping it pays for the ring's capacity headroom outright.
+/// comes from the screened windows. At 32 bytes against the 40 a
+/// timestamp + [`ImuSample`] + altitude would take, dropping it pays for
+/// the ring's capacity headroom outright.
 #[derive(Debug, Clone, Copy)]
 struct PadSample {
     timestamp_us: u64,
@@ -205,18 +234,33 @@ struct PadSample {
 enum State {
     /// Stable on pad: collect screened calibration windows (gyro bias,
     /// gravity direction, pad altitude), and watch for ignition with a
-    /// 2 s rolling buffer that is rewound once ignition is detected. The
+    /// 0.25 s rolling buffer that is rewound once ignition is detected. The
     /// rolling buffer's ONLY job is that rewind — calibration comes
     /// entirely from the windows.
     OnPad {
         pad_ring: Deque<PadSample, PAD_RING_CAP>,
-        /// Low-passed accelerometer feeding the ignition threshold. `None`
-        /// until the first sample.
-        acc_lp: Option<Vector3<f32>>,
-        /// Finished window means, packed like `Measurement`: acc[0..3],
-        /// gyro[3..6], baro altitude [6].
+        /// This half's ignition detector. Its own instance, not shared with
+        /// the pyro half's — see [`IgnitionDetector::update`].
+        ignition: IgnitionDetector,
+        /// Finished window means, packed acc[0..3], gyro[3..6], baro
+        /// altitude [6] — one vector so the three channels are averaged and
+        /// screened over exactly the same window.
         pad_windows: heapless::Vec<SVector<f32, 7>, MAX_PAD_WINDOWS>,
-        window_welford: Welford<7>,
+        /// Running sum and sample count of the window in progress; its mean
+        /// is `window_sum / window_n`.
+        ///
+        /// This was Welford's incremental mean until 2026-08-17, on the
+        /// stated grounds that a plain sum of thousands of ~9.81 m/s^2
+        /// samples loses the hundredths the screen reads. Measured on the
+        /// real windows of both archived logs, the plain sum's error in
+        /// `|acc|` is 2.7e-6 (Void Lake, 385 samples) and 1.06e-5 (LC'25,
+        /// 1000 samples) — four orders below the hundredths, and within a
+        /// factor of two of Welford's own 1.5e-6 / 7.6e-6. Past ~10^5
+        /// samples, a window this code cannot produce, the two trade places
+        /// in both directions: Welford's `1/n` increment underflows just as
+        /// the sum loses digits.
+        window_sum: SVector<f32, 7>,
+        window_n: u32,
         window_elapsed: f32,
         /// Latest screening result; `None` until enough windows agree.
         /// Ignition detection is refused while this is `None`.
@@ -227,8 +271,17 @@ enum State {
     /// how the avionics are mounted in the rocket.
     Stage1 {
         elapsed: f32,
-        acc_welford: Welford<3>,
-        pad_av_orientation: UnitQuaternion<f32>,
+        /// Running SUM of the stage-1 specific force, never divided by a
+        /// count. Both things the stage-1 mean feeds are scale-invariant —
+        /// an angle and a `normalize()` — so the division would only round
+        /// the answer. See the exit below for the one consumer that IS
+        /// magnitude-sensitive and why normalizing there is what makes it
+        /// safe.
+        acc_sum: Vector3<f32>,
+        /// Earth UP in the avionics frame as the PAD measured it. Kept only
+        /// so the launch angle is logged against the rail's attitude rather
+        /// than against the reckoner's half-second-old one.
+        pad_up_av: Vector3<f32>,
         reckoner: DeadReckoner,
         gyro_bias: Vector3<f32>,
         launch_pad_altitude_asl: f32,
@@ -238,9 +291,10 @@ enum State {
     /// Boost and Mach lockout: inertial dead reckoning only, no filter.
     /// The baro is buffered (to pick a birth altitude) but never fused.
     DeadReckoning {
-        q_av_to_rocket: UnitQuaternion<f32>,
         /// Unit airframe axis in the avionics frame, from the stage-1 mean
-        /// thrust direction. Thrust is +, drag is -.
+        /// thrust direction. Thrust is +, drag is -. It is also the whole
+        /// of the mounting solution the tilt output needs: tilt is the
+        /// angle between this and the dead reckoner's `up_av`.
         thrust_axis_av: Vector3<f32>,
         reckoner: DeadReckoner,
         gyro_bias: Vector3<f32>,
@@ -262,23 +316,21 @@ enum State {
 
     /// The baro is honest: the 2-state vertical filter exists and runs to
     /// apogee. Tilt still comes from the gyro dead reckoner.
+    ///
+    /// This is the LAST state. There is no apogee state to move on to: the
+    /// whole estimator is dropped by [`FlightEstimators::update`] the first
+    /// sample the filter's vertical velocity reaches zero, so the ascent is
+    /// all this state ever sees.
+    ///
+    /// [`FlightEstimators::update`]: crate::FlightEstimators::update
     Tracking {
-        q_av_to_rocket: UnitQuaternion<f32>,
+        thrust_axis_av: Vector3<f32>,
         reckoner: DeadReckoner,
         gyro_bias: Vector3<f32>,
         launch_pad_altitude_asl: f32,
         kf: VerticalKF,
         born_t_us: u64,
         born_forced: bool,
-        apogee_sustain: f32,
-        baro_accept_age: f32,
-        last_raw_baro: f32,
-        baro_frozen_s: f32,
-    },
-
-    Apogee {
-        altitude_asl: f32,
-        launch_pad_altitude_asl: f32,
     },
 }
 
@@ -291,10 +343,6 @@ pub struct AirbrakesEstimator {
     state: State,
     config: AirbrakesConfig,
     prev_timestamp_us: Option<u64>,
-    /// What the vertical filter's innovation gate did with the sample this
-    /// estimator last processed. `Accepted` before the filter is born and
-    /// after apogee, when there is no gate running.
-    last_baro_gate: BaroGateOutcome,
 }
 
 impl AirbrakesEstimator {
@@ -302,30 +350,58 @@ impl AirbrakesEstimator {
         Self {
             state: State::OnPad {
                 pad_ring: Deque::new(),
-                acc_lp: None,
+                ignition: IgnitionDetector::new(),
                 pad_windows: heapless::Vec::new(),
-                window_welford: Welford::new(),
+                window_sum: SVector::zeros(),
+                window_n: 0,
                 window_elapsed: 0.0,
                 calibration: None,
             },
             config,
             prev_timestamp_us: None,
-            last_baro_gate: BaroGateOutcome::Accepted,
         }
     }
 
-    /// Feed one timestamped IMU+baro sample.
-    pub fn update(&mut self, z: &Measurement) {
+    /// Feed one IMU sample, the time it was taken (us, one monotonic clock)
+    /// and the baro altitude ASL (m) from the same instant.
+    ///
+    /// Returns what the vertical filter's innovation gate did with this
+    /// sample's baro reading — returned rather than stored, so there is no
+    /// stale value for a later reader to pick up (see
+    /// [`crate::BaroGateOutcome`]). Only [`State::Tracking`] runs a gate, so
+    /// every other state answers `Accepted`: there is nothing to reject
+    /// against before the filter is born.
+    pub fn update(
+        &mut self,
+        timestamp_us: u64,
+        imu: &ImuSample,
+        altitude_asl: f32,
+    ) -> BaroGateOutcome {
+        // The very first sample has no predecessor to difference against, so
+        // it carries no elapsed time and is stepped by 0. That is not a
+        // special case anyone has to reason about: `saturating_sub` plus this
+        // clamp already hand out dt = 0 for a duplicate or backwards
+        // timestamp, so every integrator, low pass and sustain timer
+        // downstream is already required to survive it — and none of them
+        // divides by dt. This retired the module's last written-down sample
+        // rate (a 1/416 s assumed first step) on 2026-08-17; the phase shift
+        // it costs is one sample at the head of the pad calibration windows,
+        // measured on LC'25 as a gyro bias of 0.0079287 deg/s against
+        // 0.0079378 (Void Lake's 2.0783 did not move at all). Nothing the
+        // suite asserts moved: apogee altitudes and birth velocities shift in
+        // their fifth significant figure, and the only visible change is
+        // which of the MPC's two adjacent extension levels lands on a given
+        // tick during the end-of-window dither.
         let dt = match self.prev_timestamp_us {
             Some(prev) => {
-                ((z.timestamp_us.saturating_sub(prev)) as f32 * 1e-6).clamp(0.0, MAX_DT_S)
+                ((timestamp_us.saturating_sub(prev)) as f32 * 1e-6).clamp(0.0, MAX_DT_S)
             }
-            None => NOMINAL_DT,
+            None => 0.0,
         };
-        self.prev_timestamp_us = Some(z.timestamp_us);
+        self.prev_timestamp_us = Some(timestamp_us);
 
-        let acc = z.acceleration();
-        let gyro = z.angular_velocity();
+        let acc = imu.acc;
+        let gyro = imu.gyro;
 
         // Only `Tracking` runs a gate; every other state leaves this at
         // `Accepted`, which is what "no gate to reject anything" means.
@@ -334,36 +410,38 @@ impl AirbrakesEstimator {
         match &mut self.state {
             State::OnPad {
                 pad_ring,
-                acc_lp,
+                ignition,
                 pad_windows,
-                window_welford,
+                window_sum,
+                window_n,
                 window_elapsed,
                 calibration,
             } => {
-                // Ignition low pass: one pole on the measured dt. Clamped
-                // at alpha = 1 so a long stall snaps to the sample rather
-                // than overshooting past it.
-                let acc_low_passed = match *acc_lp {
-                    Some(prev) => prev + (dt / IGNITION_LP_TAU_S).min(1.0) * (acc - prev),
-                    None => acc,
-                };
-                *acc_lp = Some(acc_low_passed);
+                // Run every sample so the low pass and the sustain are
+                // already warm when the motor lights; the result is only
+                // consulted once the two readiness gates below have passed.
+                let accel_says_ignition = ignition.update(
+                    Some(acc),
+                    dt,
+                    self.config.ignition_detection_acc_threshold,
+                );
 
                 if pad_ring.is_full() {
                     pad_ring.pop_front();
                 }
                 let _ = pad_ring.push_back(PadSample {
-                    timestamp_us: z.timestamp_us,
+                    timestamp_us,
                     acc,
                     gyro,
                 });
                 // Trim to the span, but keep the one sample that has just
                 // aged out of it, so the ring always COVERS the span
-                // instead of sitting a sample short of it — which is what
-                // lets the readiness gate below be an honest `>=`.
+                // instead of sitting a sample short of it — the rewind
+                // replays the whole ring, so a sample short is a span
+                // short.
                 while pad_ring.len() >= 2 {
                     let second = pad_ring.iter().nth(1).unwrap().timestamp_us;
-                    if (z.timestamp_us.saturating_sub(second)) as f32 * 1e-6 >= PAD_RING_SPAN_S {
+                    if (timestamp_us.saturating_sub(second)) as f32 * 1e-6 >= PAD_RING_SPAN_S {
                         pad_ring.pop_front();
                     } else {
                         break;
@@ -378,15 +456,17 @@ impl AirbrakesEstimator {
                 let mut sample = SVector::<f32, 7>::zeros();
                 sample.fixed_view_mut::<3, 1>(0, 0).copy_from(&acc);
                 sample.fixed_view_mut::<3, 1>(3, 0).copy_from(&gyro);
-                sample[6] = z.altitude_asl();
-                window_welford.update(&sample);
+                sample[6] = altitude_asl;
+                *window_sum += sample;
+                *window_n += 1;
                 *window_elapsed += dt;
                 if *window_elapsed >= PAD_WINDOW_S {
                     if pad_windows.is_full() {
                         pad_windows.remove(0);
                     }
-                    let _ = pad_windows.push(window_welford.mean());
-                    *window_welford = Welford::new();
+                    let _ = pad_windows.push(*window_sum / *window_n as f32);
+                    *window_sum = SVector::zeros();
+                    *window_n = 0;
                     *window_elapsed = 0.0;
 
                     // Re-screen on every finished window: the calibration
@@ -402,16 +482,22 @@ impl AirbrakesEstimator {
                     }
                 }
 
-                // Readiness: the rewind must have a full span to replay
-                // before ignition may be detected. `is_full` is the
-                // degraded path — at a sample rate high enough to saturate
-                // the ring before the span fills, detection still happens,
-                // just with a shorter rewind. That is what the old
-                // count-based buffer did at every rate; here it is the
-                // fallback rather than the rule.
-                if !pad_ring.is_full() && pad_ring_span_s(pad_ring) < PAD_RING_SPAN_S {
-                    return;
-                }
+                // There is deliberately no second gate on the ring having
+                // filled. It stood here until 2026-08-17 and could not
+                // fire: the ring covers its span after PAD_RING_SPAN_S of
+                // samples, while the calibration below needs three finished
+                // 2 s windows and so cannot exist before 6 s (the first
+                // sample carries dt = 0, so the windows span exactly three
+                // times PAD_WINDOW_S of measured time).
+                // The gate therefore only ever refused samples that the
+                // calibration check on the next line was about to refuse
+                // anyway. The one input that could separate the two is a
+                // clock that runs backwards, where the ring's span
+                // collapses while the windows' clamped dt keeps
+                // accumulating — and there the gate was actively harmful,
+                // blocking ignition detection for as long as the ring took
+                // to re-cover its span.
+                //
                 // Calibration is a hard precondition of ignition
                 // detection: without a trustworthy bias, gravity direction
                 // and pad altitude there is nothing sane to hand the dead
@@ -419,12 +505,14 @@ impl AirbrakesEstimator {
                 // deliberately NOT detected. `calibration_complete()`
                 // surfaces this as an arming/self-test condition — the
                 // rocket must not leave the rail before it is true.
+                // Both early exits leave the pad state untouched, and no
+                // vertical filter exists there, so there is no gate outcome
+                // to report but `Accepted`.
                 let Some(cal) = *calibration else {
-                    return;
+                    return BaroGateOutcome::Accepted;
                 };
-                let threshold = self.config.ignition_detection_acc_threshold;
-                if acc_low_passed.magnitude_squared() <= threshold * threshold {
-                    return;
+                if !accel_says_ignition {
+                    return BaroGateOutcome::Accepted;
                 }
                 log_info!("ignition detected, rewinding pad buffer");
                 log_info!(
@@ -433,14 +521,18 @@ impl AirbrakesEstimator {
                     cal.launch_pad_altitude_asl
                 );
 
-                let pad_av_orientation =
-                    quaternion_from_start_and_end_vector(&UP, &cal.gravity_av_frame);
-                let mut reckoner = DeadReckoner::new(pad_av_orientation);
-                reckoner.position.z = cal.launch_pad_altitude_asl;
+                // The pad's own mean specific force IS earth UP in the
+                // avionics frame — an accelerometer at rest reads +1 g
+                // along up — so the pad attitude is a `normalize()` with no
+                // rotation to solve and no degenerate case for a mounting
+                // that happens to sit exactly inverted.
+                let pad_up_av = cal.gravity_av_frame.normalize();
+                let mut reckoner =
+                    DeadReckoner::new(pad_up_av, cal.launch_pad_altitude_asl);
 
                 // Rewind: ignition was detected late (low-pass lag +
                 // threshold), so the buffer's tail holds the first moments
-                // of real thrust — replay the whole 2 s through the dead
+                // of real thrust — replay the whole 0.25 s through the dead
                 // reckoner. This replay is the ring buffer's ONLY job;
                 // gravity, pad altitude and bias all came from the
                 // screened windows above.
@@ -463,50 +555,60 @@ impl AirbrakesEstimator {
                 log_info!("to stage 1: {:?}", reckoner);
                 self.state = State::Stage1 {
                     elapsed: 0.0,
-                    acc_welford: Welford::new(),
-                    pad_av_orientation,
+                    acc_sum: Vector3::zeros(),
+                    pad_up_av,
                     reckoner,
                     gyro_bias: cal.gyro_bias,
                     launch_pad_altitude_asl: cal.launch_pad_altitude_asl,
-                    ignition_t_us: z.timestamp_us,
+                    ignition_t_us: timestamp_us,
                 };
             }
 
             State::Stage1 {
                 elapsed,
-                acc_welford,
-                pad_av_orientation,
+                acc_sum,
+                pad_up_av,
                 reckoner,
                 gyro_bias,
                 launch_pad_altitude_asl,
                 ignition_t_us,
             } => {
-                acc_welford.update(&acc);
+                *acc_sum += acc;
                 reckoner.update(&acc, &(gyro - *gyro_bias), dt);
                 *elapsed += dt;
                 if *elapsed < STAGE1_DURATION_S {
-                    return;
+                    // Still aligning; no vertical filter, so no gate.
+                    return BaroGateOutcome::Accepted;
                 }
 
-                // The mean thrust direction (in the earth frame, via the
-                // pad orientation) is the rocket's axis: this calibrates
-                // how the avionics are mounted in the airframe.
-                let avg_acc_av_frame = acc_welford.mean();
-                let avg_acc_earth_frame = pad_av_orientation.transform_vector(&avg_acc_av_frame);
+                // The mean thrust direction IS the airframe axis in the
+                // avionics frame, so the burnout latch self-calibrates its
+                // mounting and sign from the flight itself — and it is also
+                // the whole mounting solution, since tilt is just its angle
+                // to the dead reckoner's `up_av`.
+                //
+                // This `normalize()` is what makes the accumulator's
+                // missing division harmless AND what makes the burnout
+                // latch — the one magnitude-sensitive consumer, comparing
+                // `acc . thrust_axis_av` against -2 m/s^2 — safe: the axis
+                // it dots against is unit length by construction, so the
+                // sum's arbitrary scale never reaches the threshold.
+                let thrust_axis_av = acc_sum.normalize();
+                // Measured against the PAD's up, not the reckoner's current
+                // one: half a second of gyro integration has already moved
+                // the latter, and it is the rail angle this line is for
+                // (Void Lake logs 10.2 deg here against the reckoner's
+                // 26.1 deg at the same instant). That is `pad_up_av`'s only
+                // job, hence the discard — a build with logging compiled
+                // out has no other reader for it.
+                let _ = &pad_up_av;
                 log_info!(
                     "launch angle: {} deg",
-                    UP.angle(&avg_acc_earth_frame).to_degrees()
+                    pad_up_av.angle(&thrust_axis_av).to_degrees()
                 );
-                let q_earth_to_rocket =
-                    quaternion_from_start_and_end_vector(&avg_acc_earth_frame, &UP);
-                let q_av_to_rocket = pad_av_orientation.inverse() * q_earth_to_rocket;
 
                 self.state = State::DeadReckoning {
-                    q_av_to_rocket,
-                    // The mean thrust direction IS the airframe axis in the
-                    // avionics frame, so the burnout latch self-calibrates
-                    // its mounting and sign from the flight itself.
-                    thrust_axis_av: avg_acc_av_frame.normalize(),
+                    thrust_axis_av,
                     reckoner: reckoner.clone(),
                     gyro_bias: *gyro_bias,
                     launch_pad_altitude_asl: *launch_pad_altitude_asl,
@@ -521,7 +623,6 @@ impl AirbrakesEstimator {
             }
 
             State::DeadReckoning {
-                q_av_to_rocket,
                 thrust_axis_av,
                 reckoner,
                 gyro_bias,
@@ -540,9 +641,9 @@ impl AirbrakesEstimator {
                 if baro_ring.is_full() {
                     baro_ring.pop_front();
                 }
-                let _ = baro_ring.push_back((z.timestamp_us, z.altitude_asl()));
+                let _ = baro_ring.push_back((timestamp_us, altitude_asl));
                 while let Some(front) = baro_ring.front() {
-                    if (z.timestamp_us.saturating_sub(front.0)) as f32 * 1e-6 > BARO_RING_SPAN_S {
+                    if (timestamp_us.saturating_sub(front.0)) as f32 * 1e-6 > BARO_RING_SPAN_S {
                         baro_ring.pop_front();
                     } else {
                         break;
@@ -576,7 +677,7 @@ impl AirbrakesEstimator {
                 }
 
                 let t_since_ignition_s =
-                    (z.timestamp_us.saturating_sub(*ignition_t_us)) as f32 * 1e-6;
+                    (timestamp_us.saturating_sub(*ignition_t_us)) as f32 * 1e-6;
 
                 let (born, forced) = match &self.config.mach_lockout {
                     // Subsonic profile: the baro is honest as soon as the
@@ -626,7 +727,7 @@ impl AirbrakesEstimator {
                             // measured on LC'25 they differ by <=0.01 Mach
                             // — but taking the baro out entirely removes
                             // the question.)
-                            let altitude = reckoner.position.z;
+                            let altitude = reckoner.altitude_asl;
                             let subsonic = match drag_airspeed(
                                 a_drag,
                                 altitude,
@@ -652,17 +753,21 @@ impl AirbrakesEstimator {
                     }
                 };
 
+                // Still dead reckoning, or born on this very sample — either
+                // way the gate has not run yet, since the filter fuses its
+                // first baro on the NEXT call.
                 if !born {
-                    return;
+                    return BaroGateOutcome::Accepted;
                 }
 
                 // Birth ("born subsonic"): nothing from the garbage period
                 // survives into the filter except these two numbers.
                 let alt0_asl = match ring_median(baro_ring) {
                     Some(m) => m,
-                    None => return, // no baro at all yet — wait
+                    // no baro at all yet — wait
+                    None => return BaroGateOutcome::Accepted,
                 };
-                let vv0 = reckoner.velocity.z;
+                let vv0 = reckoner.vertical_velocity;
                 let kf = VerticalKF::born(
                     alt0_asl,
                     vv0,
@@ -681,85 +786,43 @@ impl AirbrakesEstimator {
                     vv0
                 );
                 self.state = State::Tracking {
-                    q_av_to_rocket: *q_av_to_rocket,
+                    thrust_axis_av: *thrust_axis_av,
                     reckoner: reckoner.clone(),
                     gyro_bias: *gyro_bias,
                     launch_pad_altitude_asl: *launch_pad_altitude_asl,
                     kf,
-                    born_t_us: z.timestamp_us,
+                    born_t_us: timestamp_us,
                     born_forced: forced,
-                    apogee_sustain: 0.0,
-                    baro_accept_age: 0.0,
-                    last_raw_baro: z.altitude_asl(),
-                    baro_frozen_s: 0.0,
                 };
             }
 
             State::Tracking {
                 reckoner,
                 gyro_bias,
-                launch_pad_altitude_asl,
                 kf,
-                apogee_sustain,
-                baro_accept_age,
-                last_raw_baro,
-                baro_frozen_s,
                 ..
             } => {
                 // The dead reckoner runs for tilt only (gyro-only
-                // orientation); its velocity/position are unused here.
+                // attitude); its own altitude and vertical velocity keep
+                // integrating but nothing reads them past birth.
                 reckoner.update(&acc, &(gyro - *gyro_bias), dt);
 
-                kf.predict(reckoner.acceleration.z, dt);
+                kf.predict(reckoner.vertical_acceleration, dt);
 
                 // The baro is fused raw, so the dead-reckoned attitude
                 // never reaches the altitude or vertical-velocity channel —
                 // it survives only as the tilt behind `velocity()`'s
                 // horizontal component, and a drifting gyro cannot corrupt
                 // what the MPC flies on.
-                // Only a plain `Accepted` counts as fresh baro: a resync
-                // snaps altitude but does not fuse the sample, which is what
-                // this age has always meant.
-                baro_gate = kf.update(z.altitude_asl(), dt);
-                if baro_gate == BaroGateOutcome::Accepted {
-                    *baro_accept_age = 0.0;
-                } else {
-                    *baro_accept_age += dt;
-                }
-
-                // Frozen-baro watch: a dead sensor repeats its last value
-                // exactly. A live baro at this noise level never does for
-                // long.
-                if z.altitude_asl() == *last_raw_baro {
-                    *baro_frozen_s += dt;
-                } else {
-                    *baro_frozen_s = 0.0;
-                    *last_raw_baro = z.altitude_asl();
-                }
-
-                // Apogee latches only with persistence AND a healthy baro
-                // (red-team finding: a frozen/offset baro plus a
-                // single-sample latch permanently kills the airbrakes).
-                let baro_healthy =
-                    *baro_accept_age < BARO_FRESH_S && *baro_frozen_s < BARO_FROZEN_S;
-                if kf.vertical_velocity() < APOGEE_VV_M_S && baro_healthy {
-                    *apogee_sustain += dt;
-                } else {
-                    *apogee_sustain = 0.0;
-                }
-                if *apogee_sustain >= APOGEE_SUSTAIN_S {
-                    log_info!("apogee latched at {}", kf.altitude_asl());
-                    self.state = State::Apogee {
-                        altitude_asl: kf.altitude_asl(),
-                        launch_pad_altitude_asl: *launch_pad_altitude_asl,
-                    };
-                }
+                //
+                // Nothing follows this. There is no apogee transition to
+                // make: the estimator runs until the wrapper drops it, so
+                // the gate outcome is the last thing this state produces.
+                baro_gate = kf.update(altitude_asl, dt);
             }
-
-            State::Apogee { .. } => {}
         }
 
-        self.last_baro_gate = baro_gate;
+        baro_gate
     }
 
     /// Best current altitude ASL: the filter once born, dead reckoning
@@ -768,10 +831,9 @@ impl AirbrakesEstimator {
         match &self.state {
             State::OnPad { .. } => None,
             State::Stage1 { reckoner, .. } | State::DeadReckoning { reckoner, .. } => {
-                Some(reckoner.position.z)
+                Some(reckoner.altitude_asl)
             }
             State::Tracking { kf, .. } => Some(kf.altitude_asl()),
-            State::Apogee { altitude_asl, .. } => Some(*altitude_asl),
         }
     }
 
@@ -789,27 +851,30 @@ impl AirbrakesEstimator {
             | State::Tracking {
                 launch_pad_altitude_asl,
                 ..
-            }
-            | State::Apogee {
-                launch_pad_altitude_asl,
-                ..
             } => Some(*launch_pad_altitude_asl),
         }
     }
 
-    /// MPC velocity input: (horizontal, vertical) m/s. Only available while
-    /// the vertical filter is running (baro trusted, before apogee) — which
-    /// is exactly the window the airbrakes may act in.
+    /// MPC velocity input: (horizontal, vertical) m/s. Only available once
+    /// the vertical filter is running (baro trusted) — which, since
+    /// [`State::Tracking`] is the last state, is exactly the window the
+    /// airbrakes may act in.
+    ///
+    /// Its sign is also the retirement condition
+    /// [`FlightEstimators::update`] reads: a non-positive `y` ends the
+    /// airbrakes window. That is the only apogee criterion in the system.
+    ///
+    /// [`FlightEstimators::update`]: crate::FlightEstimators::update
     pub fn velocity(&self) -> Option<Vector2<f32>> {
         match &self.state {
             State::Tracking {
                 kf,
-                q_av_to_rocket,
+                thrust_axis_av,
                 reckoner,
                 ..
             } => {
                 let vv = kf.vertical_velocity();
-                let tilt = axis_tilt(q_av_to_rocket, reckoner).min(TILT_CAP_RAD);
+                let tilt = axis_tilt(thrust_axis_av, reckoner).min(TILT_CAP_RAD);
                 Some(Vector2::new((vv * libm::tanf(tilt)).abs(), vv))
             }
             _ => None,
@@ -820,15 +885,15 @@ impl AirbrakesEstimator {
     pub fn tilt(&self) -> Option<f32> {
         match &self.state {
             State::DeadReckoning {
-                q_av_to_rocket,
+                thrust_axis_av,
                 reckoner,
                 ..
             }
             | State::Tracking {
-                q_av_to_rocket,
+                thrust_axis_av,
                 reckoner,
                 ..
-            } => Some(axis_tilt(q_av_to_rocket, reckoner)),
+            } => Some(axis_tilt(thrust_axis_av, reckoner)),
             _ => None,
         }
     }
@@ -842,37 +907,19 @@ impl AirbrakesEstimator {
     /// Without it a flight where the brakes never opened cannot be told
     /// apart from one where the drag check simply never passed.
     ///
-    /// The later states imply it, since neither can be reached otherwise.
+    /// `Tracking` implies it, since it cannot be reached otherwise.
     pub fn burnout_detected(&self) -> bool {
         match &self.state {
             State::OnPad { .. } | State::Stage1 { .. } => false,
             State::DeadReckoning { burnout, .. } => *burnout,
-            State::Tracking { .. } | State::Apogee { .. } => true,
+            State::Tracking { .. } => true,
         }
     }
 
     /// True once the vertical filter exists (the baro is trusted). The
     /// airbrakes gate requires this.
     pub fn baro_trusted(&self) -> bool {
-        matches!(
-            self.state,
-            State::Tracking { .. } | State::Apogee { .. }
-        )
-    }
-
-    pub fn is_apogee(&self) -> bool {
-        matches!(self.state, State::Apogee { .. })
-    }
-
-    /// What the vertical filter's innovation gate did with the sample this
-    /// estimator last processed. Read it immediately after [`Self::update`]:
-    /// it describes that one sample and is overwritten by the next.
-    ///
-    /// Only the vertical filter has a gate, so this is `Accepted` before the
-    /// filter is born and after apogee — there is nothing to reject against
-    /// in either case.
-    pub fn baro_gate(&self) -> BaroGateOutcome {
-        self.last_baro_gate
+        matches!(self.state, State::Tracking { .. })
     }
 
     /// The lockout-exit drag check, for logging/telemetry: whether the
@@ -982,16 +1029,6 @@ fn screen_pad_windows(
     })
 }
 
-/// Measured time from the oldest to the newest buffered pad sample.
-fn pad_ring_span_s(ring: &Deque<PadSample, PAD_RING_CAP>) -> f32 {
-    match (ring.front(), ring.back()) {
-        (Some(front), Some(back)) => {
-            (back.timestamp_us.saturating_sub(front.timestamp_us)) as f32 * 1e-6
-        }
-        _ => 0.0,
-    }
-}
-
 fn ring_span_s(ring: &Deque<(u64, f32), BARO_RING_CAP>) -> f32 {
     match (ring.front(), ring.back()) {
         (Some(front), Some(back)) => (back.0.saturating_sub(front.0)) as f32 * 1e-6,
@@ -1027,35 +1064,20 @@ fn ring_median(ring: &Deque<(u64, f32), BARO_RING_CAP>) -> Option<f32> {
         }
     }
     let picks = &mut picks[..count];
-    picks.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
+    // `total_cmp`, not `partial_cmp(..).unwrap()`: the altitude reaches this
+    // ring unguarded, and one NaN among the nine picks used to panic the
+    // whole estimator on the sample that ends the Mach lockout. The upstream
+    // source of non-finite altitudes is fixed (VLF5 `sensor_tasks.rs` rejects
+    // non-finite and non-positive pressure), so this is the second layer, and
+    // it costs a token rather than a mechanism. A NaN now simply sorts to one
+    // end and the median stays a real reading.
+    picks.sort_unstable_by(f32::total_cmp);
     Some(picks[count / 2])
 }
 
-fn axis_tilt(q_av_to_rocket: &UnitQuaternion<f32>, reckoner: &DeadReckoner) -> f32 {
-    let rocket_orientation = reckoner.orientation * *q_av_to_rocket;
-    UP.angle(&rocket_orientation.transform_vector(&UP))
-}
-
-/// returns a passive rotation quaternion that would rotate start vector to
-/// end vector: the frame rotation under which coordinates `start` become
-/// `end`. Operationally (nalgebra active semantics) that means
-/// `q.transform_vector(end) == start` — e.g.
-/// `quaternion_from_start_and_end_vector(&UP, &gravity_av)` maps the
-/// device-frame gravity vector onto earth UP, which is exactly the
-/// device->earth attitude the `DeadReckoner` wants.
-fn quaternion_from_start_and_end_vector(
-    start: &Vector3<f32>,
-    end: &Vector3<f32>,
-) -> UnitQuaternion<f32> {
-    let start = start.normalize();
-    let end = end.normalize();
-
-    let axis = UnitVector3::new_normalize(end.cross(&start));
-    let angle = end.angle(&start);
-
-    if angle.to_degrees() < 0.05 {
-        UnitQuaternion::identity()
-    } else {
-        UnitQuaternion::from_axis_angle(&axis, angle)
-    }
+/// Rocket-axis tilt from vertical (radians): the angle between the airframe
+/// axis and earth UP, both written in the avionics frame — which is the
+/// frame both are already in, so no rotation is applied to take it.
+fn axis_tilt(thrust_axis_av: &Vector3<f32>, reckoner: &DeadReckoner) -> f32 {
+    reckoner.up_av.angle(thrust_axis_av)
 }

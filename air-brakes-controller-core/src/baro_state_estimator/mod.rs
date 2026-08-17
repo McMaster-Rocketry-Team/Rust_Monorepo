@@ -12,10 +12,12 @@
 //!
 //! **Ignition is the one decision the barometer does not make.** It is a
 //! magnitude check on the raw accelerometer and nothing else
-//! ([`FlightProfile::ignition_detection_acc_threshold`]): a 5 Hz low pass, a
-//! threshold, and a 0.1 s sustain. It carries no state across from the
-//! airbrakes estimator and needs no pad calibration, no mounting
-//! orientation, no gyro bias.
+//! ([`FlightProfile::ignition_detection_acc_threshold`]): a 10 Hz low pass, a
+//! threshold, and a 0.1 s sustain, implemented once in
+//! [`crate::ignition_detector`] and instantiated here. It needs no pad
+//! calibration, no mounting orientation, no gyro bias — and it shares the
+//! *code* with the airbrakes half's detector but not the *instance*, so
+//! neither half can hold the other's ignition decision hostage.
 //!
 //! The barometric detector it replaced (10 m/s of filtered climb AND 15 m of
 //! rise) decided the most load-bearing instant in the flight — the anchor
@@ -40,9 +42,15 @@
 //!   [`PAD_ALTITUDE_GATE_M`].
 //! * **Through the Mach lockout** there is no filter. It is dropped at
 //!   ignition rather than frozen, so no caller can read a pre-ignition
-//!   altitude out of it while the rocket is kilometres away.
-//! * **After the lockout** (or at ignition, on a subsonic profile) one is
-//!   built from the first honest reading and runs to landing.
+//!   altitude out of it while the rocket is kilometres away. The raw baro
+//!   is still buffered through it, for one purpose only — see
+//!   [`BARO_RING_CAP`].
+//! * **After the lockout** one is built from the median of the last
+//!   [`BARO_RING_SPAN_S`] of readings, and runs to landing. On a subsonic
+//!   profile it is built at ignition instead, from the tracked pad
+//!   altitude. Neither birth reads a single raw sample: the filter defends
+//!   its own state with an innovation gate afterwards, so the one number it
+//!   is handed first must not be able to be a bad SPI read.
 //!
 //! `Option<BaroAltitudeKF>` is the whole of that rule. Absence is a fact
 //! about the type rather than something every reader has to remember.
@@ -55,7 +63,10 @@ mod tests;
 pub use altitude_kf::BaroAltitudeKF;
 
 use firmware_common_new::vlp::packets::fire_pyro::PyroSelect;
+use heapless::Deque;
 use nalgebra::Vector3;
+
+use crate::ignition_detector::IgnitionDetector;
 
 use crate::baro_gate::BaroGateOutcome;
 
@@ -75,27 +86,6 @@ use crate::baro_gate::BaroGateOutcome;
 pub const SAMPLES_PER_S: usize = 416;
 pub const DT: f32 = 1f32 / (SAMPLES_PER_S as f32);
 
-/// Time constant of the low pass in front of the accelerometer ignition
-/// check — a 5 Hz corner (`1 / 2*pi*5`), deliberately narrower than the
-/// airbrakes estimator's 10 Hz detector. This one starts a Mach lockout
-/// that drops the pyro filter for tens of seconds, so it buys quiet at
-/// the cost of a few tens of milliseconds it can well afford out of the
-/// ~1.1 s it wins.
-///
-/// The vector is filtered and then measured, not the other way round:
-/// |accel| is rectified, so low-passing the magnitude would let airframe
-/// vibration bias the channel upward toward the threshold.
-const IGNITION_ACC_LP_TAU_S: f32 = 0.031831;
-/// How long the accelerometer has to stay above the threshold before it
-/// latches ignition.
-///
-/// The low pass alone already needs a few tens of milliseconds of sustained
-/// thrust to reach the threshold, so this is belt-and-braces — but this
-/// detector starts a Mach lockout that freezes the pyro filter for tens of
-/// seconds, and a false latch on the pad is expensive enough to be worth
-/// 0.1 s of the ~1.3 s this detector wins. Every other latch in the two
-/// estimators is sustained the same way.
-const IGNITION_ACC_SUSTAIN_S: f32 = 0.1;
 /// Apogee detection: filtered altitude this far below its running maximum
 /// counts as descending. Must exceed the worst transient dip a gate-leaking
 /// blast can put on the slow filter (~30 m from a 25-sample 500 m offset,
@@ -137,6 +127,50 @@ const PAD_ALTITUDE_GATE_M: f32 = 100.0;
 /// actually saying.
 const PAD_ALTITUDE_RESYNC_S: f32 = 1.0;
 
+/// Ring of recent raw baro samples kept through the Mach lockout, used for
+/// exactly one thing: picking the altitude the filter is born at when the
+/// lockout ends, by median. Same idiom, and the same nine-pick median, as
+/// the airbrakes half's `BARO_RING_CAP` / `ring_median` — see
+/// [`ring_median`] for why this is a copy rather than a shared function.
+///
+/// It exists because a birth seeded from ONE raw sample is a birth that
+/// inherits whatever that sample happened to be, and the exit sample is not
+/// gated by anything: the old filter was dropped at ignition, so there is
+/// no innovation gate left to reject it, and `peak_altitude_asl` was seeded
+/// from the same reading. Measured on the Osiris O3400 sim with a single
+/// bad reading on the exit sample — an SPI read decoding to pressure ~0
+/// (~30 km), or merely a factor-of-2 pressure error (12854 m against an
+/// honest 8359 m) — the drogue fired at 28.67 s while the airframe was
+/// still climbing at +109.7 m/s, against 43.60 s nominal. Both cases: the
+/// filter and the peak were born at the bad altitude, so the very next
+/// honest sample read as kilometres of descent. Take the KF's force-accept
+/// resync away as well and the filter never re-acquires at all — no pyros.
+///
+/// A median outvotes it. `BARO_RING_SPAN_S` = 0.25 s is the whole margin:
+/// long enough that a transient has to hold for more than half the window
+/// (5 of the 9 picks, ~0.13 s) to move the answer, short enough that the
+/// median's half-window lag costs only ~17 m of seed altitude at the
+/// +137 m/s the airframe is doing at lockout exit on Osiris. That lag is
+/// paid twice and matters neither time: the newborn filter's velocity prior
+/// is (300 m/s)^2 wide and closes it in a fraction of a second, and
+/// `peak_altitude_asl` is a running maximum that only ever revises upward.
+/// Seeding the peak LOW is harmless; seeding it high is the defect above.
+///
+/// RAM, measured: the `Deque` is 2072 B (128 * 16 B of `(u64, f32)` plus
+/// its indices), and it sizes the whole `Stage` enum rather than just the
+/// `MachLockout` variant, so `RocketStateEstimator` goes from 168 B to
+/// 2232 B — +2064 B held for the entire flight, not only the lockout.
+/// That is 0.2% of the STM32H743's RAM for the only mechanism standing
+/// between one bad SPI read and a drogue at +109 m/s, and it is the whole
+/// cost of the fix; nothing else was added.
+///
+/// The cap covers the span even at a 500 Hz feed (125 samples), which means
+/// the span — wall-clock, like every other duration in this module — is
+/// what bounds the window, not the cap, so a part running fast does not
+/// quietly shorten it.
+const BARO_RING_CAP: usize = 128;
+const BARO_RING_SPAN_S: f32 = 0.25;
+
 /// Per-rocket flight configuration for the deployment estimator.
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, PartialEq)]
@@ -156,21 +190,57 @@ pub struct FlightProfile {
     /// runs longer than that estimator's lockout would. This half fires the
     /// pyros, so it buys its margin in time rather than in cleverness.
     ///
-    /// Unrelated to
+    /// Still not the same thing as
     /// [`MachLockoutConfig`](crate::airbrakes_estimator::MachLockoutConfig)
-    /// despite the similar name: that one bounds the airbrakes drag check and
-    /// runs from a different sensor's ignition detection. Equal values in a
-    /// config are coincidence, not a link.
+    /// despite the similar name — but no longer for the reason this comment
+    /// used to give, which was that the two clocks ran from *different
+    /// sensors*. They do not, and have not since `b901ace` deleted this
+    /// half's barometric ignition detector. Both halves now run the one
+    /// accelerometer detector in [`crate::ignition_detector`] — one
+    /// implementation, two instances, the same 10 Hz low pass and 0.1 s
+    /// sustain — and on the flown `FLIGHT_CONFIG` both at 8 g. Given the
+    /// same threshold and both halves free to act, they latch on the same
+    /// sample: `tests::osiris_sim::ignition_latch_time_by_threshold` sweeps
+    /// 4-12 g and fails outright if the two ever disagree about which
+    /// sample the motor lit on.
+    ///
+    /// **"Both free to act" is the caveat, and it is not hypothetical.**
+    /// The airbrakes half refuses to detect ignition until its pad ring has
+    /// filled AND its pad screening has produced a calibration; this half
+    /// has neither precondition, because a board armed seconds before
+    /// liftoff must still fire its pyros. So a short pad splits the two
+    /// origins — on LC'25's 1.8 s of pad data
+    /// (`airbrakes_estimator::tests::short_pad_refuses_ignition`) the
+    /// airbrakes half never detects ignition at all, while this half is
+    /// unaffected. The Osiris diagnostic can assert equality only because
+    /// calibration there completes 54 s BEFORE ignition, so the gate never
+    /// bites. Same sensor, same detector, same threshold — but not
+    /// necessarily the same instant, and never this half waiting on that
+    /// one.
+    ///
+    /// What stays independent by design is everything after the origin: the
+    /// durations, the exit conditions, and the Mach numbers (0.75 here
+    /// against the airbrakes' `max_open_mach`). This one is a plain
+    /// duration — no filter exists until it expires and nothing measured in
+    /// flight can shorten it — where the airbrakes pair is a window
+    /// (earliest / forced) around a MEASURED drag check that decides
+    /// somewhere inside it. Equal-looking numbers in a config are still
+    /// coincidence rather than a link: they are answers to different
+    /// questions that merely happen to be timed from the same event.
     pub mach_lockout_duration_us: Option<u32>,
 
     /// Low-passed |accel| (m/s^2) above which ignition is latched. **The
     /// only ignition detector this estimator has.**
     ///
-    /// It is not the airbrakes estimator's detector reused, and it is not
-    /// wired to it: an independent magnitude check on the raw
-    /// accelerometer, which is all this half needs. No pad calibration to
-    /// wait for, no gyro bias, no mounting orientation, no dead reckoner —
-    /// a sensor and a threshold.
+    /// It IS the airbrakes estimator's detector — the same implementation,
+    /// [`crate::ignition_detector`] — but its own instance, and not wired
+    /// to that one: a magnitude check on the raw accelerometer, which is
+    /// all this half needs. No pad calibration to wait for, no gyro bias,
+    /// no mounting orientation, no dead reckoner — a sensor and a
+    /// threshold. (Separate instances because the airbrakes half refuses to
+    /// detect ignition until its pad calibration completes, and a board
+    /// powered up seconds before launch would fire no pyros at all if this
+    /// half waited on that.)
     ///
     /// This replaced a barometric pair (10 m/s of filtered climb AND 15 m
     /// of rise) that used to run alongside it. The barometric version
@@ -197,10 +267,15 @@ pub struct FlightProfile {
     /// later than 4 g — but it is airframe-specific: on LC'25's softer
     /// curve, 8 g costs 0.45 s and 10 g never latches at all.
     ///
-    /// Same units as
+    /// The detector itself is
+    /// [`crate::ignition_detector`], shared with the airbrakes half, so the
+    /// two halves now differ in exactly this number and nothing else. They
+    /// are still two settings rather than one because the threshold is the
+    /// one parameter a caller might legitimately want to split — but if you
+    /// find yourself splitting it, say why here and in
     /// [`AirbrakesConfig::ignition_detection_acc_threshold`](crate::airbrakes_estimator::AirbrakesConfig::ignition_detection_acc_threshold),
-    /// but a separate setting for a separate estimator; equal values are a
-    /// convenience rather than a constraint.
+    /// because "the motor lit" is one event and two answers to it need a
+    /// reason.
     pub ignition_detection_acc_threshold: f32,
 
     pub deployment: DeploymentProfile,
@@ -353,6 +428,11 @@ enum Stage {
         launch_pad_altitude_asl: f32,
         /// seconds of measured time still to wait
         remaining_s: f32,
+        /// (timestamp_us, raw baro altitude) for the last
+        /// [`BARO_RING_SPAN_S`] — the only thing kept from the lockout, and
+        /// only so the filter can be born from a median instead of from
+        /// whatever the one exit sample said. Nothing reads it before then.
+        baro_ring: Deque<(u64, f32), BARO_RING_CAP>,
     },
     DrogueDelay {
         launch_pad_altitude_asl: f32,
@@ -393,21 +473,12 @@ pub struct RocketStateEstimator {
     profile: FlightProfile,
     kf: Option<BaroAltitudeKF>,
     stage: Stage,
-    /// What the innovation gate did with the sample this estimator last
-    /// processed. `Accepted` while the KF is frozen in Mach lockout —
-    /// nothing is fused there, so nothing is rejected either.
-    last_baro_gate: BaroGateOutcome,
     /// Previous sample's timestamp, for the timer dt. `None` before the
     /// first sample.
     prev_timestamp_us: Option<u64>,
-    /// Low-passed accelerometer, for the ignition magnitude check. `None`
-    /// until the first sample that carries one — an IMU that is missing,
-    /// glitching or absent entirely simply never advances this, and the
-    /// baro condition carries ignition detection on its own.
-    acc_lp: Option<Vector3<f32>>,
-    /// How long the low-passed accelerometer has been continuously above
-    /// the threshold, in seconds of measured time.
-    ignition_acc_sustain_s: f32,
+    /// This half's ignition detector. Its own instance, not shared with the
+    /// airbrakes half's — see [`IgnitionDetector::update`].
+    ignition: IgnitionDetector,
 }
 
 impl RocketStateEstimator {
@@ -419,40 +490,9 @@ impl RocketStateEstimator {
                 pad_altitude_asl: None,
                 gate_rejected_s: 0.0,
             },
-            last_baro_gate: BaroGateOutcome::Accepted,
             prev_timestamp_us: None,
-            acc_lp: None,
-            ignition_acc_sustain_s: 0.0,
+            ignition: IgnitionDetector::new(),
         }
-    }
-
-    /// Run the accelerometer ignition check for this sample and report
-    /// whether it has latched.
-    ///
-    /// Independent of the baro condition in every respect — different
-    /// sensor, different filter, no shared state — so the two can only
-    /// agree by both being right. A sample without an IMU reading leaves
-    /// the filter and the sustain exactly where they were rather than
-    /// resetting them: a one-sample SPI glitch mid-boost is not evidence
-    /// that the motor stopped.
-    fn ignition_by_accel(&mut self, acc: Option<Vector3<f32>>, dt: f32) -> bool {
-        let threshold = self.profile.ignition_detection_acc_threshold;
-        let Some(acc) = acc else {
-            return false;
-        };
-
-        let lp = match self.acc_lp {
-            Some(prev) => prev + (dt / IGNITION_ACC_LP_TAU_S).min(1.0) * (acc - prev),
-            None => acc,
-        };
-        self.acc_lp = Some(lp);
-
-        if lp.magnitude_squared() > threshold * threshold {
-            self.ignition_acc_sustain_s += dt;
-        } else {
-            self.ignition_acc_sustain_s = 0.0;
-        }
-        self.ignition_acc_sustain_s >= IGNITION_ACC_SUSTAIN_S
     }
 
     /// Measured time since the previous sample, for the state machine's
@@ -490,7 +530,13 @@ impl RocketStateEstimator {
     /// detection earlier — `None`, a dead IMU, or a threshold of `None`
     /// leaves the baro condition to fire on its own exactly as before.
     ///
-    /// Returns `Some(pyro)` when a pyro channel should be fired.
+    /// Returns the pyro command for this sample — `Some(pyro)` when a pyro
+    /// channel should be fired — and what the innovation gate did with this
+    /// sample's baro reading. The gate outcome is returned rather than stored
+    /// because a resync happens on exactly one sample and there is nowhere
+    /// for it to go stale: see [`crate::BaroGateOutcome`]. `Accepted` covers
+    /// every path where no gate ran at all — the Mach lockout, where nothing
+    /// is fused, and the (unreachable) missing-filter fallback.
     ///
     /// The timestamp drives every *duration* below — the Mach lockout, the
     /// pyro delays, the apogee and landing persistence, the pad-altitude
@@ -504,11 +550,13 @@ impl RocketStateEstimator {
         timestamp_us: u64,
         acc: Option<Vector3<f32>>,
         baro_altitude_asl: f32,
-    ) -> Option<PyroSelect> {
+    ) -> (Option<PyroSelect>, BaroGateOutcome) {
         let dt = self.timer_dt(timestamp_us);
         // Run every sample so the low pass and the sustain are already warm
         // when the motor lights; the result is only consulted on the pad.
-        let accel_says_ignition = self.ignition_by_accel(acc, dt);
+        let accel_says_ignition =
+            self.ignition
+                .update(acc, dt, self.profile.ignition_detection_acc_threshold);
 
         // Mach lockout, handled here and not in the stage machine below,
         // because there is no filter during it to run that machine on.
@@ -528,24 +576,55 @@ impl RocketStateEstimator {
         if let Stage::MachLockout {
             launch_pad_altitude_asl,
             remaining_s,
+            baro_ring,
         } = &mut self.stage
         {
-            // Nothing is fused, so nothing is rejected.
-            self.last_baro_gate = BaroGateOutcome::Accepted;
+            // The reading goes in raw, shock garbage and all. There is
+            // nothing to gate it against — the filter that owned the
+            // innovation gate was dropped at ignition — and nothing reads
+            // this ring except the median below, which does not care what
+            // the samples it outvotes look like.
+            if baro_ring.is_full() {
+                baro_ring.pop_front();
+            }
+            let _ = baro_ring.push_back((timestamp_us, baro_altitude_asl));
+            while let Some(front) = baro_ring.front() {
+                if (timestamp_us.saturating_sub(front.0)) as f32 * 1e-6 > BARO_RING_SPAN_S {
+                    baro_ring.pop_front();
+                } else {
+                    break;
+                }
+            }
+
             *remaining_s -= dt;
             if *remaining_s <= 0.0 {
+                // Born from the median of the last BARO_RING_SPAN_S rather
+                // than from this one sample, so that one bad reading landing
+                // on the exit sample cannot decide both where the filter
+                // starts and what counts as the peak — see
+                // [`BARO_RING_CAP`] for the 28.67 s drogue that costs.
+                //
+                // `unwrap_or` cannot fire: this sample was just pushed. It is
+                // spelt as a fallback rather than an `expect` because this is
+                // the code path that fires pyros, and the honest degradation
+                // of an empty ring is the old single-sample behaviour, not a
+                // panic that resets the board mid-flight.
+                let seed_asl = ring_median(baro_ring).unwrap_or(baro_altitude_asl);
                 log_info!(
-                    "mach lockout over, building KF in flight at {}m",
+                    "mach lockout over, building KF in flight at {}m (median of the last {}s; this sample read {}m)",
+                    seed_asl,
+                    BARO_RING_SPAN_S,
                     baro_altitude_asl
                 );
-                self.kf = Some(BaroAltitudeKF::born_in_flight(baro_altitude_asl));
+                self.kf = Some(BaroAltitudeKF::born_in_flight(seed_asl));
                 self.stage = Stage::Ascent {
                     launch_pad_altitude_asl: *launch_pad_altitude_asl,
-                    peak_altitude_asl: baro_altitude_asl,
+                    peak_altitude_asl: seed_asl,
                     below_peak_s: 0.0,
                 };
             }
-            return None;
+            // Nothing is fused during the lockout, so nothing is rejected.
+            return (None, BaroGateOutcome::Accepted);
         }
 
         // On the pad, also handled before the stage machine, and for the
@@ -556,7 +635,9 @@ impl RocketStateEstimator {
             gate_rejected_s,
         } = &mut self.stage
         {
-            self.last_baro_gate = match pad_altitude_asl {
+            // The pad tracker's own gate: same three outcomes, on the low
+            // pass rather than on a KF.
+            let gate = match pad_altitude_asl {
                 // First sample: nothing to compare against, so it IS the pad.
                 None => {
                     *pad_altitude_asl = Some(baro_altitude_asl);
@@ -592,33 +673,43 @@ impl RocketStateEstimator {
                         Stage::MachLockout {
                             launch_pad_altitude_asl: pad,
                             remaining_s: duration_us as f32 * 1e-6,
+                            baro_ring: Deque::new(),
                         }
                     }
                     // Subsonic profile: the static port never stops telling
                     // the truth, so the filter starts now — at rest, which
                     // is what it is, the rocket having moved centimetres in
                     // the ~0.15 s the detector took.
+                    //
+                    // Seeded from `pad`, not from this sample's raw reading,
+                    // for the reason the lockout exit above is seeded from a
+                    // median: a birth reads one number and then defends it
+                    // with an innovation gate, so that number must not be
+                    // able to be a single bad SPI read. `pad` has already
+                    // been through PAD_ALTITUDE_GATE_M and a 10 s low pass,
+                    // and on a rocket that has moved centimetres it is the
+                    // better estimate of where the rocket is anyway.
                     None => {
-                        self.kf = Some(BaroAltitudeKF::new(baro_altitude_asl));
+                        self.kf = Some(BaroAltitudeKF::new(pad));
                         Stage::Ascent {
                             launch_pad_altitude_asl: pad,
-                            peak_altitude_asl: baro_altitude_asl,
+                            peak_altitude_asl: pad,
                             below_peak_s: 0.0,
                         }
                     }
                 };
             }
-            return None;
+            return (None, gate);
         }
 
         // Past the pad and past the lockout, a filter always exists. If it
         // somehow does not, do nothing rather than panic: this is the code
-        // path that fires pyros.
+        // path that fires pyros. Nothing was fused, so nothing was rejected.
         let Some(kf) = self.kf.as_mut() else {
-            return None;
+            return (None, BaroGateOutcome::Accepted);
         };
         kf.predict();
-        self.last_baro_gate = kf.update(baro_altitude_asl);
+        let gate = kf.update(baro_altitude_asl);
         let altitude_asl = kf.altitude_asl();
         let velocity = kf.vertical_velocity();
 
@@ -740,7 +831,7 @@ impl RocketStateEstimator {
             Stage::Landed { .. } | Stage::FailedToReachMinApogee { .. } => {}
         }
 
-        deploy_pyro
+        (deploy_pyro, gate)
     }
 
     pub fn state(&self) -> RocketState {
@@ -807,31 +898,34 @@ impl RocketStateEstimator {
         }
     }
 
-    /// What the innovation gate did with the sample this estimator last
-    /// processed. Read it immediately after [`Self::update`]: it describes
-    /// that one sample and is overwritten by the next.
-    pub fn baro_gate(&self) -> BaroGateOutcome {
-        self.last_baro_gate
-    }
-
     /// KF altitude ASL (m) for the fast flight-log record, or `None` when
-    /// there is genuinely no altitude to report: before the first
-    /// [`Self::update`] builds a filter, and throughout the Mach lockout,
-    /// where there is no filter at all — it is dropped at ignition and a new
-    /// one is built in flight when the lockout ends.
+    /// there is genuinely no altitude to report — which is most of the
+    /// prelaunch and boost record, not a corner case.
     ///
-    /// This used to need a guard that checked the stage before handing over
-    /// the filter, because during the lockout one existed but was frozen and
-    /// holding a pre-ignition reading tens of seconds and kilometres out of
-    /// date. Now the `Option` is the whole story, and absence cannot be
-    /// reported as a plausible-looking zero by any caller that forgets.
+    /// `self.kf` is `None` for the WHOLE pad period, however long the rocket
+    /// sits armed: nothing builds a filter until ignition is detected, and
+    /// the only thing the barometer estimates before then is
+    /// [`Self::launch_pad_altitude_asl`]. On a Mach profile it is then
+    /// `None` again for the entire lockout — the filter is dropped at
+    /// ignition rather than frozen, so on `FLIGHT_CONFIG` that is a further
+    /// 26 s with no altitude at all — and a filter first exists at the
+    /// instant the lockout ends. (On a subsonic profile, `mach_lockout` =
+    /// `None`, the filter is born at ignition detection and there is no gap.)
     ///
-    /// Every other stage returns `Some` — including `OnPad`, `Landed` and
-    /// `FailedToReachMinApogee`, whose [`RocketState`] variants carry no
-    /// altitude field of their own. The filter is running and fusing baro in
-    /// all of them, so the number is live and means what it says; those
-    /// variants omit it because the state machine has nothing to *decide*
-    /// from it there, not because it is untrustworthy.
+    /// This doc used to claim the opposite — that every stage but the
+    /// lockout returned `Some`, `OnPad` included, because "the filter is
+    /// running and fusing baro in all of them". It never was on the pad; the
+    /// pad tracker is a gated low pass, not a filter, and
+    /// `kf_accessors_absent_before_birth_and_during_lockout` asserts the
+    /// `None`. Written down because a log reader that expects an altitude
+    /// here would read the whole pad segment as missing data rather than as
+    /// the answer.
+    ///
+    /// From the lockout's end onward every stage returns `Some`, including
+    /// `Landed` and `FailedToReachMinApogee`, whose [`RocketState`] variants
+    /// carry no altitude field of their own: the filter is live there and the
+    /// number means what it says; those variants omit it because the state
+    /// machine has nothing to *decide* from it, not because it is stale.
     ///
     /// Still prefer [`Self::state`] for anything that acts on the value —
     /// not because this accessor is less honest, but because `state()` hands
@@ -895,4 +989,45 @@ impl RocketStateEstimator {
             } => *launch_pad_altitude_asl,
         }
     }
+}
+
+/// Median of 9 samples spaced evenly across the ring — a transient cannot
+/// move it, unlike a mean or a single reading. `None` on an empty ring.
+///
+/// Nine picks rather than the whole ring because the ring holds ~104
+/// samples at 416 Hz and this runs on the sample that ends the Mach
+/// lockout: nine `f32`s sort on the stack in constant time, and the
+/// robustness a median buys is set by how many of the picks a transient can
+/// reach, not by how many samples were available to pick from.
+///
+/// A deliberate copy of `airbrakes_estimator::estimator::ring_median`,
+/// which is private to that module. The two halves are kept free of each
+/// other on purpose — the airbrakes half may be retired mid-flight, and the
+/// half that fires the pyros does not call into anything that can be — so
+/// twelve duplicated lines are the cheaper coupling. If a third caller ever
+/// wants this, that is the point at which it should move to a shared
+/// module rather than gain a second copy.
+fn ring_median(ring: &Deque<(u64, f32), BARO_RING_CAP>) -> Option<f32> {
+    let n = ring.len();
+    if n == 0 {
+        return None;
+    }
+    let mut picks = [0.0f32; 9];
+    let mut count = 0usize;
+    for (i, (_, alt)) in ring.iter().enumerate() {
+        while count < 9 && i == (count * (n - 1)) / 8 {
+            picks[count] = *alt;
+            count += 1;
+        }
+    }
+    let picks = &mut picks[..count];
+    // `total_cmp`, not `partial_cmp(..).unwrap()`: this half cannot be
+    // retired mid-flight, so a panic here is the flight. A NaN altitude
+    // should not reach the ring at all — VLF5's `sensor_tasks.rs` rejects a
+    // non-finite or non-positive pressure as a failed read — but that guard
+    // lives in another repo, and the cost of not depending on it is one
+    // token. `total_cmp` orders NaN rather than refusing to; the median of a
+    // ring that somehow contains one is then merely wrong, not fatal.
+    picks.sort_unstable_by(f32::total_cmp);
+    Some(picks[count / 2])
 }

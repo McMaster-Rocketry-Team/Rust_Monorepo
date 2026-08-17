@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use firmware_common_new::flight_data_record::{
     FlightDataRecord, NodeStatusRecord, PYRO_DROGUE_CONTINUITY, PYRO_DROGUE_FIRE,
     PYRO_MAIN_CONTINUITY,
-    PYRO_MAIN_FIRE, PYRO_SHORT_CIRCUIT, AIRBRAKES_APOGEE, AIRBRAKES_BARO_GATE_REJECT,
+    PYRO_MAIN_FIRE, PYRO_SHORT_CIRCUIT, AIRBRAKES_BARO_GATE_REJECT,
     AIRBRAKES_BARO_RESYNC, AIRBRAKES_BARO_TRUSTED, AIRBRAKES_PAD_CALIBRATED,
     AIRBRAKES_BURNOUT, AIRBRAKES_SUBSONIC_DRAG,
     DEPLOYMENT_BARO_RESYNC, DEPLOYMENT_BARO_GATE_REJECT,
@@ -332,7 +332,14 @@ fn write_csv(path: &str, records: &[FlightDataRecord]) -> Result<()> {
         "airbrakes_subsonic_drag",
         "airbrakes_burnout",
         "airbrakes_baro_trusted",
-        "airbrakes_apogee",
+        // No `airbrakes_apogee` column: the estimator's apogee latch, and
+        // with it SD flag bit 4 (`AIRBRAKES_APOGEE`), was deleted on
+        // 2026-08-17 — see the reserved-bit note in
+        // `firmware_common_new::flight_data_record`. The airbrakes half is
+        // retired at apogee instead, so the apogee instant reads out of this
+        // CSV as the sample where every `airbrakes_*` column goes empty.
+        // A log recorded BEFORE that date still carries the bit; decoding one
+        // of those means adding the column back, not reading a zero here.
         "airbrakes_baro_gate_reject",
         "airbrakes_baro_resync",
         "temperature",
@@ -425,7 +432,6 @@ fn write_csv(path: &str, records: &[FlightDataRecord]) -> Result<()> {
             bit(airbrakes.map(|a| a.flags), AIRBRAKES_SUBSONIC_DRAG),
             bit(airbrakes.map(|a| a.flags), AIRBRAKES_BURNOUT),
             bit(airbrakes.map(|a| a.flags), AIRBRAKES_BARO_TRUSTED),
-            bit(airbrakes.map(|a| a.flags), AIRBRAKES_APOGEE),
             bit(airbrakes.map(|a| a.flags), AIRBRAKES_BARO_GATE_REJECT),
             bit(airbrakes.map(|a| a.flags), AIRBRAKES_BARO_RESYNC),
             cell(r.temperature),

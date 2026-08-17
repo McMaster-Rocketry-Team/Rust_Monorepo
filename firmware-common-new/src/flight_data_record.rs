@@ -386,7 +386,17 @@ pub const AIRBRAKES_BARO_GATE_REJECT: u8 = 1 << 2;
 pub const AIRBRAKES_BURNOUT: u8 = 1 << 1;
 /// The vertical filter is born (baro trusted; MPC state is live).
 pub const AIRBRAKES_BARO_TRUSTED: u8 = 1 << 3;
-pub const AIRBRAKES_APOGEE: u8 = 1 << 4;
+// Bit 4 is RESERVED, not free. It was `AIRBRAKES_APOGEE` until 2026-08-17,
+// set from the airbrakes estimator's own apogee latch. That latch was deleted
+// as dead: `FlightEstimators::update` retires the airbrakes half at zero
+// vertical velocity, which beat the latch by 0.389 s (Void Lake) / 0.392 s
+// (LC'25), and the latch's 0.5 s sustain below 1 m/s could not be satisfied by
+// a trajectory that spends ~0.107 s in that band. Nothing sets bit 4 any more,
+// and the flags around it are deliberately NOT renumbered: a log recorded
+// before that date is still decoded correctly by everything else here, and
+// bit 4 in such a log still means "the airbrakes estimator latched apogee".
+// Do not reuse it for something new — a stale log would then read as the new
+// meaning.
 /// This sample ended a rejection run by re-anchoring: altitude snapped to the
 /// baro and velocity uncertainty was re-opened. Set together with
 /// `AIRBRAKES_BARO_GATE_REJECT`. A run that ends without this bit is the gate

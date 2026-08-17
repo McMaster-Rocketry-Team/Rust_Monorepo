@@ -18,10 +18,9 @@
 //!   26 s lasts 26 seconds and not 26 seconds' worth of nominal ticks.
 //! * The **airbrakes** half ([`AirbrakesEstimator`]) is IMU+baro and
 //!   wall-clock throughout: every integration step, every window and every
-//!   sustain timer uses the measured dt carried in the [`Measurement`]
-//!   timestamp, so sensor stalls and skipped samples are integrated
-//!   honestly. It is accuracy-only: its output feeds the MPC, never the
-//!   pyros.
+//!   sustain timer uses the measured dt between the sample timestamps it is
+//!   handed, so sensor stalls and skipped samples are integrated honestly.
+//!   It is accuracy-only: its output feeds the MPC, never the pyros.
 //!
 //! Both halves therefore take their time from the one `timestamp_us`
 //! handed to [`FlightEstimators::update`], and neither has to be told what
@@ -44,38 +43,22 @@
 use core::f32::consts::FRAC_PI_2;
 
 use firmware_common_new::vlp::packets::fire_pyro::PyroSelect;
-use nalgebra::{Vector2, Vector3};
+use nalgebra::Vector2;
 
-use crate::airbrakes_estimator::{AirbrakesConfig, AirbrakesEstimator, Measurement};
+use crate::airbrakes_estimator::{AirbrakesConfig, AirbrakesEstimator, ImuSample};
 use crate::baro_gate::BaroGateOutcome;
 use crate::baro_state_estimator::{FlightProfile, RocketState, RocketStateEstimator};
 use crate::utils::approximate_speed_of_sound;
-
-/// One IMU sample in the avionics frame, SI units at the API boundary:
-/// specific force in m/s^2, angular velocity in rad/s. Firmware converts
-/// units at the edge (e.g. deg/s -> rad/s) before constructing this.
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
-#[derive(Debug, Clone)]
-pub struct ImuSample {
-    /// Accelerometer specific force (m/s^2).
-    #[cfg_attr(feature = "defmt", defmt(Debug2Format))]
-    pub acc: Vector3<f32>,
-    /// Angular velocity (rad/s).
-    #[cfg_attr(feature = "defmt", defmt(Debug2Format))]
-    pub gyro: Vector3<f32>,
-}
 
 /// The MPC's input state, handed out by
 /// [`FlightEstimators::airbrakes_mpc_states`] exactly when the airbrakes
 /// are permitted to open. Permission and state availability are one
 /// `Option` — "permitted but no state" cannot be expressed.
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone)]
 pub struct AirbrakesMPCStates {
     /// Altitude ASL (m), from the airbrakes filter.
     pub altitude_asl: f32,
     /// Velocity `[horizontal, vertical]` (m/s), from the airbrakes filter.
-    #[cfg_attr(feature = "defmt", defmt(Debug2Format))]
     pub velocity: Vector2<f32>,
 }
 
@@ -88,7 +71,6 @@ pub struct AirbrakesMPCStates {
 /// refuses to birth the vertical filter before its own measured burnout
 /// latch. So this is a plain pair: somewhere for firmware to write both
 /// halves down, and one value for [`FlightEstimators::new`] to take.
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone)]
 pub struct FlightConfig {
     /// The deployment estimator's profile: Mach lockout, burn timer, and
@@ -130,7 +112,26 @@ impl FlightEstimators {
     /// its measured-dt integration bridges the gap at the next IMU sample.
     ///
     /// Returns the deployment estimator's pyro command passed through
-    /// UNTOUCHED — this struct adds no policy to recovery.
+    /// UNTOUCHED — this struct adds no policy to recovery — paired with
+    /// [`EstimatorLogSample`]: everything a consumer wants from this sample,
+    /// which is the SD log's whole estimator half and every estimator field
+    /// the telemetry packet carries.
+    ///
+    /// The log sample is a return value rather than something read back
+    /// afterwards because the baro gate outcomes it carries describe THIS
+    /// sample and nothing keeps them: there is no accessor to call late, and
+    /// therefore no timing contract to get wrong. Slower consumers read the
+    /// published sample rather than re-reading the estimators on their own
+    /// clock, which is the point — the 5 Hz downlink and the per-sample SD
+    /// record are then literally the same values, not two code paths that
+    /// agree by inspection.
+    ///
+    /// `#[must_use]` on the whole tuple, and deliberately: `Option` is not
+    /// itself a `#[must_use]` type (verified — rustc warns on neither a bare
+    /// `Option` return nor one inside a tuple), so putting the pyro command
+    /// in a tuple would otherwise have left dropping it entirely silent. That
+    /// would be catastrophic: this is the only place a drogue or main command
+    /// exists.
     ///
     /// This is also where the airbrakes half is **retired**: dropped
     /// outright, never to return, as soon as any of three things is true.
@@ -149,12 +150,13 @@ impl FlightEstimators {
     /// Dropping rather than gating is the point: a flag can be misread and
     /// a gate can be bypassed by a later clause, but there is no way to
     /// hand out MPC states from an estimator that no longer exists.
+    #[must_use]
     pub fn update(
         &mut self,
         timestamp_us: u64,
         imu: Option<&ImuSample>,
         baro_altitude_asl: f32,
-    ) -> Option<PyroSelect> {
+    ) -> (Option<PyroSelect>, EstimatorLogSample) {
         // (a) Deployment first, trusted outright. Its pyro command is
         // returned as-is at the bottom.
         //
@@ -164,17 +166,26 @@ impl FlightEstimators {
         // moment this value matters. See
         // `FlightProfile::ignition_detection_acc_threshold` for what it
         // does with it, which is one magnitude check and nothing else.
-        let pyro = self
-            .deployment
-            .update(timestamp_us, imu.map(|imu| imu.acc), baro_altitude_asl);
+        let (pyro, deployment_baro_gate) =
+            self.deployment
+                .update(timestamp_us, imu.map(|imu| imu.acc), baro_altitude_asl);
 
         // (b) Airbrakes, only when this sample actually carries IMU data.
-        if let Some(airbrakes) = self.airbrakes.as_mut()
-            && let Some(imu) = imu
-        {
-            let z = Measurement::new(timestamp_us, &imu.acc, &imu.gyro, baro_altitude_asl);
-            airbrakes.update(&z);
-        }
+        //
+        // The gate outcome is SYNTHESISED on every other sample rather than
+        // carried over: no IMU means the vertical filter did not step and no
+        // baro was fused, so nothing was rejected, and `Accepted` is what
+        // every "no gate ran" path in either estimator already reports. The
+        // stored field this replaced would instead have repeated the previous
+        // sample's outcome into the SD record — a rejection run would have
+        // read one sample longer than it was for every IMU-less sample inside
+        // it.
+        let airbrakes_baro_gate = match (self.airbrakes.as_mut(), imu) {
+            (Some(airbrakes), Some(imu)) => {
+                airbrakes.update(timestamp_us, imu, baro_altitude_asl)
+            }
+            _ => BaroGateOutcome::Accepted,
+        };
 
         // (c) Retirement. Checked every sample, IMU or not, so clause 3
         // still bites while the airbrakes half is starved of IMU data.
@@ -196,7 +207,28 @@ impl FlightEstimators {
             }
         }
 
-        pyro
+        // (d) The log sample, built AFTER retirement so that the sample the
+        // airbrakes half is dropped on already reports the whole airbrakes
+        // group absent — the same instant the SD record and the downlink go
+        // absent, with nothing in between.
+        let log_sample = EstimatorLogSample {
+            deployment_altitude_asl: self.deployment.kf_altitude_asl(),
+            deployment_vertical_velocity: self.deployment.kf_vertical_velocity(),
+            deployment_launch_pad_altitude_asl: self.deployment.launch_pad_altitude_asl(),
+            deployment_baro_gate,
+            airbrakes: self.airbrakes.as_ref().map(|ab| AirbrakesLogSample {
+                altitude_asl: ab.altitude_asl(),
+                vertical_velocity: ab.velocity().map(|v| v.y),
+                tilt_rad: ab.tilt(),
+                subsonic_by_drag: ab.subsonic_by_drag(),
+                burnout_detected: ab.burnout_detected(),
+                baro_trusted: ab.baro_trusted(),
+                baro_gate: airbrakes_baro_gate,
+                calibration_complete: ab.calibration_complete(),
+            }),
+        };
+
+        (pyro, log_sample)
     }
 
     /// `Some` exactly when the airbrakes are permitted to open, carrying
@@ -257,19 +289,35 @@ impl FlightEstimators {
         self.deployment.state()
     }
 
-    /// Read-only access to the deployment estimator (state,
-    /// `launch_pad_altitude_asl`, telemetry assembly, ...).
+    /// The pad altitude the deployment half is holding (m ASL) — the one
+    /// reference every AGL number is measured from, on the downlink and in
+    /// the MPC's apogee target alike.
+    ///
+    /// This used to be reached through a `deployment_estimator()` accessor
+    /// that handed out the whole `&RocketStateEstimator`. One f32 is all
+    /// firmware ever wanted from it, and handing out only the f32 is what
+    /// makes the alternative unwritable: the KF's altitude and velocity are
+    /// reachable only through the [`EstimatorLogSample`] that
+    /// [`Self::update`] returns, once per sample, so no consumer can re-read
+    /// the filter on a clock of its own and disagree with the SD log about
+    /// what a sample said.
+    ///
+    /// Not an `Option`, unlike the filter's numbers: this is a low-passed
+    /// barometer reading while the rocket is on the rail and a constant
+    /// latched at ignition detection afterwards, so it exists in every
+    /// stage including the Mach lockout, where the filter itself is frozen.
+    /// It reads 0.0 only before the first sample anchors it (see
+    /// [`RocketStateEstimator::launch_pad_altitude_asl`]).
+    pub fn launch_pad_altitude_asl(&self) -> f32 {
+        self.deployment.launch_pad_altitude_asl()
+    }
+
+    /// Read-only access to the airbrakes estimator (drag check, birth, tilt,
+    /// fast-record flag assembly, ...).
     ///
     /// Deliberately no `&mut` twin: cross-estimator data flows by value,
     /// inside [`Self::update`], once per sample — the API makes any other
     /// coupling between the two estimators impossible to write.
-    pub fn deployment_estimator(&self) -> &RocketStateEstimator {
-        &self.deployment
-    }
-
-    /// Read-only access to the airbrakes estimator (drag check, birth, tilt,
-    /// fast-record flag assembly, ...). See [`Self::deployment_estimator`]
-    /// for why there is no `&mut` twin.
     ///
     /// `None` once retired (see [`Self::update`]), which callers should
     /// treat as "no reading" rather than "reading of zero" — the telemetry
@@ -278,37 +326,10 @@ impl FlightEstimators {
         self.airbrakes.as_ref()
     }
 
-    /// Everything the SD log wants from one sample, in one read.
-    ///
-    /// Call this immediately after [`Self::update`], in the same critical
-    /// section: the gate outcomes it carries describe the sample that
-    /// `update` just processed and are overwritten by the next one. Sampling
-    /// from a loop that runs on its own clock would attribute them to the
-    /// wrong tick and miss any that fell between two reads — which is
-    /// exactly what a rejection run diagnosis cannot afford.
-    pub fn log_sample(&self) -> EstimatorLogSample {
-        EstimatorLogSample {
-            deployment_altitude_asl: self.deployment.kf_altitude_asl(),
-            deployment_vertical_velocity: self.deployment.kf_vertical_velocity(),
-            deployment_baro_gate: self.deployment.baro_gate(),
-            airbrakes: self.airbrakes.as_ref().map(|ab| AirbrakesLogSample {
-                altitude_asl: ab.altitude_asl(),
-                vertical_velocity: ab.velocity().map(|v| v.y),
-                tilt_rad: ab.tilt(),
-                subsonic_by_drag: ab.subsonic_by_drag(),
-                burnout_detected: ab.burnout_detected(),
-                baro_trusted: ab.baro_trusted(),
-                is_apogee: ab.is_apogee(),
-                baro_gate: ab.baro_gate(),
-                calibration_complete: ab.calibration_complete(),
-            }),
-        }
-    }
 }
 
-/// One sample's worth of estimator state for the SD log, produced by
-/// [`FlightEstimators::log_sample`].
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+/// One sample's worth of estimator state for the SD log and the downlink,
+/// returned by [`FlightEstimators::update`].
 #[derive(Debug, Clone, Copy)]
 pub struct EstimatorLogSample {
     /// The deployment KF's output, `None` on every sample where that filter
@@ -320,6 +341,15 @@ pub struct EstimatorLogSample {
     /// agree that nothing was measured there.
     pub deployment_altitude_asl: Option<f32>,
     pub deployment_vertical_velocity: Option<f32>,
+    /// The pad altitude the deployment half is holding (m ASL), carried so
+    /// that a consumer of this sample can turn the ASL above into AGL
+    /// without reaching back into the estimators — see
+    /// [`FlightEstimators::launch_pad_altitude_asl`], which is the same
+    /// number and exists for the callers that already hold the lock.
+    ///
+    /// Not an `Option`: it exists in every stage, including the Mach lockout
+    /// where the two fields above go absent.
+    pub deployment_launch_pad_altitude_asl: f32,
     pub deployment_baro_gate: BaroGateOutcome,
     /// `None` once the airbrakes half is retired at apogee — absent, not zero.
     pub airbrakes: Option<AirbrakesLogSample>,
@@ -327,7 +357,6 @@ pub struct EstimatorLogSample {
 
 /// The airbrakes half of [`EstimatorLogSample`]. The `Option` fields are
 /// absent until the piece of the estimator that produces them is alive.
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy)]
 pub struct AirbrakesLogSample {
     pub altitude_asl: Option<f32>,
@@ -336,7 +365,12 @@ pub struct AirbrakesLogSample {
     pub subsonic_by_drag: Option<bool>,
     pub burnout_detected: bool,
     pub baro_trusted: bool,
-    pub is_apogee: bool,
+    /// No `is_apogee` twin: the airbrakes half has no apogee state to report
+    /// from. It is retired at apogee instead (see
+    /// [`FlightEstimators::update`]), and this whole struct goes absent on
+    /// that sample — which is the same information, dated to the same tick,
+    /// and reaches the SD log as the airbrakes group disappearing rather than
+    /// as a bit that flips.
     pub baro_gate: BaroGateOutcome,
     /// The pad calibration exists (see
     /// [`AirbrakesEstimator::calibration_complete`]).
@@ -354,45 +388,25 @@ pub struct AirbrakesLogSample {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::baro_state_estimator::{DeploymentProfile, DT, SAMPLES_PER_S};
+    use crate::baro_state_estimator::{DT, SAMPLES_PER_S};
+    use crate::tests::fixtures::{lc25_airbrakes, subsonic_profile};
     use nalgebra::Vector3;
 
     /// Nominal 416 Hz sample spacing in microseconds.
     const SAMPLE_DT_US: u64 = 2404;
 
-    use crate::controller::RocketParameters;
-
-    fn test_profile() -> FlightProfile {
-        FlightProfile {
-            mach_lockout_duration_us: None,
-            ignition_detection_acc_threshold: 4.0 * 9.81,
-            deployment: DeploymentProfile::Single {
-                minimum_deployment_altitude_agl: 300.0,
-                delay_us: 0,
-            },
-        }
-    }
-
-    fn test_config() -> AirbrakesConfig {
-        AirbrakesConfig {
-            ignition_detection_acc_threshold: 4.0 * 9.81,
-            mach_lockout: None,
-            max_open_mach: 0.8,
-            rocket: RocketParameters {
-                burnout_mass: 17.607,
-                cd: [0.47044, 0.5082, 0.57784, 0.665, 0.74313],
-                reference_area: 0.008982476,
-            },
-        }
-    }
+    // Both tests below are about the *composition* — the pad gate, and the
+    // pyro pass-through — so neither reads a single number out of the
+    // config. They take the shared bases whole and override nothing; see
+    // [`crate::tests::fixtures`].
 
     /// On the pad — before ignition, before the burn timer — the gate
     /// must hand out nothing, even with a healthy IMU feed coming in.
     #[test]
     fn no_mpc_states_before_coasting() {
         let mut est = FlightEstimators::new(FlightConfig {
-            profile: test_profile(),
-            airbrakes: test_config(),
+            profile: subsonic_profile(),
+            airbrakes: lc25_airbrakes(),
         });
         let imu = ImuSample {
             acc: Vector3::new(0.0, 0.0, 9.81),
@@ -401,7 +415,7 @@ mod tests {
 
         let mut t_us = 0u64;
         for _ in 0..(5 * SAMPLES_PER_S) {
-            let pyro = est.update(t_us, Some(&imu), 200.0);
+            let (pyro, _log) = est.update(t_us, Some(&imu), 200.0);
             assert!(pyro.is_none());
             assert!(est.airbrakes_mpc_states().is_none());
             t_us += SAMPLE_DT_US;
@@ -414,10 +428,13 @@ mod tests {
     /// through untouched, none added, none dropped, none delayed.
     #[test]
     fn pyro_command_passes_through_unchanged() {
-        let mut bare = RocketStateEstimator::new(test_profile());
+        // The bare half and the composed one must be handed the SAME
+        // profile — that is what makes the comparison below meaningful —
+        // so both take the fixture rather than two hand-written copies.
+        let mut bare = RocketStateEstimator::new(subsonic_profile());
         let mut composed = FlightEstimators::new(FlightConfig {
-            profile: test_profile(),
-            airbrakes: test_config(),
+            profile: subsonic_profile(),
+            airbrakes: lc25_airbrakes(),
         });
 
         // Clean point-mass trajectory: 5 s pad hold, 3 s burn at
@@ -461,12 +478,12 @@ mod tests {
         for (i, (&alt, &sf)) in samples.iter().zip(specific_force.iter()).enumerate() {
             let t_us = i as u64 * SAMPLE_DT_US;
             let acc = Some(Vector3::new(0.0, 0.0, sf));
-            let expected = bare.update(t_us, acc, alt);
+            let (expected, _expected_gate) = bare.update(t_us, acc, alt);
             let imu = ImuSample {
                 acc: acc.unwrap(),
                 gyro: Vector3::zeros(),
             };
-            let got = composed.update(t_us, Some(&imu), alt);
+            let (got, _log) = composed.update(t_us, Some(&imu), alt);
             assert_eq!(expected, got, "pyro mismatch at sample {i}");
             if let Some(pyro) = got {
                 fires.push(pyro);

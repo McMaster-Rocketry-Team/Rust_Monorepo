@@ -10,15 +10,17 @@ pub mod baro_gate;
 pub mod baro_state_estimator;
 mod controller;
 pub mod flight_estimators;
+pub mod ignition_detector;
 mod utils;
 
 pub use baro_state_estimator::{
     DeploymentProfile, FlightProfile, RocketState, RocketStateEstimator,
 };
 pub use baro_gate::BaroGateOutcome;
+pub use ignition_detector::IgnitionDetector;
+pub use airbrakes_estimator::ImuSample;
 pub use flight_estimators::{
     AirbrakesLogSample, AirbrakesMPCStates, EstimatorLogSample, FlightConfig, FlightEstimators,
-    ImuSample,
 };
 pub use controller::{AirBrakesMPC, MpcSolution, RocketParameters};
 pub use utils::{approximate_air_density, approximate_speed_of_sound, lerp};

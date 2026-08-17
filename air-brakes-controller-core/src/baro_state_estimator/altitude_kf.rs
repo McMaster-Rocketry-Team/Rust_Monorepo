@@ -1,6 +1,5 @@
 use crate::baro_gate::BaroGateOutcome;
 use crate::baro_state_estimator::{DT, SAMPLES_PER_S};
-use nalgebra::{Matrix2, SMatrix, SVector, Vector1, Vector2};
 
 /// Classic (linear) Kalman filter for a 1-D altitude + vertical-speed model,
 /// running at [`crate::baro_state_estimator::SAMPLES_PER_S`].
@@ -14,20 +13,27 @@ use nalgebra::{Matrix2, SMatrix, SVector, Vector1, Vector2};
 /// ```
 ///
 /// F = ⎡1  dt⎤ ,  H = ⎡1  0⎤
+///     ⎣0   1⎦
+///
+/// F, H, Q and R never change, so the filter is written out in closed scalar
+/// form rather than as generic 2×2 matrix products: folding away F's and H's
+/// zeros and ones by hand is the whole of what those products were computing,
+/// 416 times a second. The arithmetic is bit-identical to the matrix form this
+/// replaces (checked over 1.46 M filter states of replayed and synthetic
+/// data), and `predict` and `update` below carry the operation orderings that
+/// identity depends on.
 #[derive(Debug, Clone)]
 pub struct BaroAltitudeKF {
-    /// Current state estimate [h, v]ᵀ
-    x: SVector<f32, 2>,
-    /// Estimate covariance
-    p: SMatrix<f32, 2, 2>,
-    /// State-transition matrix
-    f: SMatrix<f32, 2, 2>,
-    /// Measurement matrix
-    h: SMatrix<f32, 1, 2>,
-    /// Process-noise covariance
-    q: SMatrix<f32, 2, 2>,
-    /// Measurement-noise covariance
-    r: SMatrix<f32, 1, 1>,
+    /// Current altitude estimate, x[0] (m ASL)
+    altitude: f32,
+    /// Current vertical-speed estimate, x[1] (m s⁻¹)
+    velocity: f32,
+    /// Estimate covariance P, upper triangle only: P is symmetric by
+    /// construction — `update` restores symmetry every sample and `predict`
+    /// preserves it — so p10 is always bit-for-bit p01 and is not stored.
+    p00: f32,
+    p01: f32,
+    p11: f32,
     /// Consecutive measurements rejected by the innovation gate
     rejected_streak: u32,
 }
@@ -49,6 +55,21 @@ pub const BARO_ALTITUDE_MEASUREMENT_VARIANCE: f32 = 0.45;
 /// accepted; nothing latency-sensitive consumes it. The airbrakes get their
 /// own fast estimator.
 const PROCESS_ACCELERATION_VARIANCE: f32 = 0.115;
+
+const DT2: f32 = DT * DT;
+
+/// Process-noise covariance Q, upper triangle: white acceleration integrated
+/// over one `DT` step, ⎡dt⁴/4  dt³/2⎤ · σ²ₐ.
+///                    ⎣dt³/2   dt² ⎦
+///
+/// Written as plain multiplications rather than `DT.powi(n)`: the method form
+/// resolves to a different implementation under `no_std` than under std (see
+/// `utils::approximate_air_density`), and these are exact either way as
+/// products. The left-to-right grouping is the one the matrix form used and
+/// is load-bearing for bit-identity — `(0.25 · dt²) · dt²`, then `· σ²ₐ`.
+const Q00: f32 = 0.25 * DT2 * DT2 * PROCESS_ACCELERATION_VARIANCE;
+const Q01: f32 = 0.5 * DT2 * DT * PROCESS_ACCELERATION_VARIANCE;
+const Q11: f32 = DT2 * PROCESS_ACCELERATION_VARIANCE;
 
 /// Innovation gate: reject a measurement whose innovation exceeds this. Pure
 /// input validation for the raw bus (a bad SPI read decoding to pressure~0 is
@@ -73,36 +94,13 @@ const RESEED_VELOCITY_VARIANCE: f32 = 300.0 * 300.0;
 
 impl BaroAltitudeKF {
     pub fn new(initial_altitude_asl: f32) -> Self {
-        let f = Matrix2::new(1.0, DT, 0.0, 1.0);
-
-        // Measurement matrix (altitude only)
-        let h = SMatrix::<f32, 1, 2>::new(1.0, 0.0);
-
-        // Simplified process-noise model: integrate white acceleration noise
-        // Written as plain multiplications rather than `DT.powi(n)`: the
-        // method form resolves to a different implementation under `no_std`
-        // than under std (see `utils::approximate_air_density`), and these
-        // are exact either way as products.
-        const DT2: f32 = DT * DT;
-        let q = Matrix2::new(
-            0.25 * DT2 * DT2,
-            0.5 * DT2 * DT,
-            0.5 * DT2 * DT,
-            DT2,
-        ) * PROCESS_ACCELERATION_VARIANCE;
-
-        let r = SMatrix::<f32, 1, 1>::new(BARO_ALTITUDE_MEASUREMENT_VARIANCE);
-
-        // initial uncertainty
-        let p = SMatrix::<f32, 2, 2>::identity() * 0.1;
-
         Self {
-            x: Vector2::new(initial_altitude_asl, 0.0),
-            p,
-            f,
-            h,
-            q,
-            r,
+            altitude: initial_altitude_asl,
+            velocity: 0.0,
+            // initial uncertainty
+            p00: 0.1,
+            p01: 0.0,
+            p11: 0.1,
             rejected_streak: 0,
         }
     }
@@ -110,24 +108,37 @@ impl BaroAltitudeKF {
     /// Predict state DT seconds ahead
     pub fn predict(&mut self) {
         // x̂₋ = F x̂
-        self.x = self.f * self.x;
+        self.altitude += self.velocity * DT;
 
-        // P₋ = F P Fᵀ + Q
-        self.p = self.f * self.p * self.f.transpose() + self.q;
-        self.p = 0.5 * (self.p + self.p.transpose()); // keep symmetric
+        // P₋ = F P Fᵀ + Q, with F's zeros and ones folded out:
+        //   FP   = ⎡p00 + dt·p01   p01 + dt·p11⎤
+        //          ⎣     p01            p11    ⎦
+        //   FPFᵀ = ⎡(FP)₀₀ + dt·(FP)₀₁   (FP)₀₁⎤
+        //          ⎣     (FP)₀₁            p11 ⎦
+        //
+        // Both off-diagonals of FPFᵀ come out of the same expression over the
+        // same operands, and Q's are one constant, so a predict cannot break
+        // P's symmetry. The explicit `0.5·(P + Pᵀ)` that used to close this
+        // method was therefore a bit-exact no-op on every sample — halving
+        // `p + p` is exact, so it did not touch the diagonal either — and is
+        // gone. The *update* is where symmetry genuinely has to be restored;
+        // see there.
+        let fp00 = self.p00 + self.p01 * DT;
+        let fp01 = self.p01 + self.p11 * DT;
+        self.p00 = fp00 + DT * fp01 + Q00;
+        self.p01 = fp01 + Q01;
+        self.p11 += Q11;
     }
 
     /// Incorporate a new barometric altitude measurement (m). The returned
     /// [`BaroGateOutcome`] is the only report of what the gate did — a resync
     /// happens on one sample and is not recoverable by polling afterwards.
     pub fn update(&mut self, z_baro: f32) -> BaroGateOutcome {
-        let z = Vector1::new(z_baro);
-
         // Innovation y = z - H x̂₋
-        let y = z - self.h * self.x;
+        let y = z_baro - self.altitude;
 
         let mut outcome = BaroGateOutcome::Accepted;
-        if y[0].abs() > INNOVATION_GATE_M {
+        if y.abs() > INNOVATION_GATE_M {
             if self.rejected_streak < MAX_REJECTED_SAMPLES {
                 self.rejected_streak += 1;
                 return BaroGateOutcome::Rejected;
@@ -136,24 +147,52 @@ impl BaroAltitudeKF {
             // wrong. Inflate the altitude variance so this update snaps the
             // altitude state to the measurement (velocity keeps its estimate)
             // instead of bleeding toward it at the nominal gain.
-            self.p[(0, 0)] += INNOVATION_GATE_M * INNOVATION_GATE_M;
+            self.p00 += INNOVATION_GATE_M * INNOVATION_GATE_M;
             outcome = BaroGateOutcome::Resynced;
         }
         self.rejected_streak = 0;
 
-        // Innovation covariance S = H P₋ Hᵀ + R
-        let s = self.h * self.p * self.h.transpose() + self.r;
+        // Innovation covariance S = H P₋ Hᵀ + R, a scalar: p00 + R. p00 is a
+        // variance and R is 0.45, so S >= 0.45 and the reciprocal below can
+        // never blow up. (The matrix form's `try_inverse().unwrap()` here was
+        // unreachable for exactly that reason: nalgebra's 1×1 `try_inverse`
+        // carries no epsilon and returns `None` only at exactly ±0.0.)
+        let s = self.p00 + BARO_ALTITUDE_MEASUREMENT_VARIANCE;
 
-        // Kalman gain K = P₋ Hᵀ S⁻¹
-        let k = self.p * self.h.transpose() * s.try_inverse().unwrap();
+        // Kalman gain K = P₋ Hᵀ S⁻¹ = ⎡p00⎤ · (1/S).
+        //                             ⎣p01⎦
+        // Reciprocal-then-multiply, never `/ s`. `try_inverse` built 1/S and
+        // multiplied by it, and the two are not the same f32: replacing this
+        // with a division moves 40.4% of the altitudes and 99.6% of the
+        // velocities a Void Lake replay produces (by up to 1.4 mm and
+        // 0.4 mm s⁻¹).
+        let s_inv = 1.0 / s;
+        let k0 = self.p00 * s_inv;
+        let k1 = self.p01 * s_inv;
 
         // State update x̂ = x̂₋ + K y
-        self.x += k * y;
+        self.altitude += k0 * y;
+        self.velocity += k1 * y;
 
-        // Covariance update P = (I - K H) P₋
-        let i = SMatrix::<f32, 2, 2>::identity();
-        self.p = (i - k * self.h) * self.p;
-        self.p = 0.5 * (self.p + self.p.transpose());
+        // Covariance update P = (I - K H) P₋, which for H = [1 0] is
+        //   ⎡ (1-k0)·p00   (1-k0)·p01 ⎤
+        //   ⎣p01 - k1·p00  p11 - k1·p01⎦
+        //
+        // The two off-diagonals are one number reached by two different
+        // expressions, so they disagree in the last bits: 178380 of the
+        // 186872 accepted samples in a Void Lake replay (95.5%) land here
+        // asymmetric. Averaging them is what hands the next `predict` the
+        // symmetric P it assumes, and it is the one symmetrization this filter
+        // cannot drop — dropping it moves 43.1% of that replay's altitudes and
+        // 98.9% of its velocities (by up to 1.6 mm and 0.4 mm s⁻¹). The
+        // diagonal half of the old `0.5·(P + Pᵀ)` was exact, so it is simply
+        // not computed.
+        let one_minus_k0 = 1.0 - k0;
+        let p01_upper = self.p01 * one_minus_k0;
+        let p01_lower = self.p01 - k1 * self.p00;
+        self.p11 -= k1 * self.p01;
+        self.p00 *= one_minus_k0;
+        self.p01 = 0.5 * (p01_upper + p01_lower);
         outcome
     }
 
@@ -172,20 +211,17 @@ impl BaroAltitudeKF {
     /// [`RocketStateEstimator::update`](super::RocketStateEstimator::update).
     pub fn born_in_flight(altitude_asl: f32) -> Self {
         let mut kf = Self::new(altitude_asl);
-        kf.p = Matrix2::new(
-            BARO_ALTITUDE_MEASUREMENT_VARIANCE,
-            0.0,
-            0.0,
-            RESEED_VELOCITY_VARIANCE,
-        );
+        kf.p00 = BARO_ALTITUDE_MEASUREMENT_VARIANCE;
+        kf.p01 = 0.0;
+        kf.p11 = RESEED_VELOCITY_VARIANCE;
         kf
     }
 
     pub fn altitude_asl(&self) -> f32 {
-        self.x[0]
+        self.altitude
     }
 
     pub fn vertical_velocity(&self) -> f32 {
-        self.x[1]
+        self.velocity
     }
 }
