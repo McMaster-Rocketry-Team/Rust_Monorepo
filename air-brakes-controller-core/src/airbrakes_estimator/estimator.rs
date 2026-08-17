@@ -135,21 +135,23 @@ const STAGE1_DURATION_S: f32 = 0.5;
 /// The drag check must hold continuously this long before the baro is
 /// declared honest.
 const SUBSONIC_SUSTAIN_S: f32 = 1.0;
-/// Burnout is latched when the axial specific force has been at least this
-/// negative continuously for `BURNOUT_SUSTAIN_S`.
+/// Burnout is latched when the axial channel — deceleration-positive, the
+/// same `a_axial` the drag check inverts — has been at least this positive
+/// continuously for `BURNOUT_SUSTAIN_S`.
 ///
 /// The SIGN is the discriminator, not the magnitude: thrust acts along
-/// +axis and drag along -axis, so the axial channel crosses zero at burnout
-/// and stays negative for the whole coast. A magnitude test cannot tell
+/// +axis and drag along -axis, so the channel crosses zero at burnout and
+/// stays decelerating for the whole coast. A magnitude test cannot tell
 /// 11.7 m/s^2 of thrust-minus-drag from 11.7 m/s^2 of pure drag — measured
 /// on LC'25 at ignition+6.00 s, where inverting |accel| yields a confident
-/// and completely wrong Mach 0.91 while the axial channel still reads
-/// +10.66 and correctly says "still burning".
+/// and completely wrong Mach 0.91 while this channel reads -10.66 and
+/// correctly says "still burning". That measurement is why the drag check
+/// reads this channel too, rather than the magnitude it used to.
 ///
-/// -2 m/s^2 rather than 0 keeps the latch clear of the crossing itself.
+/// 2 m/s^2 rather than 0 keeps the latch clear of the crossing itself.
 /// Coast drag is 7-21 m/s^2 over the region that matters, and the pad noise
 /// floor is ~0.04 m/s^2, so there is no contest.
-const BURNOUT_AXIAL_M_S2: f32 = -2.0;
+const BURNOUT_DECEL_M_S2: f32 = 2.0;
 /// How long the axial channel must stay decelerating before burnout latches.
 /// Measured latch times: LC'25 ignition+6.38 s, Void Lake +1.96 s — both
 /// about this long after true burnout, i.e. erring late.
@@ -301,8 +303,10 @@ enum State {
         /// (timestamp_us, raw baro altitude)
         baro_ring: Deque<(u64, f32), BARO_RING_CAP>,
         subsonic_sustain: f32,
-        /// Low-passed accelerometer magnitude — drag/mass once the motor
-        /// is out. `None` until the first sample of this state.
+        /// Low-passed axial specific force, deceleration-positive —
+        /// drag/mass once the motor is out, and negative while it is not.
+        /// The same channel `burnout` latches on, read through the low pass
+        /// rather than raw. `None` until the first sample of this state.
         drag_lp: Option<f32>,
         last_subsonic: bool,
         /// Latched once the axial channel proves the motor is out. Nothing
@@ -525,8 +529,7 @@ impl AirbrakesEstimator {
                 // rotation to solve and no degenerate case for a mounting
                 // that happens to sit exactly inverted.
                 let pad_up_av = cal.gravity_av_frame.normalize();
-                let mut reckoner =
-                    DeadReckoner::new(pad_up_av, cal.launch_pad_altitude_asl);
+                let mut reckoner = DeadReckoner::new(pad_up_av);
 
                 // Rewind: ignition was detected late (low-pass lag +
                 // threshold), so the buffer's tail holds the first moments
@@ -648,22 +651,37 @@ impl AirbrakesEstimator {
                     }
                 }
 
-                // Drag channel: in free flight the accelerometer measures
-                // specific force, which excludes gravity, so its magnitude
-                // is drag/mass. Low-passed because it is a single raw
-                // sample carrying the full noise and vibration floor.
-                let a_drag = match *drag_lp {
-                    Some(prev) => prev + (dt / DRAG_LP_TAU_S).min(1.0) * (acc.magnitude() - prev),
-                    None => acc.magnitude(),
-                };
-                *drag_lp = Some(a_drag);
+                // ONE channel, read two ways. In free flight the
+                // accelerometer measures specific force, which excludes
+                // gravity, so its component along the airframe axis is
+                // drag/mass — and under thrust that same component is
+                // dominated by the motor and has the opposite sign. Written
+                // deceleration-positive, so it reads directly as drag:
+                //
+                //   a_axial < 0  motor pushing (thrust beats drag)
+                //   a_axial > 0  coasting, and the value IS drag/mass
+                //
+                // This used to be two separate signals — `|acc|` for the
+                // drag inversion and `acc . axis` for the burnout latch —
+                // which could disagree about what a sample meant, and the
+                // magnitude one was the reason the inversion needed guarding
+                // in the first place: `|acc|` throws the sign away, so
+                // thrust-minus-drag is indistinguishable from pure drag
+                // (LC'25 at ignition+6.00 s inverts to a confident, wrong
+                // Mach 0.91 while this channel reads -10.66 and "still
+                // burning"). Projecting instead of taking the magnitude
+                // keeps the sign, so the one channel answers both questions
+                // — and `drag_airspeed` rejects a negative `a_drag`, so a
+                // thrusting sample no longer inverts to anything at all
+                // rather than inverting to a plausible lie.
+                let a_axial = -acc.dot(thrust_axis_av);
 
-                // Burnout, measured rather than timed: the axial channel is
-                // strongly positive under thrust and negative in free
-                // flight, so a sustained negative reading proves the motor
-                // is out. One-way latch — motors do not relight.
+                // Reading 1 — the burnout latch, on the RAW channel. Raw and
+                // not the low pass below, so the 0.3 s sustain is the only
+                // lag in it. One-way: motors do not relight, so a noisy
+                // sample mid-coast must not be able to re-open the gate.
                 if !*burnout {
-                    if acc.dot(thrust_axis_av) < BURNOUT_AXIAL_M_S2 {
+                    if a_axial > BURNOUT_DECEL_M_S2 {
                         *burnout_sustain += dt;
                         if *burnout_sustain >= BURNOUT_SUSTAIN_S {
                             *burnout = true;
@@ -673,6 +691,15 @@ impl AirbrakesEstimator {
                         *burnout_sustain = 0.0;
                     }
                 }
+
+                // Reading 2 — the drag inversion, low-passed because a single
+                // raw sample carries the full accelerometer noise and
+                // airframe vibration floor.
+                let a_drag = match *drag_lp {
+                    Some(prev) => prev + (dt / DRAG_LP_TAU_S).min(1.0) * (a_axial - prev),
+                    None => a_axial,
+                };
+                *drag_lp = Some(a_drag);
 
                 let t_since_ignition_s =
                     (timestamp_us.saturating_sub(*ignition_t_us)) as f32 * 1e-6;
@@ -717,15 +744,19 @@ impl AirbrakesEstimator {
                             (false, false)
                         } else {
                             // Invert the drag to an airspeed and compare to
-                            // the configured Mach. Air density comes from
-                            // the DEAD
-                            // RECKONED altitude, not the baro, so the whole
-                            // exit decision is independent of the sensor it
-                            // is deciding about. (Either source works —
-                            // measured on LC'25 they differ by <=0.01 Mach
-                            // — but taking the baro out entirely removes
-                            // the question.)
-                            let altitude = reckoner.altitude_asl;
+                            // the configured Mach. The atmosphere is
+                            // evaluated at the CONFIGURED crossing altitude
+                            // — a constant from the flight sim, not a
+                            // measurement — so the whole exit decision is
+                            // independent of both the baro (the sensor it is
+                            // deciding about) and of anything that
+                            // integrates and can therefore drift. It only
+                            // has to be right in the second or so around the
+                            // crossing, and that is the altitude the
+                            // airframe is at there. See
+                            // `MachLockoutConfig::subsonic_crossing_altitude_asl`
+                            // for the sensitivity and which way to err.
+                            let altitude = lockout.subsonic_crossing_altitude_asl;
                             let subsonic = match drag_airspeed(
                                 a_drag,
                                 altitude,
@@ -800,9 +831,11 @@ impl AirbrakesEstimator {
                 kf,
                 ..
             } => {
-                // The dead reckoner runs for tilt only (gyro-only
-                // attitude); its own altitude and vertical velocity keep
-                // integrating but nothing reads them past birth.
+                // The dead reckoner runs for two things here: the attitude
+                // behind tilt, and the vertical acceleration the filter
+                // predicts with. Its own vertical velocity keeps integrating
+                // but nothing reads it past birth, and it no longer carries
+                // an altitude at all.
                 reckoner.update(&acc, &(gyro - *gyro_bias), dt);
 
                 kf.predict(reckoner.vertical_acceleration, dt);
@@ -823,14 +856,19 @@ impl AirbrakesEstimator {
         baro_gate
     }
 
-    /// Best current altitude ASL: the filter once born, dead reckoning
-    /// before that, `None` on the pad.
+    /// Altitude ASL from the vertical filter, `None` until it is born.
+    ///
+    /// Absent — not stale, not integrated — for the whole boost and lockout.
+    /// This used to hand out the dead reckoner's doubly-integrated altitude
+    /// there, which no consumer needed: the MPC gate cannot be reached before
+    /// [`State::Tracking`] anyway, and the log and downlink carry the
+    /// deployment half's barometric altitude, plus
+    /// [`Self::launch_pad_altitude_asl`] in every state. What the pre-birth
+    /// value did instead was look like a position fix while being a drifting
+    /// open-loop integral nothing corrected.
     pub fn altitude_asl(&self) -> Option<f32> {
         match &self.state {
-            State::OnPad { .. } => None,
-            State::Stage1 { reckoner, .. } | State::DeadReckoning { reckoner, .. } => {
-                Some(reckoner.altitude_asl)
-            }
+            State::OnPad { .. } | State::Stage1 { .. } | State::DeadReckoning { .. } => None,
             State::Tracking { kf, .. } => Some(kf.altitude_asl()),
         }
     }

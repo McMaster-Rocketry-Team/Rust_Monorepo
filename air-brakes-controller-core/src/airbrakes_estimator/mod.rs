@@ -13,13 +13,19 @@
 //! # The lockout exit is one measurement
 //!
 //! In free flight the accelerometer measures specific force, which
-//! excludes gravity — so its raw magnitude IS drag/mass. Inverting
+//! excludes gravity — so its component along the airframe axis IS
+//! drag/mass, and the sign of that same component is what says the motor is
+//! out. One channel answers both questions; it was a magnitude and a
+//! separate axial test until 2026-08-17, and the magnitude was the half
+//! that could not tell thrust from drag. Inverting
 //! `a = 0.5 * rho * v^2 * Cd*A/m` therefore yields the airspeed with **no
 //! integration, no attitude, and no baro**: nothing in it can drift, and
 //! nothing in it can be poisoned by the very static-port error the lockout
-//! exists to wait out. Measured on LC'25, swapping the barometric altitude
-//! for the dead-reckoned one (the only place air density enters) moves the
-//! answer by at most 0.01 Mach.
+//! exists to wait out. The one atmospheric input, air density, is not
+//! measured at all — it is evaluated at
+//! [`MachLockoutConfig::subsonic_crossing_altitude_asl`], the sim's altitude
+//! for this crossing, which is what keeps the "no integration, no baro"
+//! claim literally true rather than nearly true.
 //!
 //! It crosses Mach 0.8 within 0.2 s of the inertial estimate while never
 //! once dipping below the threshold during the supersonic phase.
@@ -131,10 +137,10 @@ pub struct AirbrakesConfig {
     /// transonically elevated, and
     /// [`MachLockoutConfig::earliest_subsonic_after_ignition_us`] plus the
     /// 1 s sustain delay the decision further. Measured, birth lands well
-    /// under this threshold rather than at it — Osiris 0.726 nominal and
-    /// 0.743 with a 5x-wrong Cd, LC'25 0.727 — so the velocity check is
+    /// under this threshold rather than at it — Osiris 0.749 nominal and
+    /// 0.752 with a 5x-wrong Cd, LC'25 0.732 — so the velocity check is
     /// slack on a healthy flight without needing a separate, higher number
-    /// to make it so. It bit at Mach 0.90 on an LC'25 replay whose Cd
+    /// to make it so. It bit at Mach 0.887 on an LC'25 replay whose Cd
     /// overestimated drag by 2x, which is the case it exists for: the check
     /// reads low, births early, and the dead reckoner (which does not depend
     /// on Cd) is what disagrees.
@@ -158,8 +164,11 @@ pub struct AirbrakesConfig {
     /// the brakes-stowed entry, and that is what makes the check one-sided:
     /// the true Cd is higher transonically, so the inverted speed reads
     /// high exactly while supersonic and the check errs toward keeping the
-    /// lockout shut. Measured on LC'25 the inverted Mach peaks at 1.25
-    /// where the truth is 1.03.
+    /// lockout shut. Measured on LC'25, inverting the low-passed axial
+    /// channel at the configured crossing altitude, the inverted Mach peaks
+    /// at 1.31 where the truth is 1.03. Projecting onto the axis instead of
+    /// taking `|acc|` costs 2% of that headroom (the magnitude peaks at
+    /// 1.34), which buys the sign the check needs to reject thrust outright.
     pub rocket: RocketParameters,
 }
 
@@ -198,7 +207,7 @@ pub struct MachLockoutConfig {
     ///
     /// A hard floor, and load-bearing against exactly one kind of error.
     /// Measured on the Osiris sim, a *config* Cd wrong by 5x moves the birth
-    /// only from 18.89 s to 18.52 s — against a true Mach 0.8 crossing at
+    /// only from 18.72 s to 18.64 s — against a true Mach 0.8 crossing at
     /// 17.56 s — because this floor sits at 17.5 s and the check simply
     /// cannot speak earlier. Note what that sweep varies, though: the config
     /// moves and the trajectory does not, so the floor keeps its measured
@@ -219,8 +228,9 @@ pub struct MachLockoutConfig {
     /// asserts that margin.
     ///
     /// Set it loosely and a wrong drag model births the filter while the
-    /// port is still shocked: LC'25's floor is ~4.6 s ahead of its real
-    /// crossing, and a 2x Cd error there births at Mach 0.90.
+    /// port is still shocked: LC'25's floor is ~2.9 s ahead of its real
+    /// crossing (ignition+8.0 s against +10.90 s), and a 2x Cd error there
+    /// births at Mach 0.887.
     ///
     /// From the flight sim: the earliest simulated time below that Mach,
     /// measured from ignition detection. Erring early is unsafe (the check
@@ -246,4 +256,58 @@ pub struct MachLockoutConfig {
     /// test does not depend on Cd, so the latch still fires), not an
     /// accelerometer too dead to show deceleration at all.
     pub force_birth_after_ignition_us: u32,
+
+    /// Altitude ASL (m) the airframe is expected to be at when it crosses
+    /// [`AirbrakesConfig::max_open_mach`] on the way down — the altitude the
+    /// drag check evaluates air density and the speed of sound at.
+    ///
+    /// From the flight sim, exactly like the two timers above and from the
+    /// same run: the altitude at the coast-side crossing of that Mach. It is
+    /// a constant rather than a measurement because the check only has to be
+    /// right in one narrow window — the second or so around that crossing —
+    /// and inside that window the airframe is, by construction, at this
+    /// altitude.
+    ///
+    /// Being a constant is the point, and it buys two things a tracked
+    /// altitude cannot. It cannot drift, since nothing integrates it. And it
+    /// cannot be poisoned by the static port, which is the failure the whole
+    /// lockout exists to wait out — so the decision "is the baro honest yet?"
+    /// stays independent of the baro. Until 2026-08-17 this came from the
+    /// dead reckoner's own integrated altitude, which had the second property
+    /// but not the first.
+    ///
+    /// **Erring high is the safe direction, so round up.** Density falls with
+    /// altitude, so an altitude set too high reads `rho` too low, and the
+    /// inverted airspeed `sqrt(2a / (rho * CdA/m))` too HIGH — which keeps
+    /// the lockout shut longer. Set it from the highest crossing the
+    /// airframe's motors plausibly produce, not the average.
+    ///
+    /// The number that decides is the TRUE Mach the check ends up voting at,
+    /// which folds in both altitude-dependent terms — density, and the speed
+    /// of sound the threshold is scaled by:
+    ///
+    /// ```text
+    /// M_vote = max_open_mach * a(h_cfg)/a(h_true) * sqrt(rho(h_cfg)/rho(h_true))
+    /// ```
+    ///
+    /// Every motor that crosses below `h_cfg` drives both factors under 1 and
+    /// votes conservatively. Measured across Osiris's two motors against the
+    /// configured 6800 m: the O3400 crosses at 6734 m and votes at Mach
+    /// 0.796, the N2900 backup crosses at 5583 m and votes at 0.736 — both
+    /// under the configured 0.800.
+    /// `osiris_sim::mach_lockout_timers_bracket_every_simulation` computes
+    /// exactly this and asserts it for every simulation in the archive, which
+    /// is what stops a new motor from being added without revisiting this
+    /// constant.
+    ///
+    /// The sensitivity is mild enough that the sim's number needs no margin
+    /// beyond rounding up: 1151 m of altitude error is worth 6.6% of
+    /// airspeed, against the 1 s subsonic sustain and the
+    /// [`Self::earliest_subsonic_after_ignition_us`] floor that already delay
+    /// the decision. What it is NOT tolerant of is being left at the pad
+    /// altitude: that is a 2x density error on this airframe, reads the
+    /// airspeed ~30% low, and births the filter while genuinely supersonic on
+    /// the LC'25 replay (measured — it births at ignition+10.7 s against a
+    /// true crossing at +10.90 s).
+    pub subsonic_crossing_altitude_asl: f32,
 }

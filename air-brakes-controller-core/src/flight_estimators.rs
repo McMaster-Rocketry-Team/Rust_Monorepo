@@ -252,10 +252,10 @@ impl FlightEstimators {
     ///
     /// That last clause is normally slack: the check needs 1 s of sustain
     /// and cannot speak before `earliest_subsonic_after_ignition_us`, so
-    /// birth lands well under the threshold rather than at it (Osiris 0.726,
-    /// LC'25 0.727). It earns its place on a Cd model that overestimates
+    /// birth lands well under the threshold rather than at it (Osiris 0.749,
+    /// LC'25 0.732). It earns its place on a Cd model that overestimates
     /// drag, where the inverted airspeed reads low and births the filter
-    /// early — measured at Mach 0.90 on an LC'25 replay with a 2x Cd error.
+    /// early — measured at Mach 0.887 on an LC'25 replay with a 2x Cd error.
     /// The dead reckoner behind this clause does not depend on Cd, which is
     /// why it can disagree with the check at all.
     ///

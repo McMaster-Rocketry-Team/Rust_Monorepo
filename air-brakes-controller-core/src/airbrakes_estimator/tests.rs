@@ -436,6 +436,9 @@ fn lc25_config() -> AirbrakesConfig {
         mach_lockout: Some(MachLockoutConfig {
             earliest_subsonic_after_ignition_us: 8_000_000,
             force_birth_after_ignition_us: 20_000_000,
+            // LC'25's own baro-truth Mach 0.8 crossing: ignition+10.90 s,
+            // 3013 m ASL.
+            subsonic_crossing_altitude_asl: 3013.0,
         }),
         ..lc25_airbrakes()
     }
@@ -916,10 +919,20 @@ fn drag_check_timing_and_sensitivity() {
 
         // The whole point of the ceiling: the airframe really is at or below
         // it when the flaps become commandable. Measured margins run from
-        // 0.068 (ceiling 0.6) to 0.156 (ceiling 1.0) of Mach, all on the safe
+        // 0.027 (ceiling 0.6) to 0.156 (ceiling 1.0) of Mach, all on the safe
         // side — inverting with the SUBSONIC Cd is what buys them, since the
         // true Cd is transonically elevated and the check therefore reads
         // high exactly while it matters.
+        //
+        // The sweep deliberately does NOT re-pair
+        // `subsonic_crossing_altitude_asl` with each ceiling, though the two
+        // are paired by definition (it is the altitude at THAT Mach). It
+        // stays at LC'25's Mach-0.8 value, 3013 m, so every ceiling except
+        // 0.8 also carries an altitude mismatch — up to ~1300 m at ceiling
+        // 0.6, which reads the airspeed low and is what shrinks that end's
+        // margin from 0.068 to 0.027. That is the more adversarial test: it
+        // scores a ceiling error and a density error at once, and the
+        // property still holds.
         assert!(
             mach <= ceiling,
             "ceiling {ceiling}: born at ignition+{born_s:.2}s where the baro-truth \
@@ -1181,4 +1194,8 @@ fn forced_birth_backstop_flies_the_rest_of_the_flight() {
     assert!(apogee_err_s.abs() < 3.0, "apogee time err {apogee_err_s}");
     assert!(apogee_err_m.abs() < 80.0, "apogee alt err {apogee_err_m}");
 }
+
+
+
+
 

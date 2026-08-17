@@ -1,9 +1,20 @@
 use nalgebra::Vector3;
 
 /// Dead reckoning: track which way is up, and the vertical channel of
-/// acceleration, velocity and altitude, by adding up IMU readings step by
-/// step with no outside correction. Attitude is gyro-only (the
-/// accelerometer never touches it after the pad).
+/// acceleration and velocity, by adding up IMU readings step by step with
+/// no outside correction. Attitude is gyro-only (the accelerometer never
+/// touches it after the pad).
+///
+/// It does NOT track altitude, since 2026-08-17. Nothing ever read the
+/// integrated altitude where it mattered: the vertical filter is born from a
+/// median of the buffered BARO, never from here, so the one number this
+/// reckoner hands across the birth boundary is the velocity. Its two other
+/// readers are gone — the lockout-exit drag check now evaluates the
+/// atmosphere at a configured constant
+/// ([`MachLockoutConfig::subsonic_crossing_altitude_asl`]), and the
+/// pre-birth altitude is no longer published to the log or the downlink.
+/// Deleting it removes a doubly-integrated quantity that looked like a
+/// position fix and was never used as one.
 ///
 /// Only the vertical is tracked, because only the vertical is ever read.
 /// A full attitude was carried as a quaternion, with 3-axis position and
@@ -36,8 +47,6 @@ pub struct DeadReckoner {
     /// equivalently, the direction the accelerometer reads +1 g along while
     /// the airframe is still.
     pub up_av: Vector3<f32>,
-    /// Altitude ASL (meters).
-    pub altitude_asl: f32,
     /// Vertical velocity in the earth frame (m/s), + is up.
     pub vertical_velocity: f32,
     /// Latest vertical linear acceleration in the earth frame (gravity
@@ -47,12 +56,12 @@ pub struct DeadReckoner {
 
 impl DeadReckoner {
     /// Start from the pad: `up_av` is earth UP in the device frame (the
-    /// normalized pad gravity — see [`Self::up_av`]) and `altitude_asl` is
-    /// the pad altitude. Vertical velocity starts at zero.
-    pub fn new(up_av: Vector3<f32>, altitude_asl: f32) -> Self {
+    /// normalized pad gravity — see [`Self::up_av`]). Vertical velocity
+    /// starts at zero, which is the whole of the initial condition — there
+    /// is no altitude to anchor.
+    pub fn new(up_av: Vector3<f32>) -> Self {
         Self {
             up_av,
-            altitude_asl,
             vertical_velocity: 0.0,
             vertical_acceleration: 0.0,
         }
@@ -74,8 +83,7 @@ impl DeadReckoner {
         let vertical_accel = self.up_av.dot(accel) - 9.81;
         self.vertical_acceleration = vertical_accel;
 
-        // 3) Velocity and altitude
-        self.altitude_asl += self.vertical_velocity * dt + vertical_accel * (0.5 * dt * dt);
+        // 3) Velocity
         self.vertical_velocity += vertical_accel * dt;
     }
 }

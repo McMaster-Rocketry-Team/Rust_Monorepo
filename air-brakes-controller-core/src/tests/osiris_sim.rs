@@ -58,6 +58,7 @@ use crate::baro_state_estimator::{DeploymentProfile, FlightProfile};
 use crate::controller::{AirBrakesMPC, RocketParameters};
 use crate::flight_estimators::{FlightConfig, FlightEstimators};
 use crate::tests::init_logger;
+use crate::utils::{approximate_air_density, approximate_speed_of_sound};
 
 // ---------------------------------------------------------------------------
 // The flight config under test
@@ -103,6 +104,7 @@ fn osiris_config() -> FlightConfig {
             mach_lockout: Some(MachLockoutConfig {
                 earliest_subsonic_after_ignition_us: 17_500_000,
                 force_birth_after_ignition_us: 25_000_000,
+                subsonic_crossing_altitude_asl: 6800.0,
             }),
             max_open_mach: 0.8,
             rocket: osiris_rocket(),
@@ -1036,8 +1038,9 @@ fn mach_lockout_timers_bracket_every_simulation() {
         let m075 = truth.mach_down_crossing(0.75);
         let (apogee_t, apogee_asl) = truth.apogee();
         eprintln!(
-            "{path}: Mach 0.8 at {m08:.2}s, Mach 0.75 at {m075:.2}s, \
-             apogee {apogee_asl:.0} m pressure-ASL at {apogee_t:.2}s"
+            "{path}: Mach 0.8 at {m08:.2}s ({:.0} m ASL), Mach 0.75 at {m075:.2}s, \
+             apogee {apogee_asl:.0} m pressure-ASL at {apogee_t:.2}s",
+            truth.at(m08).altitude_asl
         );
 
         // Never able to CONCLUDE while genuinely supersonic. The check
@@ -1060,6 +1063,39 @@ fn mach_lockout_timers_bracket_every_simulation() {
                 t_early - m08
             );
         }
+        // The atmosphere the drag check inverts with is a configured
+        // constant, so a motor that crosses somewhere other than the
+        // configured altitude has its airspeed read wrong — and the only
+        // direction that matters is reading LOW, which opens the lockout
+        // early. Fold both altitude-dependent terms (density and the speed
+        // of sound the threshold is scaled by) into the one number that
+        // decides: the TRUE Mach at which the check actually votes.
+        //
+        //   fires when  v_true * sqrt(rho(h_t)/rho(h_c))  <  M_cfg * a(h_c)
+        //   i.e. when   M_true  <  M_cfg * a(h_c)/a(h_t) * sqrt(rho(h_c)/rho(h_t))
+        //
+        // For the motor the constant was taken from this is exactly `M_cfg`.
+        // For any motor crossing LOWER, both factors fall below 1 and the
+        // check votes conservatively — which is the whole reason the
+        // constant is set from the highest crossing rather than the mean.
+        let h_c = ml.subsonic_crossing_altitude_asl;
+        let h_t = truth.at(m08).altitude_asl;
+        let effective_mach = cfg.airbrakes.max_open_mach
+            * (approximate_speed_of_sound(h_c) / approximate_speed_of_sound(h_t))
+            * libm::sqrtf(approximate_air_density(h_c) / approximate_air_density(h_t));
+        eprintln!(
+            "{path}:   crosses at {h_t:.0} m against the configured {h_c:.0} m, so the \
+             drag check really votes at Mach {effective_mach:.3}"
+        );
+        assert!(
+            effective_mach <= cfg.airbrakes.max_open_mach,
+            "{path}: the configured crossing altitude {h_c:.0} m sits BELOW this \
+             motor's real crossing at {h_t:.0} m, so the check votes at Mach \
+             {effective_mach:.3} — above the configured {:.2}, in flow the airframe \
+             is not qualified for",
+            cfg.airbrakes.max_open_mach
+        );
+
         // The timeout is a backstop, not the normal path.
         assert!(
             t_force > m08,
@@ -2160,3 +2196,198 @@ fn kf_bandwidth_vs_truth() {
         }
     }
 }
+
+/// TEMPORARY: does the MPC's own input tolerate a baro-only source?
+///
+/// Scored at the MPC's level rather than the state's: commanded flap
+/// extension and predicted apogee against an oracle MPC fed OpenRocket's
+/// true state, over exactly the window the real gate hands states out.
+/// Rows 1 and 2 swap ONE channel each, so altitude and velocity can be
+/// blamed separately.
+#[test]
+fn mpc_input_baro_only() {
+    init_logger();
+
+    /// Plain 2-state constant-velocity KF on baro alone -- no accel input.
+    struct BaroOnly {
+        alt: f32,
+        vel: f32,
+        p: [f32; 4],
+        q: f32,
+        r: f32,
+    }
+    impl BaroOnly {
+        fn step(&mut self, z: f32, dt: f32) {
+            self.alt += self.vel * dt;
+            let (p00, p01, p10, p11) = (self.p[0], self.p[1], self.p[2], self.p[3]);
+            let q = self.q * self.q;
+            self.p[0] = p00 + dt * (p01 + p10) + dt * dt * p11 + q * dt.powi(4) / 4.0;
+            self.p[1] = p01 + dt * p11 + q * dt.powi(3) / 2.0;
+            self.p[2] = p10 + dt * p11 + q * dt.powi(3) / 2.0;
+            self.p[3] = p11 + q * dt * dt;
+            let innovation = z - self.alt;
+            if innovation.abs() > 100.0 {
+                return;
+            }
+            let rr = self.r * self.r;
+            let s = self.p[0] + rr;
+            let (k0, k1) = (self.p[0] / s, self.p[2] / s);
+            self.alt += k0 * innovation;
+            self.vel += k1 * innovation;
+            let (b00, b01, b10, b11) = (self.p[0], self.p[1], self.p[2], self.p[3]);
+            let a = 1.0 - k0;
+            self.p[0] = a * a * b00 + k0 * k0 * rr;
+            self.p[1] = a * (b01 - k1 * b00) + k0 * k1 * rr;
+            self.p[2] = a * (b10 - k1 * b00) + k0 * k1 * rr;
+            self.p[3] = b11 - k1 * (b01 + b10) + k1 * k1 * b00 + k1 * k1 * rr;
+        }
+    }
+
+    const TAUS: [f32; 4] = [0.10, 0.20, 0.35, 0.50];
+
+    for path in [O3400_CSV, N2900_CSV] {
+        let truth = Truth::load(path);
+        let (apogee_t, apogee_asl) = truth.apogee();
+        let samples = synthesize(
+            &truth,
+            &SensorModel {
+                until_s: apogee_t + 5.0,
+                ..Default::default()
+            },
+        );
+        let cfg = osiris_config();
+        let target_asl = apogee_asl - 150.0;
+        let mpc = AirBrakesMPC::new(cfg.airbrakes.rocket.clone(), target_asl);
+        let mut est = FlightEstimators::new(cfg);
+
+        let mut filters: [Option<BaroOnly>; 4] = [None, None, None, None];
+        let mut baro_hist: std::collections::VecDeque<(f32, f32)> = Default::default();
+        let mut ticks: Vec<[Option<(f32, f32)>; 6]> = Vec::new();
+        let mut prev_t: Option<f32> = None;
+        let mut gate_open_t: Option<f32> = None;
+        let mut gate_last_t = 0.0f32;
+
+        for s in &samples {
+            let _ = est.update(s.t_us, Some(&s.imu), s.baro_altitude_asl);
+            let dt = prev_t.map(|p| (s.truth_t - p).clamp(0.0, 0.25)).unwrap_or(0.0);
+            prev_t = Some(s.truth_t);
+
+            baro_hist.push_back((s.truth_t, s.baro_altitude_asl));
+            while baro_hist.front().is_some_and(|(t, _)| s.truth_t - t > 0.6) {
+                baro_hist.pop_front();
+            }
+
+            let gated = est.airbrakes_mpc_states();
+            for (k, f) in filters.iter_mut().enumerate() {
+                match f {
+                    Some(f) => f.step(s.baro_altitude_asl, dt),
+                    None if gated.is_some() => {
+                        // Born when the real gate opens, seeded the way a
+                        // baro-only design actually would: causal
+                        // least-squares slope of its own last 0.5 s.
+                        let (mut st, mut sy, mut stt, mut sty, mut cnt) =
+                            (0.0f64, 0.0f64, 0.0f64, 0.0f64, 0.0f64);
+                        for (bt, by) in baro_hist.iter() {
+                            let t = (bt - s.truth_t) as f64;
+                            st += t;
+                            sy += *by as f64;
+                            stt += t * t;
+                            sty += t * *by as f64;
+                            cnt += 1.0;
+                        }
+                        let den = cnt * stt - st * st;
+                        let slope =
+                            if den.abs() > 1e-9 { (cnt * sty - st * sy) / den } else { 0.0 };
+                        *f = Some(BaroOnly {
+                            alt: s.baro_altitude_asl,
+                            vel: slope as f32,
+                            p: [9.0, 0.0, 0.0, 30.0 * 30.0],
+                            q: 3.0 / (2.0 * TAUS[k] * TAUS[k]),
+                            r: 3.0,
+                        });
+                    }
+                    None => {}
+                }
+            }
+
+            let Some(states) = gated else { continue };
+            gate_open_t.get_or_insert(s.truth_t);
+            gate_last_t = s.truth_t;
+            // let every candidate settle for 1 s -- the birth transient is
+            // not what this is measuring
+            if s.truth_t - gate_open_t.unwrap() < 1.0 {
+                continue;
+            }
+
+            let oracle = mpc.update(
+                s.truth.altitude_asl,
+                Vector2::new(s.truth.lateral_velocity, s.truth.vv),
+            );
+            let mut tick: [Option<(f32, f32)>; 6] = [None; 6];
+            let mut put = |slot: usize, sol: crate::MpcSolution| {
+                tick[slot] = Some((
+                    (sol.extension_percentage - oracle.extension_percentage).abs(),
+                    (sol.predicted_apogee_asl - oracle.predicted_apogee_asl).abs(),
+                ));
+            };
+
+            put(0, mpc.update(states.altitude_asl, states.velocity));
+            if let Some(f) = &filters[1] {
+                // one channel swapped at a time, both at tau = 0.20 s
+                put(1, mpc.update(f.alt, states.velocity));
+                put(2, mpc.update(states.altitude_asl, Vector2::new(0.0, f.vel)));
+            }
+            for (slot, k) in [(3usize, 0usize), (4, 1), (5, 3)] {
+                if let Some(f) = &filters[k] {
+                    put(slot, mpc.update(f.alt, Vector2::new(0.0, f.vel)));
+                }
+            }
+            ticks.push(tick);
+        }
+
+        eprintln!(
+            "\n=== {path}: MPC input study, gate open {:.1}..{gate_last_t:.1}s, {} scored ticks, \
+             target {target_asl:.0} m ASL ===",
+            gate_open_t.unwrap(),
+            ticks.len(),
+        );
+        eprintln!(
+            "  {:<38} {:>8} {:>8} {:>10} {:>9}",
+            "MPC fed from", "|dext|", "p95", "|dapogee|", "p95"
+        );
+        eprintln!("  {:<38} {:>8} {:>8} {:>10} {:>9}", "", "%pt", "%pt", "m", "m");
+        for (slot, label) in [
+            (0usize, "flown (IMU+baro KF)  <- ships today"),
+            (1, "baro-only ALTITUDE + flown velocity"),
+            (2, "flown altitude + baro-only VELOCITY"),
+            (3, "baro-only both, tau=0.10s"),
+            (4, "baro-only both, tau=0.20s"),
+            (5, "baro-only both, tau=0.50s"),
+        ] {
+            let (mut ext, mut apo): (Vec<f32>, Vec<f32>) = (Vec::new(), Vec::new());
+            for t in &ticks {
+                if let Some((e, a)) = t[slot] {
+                    ext.push(e);
+                    apo.push(a);
+                }
+            }
+            if ext.is_empty() {
+                continue;
+            }
+            ext.sort_by(f32::total_cmp);
+            apo.sort_by(f32::total_cmp);
+            let p95 = |v: &[f32]| v[((v.len() as f32 * 0.95) as usize).min(v.len() - 1)];
+            let mean = |v: &[f32]| v.iter().sum::<f32>() / v.len() as f32;
+            eprintln!(
+                "  {:<38} {:>8.2} {:>8.2} {:>10.1} {:>9.1}",
+                label,
+                mean(&ext) * 100.0,
+                p95(&ext) * 100.0,
+                mean(&apo),
+                p95(&apo),
+            );
+        }
+    }
+}
+
+
