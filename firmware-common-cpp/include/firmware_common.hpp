@@ -552,10 +552,6 @@ namespace can_bus {
         }
     };
 
-    enum class DataType : uint8_t {
-        Data = 1
-    };
-
     struct DataTransferMessage {
         static constexpr uint32_t MESSAGE_TYPE = 16;
         static constexpr size_t SIZE_BYTES = 36;
@@ -566,11 +562,10 @@ namespace can_bus {
         uint8_t sequence_number;
         bool start_of_transfer;
         bool end_of_transfer;
-        DataType data_type;
         uint16_t destination_node_id; // 12 bits
 
         DataTransferMessage() noexcept : data{0}, data_len(0), sequence_number(0),
-            start_of_transfer(false), end_of_transfer(false), data_type(DataType::Data), destination_node_id(0) {}
+            start_of_transfer(false), end_of_transfer(false), destination_node_id(0) {}
 
         // The valid prefix of `data`, matching Rust's `data()`. The bytes past
         // data_len are padding and carry no meaning.
@@ -588,18 +583,19 @@ namespace can_bus {
             // 33: sequence_number
             buffer[33] = sequence_number;
             
-            // 34, 35: packed fields
+            // 34, 35: packed fields. Bits 272..286 in msb0 numbering, then two
+            // bits of trailing padding.
             uint8_t b34 = 0;
-            if (start_of_transfer) b34 |= 0x80;
-            if (end_of_transfer) b34 |= 0x40;
-            b34 |= (static_cast<uint8_t>(data_type) & 0x03) << 4;
-            
-            // destination_node_id 12 bits. Top 4 bits to b34 lower nibble
-            b34 |= (destination_node_id >> 8) & 0x0F;
+            if (start_of_transfer) b34 |= 0x80;  // bit 272
+            if (end_of_transfer) b34 |= 0x40;    // bit 273
+
+            // destination_node_id 12 bits, bits 274..286. Top 6 bits fill the
+            // rest of b34
+            b34 |= (destination_node_id >> 6) & 0x3F;
             buffer[34] = b34;
-            
-            // Bottom 8 bits to b35
-            buffer[35] = destination_node_id & 0xFF;
+
+            // Bottom 6 bits land in b35's top 6 bits, low 2 bits are padding
+            buffer[35] = (destination_node_id & 0x3F) << 2;
         }
 
         static DataTransferMessage deserialize(const uint8_t* buffer) noexcept {
@@ -611,9 +607,8 @@ namespace can_bus {
             uint8_t b34 = buffer[34];
             msg.start_of_transfer = (b34 & 0x80) != 0;
             msg.end_of_transfer = (b34 & 0x40) != 0;
-            msg.data_type = static_cast<DataType>((b34 >> 4) & 0x03);
-            
-            msg.destination_node_id = ((static_cast<uint16_t>(b34) & 0x0F) << 8) | buffer[35];
+
+            msg.destination_node_id = ((static_cast<uint16_t>(b34) & 0x3F) << 6) | (buffer[35] >> 2);
             return msg;
         }
     };
@@ -982,7 +977,7 @@ namespace can_bus {
 
     struct VLStatusMessage {
         static constexpr uint32_t MESSAGE_TYPE = 36;
-        static constexpr size_t SIZE_BYTES = 5;
+        static constexpr size_t SIZE_BYTES = 3;
 
         FlightStage flight_stage;
         uint16_t battery_mv;
@@ -992,8 +987,6 @@ namespace can_bus {
         void serialize(uint8_t* buffer) const noexcept {
             buffer[0] = static_cast<uint8_t>(flight_stage);
             write_u16_be(buffer + 1, battery_mv);
-            buffer[3] = 0;
-            buffer[4] = 0;
         }
 
         static VLStatusMessage deserialize(const uint8_t* buffer) noexcept {
@@ -1007,7 +1000,7 @@ namespace can_bus {
 
     struct AirBrakesControlMessage {
         static constexpr uint32_t MESSAGE_TYPE = 69;
-        static constexpr size_t SIZE_BYTES = 6;
+        static constexpr size_t SIZE_BYTES = 2;
 
         uint16_t extension_percentage; // Unit: 0.1%, e.g. 10 = 1%
 
@@ -1027,7 +1020,8 @@ namespace can_bus {
         static constexpr uint8_t PRIORITY = 2;
 
         void serialize(uint8_t* buffer) const noexcept {
-            std::memset(buffer, 0, SIZE_BYTES); // Zero out for padding
+            // extension_percentage fills all 16 bits, so there is no padding to
+            // zero out.
             write_u16_be(buffer, extension_percentage);
         }
 

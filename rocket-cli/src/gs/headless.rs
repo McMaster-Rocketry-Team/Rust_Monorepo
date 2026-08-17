@@ -245,7 +245,7 @@ fn downlink_json(packet: &VLPDownlinkPacket, status: &PacketStatus) -> Value {
         VLPDownlinkPacket::LowPowerTelemetry(p) => json!({
             "type": "low_power_telemetry",
             "rssi": status.rssi, "snr": status.snr,
-            "gps_fixed": p.gps_fixed,
+            "gps_fixed": p.gps_fixed(),
             "satellites": p.num_of_fix_satellites(),
             "lat": p.lat_lon().map(|(lat, _)| lat), "lon": p.lat_lon().map(|(_, lon)| lon),
             "air_temperature": p.air_temperature(),

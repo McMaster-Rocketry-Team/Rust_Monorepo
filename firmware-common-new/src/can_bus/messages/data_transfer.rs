@@ -4,13 +4,6 @@ use packed_struct::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
-#[derive(PrimitiveEnum_u8, Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize)]
-#[repr(C)]
-pub enum DataType {
-    Data = 1,
-}
-
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PackedStruct, Clone, Debug, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize)]
 #[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "36")]
 #[repr(C)]
@@ -23,9 +16,12 @@ pub struct DataTransferMessage {
     pub sequence_number: u8,
     pub start_of_transfer: bool,
     pub end_of_transfer: bool,
-    #[packed_field(bits = "274..276", ty = "enum")]
-    pub data_type: DataType,
 
+    // A 2-bit `data_type` used to sit here to pick between firmware and data payloads.
+    // The custom bootloader and OTA are gone, so `Data` was the only value left and the
+    // field was spending wire bits to say nothing; `destination_node_id` now starts at
+    // bit 274 instead of 276. The message still declares 36 bytes because the remaining
+    // 286 bits don't fit in 35 - shrinking it would truncate `destination_node_id`.
     #[packed_field(element_size_bits = "12")]
     pub destination_node_id: u16,
 }
@@ -33,7 +29,6 @@ pub struct DataTransferMessage {
 impl DataTransferMessage {
     pub fn new(
         mut data: Vec<u8, 32>,
-        data_type: DataType,
         sequence_number: u8,
         start_of_transfer: bool,
         end_of_transfer: bool,
@@ -44,7 +39,6 @@ impl DataTransferMessage {
         Self {
             data_len,
             data: data.into_array().unwrap(),
-            data_type,
             sequence_number,
             start_of_transfer,
             end_of_transfer,
@@ -83,7 +77,6 @@ mod test {
         vec![
             DataTransferMessage::new(
                 heapless::Vec::new(),
-                DataType::Data,
                 0,
                 false,
                 false,
@@ -92,7 +85,6 @@ mod test {
             .into(),
             DataTransferMessage::new(
                 data_max,
-                DataType::Data,
                 u8::MAX,
                 true,
                 true,

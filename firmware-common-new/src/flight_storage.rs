@@ -50,6 +50,13 @@ pub const DEFAULT_TARGET_APOGEE_AGL: f32 = 4000.0;
 
 /// On-disk format version. Bump when the record or superblock layout changes;
 /// logs written at any other version are treated as absent.
+/// v13: the airbrakes flag byte is renumbered. Bit 4 was held empty for the
+///     retired `AIRBRAKES_APOGEE` latch so pre-2026-08-17 logs kept their
+///     meaning; every board and host now runs current code, so the hole is
+///     reclaimed — baro-resync 5 -> 4, pad-calibrated 6 -> 5, bits 0-3
+///     unmoved. This bump is what keeps that safe: the two layouts would
+///     otherwise both claim v12 and an old card would decode as valid with
+///     three flags silently shifted, instead of being rejected here.
 /// v12: absent data is `Option` everywhere instead of a sentinel value.
 ///     `f32::NAN`, `PAYLOAD_READING_UNAVAILABLE` (0xFFFF), a zero
 ///     `unix_time_us`, the `valid` bitmask and its `VALID_*` flags are all
@@ -70,7 +77,7 @@ pub const DEFAULT_TARGET_APOGEE_AGL: f32 = 4000.0;
 ///     `mpc_predicted_apogee_agl` added to the slow record, `VALID_BARO` dropped.
 /// v8: payload EPM rail currents + SEM actuator steps in the slow record.
 /// v7: tagged FAST/SLOW stream (see `flight_data_record`). Older formats: see git history.
-pub const STORAGE_VERSION: u32 = 12;
+pub const STORAGE_VERSION: u32 = 13;
 
 /// rkyv body sizes for tagged record types.
 pub const FAST_BODY_LEN: usize = size_of::<<FlightDataFastRecord as rkyv::Archive>::Archived>();

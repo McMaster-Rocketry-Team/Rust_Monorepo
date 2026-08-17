@@ -241,7 +241,7 @@ impl DownlinkPacketDisplay {
                     Section::new(
                         "GPS",
                         vec![vec![
-                            ("gps fixed", true, Self::format_bool(p.gps_fixed)),
+                            ("gps fixed", true, Self::format_bool(p.gps_fixed())),
                             (
                                 "satellites",
                                 false,

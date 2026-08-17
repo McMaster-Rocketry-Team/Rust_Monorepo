@@ -500,10 +500,6 @@ TEST(DataTransferTest, ReferenceData) {
         bool expected_start = message_content["start_of_transfer"];
         bool expected_end = message_content["end_of_transfer"];
         uint16_t expected_node_id = message_content["destination_node_id"];
-        
-        std::string dt_str = message_content["data_type"];
-        ASSERT_EQ(dt_str, "Data");
-        firmware_common::can_bus::DataType expected_type = firmware_common::can_bus::DataType::Data;
 
         auto msg = firmware_common::can_bus::DataTransferMessage::deserialize(serialized_data.data());
         
@@ -512,7 +508,6 @@ TEST(DataTransferTest, ReferenceData) {
         EXPECT_EQ(msg.sequence_number, expected_seq);
         EXPECT_EQ(msg.start_of_transfer, expected_start);
         EXPECT_EQ(msg.end_of_transfer, expected_end);
-        EXPECT_EQ(msg.data_type, expected_type);
         EXPECT_EQ(msg.destination_node_id, expected_node_id);
         EXPECT_EQ(firmware_common::can_bus::get_frame_id(msg, 10, 20), expected_id);
 

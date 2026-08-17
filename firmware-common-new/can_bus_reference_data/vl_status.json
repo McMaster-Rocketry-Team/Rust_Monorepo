@@ -10,15 +10,11 @@
     "serialized_data": [
       0,
       0,
-      0,
-      0,
       0
     ],
     "frame_id": 143695892,
     "encoded_data": [
       [
-        0,
-        0,
         0,
         0,
         0,
@@ -37,9 +33,7 @@
     "serialized_data": [
       6,
       255,
-      255,
-      0,
-      0
+      255
     ],
     "frame_id": 143695892,
     "encoded_data": [
@@ -47,8 +41,6 @@
         6,
         255,
         255,
-        0,
-        0,
         192
       ]
     ]
@@ -64,16 +56,12 @@
     "serialized_data": [
       1,
       0,
-      0,
-      0,
       0
     ],
     "frame_id": 143695892,
     "encoded_data": [
       [
         1,
-        0,
-        0,
         0,
         0,
         192
@@ -91,16 +79,12 @@
     "serialized_data": [
       2,
       0,
-      0,
-      0,
       0
     ],
     "frame_id": 143695892,
     "encoded_data": [
       [
         2,
-        0,
-        0,
         0,
         0,
         192
@@ -118,16 +102,12 @@
     "serialized_data": [
       3,
       0,
-      0,
-      0,
       0
     ],
     "frame_id": 143695892,
     "encoded_data": [
       [
         3,
-        0,
-        0,
         0,
         0,
         192
@@ -145,16 +125,12 @@
     "serialized_data": [
       4,
       0,
-      0,
-      0,
       0
     ],
     "frame_id": 143695892,
     "encoded_data": [
       [
         4,
-        0,
-        0,
         0,
         0,
         192
@@ -172,16 +148,12 @@
     "serialized_data": [
       5,
       0,
-      0,
-      0,
       0
     ],
     "frame_id": 143695892,
     "encoded_data": [
       [
         5,
-        0,
-        0,
         0,
         0,
         192
@@ -199,16 +171,12 @@
     "serialized_data": [
       7,
       0,
-      0,
-      0,
       0
     ],
     "frame_id": 143695892,
     "encoded_data": [
       [
         7,
-        0,
-        0,
         0,
         0,
         192

@@ -195,8 +195,6 @@ const KF_R_ALT_STD: f32 = 3.0;
 // `FlightEstimators::update` would have gone permanently false and the ONLY
 // remaining retirement conditions would have been tilt past the horizon and
 // the deployment half's apogee call.
-//
-// `AIRBRAKES_APOGEE` (SD flag bit 4) went with it; the bit stays reserved.
 
 // --- Outputs ---------------------------------------------------------------
 /// Tilt is capped here for the horizontal-velocity output (tan blows up at
