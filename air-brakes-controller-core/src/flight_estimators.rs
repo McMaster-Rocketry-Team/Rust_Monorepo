@@ -51,20 +51,6 @@ use crate::baro_gate::BaroGateOutcome;
 use crate::baro_state_estimator::{FlightProfile, RocketState, RocketStateEstimator};
 use crate::utils::approximate_speed_of_sound;
 
-/// Ceiling on the vertical velocity at which the gate will hand out MPC
-/// states, as a fraction of the local speed of sound: the airbrakes may
-/// only open below Mach 0.85 *per the airbrakes filter's own estimate*.
-///
-/// This is the deliberately-conservative slow-gate ceiling, and it is
-/// distinct from the lockout-exit check's Mach 0.8 threshold on purpose:
-/// the check decides *when the baro is honest again* and sits at the
-/// actual "safe to open" requirement; this ceiling is an independent
-/// last-layer sanity bound on the born filter's state. It sits above the
-/// check threshold so it never fights a healthy check — it only bites if
-/// the filter was born reporting near-sonic speed, in which case the
-/// brakes stay shut until the estimate decays below it.
-pub const MAX_OPEN_MACH: f32 = 0.85;
-
 /// One IMU sample in the avionics frame, SI units at the API boundary:
 /// specific force in m/s^2, angular velocity in rad/s. Firmware converts
 /// units at the edge (e.g. deg/s -> rad/s) before constructing this.
@@ -226,13 +212,27 @@ impl FlightEstimators {
     ///   be born before the estimator's own axial-sign burnout latch, on
     ///   either the supersonic or the subsonic path, so a separate coasting
     ///   clause would be redundant;
-    /// * vertical velocity at most [`MAX_OPEN_MACH`] of the local speed
-    ///   of sound at the filter's own altitude.
+    /// * vertical velocity at most the airframe's configured
+    ///   [`max_open_mach`] of the local speed of sound at the filter's own
+    ///   altitude — the same Mach the lockout-exit drag check votes at, read
+    ///   back out of the airbrakes half because this gate carries no config
+    ///   of its own.
+    ///
+    /// That last clause is normally slack: the check needs 1 s of sustain
+    /// and cannot speak before `earliest_subsonic_after_ignition_us`, so
+    /// birth lands well under the threshold rather than at it (Osiris 0.726,
+    /// LC'25 0.727). It earns its place on a Cd model that overestimates
+    /// drag, where the inverted airspeed reads low and births the filter
+    /// early — measured at Mach 0.90 on an LC'25 replay with a 2x Cd error.
+    /// The dead reckoner behind this clause does not depend on Cd, which is
+    /// why it can disagree with the check at all.
     ///
     /// Every clause here is evaluated on the airbrakes filter's OWN state —
     /// never the slow filter's, which may be frozen (Mach lockout) or
     /// lagging hundreds of metres during coast. Any clause failing yields
     /// `None`: the brakes stay shut.
+    ///
+    /// [`max_open_mach`]: crate::airbrakes_estimator::AirbrakesConfig::max_open_mach
     pub fn airbrakes_mpc_states(&self) -> Option<AirbrakesMPCStates> {
         let airbrakes = self.airbrakes.as_ref()?;
         if !airbrakes.baro_trusted() {
@@ -241,7 +241,7 @@ impl FlightEstimators {
         let altitude_asl = airbrakes.altitude_asl()?;
         let velocity = airbrakes.velocity()?;
 
-        if velocity.y > MAX_OPEN_MACH * approximate_speed_of_sound(altitude_asl) {
+        if velocity.y > airbrakes.max_open_mach() * approximate_speed_of_sound(altitude_asl) {
             return None;
         }
 
@@ -377,6 +377,7 @@ mod tests {
         AirbrakesConfig {
             ignition_detection_acc_threshold: 4.0 * 9.81,
             mach_lockout: None,
+            max_open_mach: 0.8,
             rocket: RocketParameters {
                 burnout_mass: 17.607,
                 cd: [0.47044, 0.5082, 0.57784, 0.665, 0.74313],

@@ -104,6 +104,7 @@ fn osiris_config() -> FlightConfig {
                 earliest_subsonic_after_ignition_us: 17_500_000,
                 force_birth_after_ignition_us: 25_000_000,
             }),
+            max_open_mach: 0.8,
             rocket: osiris_rocket(),
         },
     }

@@ -119,6 +119,47 @@ pub struct AirbrakesConfig {
     /// alignment finishes.
     pub mach_lockout: Option<MachLockoutConfig>,
 
+    /// **The** Mach number of this airframe: below it the flow is subsonic,
+    /// the static port is honest, and the flaps may open. One value, read in
+    /// two places, because it is one physical fact about the rocket:
+    ///
+    /// * the lockout-exit drag check votes at it — the inverted airspeed
+    ///   falling below it (and staying there) is what births the vertical
+    ///   filter and ends the Mach lockout;
+    /// * [`FlightEstimators::airbrakes_mpc_states`] refuses to hand out MPC
+    ///   states while the filter's own vertical velocity is above it, which
+    ///   is what actually keeps the flaps shut.
+    ///
+    /// Per-airframe because it is the Mach [`Self::rocket`]'s stowed `cd[0]`
+    /// is tabulated at. The two must agree — the check inverts the drag with
+    /// that Cd to decide whether it is below this speed — and while the
+    /// threshold was hard-coded they could disagree silently.
+    ///
+    /// This IS the requirement, not the requirement minus margin. The margin
+    /// arrives on its own, from two places that are already load-bearing:
+    /// inverting with the SUBSONIC Cd reads high while the true Cd is
+    /// transonically elevated, and
+    /// [`MachLockoutConfig::earliest_subsonic_after_ignition_us`] plus the
+    /// 1 s sustain delay the decision further. Measured, birth lands well
+    /// under this threshold rather than at it — Osiris 0.726 nominal and
+    /// 0.743 with a 5x-wrong Cd, LC'25 0.727 — so the velocity check is
+    /// slack on a healthy flight without needing a separate, higher number
+    /// to make it so. It bit at Mach 0.90 on an LC'25 replay whose Cd
+    /// overestimated drag by 2x, which is the case it exists for: the check
+    /// reads low, births early, and the dead reckoner (which does not depend
+    /// on Cd) is what disagrees.
+    ///
+    /// This was two constants until 2026-08-17 — a 0.8 exit and a 0.85
+    /// ceiling with an invariant between them. The 0.85 was never derived
+    /// from anything; it was 0.8 plus margin that `t_min` and the sustain
+    /// already supply. If an airframe ever turns up whose flaps are
+    /// qualified *below* the Mach at which its baro recovers, split it again
+    /// then — and note that limit would sit under this one, the opposite way
+    /// round from the invariant the split used to carry.
+    ///
+    /// [`FlightEstimators::airbrakes_mpc_states`]: crate::FlightEstimators::airbrakes_mpc_states
+    pub max_open_mach: f32,
+
     /// The airframe — the same value the MPC flies on.
     ///
     /// The drag check needs `Cd * A / m`, and it derives that here rather
@@ -145,10 +186,19 @@ pub struct AirbrakesConfig {
 ///
 /// [`FlightProfile::mach_lockout_duration_us`]: crate::FlightProfile::mach_lockout_duration_us
 pub struct MachLockoutConfig {
-    /// Earliest the rocket could possibly be below Mach 0.8; the drag check
-    /// is not consulted before this.
+    /// Earliest the rocket could possibly be below
+    /// [`AirbrakesConfig::max_open_mach`]; the drag check is not consulted
+    /// before this.
     ///
-    /// From the flight sim: the earliest simulated time below Mach 0.8,
+    /// This is the guard that does the most work in practice. Measured on
+    /// the Osiris sim, a Cd wrong by 5x moves the birth only from 18.89 s to
+    /// 18.52 s — against a true Mach 0.8 crossing at 17.56 s — because this
+    /// floor sits at 17.5 s and the check simply cannot speak earlier. Set
+    /// it loosely and a wrong drag model births the filter while the port is
+    /// still shocked: LC'25's floor is ~4.6 s ahead of its real crossing,
+    /// and a 2x Cd error there births at Mach 0.90.
+    ///
+    /// From the flight sim: the earliest simulated time below that Mach,
     /// measured from ignition detection. Erring early is unsafe (the check
     /// gets to speak while still supersonic), erring late only costs
     /// control window.
@@ -161,7 +211,8 @@ pub struct MachLockoutConfig {
     /// Give-up time: at this point the vertical filter is born from the
     /// baro regardless of what the drag check says.
     ///
-    /// From the flight sim: the latest plausible time below Mach 0.8 plus
+    /// From the flight sim: the latest plausible time below
+    /// [`AirbrakesConfig::max_open_mach`] plus
     /// margin, and it must end well (>5 s) before the EARLIEST simulated
     /// apogee — a forced birth after apogee leaves the airbrakes no window
     /// at all.

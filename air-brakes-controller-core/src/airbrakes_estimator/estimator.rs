@@ -114,12 +114,11 @@ const MIN_CALIBRATION_WINDOWS: usize = 3;
 const STAGE1_DURATION_S: f32 = 0.5;
 
 // --- Lockout exit: the drag check (Piece 3) --------------------------------
-/// Exit threshold: Mach 0.8 IS the requirement. The margin lives in the
-/// measurement itself — inverting the drag with the SUBSONIC Cd reads high
-/// while the true Cd is transonically elevated, and the 1 s sustain delays
-/// the decision — so voting at a lower Mach would double-count margin and
-/// burn control-window seconds (speed decays slowly near the crossing).
-const SUBSONIC_MACH: f32 = 0.8;
+// The Mach the check votes at is per-airframe and lives in
+// `AirbrakesConfig::max_open_mach` — the same value the MPC gate uses,
+// because "the flow is subsonic" and "the flaps may open" are one fact
+// about the airframe. It is the Mach the config's own Cd table is
+// tabulated at, so the threshold and the Cd travel together.
 /// The drag check must hold continuously this long before the baro is
 /// declared honest.
 const SUBSONIC_SUSTAIN_S: f32 = 1.0;
@@ -619,7 +618,8 @@ impl AirbrakesEstimator {
                             (false, false)
                         } else {
                             // Invert the drag to an airspeed and compare to
-                            // Mach 0.8. Air density comes from the DEAD
+                            // the configured Mach. Air density comes from
+                            // the DEAD
                             // RECKONED altitude, not the baro, so the whole
                             // exit decision is independent of the sensor it
                             // is deciding about. (Either source works —
@@ -633,7 +633,9 @@ impl AirbrakesEstimator {
                                 self.config.rocket.subsonic_cda_over_mass(),
                             ) {
                                 Some(airspeed) => {
-                                    airspeed < SUBSONIC_MACH * approximate_speed_of_sound(altitude)
+                                    airspeed
+                                        < self.config.max_open_mach
+                                            * approximate_speed_of_sound(altitude)
                                 }
                                 // Nonsensical drag parameter: never pass,
                                 // fall through to the T_max backstop.
@@ -874,9 +876,10 @@ impl AirbrakesEstimator {
     }
 
     /// The lockout-exit drag check, for logging/telemetry: whether the
-    /// drag-inverted airspeed is currently below Mach 0.8. `None` outside
-    /// the dead-reckoning phase, and always `false` before `t_min_us`
-    /// (the check is not consulted while the motor may still be burning).
+    /// drag-inverted airspeed is currently below the airframe's configured
+    /// `max_open_mach`. `None` outside the dead-reckoning phase, and always
+    /// `false` before `t_min_us` (the check is not consulted while the motor
+    /// may still be burning).
     pub fn subsonic_by_drag(&self) -> Option<bool> {
         match &self.state {
             State::DeadReckoning { last_subsonic, .. } => Some(*last_subsonic),
@@ -917,6 +920,15 @@ impl AirbrakesEstimator {
             // calibration, so every later state implies it.
             _ => true,
         }
+    }
+
+    /// The airframe's subsonic Mach, as configured — the same value this
+    /// estimator's own drag check votes at. Read by the MPC gate in
+    /// [`FlightEstimators`], which has no config of its own.
+    ///
+    /// [`FlightEstimators`]: crate::FlightEstimators
+    pub fn max_open_mach(&self) -> f32 {
+        self.config.max_open_mach
     }
 }
 

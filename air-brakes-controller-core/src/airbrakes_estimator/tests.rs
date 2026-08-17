@@ -285,6 +285,7 @@ fn void_lake_v2_replay() {
         AirbrakesConfig {
             ignition_detection_acc_threshold: 4.0 * 9.81,
             mach_lockout: None,
+            max_open_mach: 0.8,
             // Subsonic profile: the drag check is never consulted, so the
             // airframe cannot affect this run.
             rocket: lc25_rocket(),
@@ -354,6 +355,7 @@ fn filter_is_never_born_under_thrust() {
             AirbrakesConfig {
                 ignition_detection_acc_threshold: 4.0 * 9.81,
                 mach_lockout: None,
+                max_open_mach: 0.8,
                 rocket: lc25_rocket(),
             },
         ),
@@ -414,6 +416,7 @@ fn lc25_config() -> AirbrakesConfig {
             earliest_subsonic_after_ignition_us: 8_000_000,
             force_birth_after_ignition_us: 20_000_000,
         }),
+        max_open_mach: 0.8,
         rocket: lc25_rocket(),
     }
 }
@@ -1251,6 +1254,7 @@ fn airbrakes_half_retires_at_apogee_and_stays_retired() {
         airbrakes: AirbrakesConfig {
             ignition_detection_acc_threshold: 4.0 * 9.81,
             mach_lockout: None,
+            max_open_mach: 0.8,
             rocket: lc25_rocket(),
         },
     });
