@@ -396,6 +396,17 @@ impl DownlinkPacketDisplay {
                     // on ascent: while they agree the brakes have authority,
                     // and the gap between them is the overshoot the MPC cannot
                     // fix.
+                    //
+                    // `calibrated` is the one here to watch BEFORE launch, and
+                    // the only reason this section is worth looking at on the
+                    // rail. Ignition detection is gated on the pad
+                    // calibration, so a red one means the airbrakes will not
+                    // fly — and nothing else on this panel would say so, since
+                    // `born` cannot go green until the Mach lockout is already
+                    // over. Expect it green within ~6 s of arming; it is
+                    // re-derived every 2 s and drops back if the airframe is
+                    // handled, so it describes the pad now rather than the
+                    // best moment it ever had.
                     Section::new(
                         "Airbrakes",
                         vec![
@@ -411,6 +422,11 @@ impl DownlinkPacketDisplay {
                                     "target apogee agl",
                                     false,
                                     format!("{:.1}m", p.target_apogee_agl()).into(),
+                                ),
+                                (
+                                    "calibrated",
+                                    true,
+                                    Self::format_bool(p.airbrakes_calibrated()),
                                 ),
                                 ("born", true, Self::format_bool(p.airbrakes_born())),
                             ],

@@ -392,7 +392,18 @@ pub const AIRBRAKES_APOGEE: u8 = 1 << 4;
 /// `AIRBRAKES_BARO_GATE_REJECT`. A run that ends without this bit is the gate
 /// doing its job; a run that ends with it is a diverged filter.
 pub const AIRBRAKES_BARO_RESYNC: u8 = 1 << 5;
-// bits 6-7 unallocated.
+/// The pad calibration completed: gyro bias, pad orientation and pad altitude
+/// exist, and the estimator is willing to detect ignition.
+///
+/// Unlike every other bit here this one is about the PAD, and it is the only
+/// row content the log carries before ignition. While it is clear the
+/// airbrakes cannot fly at all — ignition detection is gated on it — so a log
+/// that opens with a run of zeros here explains an otherwise silent
+/// no-deployment. Expect it set within ~6 s of the estimator starting and to
+/// stay set; it is re-derived every 2 s and CAN drop if the airframe is
+/// picked up or turned.
+pub const AIRBRAKES_PAD_CALIBRATED: u8 = 1 << 6;
+// bit 7 unallocated.
 
 pub const PYRO_MAIN_CONTINUITY: u8 = 1 << 0;
 pub const PYRO_MAIN_FIRE: u8 = 1 << 1;

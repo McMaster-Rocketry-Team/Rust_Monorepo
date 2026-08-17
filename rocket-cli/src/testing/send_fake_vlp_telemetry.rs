@@ -87,6 +87,8 @@ pub async fn send_fake_vlp_telemetry(args: SendVLPTelemetryArgs) -> Result<()> {
             Some(0.0),
             FlightStage::Armed,
             false,
+            // Calibrated but not born is the nominal shape on the rail.
+            true,
             Some(altitude_agl),
             3000.0,
             false,

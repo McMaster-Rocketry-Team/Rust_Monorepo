@@ -227,6 +227,7 @@ fn downlink_json(packet: &VLPDownlinkPacket, status: &PacketStatus) -> Value {
             "deployment_kf_vertical_velocity": p.deployment_kf_vertical_velocity(),
             "airbrakes_kf_tilt_deg": p.airbrakes_kf_tilt_deg(),
             "airbrakes_born": p.airbrakes_born(),
+            "airbrakes_calibrated": p.airbrakes_calibrated(),
             "mpc_predicted_apogee_agl": p.mpc_predicted_apogee_agl(),
             "target_apogee_agl": p.target_apogee_agl(),
             "airbrakes_cmd_pct": p.air_brakes_commanded_extension_percentage(),

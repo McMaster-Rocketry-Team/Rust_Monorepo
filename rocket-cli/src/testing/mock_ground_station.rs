@@ -181,6 +181,7 @@ impl MockVLPClient {
                     Some(4.0),
                     FlightStage::Ascent,
                     true,
+                    true,
                     Some(2800.0),
                     3000.0,
                     false,

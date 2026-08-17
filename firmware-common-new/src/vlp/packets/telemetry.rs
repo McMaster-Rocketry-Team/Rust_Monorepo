@@ -198,6 +198,19 @@ pub struct TelemetryPacket {
 
     /// The airbrakes estimator's vertical filter is born (baro trusted).
     airbrakes_born: bool,
+    /// The airbrakes estimator's pad calibration is complete.
+    ///
+    /// The one bit in this packet that is actionable BEFORE launch. The
+    /// estimator refuses to detect ignition without a calibration, so a
+    /// rocket sitting on the rail with this clear will fly with no airbrakes
+    /// and nothing else in the downlink will say so — `airbrakes_born` is
+    /// sourced from `baro_trusted`, which cannot go true until after the Mach
+    /// lockout. Treat it as a go/no-go item.
+    ///
+    /// It is re-derived every 2 s from the last minute of pad data and can go
+    /// back to false, so it reports the pad as it is NOW rather than latching
+    /// the first success.
+    airbrakes_calibrated: bool,
     /// Whether the MPC produced an apogee prediction for this packet. Absent
     /// whenever the controller is not solving: before the airbrakes estimator
     /// is born, after the controller is shut down at apogee, and on any cycle
@@ -355,6 +368,7 @@ impl TelemetryPacket {
         flight_stage: FlightStage,
 
         airbrakes_born: bool,
+        airbrakes_calibrated: bool,
         mpc_predicted_apogee_agl: Option<f32>,
         target_apogee_agl: f32,
 
@@ -448,6 +462,7 @@ impl TelemetryPacket {
             flight_stage: flight_stage.into(),
 
             airbrakes_born,
+            airbrakes_calibrated,
             mpc_predicted_apogee_valid: mpc_predicted_apogee_agl.is_some(),
             mpc_predicted_apogee_agl: AltitudeFac::to_fixed_point_capped(
                 mpc_predicted_apogee_agl.unwrap_or(0.0),
@@ -693,6 +708,13 @@ impl TelemetryPacket {
         self.airbrakes_born
     }
 
+    /// The airbrakes estimator's pad calibration is complete — the only
+    /// pre-launch go/no-go bit in this packet. False on the rail means the
+    /// airbrakes will not fly, silently.
+    pub fn airbrakes_calibrated(&self) -> bool {
+        self.airbrakes_calibrated
+    }
+
     /// The apogee AGL the MPC predicts at the extension it is commanding.
     /// `None` whenever the controller is not solving — before the airbrakes
     /// estimator is born, after it is shut down at apogee, and on a cycle
@@ -927,6 +949,7 @@ impl TelemetryPacket {
             flight_stage: format!("{:?}", self.flight_stage()),
 
             airbrakes_born: self.airbrakes_born(),
+            airbrakes_calibrated: self.airbrakes_calibrated(),
             mpc_predicted_apogee_agl: self.mpc_predicted_apogee_agl(),
             target_apogee_agl: self.target_apogee_agl(),
 
@@ -1025,6 +1048,10 @@ pub struct TelemetryPacketBuilderState {
 
     /// The airbrakes estimator's vertical filter is born (baro trusted).
     pub airbrakes_born: bool,
+    /// The airbrakes estimator's pad calibration is complete. The one
+    /// pre-launch go/no-go bit here: false on the rail means the airbrakes
+    /// will not fly.
+    pub airbrakes_calibrated: bool,
     /// The apogee AGL the MPC predicts at the extension it is commanding.
     /// `None` whenever the controller is not solving, including a cycle whose
     /// solution came back NaN.
@@ -1096,6 +1123,7 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 flight_stage: FlightStage::Armed,
 
                 airbrakes_born: false,
+                airbrakes_calibrated: false,
                 mpc_predicted_apogee_agl: None,
                 target_apogee_agl: 0.0,
 
@@ -1159,6 +1187,7 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 state.airbrakes_kf_tilt_deg,
                 state.flight_stage,
                 state.airbrakes_born,
+                state.airbrakes_calibrated,
                 state.mpc_predicted_apogee_agl,
                 state.target_apogee_agl,
                 state.amp_online,
@@ -1237,6 +1266,7 @@ mod tests {
             Some(10.0),
             FlightStage::Ascent,
             true,
+            true,
             Some(2900.0),
             3000.0,
             true,
@@ -1291,6 +1321,7 @@ mod tests {
             None,
             None,
             FlightStage::Armed,
+            false,
             false,
             None,
             3000.0,
@@ -1458,6 +1489,7 @@ mod tests {
             Some(f32::NAN),
             FlightStage::Ascent,
             true,
+            true,
             Some(f32::NAN),
             3000.0,
             true,
@@ -1514,6 +1546,7 @@ mod tests {
             None,
             None,
             FlightStage::Ascent,
+            false,
             false,
             None,
             3000.0,
