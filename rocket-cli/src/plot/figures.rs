@@ -84,10 +84,38 @@ impl Line {
     }
 }
 
+/// A second y axis on the right of a panel.
+///
+/// Used where quantities that belong together are not measured in the same
+/// thing — altitude against vertical acceleration, or vertical speed against
+/// tilt and air-brake extension. The alternative is one panel each, which puts
+/// the very comparison the reader wants on two different time axes.
+struct Secondary {
+    unit: &'static str,
+    lines: Vec<Line>,
+    zero_line: bool,
+}
+
+impl Secondary {
+    fn new(unit: &'static str, lines: Vec<Line>) -> Self {
+        Self {
+            unit,
+            lines,
+            zero_line: false,
+        }
+    }
+
+    fn with_zero(mut self) -> Self {
+        self.zero_line = true;
+        self
+    }
+}
+
 struct Panel {
     title: &'static str,
     unit: &'static str,
     lines: Vec<Line>,
+    secondary: Option<Secondary>,
     /// Draw a reference line at zero. Only meaningful where the sign carries
     /// information — velocity crossing zero *is* apogee.
     zero_line: bool,
@@ -103,10 +131,16 @@ impl Panel {
             title,
             unit,
             lines,
+            secondary: None,
             zero_line: false,
             x_labels: false,
             event_labels: false,
         }
+    }
+
+    fn with_secondary(mut self, secondary: Secondary) -> Self {
+        self.secondary = Some(secondary);
+        self
     }
 
     fn with_zero(mut self) -> Self {
@@ -163,6 +197,38 @@ impl<'a> Renderer<'a> {
                 .map(|i| (x[i] * x[i] + y[i] * y[i] + z[i] * z[i]).sqrt())
                 .collect();
             derived.insert("acc_magnitude", magnitude);
+        }
+
+        // Vertical acceleration in the earth frame. The log carries only
+        // body-frame components, so the longitudinal axis is projected onto the
+        // vertical with the estimator's own tilt and gravity is removed:
+        //
+        //     a_vertical = a_z * cos(tilt) - g
+        //
+        // On the pad that is 9.81 * cos(0) - 9.81 = 0, which is the check that
+        // the sign convention is right. Lateral components are left out — they
+        // are under 0.05 m/s^2 through this flight, far below the error the
+        // tilt estimate itself carries.
+        //
+        // It is deliberately absent wherever tilt is, rather than assuming
+        // vertical: under drogue the airframe hangs at an angle, and pretending
+        // otherwise would report a fabricated acceleration during exactly the
+        // phase where the assumption fails.
+        if let (Some(z), Some(tilt)) = (
+            log.column("acc_z"),
+            log.column("airbrakes_kf_tilt_deg"),
+        ) {
+            const G: f32 = 9.80665;
+            let vertical = (0..log.row_count)
+                .map(|i| {
+                    if tilt[i].is_finite() && z[i].is_finite() {
+                        z[i] * tilt[i].to_radians().cos() - G
+                    } else {
+                        f32::NAN
+                    }
+                })
+                .collect();
+            derived.insert("vertical_acc_earth", vertical);
         }
 
         // T+0 stays liftoff; the axis simply starts at a negative number when
@@ -233,80 +299,77 @@ impl<'a> Renderer<'a> {
 
     // ---------------------------------------------------------------- figures
 
-    /// The flight itself: where it went, how fast, how hard, and what the
-    /// recovery hardware did about it.
+    /// The flight itself: where it went, how fast, and what the recovery and
+    /// air-brake hardware did about it.
+    ///
+    /// Three panels, each pairing quantities that are read against each other.
+    /// Two of them carry a second y axis, because the pairings that matter here
+    /// are not in the same unit — altitude against vertical acceleration, and
+    /// vertical speed against tilt and brake extension. Splitting those into
+    /// one panel per unit is what a single axis would force, and it puts the
+    /// comparison the reader came for on two separate charts.
     pub fn render_flight(&self, path: &Path) -> Result<()> {
         let root = BitMapBackend::new(path, (WIDTH, HEIGHT)).into_drawing_area();
         root.fill(&theme::BG).plot()?;
         let (header, body) = root.split_vertically(HEADER_H);
         self.draw_header(&header, "Flight")?;
 
-        // Altitude gets the most height because it is the panel everything else
-        // is read against; the lane strip gets the least because a lane is
-        // legible at any height that fits its label. Only the last panel pays
-        // for tick labels.
-        let (p1, rest) = body.split_vertically(468);
-        let (p2, rest) = rest.split_vertically(406);
-        let (p3, rest) = rest.split_vertically(406);
-        let (p4, p5) = rest.split_vertically(346);
+        let (p1, rest) = body.split_vertically(760);
+        let (p2, p3) = rest.split_vertically(700);
 
         self.draw_panel(
             &p1,
             &Panel::new(
-                "Altitude ASL",
+                "Altitude & vertical acceleration",
                 "m",
                 vec![
-                    Line::new("deployment KF", "deployment_kf_altitude_asl", theme::CYAN),
-                    Line::new("airbrakes KF", "airbrakes_kf_altitude_asl", theme::AMBER),
-                    Line::new("GPS", "gps_altitude_asl", theme::VIOLET),
+                    // Both are metres and both are plotted as logged, but they
+                    // are referenced to different data — the estimator reports
+                    // above sea level, the MPC predicts above ground — so the
+                    // labels carry the reference rather than the axis.
+                    Line::new("airbrakes KF altitude (ASL)", "airbrakes_kf_altitude_asl", theme::CYAN),
+                    Line::new("predicted apogee (AGL)", "mpc_predicted_apogee_agl", theme::AMBER),
                 ],
             )
-            .with_event_labels(),
+            .with_event_labels()
+            .with_secondary(
+                Secondary::new(
+                    "m/s²",
+                    vec![Line::new(
+                        "vertical acceleration (earth)",
+                        "vertical_acc_earth",
+                        theme::GREEN,
+                    )],
+                )
+                .with_zero(),
+            ),
+            Y_GUTTER,
         )?;
         self.draw_panel(
             &p2,
             &Panel::new(
-                "Vertical velocity",
+                "Vertical speed, tilt & air brakes",
                 "m/s",
                 vec![
                     Line::new("deployment KF", "deployment_kf_vertical_velocity", theme::CYAN),
-                    Line::new("airbrakes KF", "airbrakes_kf_vertical_velocity", theme::AMBER),
+                    Line::new("airbrakes KF", "airbrakes_kf_vertical_velocity", theme::VIOLET),
                 ],
             )
-            .with_zero(),
-        )?;
-        self.draw_panel(
-            &p3,
-            &Panel::new(
-                "Acceleration",
-                "m/s²",
+            .with_zero()
+            .with_secondary(Secondary::new(
+                "° / %",
                 vec![
-                    Line::new("x", "acc_x", theme::CORAL),
-                    Line::new("y", "acc_y", theme::BLUE),
-                    Line::new("z", "acc_z", theme::ROSE),
-                    // Last, so it is drawn over the component it coincides
-                    // with — on a single-axis airframe that is always one of
-                    // them, and the magnitude is the trace being looked for.
-                    Line::new("|a|", "acc_magnitude", theme::GREEN),
-                ],
-            )
-            .with_zero(),
-        )?;
-        self.draw_panel(
-            &p4,
-            &Panel::new(
-                "Air brakes extension",
-                "%",
-                vec![
-                    Line::new("commanded", "air_brakes_commanded_extension", theme::AMBER)
+                    Line::new("tilt", "airbrakes_kf_tilt_deg", theme::ROSE),
+                    Line::new("brakes commanded", "air_brakes_commanded_extension", theme::AMBER)
                         .scaled(100.0),
-                    Line::new("actual", "air_brakes_actual_extension", theme::CYAN)
+                    Line::new("brakes actual", "air_brakes_actual_extension", theme::GREEN)
                         .scaled(100.0),
                 ],
-            ),
+            )),
+            Y_GUTTER,
         )?;
         self.draw_lanes(
-            &p5,
+            &p3,
             "Pyro & deployment",
             &[
                 ("drogue cont.", "pyro_drogue_continuity", theme::CYAN),
@@ -317,24 +380,32 @@ impl<'a> Renderer<'a> {
                 ("valid. deploy", "air_brakes_validation_deploy", theme::VIOLET),
             ],
             true,
+            Y_GUTTER,
         )?;
 
         root.present().plot()?;
         Ok(())
     }
 
-    /// Everything else that was logged: attitude, environment, power, GPS
-    /// quality, the payload rails, and the estimator's own flags.
+    /// Everything else that was logged.
+    ///
+    /// This figure is where the raw and whole-flight signals live: the body
+    /// accelerometer, the deployment estimator that keeps reporting all the way
+    /// down, attitude, environment, power, GPS quality, the payload rails and
+    /// the estimator's own flags. Several of these used to sit on the flight
+    /// figure; they moved here rather than being dropped when that figure was
+    /// cut to three panels, because a column that is logged and plotted nowhere
+    /// is a column nobody will remember to look at.
     pub fn render_misc(&self, path: &Path) -> Result<()> {
         let root = BitMapBackend::new(path, (WIDTH, HEIGHT)).into_drawing_area();
         root.fill(&theme::BG).plot()?;
         let (header, body) = root.split_vertically(HEADER_H);
         self.draw_header(&header, "Auxiliary")?;
 
-        // Three columns of four. Only the bottom row carries tick labels, so it
-        // is the only row that has to be taller.
-        let (top, bottom) = body.split_vertically(HEIGHT - HEADER_H - 566);
-        let upper = top.split_evenly((3, 3));
+        // Five rows of three. Only the bottom row carries tick labels, so it is
+        // the only row that has to be taller.
+        let (top, bottom) = body.split_vertically(HEIGHT - HEADER_H - 470);
+        let upper = top.split_evenly((4, 3));
         let lower = bottom.split_evenly((1, 3));
         let cells: Vec<_> = upper.into_iter().chain(lower).collect();
 
@@ -362,15 +433,40 @@ impl<'a> Renderer<'a> {
             .with_zero()
             .with_event_labels(),
             Panel::new(
-                "Tilt from vertical",
-                "°",
-                vec![Line::new("airbrakes KF", "airbrakes_kf_tilt_deg", theme::VIOLET)],
+                "Acceleration (body frame)",
+                "m/s²",
+                vec![
+                    Line::new("x", "acc_x", theme::CORAL),
+                    Line::new("y", "acc_y", theme::BLUE),
+                    Line::new("z", "acc_z", theme::ROSE),
+                    // Last, so it is drawn over the component it coincides
+                    // with — on a single-axis airframe that is always one of
+                    // them, and the magnitude is the trace being looked for.
+                    Line::new("|a|", "acc_magnitude", theme::GREEN),
+                ],
             )
+            .with_zero()
             .with_event_labels(),
+            Panel::new(
+                "Altitude ASL",
+                "m",
+                vec![
+                    // The deployment filter is the one that keeps reporting
+                    // through descent, which is why the whole-flight altitude
+                    // picture lives here and not on the flight figure.
+                    Line::new("deployment KF", "deployment_kf_altitude_asl", theme::CYAN),
+                    Line::new("GPS", "gps_altitude_asl", theme::VIOLET),
+                ],
+            ),
             Panel::new(
                 "Barometric pressure",
                 "Pa",
                 vec![Line::new("baro", "pressure", theme::CYAN)],
+            ),
+            Panel::new(
+                "Tilt from vertical",
+                "°",
+                vec![Line::new("airbrakes KF", "airbrakes_kf_tilt_deg", theme::VIOLET)],
             ),
             Panel::new(
                 "Temperature",
@@ -420,7 +516,17 @@ impl<'a> Renderer<'a> {
                     Line::new("per 12V", "payload_per_12v_ma", theme::ROSE),
                 ],
             ),
-            // Bottom row: these three carry the shared tick labels.
+            Panel::new(
+                "Air brakes extension",
+                "%",
+                vec![
+                    Line::new("commanded", "air_brakes_commanded_extension", theme::AMBER)
+                        .scaled(100.0),
+                    Line::new("actual", "air_brakes_actual_extension", theme::CYAN)
+                        .scaled(100.0),
+                ],
+            ),
+            // Bottom row: these carry the shared tick labels.
             Panel::new(
                 "Payload actuators",
                 "steps",
@@ -445,13 +551,13 @@ impl<'a> Renderer<'a> {
         ];
 
         for (cell, panel) in cells.iter().zip(panels.iter()) {
-            self.draw_panel(cell, panel)?;
+            self.draw_panel(cell, panel, 0)?;
         }
-        // The twelfth cell is the flag strip: these are the estimator's own
-        // account of why it did what it did, and they only make sense against
-        // the same time axis as everything else.
+        // The last cell is the flag strip: these are the estimator's own account
+        // of why it did what it did, and they only make sense against the same
+        // time axis as everything else.
         self.draw_lanes(
-            &cells[11],
+            &cells[14],
             "Estimator & baro flags",
             &[
                 ("pad calib.", "airbrakes_pad_calibrated", theme::GREEN),
@@ -464,6 +570,7 @@ impl<'a> Renderer<'a> {
                 ("ab resync", "airbrakes_baro_resync", theme::ROSE),
             ],
             true,
+            0,
         )?;
 
         root.present().plot()?;
@@ -664,7 +771,7 @@ impl<'a> Renderer<'a> {
         }
     }
 
-    fn draw_panel(&self, area: &Area, panel: &Panel) -> Result<()> {
+    fn draw_panel(&self, area: &Area, panel: &Panel, right_gutter: i32) -> Result<()> {
         area.fill(&theme::PANEL_BG).plot()?;
         let (w, _) = area.dim_in_pixel();
         // One reduction bucket per horizontal pixel of plotting area. Asking for
@@ -677,25 +784,54 @@ impl<'a> Renderer<'a> {
             .map(|line| (line, self.trace(line, buckets)))
             .collect();
 
-        if traces.iter().all(|(_, t)| t.is_none()) {
-            return self.draw_absent_panel(area, panel, &traces);
+        let nothing_primary = traces.iter().all(|(_, t)| t.is_none());
+        let nothing_secondary = panel.secondary.as_ref().is_none_or(|sec| {
+            sec.lines
+                .iter()
+                .all(|line| self.trace(line, buckets).is_none())
+        });
+        if nothing_primary && nothing_secondary {
+            return self.draw_absent_panel(area, panel, &traces, right_gutter);
         }
 
         let axis = self.axis_range(&traces, panel.zero_line);
         let (y_lo, y_hi) = (axis.lo as f64, axis.hi as f64);
+
+        // The secondary traces are reduced up front so its axis can be sized
+        // before the chart is built.
+        let secondary: Vec<(&Line, Option<Trace>)> = panel
+            .secondary
+            .iter()
+            .flat_map(|s| s.lines.iter())
+            .map(|line| (line, self.trace(line, buckets)))
+            .collect();
+        let s_axis = panel
+            .secondary
+            .as_ref()
+            .map(|sec| self.axis_range(&secondary, sec.zero_line));
+        let (s_lo, s_hi) = s_axis
+            .as_ref()
+            .map(|a| (a.lo as f64, a.hi as f64))
+            .unwrap_or((0.0, 1.0));
 
         let mut chart = ChartBuilder::on(area)
             .caption(
                 panel.title,
                 TextStyle::from((theme::FONT, theme::F_CAPTION).into_font()).color(&theme::TEXT),
             )
-            .margin_right(40)
+            .margin_right(if right_gutter > 0 { 14 } else { 40 })
             .margin_left(14)
             .margin_bottom(12)
             .x_label_area_size(if panel.x_labels { X_LABELS_H } else { 0 })
             .y_label_area_size(Y_GUTTER)
+            .right_y_label_area_size(right_gutter)
             .build_cartesian_2d(self.x_range.0..self.x_range.1, y_lo..y_hi)
-            .plot()?;
+            .plot()?
+            // Always dual, even with nothing on the right: the gutter is
+            // reserved per figure so that panels sharing a time axis start and
+            // end at the same x, and a panel that opted out of the second axis
+            // must not therefore be wider than its neighbours.
+            .set_secondary_coord(self.x_range.0..self.x_range.1, s_lo..s_hi);
 
         {
             let mut binding = chart.configure_mesh();
@@ -720,6 +856,23 @@ impl<'a> Renderer<'a> {
                 mesh.disable_x_axis();
             }
             mesh.draw().plot()?;
+        }
+
+        if let Some(sec) = &panel.secondary {
+            chart
+                .configure_secondary_axes()
+                .y_desc(sec.unit)
+                .axis_style(theme::AXIS)
+                .label_style(
+                    TextStyle::from((theme::FONT, theme::F_TICK).into_font())
+                        .color(&theme::MUTED),
+                )
+                .axis_desc_style(
+                    TextStyle::from((theme::FONT, theme::F_TICK).into_font())
+                        .color(&theme::MUTED),
+                )
+                .draw()
+                .plot()?;
         }
 
         self.draw_stage_bands(&mut chart, y_lo, y_hi)?;
@@ -769,6 +922,33 @@ impl<'a> Renderer<'a> {
             }
         }
 
+        for (line, trace) in &secondary {
+            let Some(trace) = trace else { continue };
+            for (i, run) in trace.runs.iter().enumerate() {
+                let points: Vec<(f64, f64)> =
+                    run.iter().map(|&(t, v)| (t, v as f64)).collect();
+                let style = line.color.stroke_width(2);
+                let series = chart
+                    .draw_secondary_series(
+                        points
+                            .windows(2)
+                            .map(|w| PathElement::new(vec![w[0], w[1]], style)),
+                    )
+                    .plot()?;
+                // `draw_secondary_series` hands back an annotation on the
+                // *primary* chart, so one legend covers both axes.
+                if i == 0 {
+                    let color = line.color;
+                    series.label(line.label).legend(move |(x, y)| {
+                        PathElement::new(
+                            vec![(x, y), (x + LEGEND_SWATCH, y)],
+                            color.stroke_width(6),
+                        )
+                    });
+                }
+            }
+        }
+
         if panel.event_labels {
             self.draw_event_labels(&mut chart, y_lo, y_hi)?;
         }
@@ -794,17 +974,25 @@ impl<'a> Renderer<'a> {
         // panel is never ambiguous between "not fitted" and "nothing happened".
         let missing: Vec<&str> = traces
             .iter()
+            .chain(secondary.iter())
             .filter(|(_, t)| t.is_none())
             .map(|(l, _)| l.label)
             .collect();
         if !missing.is_empty() {
             notes.push(format!("no data: {}", missing.join(", ")));
         }
-        if let Some((lo, hi)) = axis.clipped {
-            notes.push(format!(
-                "axis excludes outliers — full range {lo:.1} to {hi:.1} {}",
-                panel.unit
-            ));
+        for (range, unit) in [
+            (Some(&axis), panel.unit),
+            (
+                s_axis.as_ref(),
+                panel.secondary.as_ref().map_or("", |s| s.unit),
+            ),
+        ] {
+            if let Some((lo, hi)) = range.and_then(|a| a.clipped) {
+                notes.push(format!(
+                    "axis excludes outliers — full range {lo:.1} to {hi:.1} {unit}"
+                ));
+            }
         }
         if !notes.is_empty() {
             let (w, _) = area.dim_in_pixel();
@@ -826,18 +1014,58 @@ impl<'a> Renderer<'a> {
         area: &Area,
         panel: &Panel,
         traces: &[(&Line, Option<Trace>)],
+        right_gutter: i32,
     ) -> Result<()> {
         let (w, h) = area.dim_in_pixel();
-        // Same size and position as a live panel's caption, so a grid of panels
-        // reads as one grid rather than as two kinds of thing.
-        area.draw_text(
-            panel.title,
-            &TextStyle::from((theme::FONT, theme::F_CAPTION).into_font())
-                .color(&theme::MUTED)
-                .pos(Pos::new(HPos::Center, VPos::Center)),
-            (w as i32 / 2, 34),
-        )
-        .plot()?;
+
+        // Still a real chart, even with nothing to put in it. The bottom panel
+        // of a column owns that column's tick labels, and whether that panel
+        // happens to have data is chance — on this log the bottom two cells are
+        // payload columns the flight never wrote, and returning early here left
+        // two entire columns of the auxiliary figure with no time axis at all.
+        let mut chart = ChartBuilder::on(area)
+            .caption(
+                panel.title,
+                TextStyle::from((theme::FONT, theme::F_CAPTION).into_font())
+                    .color(&theme::MUTED),
+            )
+            .margin_right(if right_gutter > 0 { 14 } else { 40 })
+            .margin_left(14)
+            .margin_bottom(12)
+            .x_label_area_size(if panel.x_labels { X_LABELS_H } else { 0 })
+            .y_label_area_size(Y_GUTTER)
+            .right_y_label_area_size(right_gutter)
+            .build_cartesian_2d(self.x_range.0..self.x_range.1, 0f64..1f64)
+            .plot()?;
+
+        {
+            let mut binding = chart.configure_mesh();
+            let mesh = binding
+                .disable_y_mesh()
+                .light_line_style(theme::GRID.mix(0.55))
+                .bold_line_style(theme::GRID)
+                .axis_style(theme::AXIS)
+                .label_style(
+                    TextStyle::from((theme::FONT, theme::F_TICK).into_font())
+                        .color(&theme::MUTED),
+                )
+                .y_labels(0)
+                .axis_desc_style(
+                    TextStyle::from((theme::FONT, theme::F_TICK).into_font())
+                        .color(&theme::MUTED),
+                );
+            if panel.x_labels {
+                mesh.x_desc("T+ seconds");
+            } else {
+                mesh.disable_x_axis();
+            }
+            mesh.draw().plot()?;
+        }
+
+        self.draw_stage_bands(&mut chart, 0.0, 1.0)?;
+        self.draw_event_rules(&mut chart, 0.0, 1.0)?;
+        self.draw_plot_border(&mut chart, 0.0, 1.0)?;
+
         // Distinguishes a firmware that never wrote the column from one that
         // wrote it and had nothing to say — different problems, different fixes.
         let reason = if traces
@@ -870,6 +1098,7 @@ impl<'a> Renderer<'a> {
         title: &'static str,
         lanes: &[(&str, &str, RGBColor)],
         x_labels: bool,
+        right_gutter: i32,
     ) -> Result<()> {
         area.fill(&theme::PANEL_BG).plot()?;
         let n = lanes.len() as f64;
@@ -879,11 +1108,12 @@ impl<'a> Renderer<'a> {
                 title,
                 TextStyle::from((theme::FONT, theme::F_CAPTION).into_font()).color(&theme::TEXT),
             )
-            .margin_right(40)
+            .margin_right(if right_gutter > 0 { 14 } else { 40 })
             .margin_left(14)
             .margin_bottom(12)
             .x_label_area_size(if x_labels { X_LABELS_H } else { 0 })
             .y_label_area_size(Y_GUTTER)
+            .right_y_label_area_size(right_gutter)
             .build_cartesian_2d(self.x_range.0..self.x_range.1, 0f64..n)
             .plot()?;
 
