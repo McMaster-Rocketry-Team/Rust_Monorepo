@@ -294,9 +294,10 @@ pub struct FlightDataSlowRecord {
     /// finished log could not answer "what did the firmware think its AGL
     /// was?" at all.
     ///
-    /// A low-passed barometer reading while the rocket is on the rail, and a
-    /// constant latched at ignition detection afterwards, so it moves only
-    /// during the pad segment and is flat for the whole flight.
+    /// The mean of one second of barometer while the rocket is on the rail,
+    /// stepping once a second, and a constant latched at ignition detection
+    /// afterwards — so it moves only during the pad segment and is flat for
+    /// the whole flight.
     ///
     /// `None` only when this record's tick had no matching estimator sample —
     /// the same condition that empties the fast record's `deployment` group,

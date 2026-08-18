@@ -351,9 +351,10 @@ impl<'a> Renderer<'a> {
         // here, once, against the pad reference the log now carries.
         //
         // Row-wise rather than against a single scalar: on the pad the
-        // reference is a settling low pass, and subtracting it row by row is
-        // what puts the pre-launch trace at 0 instead of at whatever the low
-        // pass had reached. Rows before the first slow record have no
+        // reference is a windowed mean that steps once a second, and
+        // subtracting it row by row is what puts the pre-launch trace at 0
+        // instead of at whatever step it had reached. Rows before the first
+        // slow record have no
         // reference of their own and fall back to the first one the session
         // ever recorded, so the conversion leaves no gap that the source
         // column did not already have.

@@ -316,12 +316,14 @@ impl FlightEstimators {
     /// the filter on a clock of its own and disagree with the SD log about
     /// what a sample said.
     ///
-    /// Not an `Option`, unlike the filter's numbers: this is a low-passed
-    /// barometer reading while the rocket is on the rail and a constant
+    /// Not an `Option`, unlike the filter's numbers: this is a mean of one
+    /// second of barometer while the rocket is on the rail and a constant
     /// latched at ignition detection afterwards, so it exists in every
     /// stage including the Mach lockout, where the filter itself is frozen.
-    /// It reads 0.0 only before the first sample anchors it (see
-    /// [`RocketStateEstimator::launch_pad_altitude_asl`]).
+    /// It reads 0.0 only before the estimator's first sample — the windowed
+    /// mean degrades through its partial window rather than going absent
+    /// while it fills (see [`RocketStateEstimator::launch_pad_altitude_asl`]),
+    /// which is what keeps that promise true.
     pub fn launch_pad_altitude_asl(&self) -> f32 {
         self.deployment.launch_pad_altitude_asl()
     }

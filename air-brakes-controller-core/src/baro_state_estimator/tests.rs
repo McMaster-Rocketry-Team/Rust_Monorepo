@@ -295,6 +295,19 @@ fn pad_reference_excludes_the_second_before_ignition() {
     let mut estimator = RocketStateEstimator::new(subsonic_profile(), IGNITION_ACC_THRESHOLD);
     let mut noise = NoiseGen::new(0.5);
 
+    // A fifth of a second in — before any window has closed — there is
+    // already a reference, and it is the pad rather than 0. Everything
+    // downstream reads this as "absent means no estimator sample", so a
+    // young session must not look like a pad at sea level.
+    for _ in 0..(SAMPLES_PER_S / 5) {
+        estimator.update(clock.tick(), sf(PAD_SF), PAD_ASL + noise.next());
+    }
+    let young = estimator.launch_pad_altitude_asl();
+    assert!(
+        (young - PAD_ASL).abs() < 1.0,
+        "0.2 s in the reference read {young:.2}m against a true {PAD_ASL}m"
+    );
+
     // 30 s of quiet rail.
     for _ in 0..(30 * SAMPLES_PER_S) {
         estimator.update(clock.tick(), sf(PAD_SF), PAD_ASL + noise.next());

@@ -337,14 +337,26 @@ pub enum RocketState {
 /// somebody can read a velocity out of.
 ///
 /// **Handed out one window late** is the whole design. Windows close on
-/// wall clock, and the mean that [`Self::reference_asl`] returns is always
-/// the one before the one that closed most recently — so it covers a full
-/// second that ended between one and two seconds ago, and at the instant
-/// ignition latches it cannot contain a single sample taken within a
-/// second of the motor lighting. Nothing an igniter does to a static port
-/// is in it. That guard is why the previous sample is not simply averaged
-/// up to ignition, and it costs nothing: the rocket sits armed on the rail
-/// for minutes.
+/// wall clock, and once two have closed the mean that
+/// [`Self::reference_asl`] returns is the one before the one that closed
+/// most recently — so it covers a full second that ended between one and
+/// two seconds ago, and at the instant ignition latches it cannot contain
+/// a single sample taken within a second of the motor lighting. Nothing an
+/// igniter does to a static port is in it. That guard is why the previous
+/// sample is not simply averaged up to ignition, and it costs nothing: the
+/// rocket sits armed on the rail for minutes.
+///
+/// **Before two windows have closed** — the first ~2 s of a session, and
+/// nowhere else — `reference_asl` degrades in order rather than going
+/// absent: the one window that has closed, then the partial mean of the
+/// window still filling. That keeps the promise every consumer downstream
+/// is written against (`FlightEstimators::launch_pad_altitude_asl`, the
+/// slow record's `launch_pad_altitude_asl`, the plot's row-wise AGL
+/// conversion): a reference exists from the estimator's first sample
+/// onward, and absence means "no estimator sample", never "too early". It
+/// does mean the lag guarantee above holds only once those 2 s are up —
+/// which is always true at ignition, because arming the board and walking
+/// away takes minutes, not seconds.
 ///
 /// **And no gate.** Until 2026-08-18 this was a 10 s low pass behind a
 /// 100 m innovation gate with a 1 s resync, and the gate existed for one
@@ -407,9 +419,13 @@ impl PadReference {
         self.count += 1;
     }
 
-    /// The reference, or `None` while fewer than two windows have closed.
+    /// The reference: the lagged window once there is one, else the best
+    /// thing there is, else `None` before the very first sample. See the
+    /// type doc for why this degrades rather than going absent.
     fn reference_asl(&self) -> Option<f32> {
         self.reference_asl
+            .or(self.pending_asl)
+            .or_else(|| (self.count > 0).then(|| (self.sum / self.count as f64) as f32))
     }
 }
 
@@ -519,8 +535,8 @@ impl RocketStateEstimator {
     ///
     /// Zero on the first sample, where there is no previous timestamp to
     /// difference against. Nothing is timing anything yet there, and the pad
-    /// altitude that the `OnPad` low pass would move is initialised from
-    /// that very sample.
+    /// reference does not read this at all — its windows close on the
+    /// timestamps themselves.
     fn timer_dt(&mut self, timestamp_us: u64) -> f32 {
         let dt = match self.prev_timestamp_us {
             Some(prev) => (timestamp_us.saturating_sub(prev)) as f32 * 1e-6,
@@ -901,7 +917,7 @@ impl RocketStateEstimator {
     /// This doc used to claim the opposite — that every stage but the
     /// lockout returned `Some`, `OnPad` included, because "the filter is
     /// running and fusing baro in all of them". It never was on the pad; the
-    /// pad tracker is a gated low pass, not a filter, and
+    /// pad reference is a windowed mean, not a filter, and
     /// `kf_accessors_absent_before_birth_and_during_lockout` asserts the
     /// `None`. Written down because a log reader that expects an altitude
     /// here would read the whole pad segment as missing data rather than as
@@ -933,14 +949,15 @@ impl RocketStateEstimator {
     }
 
     /// Launch pad altitude ASL (m), available in every stage: while on the
-    /// pad this is the current low-passed pad estimate (tracking slow baro
-    /// drift); from ignition detection onward it is the value latched at
+    /// pad this is [`PadReference`]'s current mean — one second of
+    /// barometer, stepping once a second, from a window that ended a second
+    /// ago; from ignition detection onward it is the value latched at
     /// detection.
     pub fn launch_pad_altitude_asl(&self) -> f32 {
         match &self.stage {
-            // Zero until the second averaging window closes — for the
-            // first ~2 s there is genuinely no reference yet, and every
-            // caller of this is on the pad where it is about to exist.
+            // Zero before the first sample and nowhere else — see
+            // `PadReference::reference_asl`, which degrades through the
+            // partial window rather than going absent for the first ~2 s.
             Stage::OnPad { pad } => pad.reference_asl().unwrap_or(0.0),
             Stage::Ascent {
                 launch_pad_altitude_asl,
