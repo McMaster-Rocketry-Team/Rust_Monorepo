@@ -75,6 +75,19 @@ fixed_point_factory!(EpmRailMaFac, f32, 0.0, 1000.0, 40.0);
 // (the home position, which is where they sit for most of a flight) has to
 // stay distinguishable from an actuator SEM never reported.
 fixed_point_factory!(ActuatorStepsFac, f32, 0.0, 65535.0, 64.0);
+// Fracture load on one experiment channel, newtons, tension positive. 8 bits
+// over -20..80N is (80 - -20) / (2^8 - 1) = 0.392N per code.
+//
+// The range is the experiment team's, not a mirror of the CAN field's. CAN
+// carries a full int16 of centinewtons — +/-327.67N — and encoding that here
+// would have cost 2.57N per code, six percent of a 40N fracture, which is the
+// same mistake the rails made with their old 0..10.23A range. 80N of tension
+// covers the pull; 20N of compression covers the closure preload, which is the
+// only reason the bottom of the range is negative at all.
+//
+// The SD slow record keeps the raw centinewtons, so a channel that pulls past
+// 80N is exact in the log and merely pinned on the radio.
+fixed_point_factory!(LoadCellNFac, f32, -20.0, 80.0, 0.4);
 
 // The all-ones code of each payload-relayed field, spent on "the payload could
 // not take this reading" instead of on a value. The top of the range is the
@@ -86,6 +99,15 @@ fixed_point_factory!(ActuatorStepsFac, f32, 0.0, 65535.0, 64.0);
 // present reading can never collide with the sentinel.
 const EPM_RAIL_MA_UNAVAILABLE_CODE: EpmRailMaFacBase = (1 << EPM_RAIL_MA_FAC_BITS) - 1;
 const ACTUATOR_STEPS_UNAVAILABLE_CODE: ActuatorStepsFacBase = (1 << ACTUATOR_STEPS_FAC_BITS) - 1;
+// The top code again, not the bottom, so the whole payload block follows one
+// rule. It costs the top quantum of tension — a channel pulling 80N or more
+// reports 79.6N — which is saturation, already an approximation. The bottom of
+// the range is 20N of compression, and unlike a rail at 0mA or a bus at 0V it
+// is not a reading anything downstream turns on.
+// Widened before the shift: this field is 8 bits in a u8 base, so `1 << 8`
+// would overflow the type the other sentinels above shift in.
+const LOAD_CELL_N_UNAVAILABLE_CODE: LoadCellNFacBase =
+    ((1u16 << LOAD_CELL_N_FAC_BITS) - 1) as LoadCellNFacBase;
 
 // `shared_battery_v` and `epm_batt_v` use the same trick, but their factories,
 // sentinels and codecs live in `super` — each is carried by more than one
@@ -101,34 +123,33 @@ fn defined(value: Option<f32>) -> Option<f32> {
     value.filter(|v| !v.is_nan())
 }
 
-// 304 bits of declared fields = exactly 38 bytes, no spare. On air the packet
+// 328 bits of declared fields = exactly 41 bytes, no spare. On air the packet
 // costs `n + 1` bytes of data plus `(n + 1) / 4` of reed-solomon ecc, which
-// puts this at 48 bytes on air.
+// puts this at 52 bytes on air.
 //
 // The link is SF12 / 250kHz / CR4/8, preamble 8, explicit header, **CRC off**
 // (`create_tx_packet_params(8, false, false, false, ..)` in `vlp::lora`), and
 // the sx126x turns low-data-rate optimization on for SF12 at 250kHz. That
 // makes one symbol 16.384ms and the preamble 200.7ms, and the payload symbol
 // count `8 + ceil((8 * PL - 20) / 40) * 8` — which steps every five bytes of
-// on-air payload. The current bucket is PL 48..52, i.e. **38..41 bytes of
-// struct, all of them 1642.5ms on air**; 42 bytes is 1773.6ms, +131.1ms.
+// on-air payload. The bucket is PL 48..52, i.e. 38..41 bytes of struct, all of
+// them 1642.5ms on air. **41 bytes is the top of it**; 42 bytes is 1773.6ms,
+// +131.1ms, and 1642.5ms is already 82% of the 2s telemetry period.
 //
-// So there are three bytes of free headroom above this struct, not zero. An
-// earlier version of this comment said 38 bytes was the last size in the
-// bucket, from step boundaries computed with CRC on; the radio is configured
-// with CRC off, which moves them. The struct is still sized to its contents
-// rather than to the step — growth should be a deliberate edit — but "it will
-// cost air time" is not the reason to refuse one until 41 bytes.
+// So this packet is now genuinely full, in a way it was not before: an earlier
+// version of this comment said 38 bytes was the last size in the bucket, from
+// step boundaries computed with CRC on, but the radio runs with CRC off. That
+// mistake hid three bytes of headroom, which the payload's load cells have now
+// spent. The next field costs 131.1ms whatever it is.
 //
-// The packet was 300 bits with four spare until 2026-08-18, when the payload's
-// EPM battery range came down to 12..17V and its six rail currents to 0..1A.
-// That freed fourteen bits, and those plus the four spare bought the payload's
-// arm-sequence state and five of its seven per-channel experiment flags — the
-// two it could not fit, `homed` and `enabled`, are the two the ground already
-// knows: `enabled` is fitted-at-build configuration, and `homed` is an
-// arm-sequence intermediate that `arm_seq_complete` and `arm_seq_fault`
-// already summarise. The three load cells did not fit at any resolution and
-// stay on SD.
+// The packet was 300 bits with four spare until 2026-08-18. Narrowing the
+// payload's EPM battery to 12..17V and its six rail currents to 0..1A freed
+// fourteen bits; those plus the four spare bought the payload's arm-sequence
+// state and five of its seven per-channel experiment flags. The two that did
+// not fit, `homed` and `enabled`, are the two the ground already knows:
+// `enabled` is fitted-at-build configuration, and `homed` is an arm-sequence
+// intermediate that `arm_seq_complete` and `arm_seq_fault` already summarise.
+// The three fracture load cells then took the last three bytes at 8 bits each.
 //
 // Six of those bits are validity bits. The packet is a bit-packed
 // `packed_struct` and so cannot carry an `Option` on the wire; the rule the
@@ -138,7 +159,7 @@ fn defined(value: Option<f32>) -> Option<f32> {
 // back as an `Option` by its getter, so no caller can confuse "the estimator
 // had nothing to say" with a real zero.
 #[derive(PackedStruct, Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "38")]
+#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "41")]
 pub struct TelemetryPacket {
     #[packed_field(bits = "0..4")]
     nonce: Integer<u8, packed_bits::Bits<4>>,
@@ -392,6 +413,19 @@ pub struct TelemetryPacket {
     #[packed_field(element_size_bits = "10")]
     sem_actuator_3_steps: Integer<ActuatorStepsFacBase, packed_bits::Bits<ACTUATOR_STEPS_FAC_BITS>>,
 
+    /// Fracture load per experiment channel, newtons, tension positive.
+    /// 0.392N resolution over -20..79.6N; the all-ones code is absence, which
+    /// is what an unfitted channel and a silent SEM both report. Absence has
+    /// to be in-band here rather than borrowed from a flag: `enabled` is one
+    /// of the two per-channel flags that stayed on SD, so the packet has no
+    /// other way to say the channel is not there.
+    #[packed_field(element_size_bits = "8")]
+    sem_load_cell_1_n: Integer<LoadCellNFacBase, packed_bits::Bits<LOAD_CELL_N_FAC_BITS>>,
+    #[packed_field(element_size_bits = "8")]
+    sem_load_cell_2_n: Integer<LoadCellNFacBase, packed_bits::Bits<LOAD_CELL_N_FAC_BITS>>,
+    #[packed_field(element_size_bits = "8")]
+    sem_load_cell_3_n: Integer<LoadCellNFacBase, packed_bits::Bits<LOAD_CELL_N_FAC_BITS>>,
+
     /// Five of the seven per-channel experiment flags, channel-major. Decode
     /// with [`Self::payload_experiment_flags`] rather than field by field;
     /// [`DownlinkExperimentFlags`] records which two did not fit and why.
@@ -534,6 +568,8 @@ impl TelemetryPacket {
         epm_rail_ma: [Option<u16>; 6],
         // Experiment channels 1..3.
         sem_actuator_steps: [Option<u16>; 3],
+        // Centinewtons, as `CustomPayloadStatusMessage` carries them.
+        sem_load_cell_cn: [Option<i16>; 3],
         sem_experiment_flags: [ExperimentChannelFlags; 3],
     ) -> Self {
         // A NaN that reaches a `fixed_point_factory` panics: the min/max
@@ -666,6 +702,10 @@ impl TelemetryPacket {
             sem_actuator_2_steps: Self::encode_steps(sem_actuator_steps[1]),
             sem_actuator_3_steps: Self::encode_steps(sem_actuator_steps[2]),
 
+            sem_load_cell_1_n: Self::encode_load_cell_n(sem_load_cell_cn[0]),
+            sem_load_cell_2_n: Self::encode_load_cell_n(sem_load_cell_cn[1]),
+            sem_load_cell_3_n: Self::encode_load_cell_n(sem_load_cell_cn[2]),
+
             payload_exp1_fractured: sem_experiment_flags[0].fractured,
             payload_exp1_finished: sem_experiment_flags[0].finished,
             payload_exp1_fault: sem_experiment_flags[0].fault,
@@ -717,6 +757,26 @@ impl TelemetryPacket {
                 let code: ActuatorStepsFacBase =
                     ActuatorStepsFac::to_fixed_point_capped(steps as f32).into();
                 code.min(ACTUATOR_STEPS_UNAVAILABLE_CODE - 1).into()
+            }
+        }
+    }
+
+    /// Centinewtons off the CAN message to the packet's newtons.
+    ///
+    /// `to_fixed_point_capped` already pins a channel below -20N to the bottom
+    /// of the range, which is the right answer: 20N of compression is past
+    /// anything the closure preload produces, and reporting "at least this
+    /// compressed" beats reporting nothing. The top is capped one code short
+    /// so a channel pulling past 80N cannot land on the absence code.
+    fn encode_load_cell_n(
+        load_cn: Option<i16>,
+    ) -> Integer<LoadCellNFacBase, packed_bits::Bits<LOAD_CELL_N_FAC_BITS>> {
+        match load_cn {
+            None => LOAD_CELL_N_UNAVAILABLE_CODE.into(),
+            Some(cn) => {
+                let code: LoadCellNFacBase =
+                    LoadCellNFac::to_fixed_point_capped(cn as f32 / 100.0).into();
+                code.min(LOAD_CELL_N_UNAVAILABLE_CODE - 1).into()
             }
         }
     }
@@ -1002,6 +1062,50 @@ impl TelemetryPacket {
         self.payload_arm_seq_fault
     }
 
+    /// Experiment channel 1 fracture load, newtons, tension positive. `None`
+    /// if SEM did not report the channel, which includes a channel that is not
+    /// fitted. A channel resting at zero load reads `Some(0.0)`.
+    pub fn sem_load_cell_1_n(&self) -> Option<f32> {
+        Self::decode_load_cell_n(self.sem_load_cell_1_n)
+    }
+
+    /// Experiment channel 2 fracture load, newtons.
+    pub fn sem_load_cell_2_n(&self) -> Option<f32> {
+        Self::decode_load_cell_n(self.sem_load_cell_2_n)
+    }
+
+    /// Experiment channel 3 fracture load, newtons.
+    pub fn sem_load_cell_3_n(&self) -> Option<f32> {
+        Self::decode_load_cell_n(self.sem_load_cell_3_n)
+    }
+
+    /// Fracture loads for experiment channels 1..3, newtons, each `None` if
+    /// SEM did not report that channel.
+    ///
+    /// This is the value the payload last reported, not a peak. At a 2s
+    /// downlink cadence sampling a 10Hz CAN stream, a fracture transient will
+    /// not be on it — the `fractured` flag is what says a break happened, and
+    /// the SD log at 10Hz is what has the trace. Read this as "what the
+    /// channel is holding", not "what it broke at".
+    pub fn load_cell_n(&self) -> [Option<f32>; 3] {
+        [
+            self.sem_load_cell_1_n(),
+            self.sem_load_cell_2_n(),
+            self.sem_load_cell_3_n(),
+        ]
+    }
+
+    fn decode_load_cell_n(
+        raw: Integer<LoadCellNFacBase, packed_bits::Bits<LOAD_CELL_N_FAC_BITS>>,
+    ) -> Option<f32> {
+        let code: LoadCellNFacBase = raw.into();
+        if code == LOAD_CELL_N_UNAVAILABLE_CODE {
+            None
+        } else {
+            Some(LoadCellNFac::to_float(raw))
+        }
+    }
+
     /// Experiment state for channels 1..3, as much of it as the packet
     /// carries. See [`DownlinkExperimentFlags`] for the two flags it does not.
     pub fn payload_experiment_flags(&self) -> [DownlinkExperimentFlags; 3] {
@@ -1183,6 +1287,10 @@ impl TelemetryPacket {
             sem_actuator_2_steps: self.sem_actuator_2_steps(),
             sem_actuator_3_steps: self.sem_actuator_3_steps(),
 
+            sem_load_cell_1_n: self.sem_load_cell_1_n(),
+            sem_load_cell_2_n: self.sem_load_cell_2_n(),
+            sem_load_cell_3_n: self.sem_load_cell_3_n(),
+
             payload_experiment_flags: self
                 .payload_experiment_flags()
                 .iter()
@@ -1300,6 +1408,9 @@ pub struct TelemetryPacketBuilderState {
     pub epm_rail_ma: [Option<u16>; 6],
     /// Experiment channels 1..3.
     pub sem_actuator_steps: [Option<u16>; 3],
+    /// Fracture load per experiment channel, centinewtons as the CAN message
+    /// carries them. `None` for a channel SEM did not report.
+    pub sem_load_cell_cn: [Option<i16>; 3],
     /// Per-channel experiment state from `CustomPayloadStatusMessage`, all
     /// seven flags. The packet takes five of them; keeping all seven here
     /// means the builder holds what the payload said rather than what the
@@ -1363,6 +1474,7 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 epm_batt_mv: None,
                 epm_rail_ma: [None; 6],
                 sem_actuator_steps: [None; 3],
+                sem_load_cell_cn: [None; 3],
                 sem_experiment_flags: [ExperimentChannelFlags::default(); 3],
             })),
         }
@@ -1422,6 +1534,7 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 state.epm_batt_mv,
                 state.epm_rail_ma,
                 state.sem_actuator_steps,
+                state.sem_load_cell_cn,
                 state.sem_experiment_flags,
             )
         })
@@ -1526,6 +1639,7 @@ mod tests {
             // exercises the pin as well as the quantization.
             [Some(120), Some(340), None, Some(780), Some(950), Some(2400)],
             [Some(0), Some(1200), Some(34567)],
+            [Some(0), None, Some(4250)],
             [ExperimentChannelFlags::default(); 3],
         )
     }
@@ -1571,6 +1685,7 @@ mod tests {
             None,
             [None; 6],
             [None; 3],
+            [None; 3],
             [ExperimentChannelFlags::default(); 3],
         )
     }
@@ -1580,8 +1695,8 @@ mod tests {
 
         let mut buffer = [0u8; 64];
         let len = packet.serialize(&mut buffer);
-        // 1 byte packet type + the 38 byte packed struct.
-        assert_eq!(len, 39);
+        // 1 byte packet type + the 41 byte packed struct.
+        assert_eq!(len, 42);
 
         let deserialized_packet = VLPDownlinkPacket::deserialize(&buffer[..len]).unwrap();
         assert_eq!(deserialized_packet, packet);
@@ -1652,6 +1767,12 @@ mod tests {
         // sentinel rather than wrapping or becoming `None`. 2.4A on the wire
         // reads as "at least 968mA"; the exact figure is on SD.
         assert_eq!(rails[5], Some(968));
+        // 0.392N per code. Channel 2 was reported unavailable and stays
+        // absent; channel 1 at exactly zero load must not be mistaken for it.
+        let loads = p.load_cell_n();
+        assert_relative_eq!(loads[0].unwrap(), 0.0, epsilon = 0.4);
+        assert_eq!(loads[1], None);
+        assert_relative_eq!(loads[2].unwrap(), 42.5, epsilon = 0.4);
         let steps = p.sem_actuator_steps();
         assert_eq!(steps[0], Some(0));
         assert_relative_eq!(steps[1].unwrap() as f32, 1200.0, epsilon = 64.1);
@@ -1688,6 +1809,7 @@ mod tests {
         assert_eq!(p.epm_batt_v(), EpmBattV::Unavailable);
         assert_eq!(p.epm_rail_ma(), [None; 6]);
         assert_eq!(p.sem_actuator_steps(), [None; 3]);
+        assert_eq!(p.load_cell_n(), [None; 3]);
         // AMP has not reported. This must not decode as 2.5V, which is the
         // bottom of the range and reads as a dead pack.
         assert_eq!(p.shared_battery_v(), None);
@@ -1750,6 +1872,7 @@ mod tests {
             None,
             [None; 6],
             [None; 3],
+            [None; 3],
             [ExperimentChannelFlags::default(); 3],
         );
 
@@ -1807,6 +1930,7 @@ mod tests {
             Some(u16::MAX),
             [Some(u16::MAX); 6],
             [Some(u16::MAX); 3],
+            [Some(i16::MAX); 3],
             [ExperimentChannelFlags::default(); 3],
         );
 
@@ -1817,6 +1941,11 @@ mod tests {
         }
         for steps in p.sem_actuator_steps() {
             assert_eq!(steps, Some(65471));
+        }
+        // 327.67N of tension is far past the top of the packet's range, so it
+        // pins one code short of the absence code rather than becoming it.
+        for load in p.load_cell_n() {
+            assert_relative_eq!(load.unwrap(), 79.6078, epsilon = 0.001);
         }
 
         // A genuine zero is still a zero, at the other end of the range.

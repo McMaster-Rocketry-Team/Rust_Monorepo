@@ -930,6 +930,33 @@ impl DownlinkPacketDisplay {
                                     }),
                                 ),
                             ],
+                            // What each channel is holding right now, not what
+                            // it broke at: a 2s packet sampling a 10Hz stream
+                            // will not land on a fracture transient. "e1 frac"
+                            // above is what says a break happened.
+                            vec![
+                                (
+                                    "load 1",
+                                    false,
+                                    Self::format_optional(p.sem_load_cell_1_n(), |v| {
+                                        format!("{:.1}N", v)
+                                    }),
+                                ),
+                                (
+                                    "load 2",
+                                    false,
+                                    Self::format_optional(p.sem_load_cell_2_n(), |v| {
+                                        format!("{:.1}N", v)
+                                    }),
+                                ),
+                                (
+                                    "load 3",
+                                    false,
+                                    Self::format_optional(p.sem_load_cell_3_n(), |v| {
+                                        format!("{:.1}N", v)
+                                    }),
+                                ),
+                            ],
                         ],
                     ),
                 ]

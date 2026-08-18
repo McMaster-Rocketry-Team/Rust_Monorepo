@@ -242,6 +242,9 @@ impl MockVLPClient {
                     // pinned reading next to a real one and an absent one.
                     [Some(120), Some(340), Some(55), Some(780), Some(1500), None],
                     [Some(0), Some(1200), Some(34567)],
+                    // Channel 1 broke at a load it is no longer holding,
+                    // channel 2 is under tension, channel 3 never reported.
+                    [Some(120), Some(3150), None],
                     // Channel 1 done and fractured, channel 2 still holding
                     // closure, channel 3 faulted — a mix, so a wrong flag is
                     // visible on sight the way the stack flags above are.

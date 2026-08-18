@@ -116,6 +116,7 @@ pub async fn send_fake_vlp_telemetry(args: SendVLPTelemetryArgs) -> Result<()> {
             Some(12600),
             [Some(120), Some(340), Some(55), Some(780), Some(1500), None],
             [Some(0), Some(1200), Some(34567)],
+            [Some(0), Some(2500), Some(4100)],
             [ExperimentChannelFlags {
                 fractured: false,
                 finished: false,
