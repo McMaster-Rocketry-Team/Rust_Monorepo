@@ -125,12 +125,8 @@ const PAD_RING_CAP: usize = 128;
 /// costs nothing operationally.
 const MIN_CALIBRATION_WINDOWS: usize = 3;
 
-// --- Thrust-vector alignment ----------------------------------------------
-/// How long after ignition the specific force is accumulated to solve which
-/// way the airframe axis points in the avionics frame. Its own phase of the
-/// [`State::Ignition`] state rather than a state of its own: nothing outside
-/// this file could observe the difference, and the two share every field.
-const ALIGN_DURATION_S: f32 = 0.5;
+// --- Stage 1 (thrust-vector alignment) ------------------------------------
+const STAGE1_DURATION_S: f32 = 0.5;
 
 // --- Lockout exit: the drag check (Piece 3) --------------------------------
 // The Mach the check votes at is per-airframe and lives in
@@ -251,15 +247,15 @@ struct PadSample {
     gyro: Vector3<f32>,
 }
 
-/// Three states, in the order the flight passes through them, and it only
-/// ever passes forward: `Armed` -> `Ignition` -> `AirbrakesEnabled`. There is
-/// no path back from any of them and no fourth state — the estimator's life
-/// ends by being dropped whole at apogee (see [`FlightEstimators::update`]),
-/// not by transitioning.
+/// Four states, in the order the flight passes through them, and it only ever
+/// passes forward: `Armed` -> `Stage1` -> `DeadReckoning` ->
+/// `AirbrakesEnabled`. There is no path back from any of them and no fifth —
+/// the estimator's life ends by being dropped whole at apogee (see
+/// [`FlightEstimators::update`]), not by transitioning.
 ///
 /// That is a stronger claim than "the transitions happen to be written
-/// one-way". Everything that could have gone backwards is now a transition
-/// condition instead of a live one: the brakes' permission used to be
+/// one-way". Everything that could have gone backwards is a transition
+/// condition rather than a live one: the brakes' permission used to be
 /// recomputed every sample downstream and could withdraw itself, which meant
 /// a filter transient could shut the brakes after they had opened. The Mach
 /// limit that permission turned on is now checked once, on the way into
@@ -303,36 +299,34 @@ enum State {
         calibration: Option<PadCalibration>,
     },
 
-    /// Ignition detected: boost, Mach lockout and coast, on inertial dead
-    /// reckoning only. The baro is buffered (to pick a birth altitude) but
-    /// never fused.
-    ///
-    /// Its first `ALIGN_DURATION_S` are the thrust-vector alignment, which
-    /// was a state of its own until 2026-08-18: `thrust_axis_av` is `None`
-    /// until the accumulated specific force has solved which way the
-    /// airframe points in the avionics frame, and everything that needs the
-    /// axis — the burnout latch, the drag channel, tilt — waits for it. The
-    /// two shared a dead reckoner, a gyro bias and an ignition time and were
-    /// distinguishable from outside only by their outputs going absent,
-    /// which the `Option` says directly.
-    Ignition {
-        /// Unit airframe axis in the avionics frame, from the mean thrust
-        /// direction over the alignment window. Thrust is +, drag is -. It
-        /// is also the whole of the mounting solution the tilt output needs:
-        /// tilt is the angle between this and the dead reckoner's `up_av`.
-        thrust_axis_av: Option<Vector3<f32>>,
-        /// Running SUM of the alignment window's specific force, never
-        /// divided by a count. Both things its mean feeds are
-        /// scale-invariant — an angle and a `normalize()` — so the division
-        /// would only round the answer. See the solve below for the one
-        /// consumer that IS magnitude-sensitive and why normalizing there is
-        /// what makes it safe.
-        align_acc_sum: Vector3<f32>,
-        align_elapsed: f32,
+    /// First half second of powered flight: the thrust direction tells us
+    /// how the avionics are mounted in the rocket.
+    Stage1 {
+        elapsed: f32,
+        /// Running SUM of the stage-1 specific force, never divided by a
+        /// count. Both things the stage-1 mean feeds are scale-invariant —
+        /// an angle and a `normalize()` — so the division would only round
+        /// the answer. See the exit below for the one consumer that IS
+        /// magnitude-sensitive and why normalizing there is what makes it
+        /// safe.
+        acc_sum: Vector3<f32>,
         /// Earth UP in the avionics frame as the PAD measured it. Kept only
         /// so the launch angle is logged against the rail's attitude rather
         /// than against the reckoner's half-second-old one.
         pad_up_av: Vector3<f32>,
+        reckoner: DeadReckoner,
+        gyro_bias: Vector3<f32>,
+        ignition_t_us: u64,
+    },
+
+    /// Boost and Mach lockout: inertial dead reckoning only, no filter.
+    /// The baro is buffered (to pick a birth altitude) but never fused.
+    DeadReckoning {
+        /// Unit airframe axis in the avionics frame, from the stage-1 mean
+        /// thrust direction. Thrust is +, drag is -. It is also the whole
+        /// of the mounting solution the tilt output needs: tilt is the
+        /// angle between this and the dead reckoner's `up_av`.
+        thrust_axis_av: Vector3<f32>,
         reckoner: DeadReckoner,
         gyro_bias: Vector3<f32>,
         ignition_t_us: u64,
@@ -588,15 +582,64 @@ impl AirbrakesEstimator {
                     }
                 }
 
-                log_info!("to ignition: {:?}", reckoner);
-                self.state = State::Ignition {
-                    thrust_axis_av: None,
-                    align_acc_sum: Vector3::zeros(),
-                    align_elapsed: 0.0,
+                log_info!("to stage 1: {:?}", reckoner);
+                self.state = State::Stage1 {
+                    elapsed: 0.0,
+                    acc_sum: Vector3::zeros(),
                     pad_up_av,
                     reckoner,
                     gyro_bias: cal.gyro_bias,
                     ignition_t_us: timestamp_us,
+                };
+            }
+
+            State::Stage1 {
+                elapsed,
+                acc_sum,
+                pad_up_av,
+                reckoner,
+                gyro_bias,
+                ignition_t_us,
+            } => {
+                *acc_sum += acc;
+                reckoner.update(&acc, &(gyro - *gyro_bias), dt);
+                *elapsed += dt;
+                if *elapsed < STAGE1_DURATION_S {
+                    // Still aligning; no vertical filter, so no gate.
+                    return BaroGateOutcome::Accepted;
+                }
+
+                // The mean thrust direction IS the airframe axis in the
+                // avionics frame, so the burnout latch self-calibrates its
+                // mounting and sign from the flight itself — and it is also
+                // the whole mounting solution, since tilt is just its angle
+                // to the dead reckoner's `up_av`.
+                //
+                // This `normalize()` is what makes the accumulator's
+                // missing division harmless AND what makes the burnout
+                // latch — the one magnitude-sensitive consumer, comparing
+                // `acc . thrust_axis_av` against -2 m/s^2 — safe: the axis
+                // it dots against is unit length by construction, so the
+                // sum's arbitrary scale never reaches the threshold.
+                let thrust_axis_av = acc_sum.normalize();
+                // Measured against the PAD's up, not the reckoner's current
+                // one: half a second of gyro integration has already moved
+                // the latter, and it is the rail angle this line is for
+                // (Void Lake logs 10.2 deg here against the reckoner's
+                // 26.1 deg at the same instant). That is `pad_up_av`'s only
+                // job, hence the discard — a build with logging compiled
+                // out has no other reader for it.
+                let _ = &pad_up_av;
+                log_info!(
+                    "launch angle: {} deg",
+                    pad_up_av.angle(&thrust_axis_av).to_degrees()
+                );
+
+                self.state = State::DeadReckoning {
+                    thrust_axis_av,
+                    reckoner: reckoner.clone(),
+                    gyro_bias: *gyro_bias,
+                    ignition_t_us: *ignition_t_us,
                     baro_ring: Deque::new(),
                     subsonic_sustain: 0.0,
                     drag_lp: None,
@@ -606,11 +649,8 @@ impl AirbrakesEstimator {
                 };
             }
 
-            State::Ignition {
+            State::DeadReckoning {
                 thrust_axis_av,
-                align_acc_sum,
-                align_elapsed,
-                pad_up_av,
                 reckoner,
                 gyro_bias,
                 ignition_t_us,
@@ -622,54 +662,6 @@ impl AirbrakesEstimator {
                 burnout_sustain,
             } => {
                 reckoner.update(&acc, &(gyro - *gyro_bias), dt);
-
-                // Alignment: the first `ALIGN_DURATION_S` of powered flight,
-                // during which the only job is to accumulate specific force.
-                // Everything below this block needs the airframe axis, so
-                // this returns rather than falling through — and it returns
-                // `Accepted` because there is no vertical filter yet and so
-                // no gate to report on.
-                let thrust_axis_av = match thrust_axis_av {
-                    Some(axis) => *axis,
-                    None => {
-                        *align_acc_sum += acc;
-                        *align_elapsed += dt;
-                        if *align_elapsed < ALIGN_DURATION_S {
-                            return BaroGateOutcome::Accepted;
-                        }
-
-                        // The mean thrust direction IS the airframe axis in
-                        // the avionics frame, so the burnout latch
-                        // self-calibrates its mounting and sign from the
-                        // flight itself — and it is also the whole mounting
-                        // solution, since tilt is just its angle to the dead
-                        // reckoner's `up_av`.
-                        //
-                        // This `normalize()` is what makes the accumulator's
-                        // missing division harmless AND what makes the
-                        // burnout latch — the one magnitude-sensitive
-                        // consumer, comparing `acc . thrust_axis_av` against
-                        // -2 m/s^2 — safe: the axis it dots against is unit
-                        // length by construction, so the sum's arbitrary
-                        // scale never reaches the threshold.
-                        let axis = align_acc_sum.normalize();
-                        // Measured against the PAD's up, not the reckoner's
-                        // current one: half a second of gyro integration has
-                        // already moved the latter, and it is the rail angle
-                        // this line is for (Void Lake logs 10.2 deg here
-                        // against the reckoner's 26.1 deg at the same
-                        // instant). That is `pad_up_av`'s only job, hence the
-                        // discard — a build with logging compiled out has no
-                        // other reader for it.
-                        let _ = &pad_up_av;
-                        log_info!(
-                            "launch angle: {} deg",
-                            pad_up_av.angle(&axis).to_degrees()
-                        );
-                        *thrust_axis_av = Some(axis);
-                        axis
-                    }
-                };
 
                 // The baro goes in raw.
                 if baro_ring.is_full() {
@@ -707,7 +699,7 @@ impl AirbrakesEstimator {
                 // — and `drag_airspeed` rejects a negative `a_drag`, so a
                 // thrusting sample no longer inverts to anything at all
                 // rather than inverting to a plausible lie.
-                let a_axial = -acc.dot(&thrust_axis_av);
+                let a_axial = -acc.dot(thrust_axis_av);
 
                 // Reading 1 — the burnout latch, on the RAW channel. Raw and
                 // not the low pass below, so the 0.3 s sustain is the only
@@ -878,7 +870,7 @@ impl AirbrakesEstimator {
                     vv0
                 );
                 self.state = State::AirbrakesEnabled {
-                    thrust_axis_av,
+                    thrust_axis_av: *thrust_axis_av,
                     reckoner: reckoner.clone(),
                     gyro_bias: *gyro_bias,
                     kf,
@@ -929,7 +921,7 @@ impl AirbrakesEstimator {
     /// fix while being a drifting open-loop integral nothing corrected.
     pub fn altitude_asl(&self) -> Option<f32> {
         match &self.state {
-            State::Armed { .. } | State::Ignition { .. } => None,
+            State::Armed { .. } | State::Stage1 { .. } | State::DeadReckoning { .. } => None,
             State::AirbrakesEnabled { kf, .. } => Some(kf.altitude_asl()),
         }
     }
@@ -975,8 +967,8 @@ impl AirbrakesEstimator {
     /// Rocket axis tilt from vertical, radians (gyro dead reckoning).
     pub fn tilt(&self) -> Option<f32> {
         match &self.state {
-            State::Ignition {
-                thrust_axis_av: Some(thrust_axis_av),
+            State::DeadReckoning {
+                thrust_axis_av,
                 reckoner,
                 ..
             }
@@ -1001,8 +993,8 @@ impl AirbrakesEstimator {
     /// `Tracking` implies it, since it cannot be reached otherwise.
     pub fn burnout_detected(&self) -> bool {
         match &self.state {
-            State::Armed { .. } => false,
-            State::Ignition { burnout, .. } => *burnout,
+            State::Armed { .. } | State::Stage1 { .. } => false,
+            State::DeadReckoning { burnout, .. } => *burnout,
             State::AirbrakesEnabled { .. } => true,
         }
     }
@@ -1029,11 +1021,7 @@ impl AirbrakesEstimator {
     /// may still be burning).
     pub fn subsonic_by_drag(&self) -> Option<bool> {
         match &self.state {
-            State::Ignition {
-                thrust_axis_av: Some(_),
-                last_subsonic,
-                ..
-            } => Some(*last_subsonic),
+            State::DeadReckoning { last_subsonic, .. } => Some(*last_subsonic),
             _ => None,
         }
     }

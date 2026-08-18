@@ -10,15 +10,16 @@
 //! ("born subsonic" — no state that existed during the garbage period
 //! survives into the filter).
 //!
-//! # Three states, and it only walks forward
+//! # Four states, and it only walks forward
 //!
-//! `Armed` -> `Ignition` -> `AirbrakesEnabled`. Nothing goes back, nothing
-//! skips, and there is no fourth: the estimator's life ends by being dropped
-//! whole at apogee, not by transitioning. Armed screens the pad for a
-//! calibration and watches for ignition; Ignition solves the mounting from
-//! the first half second of thrust and then dead-reckons through boost and
-//! the Mach lockout; AirbrakesEnabled is the vertical filter running, and the
-//! brakes permitted to open, until the drop.
+//! `Armed` -> `Stage1` -> `DeadReckoning` -> `AirbrakesEnabled`. Nothing goes
+//! back, nothing skips, and there is no fifth: the estimator's life ends by
+//! being dropped whole at apogee, not by transitioning. Armed screens the pad
+//! for a calibration and watches for ignition; Stage1 is the first half second
+//! of thrust, which is what solves how the avionics are mounted; DeadReckoning
+//! is boost and the Mach lockout, inertial only, buffering the baro without
+//! fusing it; AirbrakesEnabled is the vertical filter running, and the brakes
+//! permitted to open, until the drop.
 //!
 //! Everything that decides whether the brakes may open is therefore a
 //! transition condition, not a live one. That is the point rather than a
