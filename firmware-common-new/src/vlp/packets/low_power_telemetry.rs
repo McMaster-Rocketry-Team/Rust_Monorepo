@@ -9,7 +9,8 @@ use crate::fixed_point_factory;
 use super::{
     BATTERY_V_FAC_BITS, BatteryVFac, BatteryVFacBase, EPM_BATT_V_FAC_BITS, EpmBattVFacBase,
     TEMPERATURE_FAC_BITS, TemperatureFac, TemperatureFacBase, VLPDownlinkPacket,
-    decode_epm_batt_v, decode_shared_battery_v, encode_epm_batt_v, encode_shared_battery_v,
+    EpmBattV, decode_epm_batt_v, decode_shared_battery_v, encode_epm_batt_v,
+    encode_shared_battery_v,
     telemetry::MAX_REPORTED_FIX_SATELLITES,
 };
 
@@ -23,13 +24,14 @@ fixed_point_factory!(LonFac, f64, -180.0, 180.0, 0.00002146);
 // when the rocket drops into low power mode. `EpmBattVFac` and its sentinel
 // live there for the same reason, shared with `TelemetryPacket`.
 
-// 98 bits = 13 bytes, 6 spare bits. The twelfth and thirteenth bytes were paid
-// for by `epm_batt_v`: the packet had one spare bit and that field is 11 wide.
-// At 5 s that is affordable in a way it would not be on the 2 s
-// `TelemetryPacket`, which is already at the last size fitting its symbol
-// count.
+// 96 bits = exactly 12 bytes, no spare. The twelfth byte was paid for by
+// `epm_batt_v`: the packet had one spare bit and that field was 11 wide. It is
+// 9 wide since the EPM battery range came down to 12..17V, which gave the
+// thirteenth byte back — this packet is the only place that narrowing bought
+// air time rather than bits, because `TelemetryPacket` spent its fourteen on
+// the payload's experiment flags instead.
 #[derive(PackedStruct, Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "13")]
+#[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "12")]
 pub struct LowPowerTelemetryPacket {
     #[packed_field(bits = "0..4")]
     nonce: Integer<u8, packed_bits::Bits<4>>,
@@ -76,7 +78,7 @@ pub struct LowPowerTelemetryPacket {
     /// launch, and low power is the mode it spends those hours in, so "is the
     /// payload still alive on the rail" was the one question the downlink
     /// could not answer without arming.
-    #[packed_field(element_size_bits = "11")]
+    #[packed_field(element_size_bits = "9")]
     epm_batt_v: Integer<EpmBattVFacBase, packed_bits::Bits<EPM_BATT_V_FAC_BITS>>,
 }
 
@@ -170,7 +172,7 @@ impl LowPowerTelemetryPacket {
     /// on CAN). A collapsed or disconnected pack decodes as `Some(0.0)`, not
     /// as absence — which is why the sentinel is the top code, exactly as on
     /// [`super::telemetry::TelemetryPacket::epm_batt_v`].
-    pub fn epm_batt_v(&self) -> Option<f32> {
+    pub fn epm_batt_v(&self) -> EpmBattV {
         decode_epm_batt_v(self.epm_batt_v)
     }
 
@@ -185,7 +187,8 @@ impl LowPowerTelemetryPacket {
             amp_online: self.amp_online,
             shared_battery_v: self.shared_battery_v(),
             air_temperature: self.air_temperature(),
-            epm_batt_v: self.epm_batt_v(),
+            epm_batt_v: self.epm_batt_v().volts(),
+            epm_batt_below_range: self.epm_batt_v() == EpmBattV::BelowRange,
         }
     }
 }
@@ -304,8 +307,8 @@ mod tests {
 
         let mut buffer = [0u8; 64];
         let len = packet.serialize(&mut buffer);
-        // 1 byte packet type + the 13 byte packed struct.
-        assert_eq!(len, 14);
+        // 1 byte packet type + the 12 byte packed struct.
+        assert_eq!(len, 13);
 
         let deserialized_packet = VLPDownlinkPacket::deserialize(&buffer[..len]).unwrap();
         assert_eq!(deserialized_packet, packet);
@@ -411,12 +414,19 @@ mod tests {
         };
 
         // Nothing reported, or the payload's own "could not read this".
-        assert_eq!(round_trip(None), None);
-        // A collapsed or disconnected bus is a reading, not absence.
-        assert_relative_eq!(round_trip(Some(0)).unwrap(), 0.0, epsilon = 0.01);
-        assert_relative_eq!(round_trip(Some(12600)).unwrap(), 12.6, epsilon = 0.01);
+        assert_eq!(round_trip(None), EpmBattV::Unavailable);
+        // A collapsed or disconnected bus is a fault, not absence — and not a
+        // plausible 12.0V either, which is what it would decode as if the
+        // bottom of the range had not been reserved for it.
+        assert_eq!(round_trip(Some(0)), EpmBattV::BelowRange);
+        assert_eq!(round_trip(Some(11500)), EpmBattV::BelowRange);
+        assert_relative_eq!(round_trip(Some(12600)).volts().unwrap(), 12.6, epsilon = 0.01);
         // Over-range caps one code short of the sentinel, so it cannot be
         // mistaken for absence.
-        assert_relative_eq!(round_trip(Some(u16::MAX)).unwrap(), 16.9917, epsilon = 0.001);
+        assert_relative_eq!(
+            round_trip(Some(u16::MAX)).volts().unwrap(),
+            16.9902,
+            epsilon = 0.001
+        );
     }
 }

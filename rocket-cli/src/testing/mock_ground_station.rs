@@ -1,3 +1,4 @@
+use firmware_common_new::can_bus::messages::custom_payload_status::ExperimentChannelFlags;
 use firmware_common_new::can_bus::custom_status::{
     NodeCustomStatusExt, payload_sdrm_custom_status::PayloadSDRMCustomStatus,
 };
@@ -237,8 +238,42 @@ impl MockVLPClient {
                         arm_seq_fault: false,
                     },
                     Some(12600),
+                    // Rail 4 is over the 1A range so the panel shows a
+                    // pinned reading next to a real one and an absent one.
                     [Some(120), Some(340), Some(55), Some(780), Some(1500), None],
                     [Some(0), Some(1200), Some(34567)],
+                    // Channel 1 done and fractured, channel 2 still holding
+                    // closure, channel 3 faulted — a mix, so a wrong flag is
+                    // visible on sight the way the stack flags above are.
+                    [
+                        ExperimentChannelFlags {
+                            fractured: true,
+                            finished: true,
+                            fault: false,
+                            homed: true,
+                            closure_confirmed: true,
+                            enabled: true,
+                            monitoring: false,
+                        },
+                        ExperimentChannelFlags {
+                            fractured: false,
+                            finished: false,
+                            fault: false,
+                            homed: true,
+                            closure_confirmed: true,
+                            enabled: true,
+                            monitoring: true,
+                        },
+                        ExperimentChannelFlags {
+                            fractured: false,
+                            finished: false,
+                            fault: true,
+                            homed: false,
+                            closure_confirmed: false,
+                            enabled: true,
+                            monitoring: false,
+                        },
+                    ],
                 )
         .into()
     }

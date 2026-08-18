@@ -1,3 +1,4 @@
+use firmware_common_new::can_bus::messages::custom_payload_status::ExperimentChannelFlags;
 use firmware_common_new::can_bus::custom_status::payload_sdrm_custom_status::PayloadSDRMCustomStatus;
 use std::time::Duration;
 
@@ -115,6 +116,15 @@ pub async fn send_fake_vlp_telemetry(args: SendVLPTelemetryArgs) -> Result<()> {
             Some(12600),
             [Some(120), Some(340), Some(55), Some(780), Some(1500), None],
             [Some(0), Some(1200), Some(34567)],
+            [ExperimentChannelFlags {
+                fractured: false,
+                finished: false,
+                fault: false,
+                homed: true,
+                closure_confirmed: true,
+                enabled: true,
+                monitoring: true,
+            }; 3],
         )
         .into()
     };

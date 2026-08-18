@@ -6,7 +6,10 @@ use serde::{Deserialize, Serialize};
 use crate::{
     can_bus::{
         custom_status::payload_sdrm_custom_status::PayloadSDRMCustomStatus,
-        messages::{amp_status::PowerOutputStatus, vl_status::FlightStage},
+        messages::{
+            amp_status::PowerOutputStatus, custom_payload_status::ExperimentChannelFlags,
+            vl_status::FlightStage,
+        },
     },
     fixed_point_factory,
     gps::GPSData,
@@ -15,7 +18,8 @@ use crate::{
 use super::{
     BATTERY_V_FAC_BITS, BatteryVFac, BatteryVFacBase, EPM_BATT_V_FAC_BITS, EpmBattVFacBase,
     TEMPERATURE_FAC_BITS, TemperatureFac, TemperatureFacBase, VLPDownlinkPacket,
-    decode_epm_batt_v, decode_shared_battery_v, encode_epm_batt_v, encode_shared_battery_v,
+    EpmBattV, decode_epm_batt_v, decode_shared_battery_v, encode_epm_batt_v,
+    encode_shared_battery_v,
 };
 
 /// Largest satellite count a 5-bit packet field can hold. Counts above this are
@@ -49,15 +53,21 @@ fixed_point_factory!(TiltDegFac, f32, -90.0, 90.0, 1.0);
 // `shared_battery_v` — it has to decode identically on both. See
 // `super::EPM_BATT_V_UNAVAILABLE_CODE`.
 
-// Load current of one EPM switched rail. 5A is the stack's design maximum, so
-// the old 0..10.23A range was spending two bits per rail on current the
-// hardware cannot draw; 7 bits over 0..5A is (5000 - 0) / (2^7 - 1) = 39.4mA
-// per code. CAN and the SD slow record keep the full u16 mA, so an over-range
-// fault is still exact in the log. The all-ones code is reserved for absence,
-// so a rail is reported saturated at 4.961A rather than 5.000A — the top code
-// buys the ability to tell "rail switched off, drawing 0mA" (a normal state,
-// see `payload_epm_rails_on`) apart from "EPM never reported this rail".
-fixed_point_factory!(EpmRailMaFac, f32, 0.0, 5000.0, 40.0);
+// Load current of one EPM switched rail. 1A is what the rails actually draw,
+// so the range has come down twice: 0..10.23A, then 0..5A (the stack's design
+// maximum), now 0..1A. 5 bits over 0..1A is (1000 - 0) / (2^5 - 1) = 32.3mA
+// per code, which is *finer* than the 39.4mA the wider range bought — the
+// twelve bits this frees went to the payload's experiment flags, and the
+// resolution improved on the way.
+//
+// A rail drawing more than 1A pins at the top of the range rather than
+// reporting its real current. That is the accepted cost: pinned-at-ceiling is
+// still visible as a fault, and CAN and the SD slow record keep the full u16
+// mA, so a stall or a short is exact in the log. The all-ones code is reserved
+// for absence, so a pinned rail reports 968mA rather than 1000mA — the top
+// code buys the ability to tell "rail switched off, drawing 0mA" (a normal
+// state, see `payload_epm_rails_on`) apart from "EPM never reported this rail".
+fixed_point_factory!(EpmRailMaFac, f32, 0.0, 1000.0, 40.0);
 // SEM linear actuator position. The full u16 step range at
 // (65535 - 0) / (2^10 - 1) = 64.1 steps per code; SEM's own step scale decides
 // what that means in millimetres. As with the rails the all-ones code is
@@ -91,14 +101,34 @@ fn defined(value: Option<f32>) -> Option<f32> {
     value.filter(|v| !v.is_nan())
 }
 
-// 300 bits of declared fields = 37.5 bytes, so 38 with four spare bits. On air the packet costs
-// `n + 1` bytes of data plus `(n + 1) / 4` of reed-solomon ecc, which puts
-// this at 48 bytes on air. The symbol count steps at 50 / 55 / 60 bytes on
-// air, so 38 bytes is the last size that still fits in the current symbol
-// count — there is no room left to grow without paying for more air time
-// inside the 2s telemetry period. The struct is sized to its contents, not to
-// the step, so growth is a deliberate edit rather than something that happens
-// by accident.
+// 304 bits of declared fields = exactly 38 bytes, no spare. On air the packet
+// costs `n + 1` bytes of data plus `(n + 1) / 4` of reed-solomon ecc, which
+// puts this at 48 bytes on air.
+//
+// The link is SF12 / 250kHz / CR4/8, preamble 8, explicit header, **CRC off**
+// (`create_tx_packet_params(8, false, false, false, ..)` in `vlp::lora`), and
+// the sx126x turns low-data-rate optimization on for SF12 at 250kHz. That
+// makes one symbol 16.384ms and the preamble 200.7ms, and the payload symbol
+// count `8 + ceil((8 * PL - 20) / 40) * 8` — which steps every five bytes of
+// on-air payload. The current bucket is PL 48..52, i.e. **38..41 bytes of
+// struct, all of them 1642.5ms on air**; 42 bytes is 1773.6ms, +131.1ms.
+//
+// So there are three bytes of free headroom above this struct, not zero. An
+// earlier version of this comment said 38 bytes was the last size in the
+// bucket, from step boundaries computed with CRC on; the radio is configured
+// with CRC off, which moves them. The struct is still sized to its contents
+// rather than to the step — growth should be a deliberate edit — but "it will
+// cost air time" is not the reason to refuse one until 41 bytes.
+//
+// The packet was 300 bits with four spare until 2026-08-18, when the payload's
+// EPM battery range came down to 12..17V and its six rail currents to 0..1A.
+// That freed fourteen bits, and those plus the four spare bought the payload's
+// arm-sequence state and five of its seven per-channel experiment flags — the
+// two it could not fit, `homed` and `enabled`, are the two the ground already
+// knows: `enabled` is fitted-at-build configuration, and `homed` is an
+// arm-sequence intermediate that `arm_seq_complete` and `arm_seq_fault`
+// already summarise. The three load cells did not fit at any resolution and
+// stay on SD.
 //
 // Six of those bits are validity bits. The packet is a bit-packed
 // `packed_struct` and so cannot carry an `Option` on the wire; the rule the
@@ -107,7 +137,6 @@ fn defined(value: Option<f32>) -> Option<f32> {
 // field with an absence encoding is set from an `Option` in `new` and read
 // back as an `Option` by its getter, so no caller can confuse "the estimator
 // had nothing to say" with a real zero.
-// 250khz bandwidth + 12sf + 8cr lora, inside the 2s telemetry period.
 #[derive(PackedStruct, Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "38")]
 pub struct TelemetryPacket {
@@ -322,6 +351,13 @@ pub struct TelemetryPacket {
     payload_exp3_active: bool,
     payload_sdrm_sd_logging: bool,
     payload_sem_sd_logging: bool,
+    /// Bits 8..10 of the same 11-bit word. Read together: running clear and
+    /// complete clear, after the sequence has had time to finish, is the
+    /// payload never having started — the state the ground could not see at
+    /// all before these three bits existed.
+    payload_arm_seq_running: bool,
+    payload_arm_seq_complete: bool,
+    payload_arm_seq_fault: bool,
 
     /// Payload stack telemetry, relayed from `CustomPayloadStatusMessage`. A
     /// reading the payload could not take (`0xFFFF` on CAN) is sent as the
@@ -331,21 +367,21 @@ pub struct TelemetryPacket {
     /// spending the top code of each field costs nothing but one quantum of
     /// headroom at full scale, which for a battery bus, a rail current and an
     /// actuator position is headroom nothing real ever reaches.
-    #[packed_field(element_size_bits = "11")]
+    #[packed_field(element_size_bits = "9")]
     epm_batt_v: Integer<EpmBattVFacBase, packed_bits::Bits<EPM_BATT_V_FAC_BITS>>,
 
     /// EPM switched rail load currents, 39.4mA resolution over 0..4.961A.
-    #[packed_field(element_size_bits = "7")]
+    #[packed_field(element_size_bits = "5")]
     epm_sys_3v3_ma: Integer<EpmRailMaFacBase, packed_bits::Bits<EPM_RAIL_MA_FAC_BITS>>,
-    #[packed_field(element_size_bits = "7")]
+    #[packed_field(element_size_bits = "5")]
     epm_sys_5v_ma: Integer<EpmRailMaFacBase, packed_bits::Bits<EPM_RAIL_MA_FAC_BITS>>,
-    #[packed_field(element_size_bits = "7")]
+    #[packed_field(element_size_bits = "5")]
     epm_per_3v3_ma: Integer<EpmRailMaFacBase, packed_bits::Bits<EPM_RAIL_MA_FAC_BITS>>,
-    #[packed_field(element_size_bits = "7")]
+    #[packed_field(element_size_bits = "5")]
     epm_per_5v_ma: Integer<EpmRailMaFacBase, packed_bits::Bits<EPM_RAIL_MA_FAC_BITS>>,
-    #[packed_field(element_size_bits = "7")]
+    #[packed_field(element_size_bits = "5")]
     epm_per_9v_ma: Integer<EpmRailMaFacBase, packed_bits::Bits<EPM_RAIL_MA_FAC_BITS>>,
-    #[packed_field(element_size_bits = "7")]
+    #[packed_field(element_size_bits = "5")]
     epm_per_12v_ma: Integer<EpmRailMaFacBase, packed_bits::Bits<EPM_RAIL_MA_FAC_BITS>>,
 
     /// SEM linear actuator positions, 64.1 step resolution over 0..65471 steps.
@@ -355,6 +391,67 @@ pub struct TelemetryPacket {
     sem_actuator_2_steps: Integer<ActuatorStepsFacBase, packed_bits::Bits<ACTUATOR_STEPS_FAC_BITS>>,
     #[packed_field(element_size_bits = "10")]
     sem_actuator_3_steps: Integer<ActuatorStepsFacBase, packed_bits::Bits<ACTUATOR_STEPS_FAC_BITS>>,
+
+    /// Five of the seven per-channel experiment flags, channel-major. Decode
+    /// with [`Self::payload_experiment_flags`] rather than field by field;
+    /// [`DownlinkExperimentFlags`] records which two did not fit and why.
+    ///
+    /// No absence encoding, and none needed: every combination is a legal
+    /// state, and a channel with nothing to report reads all-clear — which is
+    /// also what an unfitted channel reports, since the `enabled` bit that
+    /// would separate them is one of the two left on SD.
+    payload_exp1_fractured: bool,
+    payload_exp1_finished: bool,
+    payload_exp1_fault: bool,
+    payload_exp1_closure_confirmed: bool,
+    payload_exp1_monitoring: bool,
+    payload_exp2_fractured: bool,
+    payload_exp2_finished: bool,
+    payload_exp2_fault: bool,
+    payload_exp2_closure_confirmed: bool,
+    payload_exp2_monitoring: bool,
+    payload_exp3_fractured: bool,
+    payload_exp3_finished: bool,
+    payload_exp3_fault: bool,
+    payload_exp3_closure_confirmed: bool,
+    payload_exp3_monitoring: bool,
+}
+
+/// The part of one experiment channel's [`ExperimentChannelFlags`] the
+/// downlink has room for.
+///
+/// Five of the payload's seven flags. `homed` and `enabled` are the two left
+/// behind, and they are the two the ground can do without: `enabled` is decided
+/// when the channel is fitted and does not change in flight, and `homed` is an
+/// arm-sequence intermediate that `arm_seq_complete` / `arm_seq_fault` already
+/// summarise. A distinct type rather than a partly-filled
+/// `ExperimentChannelFlags`, so a caller cannot read a `homed` the packet never
+/// carried as a `homed` the payload reported clear.
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct DownlinkExperimentFlags {
+    /// The sample on this channel has fractured.
+    pub fractured: bool,
+    /// This experiment ran to completion.
+    pub finished: bool,
+    /// This channel is in its fault state.
+    pub fault: bool,
+    /// Closure reached the commanded target, which is the launch commit signal.
+    pub closure_confirmed: bool,
+    /// This channel holds closure and streams load.
+    pub monitoring: bool,
+}
+
+impl From<ExperimentChannelFlags> for DownlinkExperimentFlags {
+    fn from(flags: ExperimentChannelFlags) -> Self {
+        Self {
+            fractured: flags.fractured,
+            finished: flags.finished,
+            fault: flags.fault,
+            closure_confirmed: flags.closure_confirmed,
+            monitoring: flags.monitoring,
+        }
+    }
 }
 
 /// The deployment estimator's live state, the pair of numbers the deployment
@@ -437,6 +534,7 @@ impl TelemetryPacket {
         epm_rail_ma: [Option<u16>; 6],
         // Experiment channels 1..3.
         sem_actuator_steps: [Option<u16>; 3],
+        sem_experiment_flags: [ExperimentChannelFlags; 3],
     ) -> Self {
         // A NaN that reaches a `fixed_point_factory` panics: the min/max
         // comparisons in `to_fixed_point_capped` are both false for NaN, so it
@@ -549,6 +647,9 @@ impl TelemetryPacket {
             payload_exp3_active: payload_stack_status.exp3_active,
             payload_sdrm_sd_logging: payload_stack_status.sdrm_sd_logging,
             payload_sem_sd_logging: payload_stack_status.sem_sd_logging,
+            payload_arm_seq_running: payload_stack_status.arm_seq_running,
+            payload_arm_seq_complete: payload_stack_status.arm_seq_complete,
+            payload_arm_seq_fault: payload_stack_status.arm_seq_fault,
 
             // An unavailable reading is sent as the field's all-ones code
             // rather than carrying its own validity bit.
@@ -564,6 +665,22 @@ impl TelemetryPacket {
             sem_actuator_1_steps: Self::encode_steps(sem_actuator_steps[0]),
             sem_actuator_2_steps: Self::encode_steps(sem_actuator_steps[1]),
             sem_actuator_3_steps: Self::encode_steps(sem_actuator_steps[2]),
+
+            payload_exp1_fractured: sem_experiment_flags[0].fractured,
+            payload_exp1_finished: sem_experiment_flags[0].finished,
+            payload_exp1_fault: sem_experiment_flags[0].fault,
+            payload_exp1_closure_confirmed: sem_experiment_flags[0].closure_confirmed,
+            payload_exp1_monitoring: sem_experiment_flags[0].monitoring,
+            payload_exp2_fractured: sem_experiment_flags[1].fractured,
+            payload_exp2_finished: sem_experiment_flags[1].finished,
+            payload_exp2_fault: sem_experiment_flags[1].fault,
+            payload_exp2_closure_confirmed: sem_experiment_flags[1].closure_confirmed,
+            payload_exp2_monitoring: sem_experiment_flags[1].monitoring,
+            payload_exp3_fractured: sem_experiment_flags[2].fractured,
+            payload_exp3_finished: sem_experiment_flags[2].finished,
+            payload_exp3_fault: sem_experiment_flags[2].fault,
+            payload_exp3_closure_confirmed: sem_experiment_flags[2].closure_confirmed,
+            payload_exp3_monitoring: sem_experiment_flags[2].monitoring,
         }
     }
 
@@ -870,16 +987,61 @@ impl TelemetryPacket {
         self.payload_sdrm_sd_logging
     }
 
+    /// The payload is working through its arm sequence.
+    pub fn payload_arm_seq_running(&self) -> bool {
+        self.payload_arm_seq_running
+    }
+
+    /// The arm sequence reached its end, whether or not every channel passed.
+    pub fn payload_arm_seq_complete(&self) -> bool {
+        self.payload_arm_seq_complete
+    }
+
+    /// At least one enabled channel failed all of its attempts.
+    pub fn payload_arm_seq_fault(&self) -> bool {
+        self.payload_arm_seq_fault
+    }
+
+    /// Experiment state for channels 1..3, as much of it as the packet
+    /// carries. See [`DownlinkExperimentFlags`] for the two flags it does not.
+    pub fn payload_experiment_flags(&self) -> [DownlinkExperimentFlags; 3] {
+        [
+            DownlinkExperimentFlags {
+                fractured: self.payload_exp1_fractured,
+                finished: self.payload_exp1_finished,
+                fault: self.payload_exp1_fault,
+                closure_confirmed: self.payload_exp1_closure_confirmed,
+                monitoring: self.payload_exp1_monitoring,
+            },
+            DownlinkExperimentFlags {
+                fractured: self.payload_exp2_fractured,
+                finished: self.payload_exp2_finished,
+                fault: self.payload_exp2_fault,
+                closure_confirmed: self.payload_exp2_closure_confirmed,
+                monitoring: self.payload_exp2_monitoring,
+            },
+            DownlinkExperimentFlags {
+                fractured: self.payload_exp3_fractured,
+                finished: self.payload_exp3_finished,
+                fault: self.payload_exp3_fault,
+                closure_confirmed: self.payload_exp3_closure_confirmed,
+                monitoring: self.payload_exp3_monitoring,
+            },
+        ]
+    }
+
     pub fn payload_sem_sd_logging(&self) -> bool {
         self.payload_sem_sd_logging
     }
 
-    /// EPM battery bus voltage. `None` when the payload reported the reading
-    /// as unavailable (`0xFFFF` on CAN) or has not reported at all. A real
-    /// 0.0 V — a collapsed or disconnected bus — decodes as `Some(0.0)`, not
-    /// as absence; that distinction is the reason the sentinel is the top code
-    /// rather than the bottom one.
-    pub fn epm_batt_v(&self) -> Option<f32> {
+    /// EPM battery bus voltage, or one of the two things that is not a
+    /// voltage. [`EpmBattV::Unavailable`] is the payload reporting the reading
+    /// as unavailable (`0xFFFF` on CAN) or not reporting at all;
+    /// [`EpmBattV::BelowRange`] is a bus under
+    /// [`EPM_BATT_V_MIN`](super::EPM_BATT_V_MIN), i.e. a collapsed or
+    /// disconnected pack. Keeping those two apart is why this is an enum and
+    /// not an `Option`.
+    pub fn epm_batt_v(&self) -> EpmBattV {
         decode_epm_batt_v(self.epm_batt_v)
     }
 
@@ -1004,8 +1166,12 @@ impl TelemetryPacket {
             payload_exp1_active: self.payload_exp1_active(),
             payload_exp2_active: self.payload_exp2_active(),
             payload_exp3_active: self.payload_exp3_active(),
+            payload_arm_seq_running: self.payload_arm_seq_running(),
+            payload_arm_seq_complete: self.payload_arm_seq_complete(),
+            payload_arm_seq_fault: self.payload_arm_seq_fault(),
 
-            epm_batt_v: self.epm_batt_v(),
+            epm_batt_v: self.epm_batt_v().volts(),
+            epm_batt_below_range: self.epm_batt_v() == EpmBattV::BelowRange,
             epm_sys_3v3_ma: self.epm_sys_3v3_ma(),
             epm_sys_5v_ma: self.epm_sys_5v_ma(),
             epm_per_3v3_ma: self.epm_per_3v3_ma(),
@@ -1016,6 +1182,20 @@ impl TelemetryPacket {
             sem_actuator_1_steps: self.sem_actuator_1_steps(),
             sem_actuator_2_steps: self.sem_actuator_2_steps(),
             sem_actuator_3_steps: self.sem_actuator_3_steps(),
+
+            payload_experiment_flags: self
+                .payload_experiment_flags()
+                .iter()
+                .map(|f| {
+                    json::object! {
+                        fractured: f.fractured,
+                        finished: f.finished,
+                        fault: f.fault,
+                        closure_confirmed: f.closure_confirmed,
+                        monitoring: f.monitoring,
+                    }
+                })
+                .collect::<Vec<_>>(),
         }
     }
 }
@@ -1120,6 +1300,11 @@ pub struct TelemetryPacketBuilderState {
     pub epm_rail_ma: [Option<u16>; 6],
     /// Experiment channels 1..3.
     pub sem_actuator_steps: [Option<u16>; 3],
+    /// Per-channel experiment state from `CustomPayloadStatusMessage`, all
+    /// seven flags. The packet takes five of them; keeping all seven here
+    /// means the builder holds what the payload said rather than what the
+    /// current packet happens to have room for.
+    pub sem_experiment_flags: [ExperimentChannelFlags; 3],
 }
 
 pub struct TelemetryPacketBuilder<M: RawMutex> {
@@ -1178,6 +1363,7 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 epm_batt_mv: None,
                 epm_rail_ma: [None; 6],
                 sem_actuator_steps: [None; 3],
+                sem_experiment_flags: [ExperimentChannelFlags::default(); 3],
             })),
         }
     }
@@ -1236,6 +1422,7 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 state.epm_batt_mv,
                 state.epm_rail_ma,
                 state.sem_actuator_steps,
+                state.sem_experiment_flags,
             )
         })
     }
@@ -1335,8 +1522,11 @@ mod tests {
                 arm_seq_fault: false,
             },
             Some(12600),
-            [Some(120), Some(340), None, Some(780), Some(1500), Some(2400)],
+            // Rail 5 is deliberately over the 1A range, so the round trip
+            // exercises the pin as well as the quantization.
+            [Some(120), Some(340), None, Some(780), Some(950), Some(2400)],
             [Some(0), Some(1200), Some(34567)],
+            [ExperimentChannelFlags::default(); 3],
         )
     }
 
@@ -1381,6 +1571,7 @@ mod tests {
             None,
             [None; 6],
             [None; 3],
+            [ExperimentChannelFlags::default(); 3],
         )
     }
 
@@ -1446,18 +1637,21 @@ mod tests {
         assert_relative_eq!(p.air_brakes_servo_temp().unwrap(), 42.0, epsilon = 0.2);
 
         // Payload readings survive the round trip within their quantization
-        // (39.4mA per rail code, 64.1 steps per actuator code). Rail 2 was
+        // (32.3mA per rail code, 64.1 steps per actuator code). Rail 2 was
         // reported unavailable and comes back as `None`, not as a rail
         // drawing nothing -- and actuator 1, which really is at step 0, comes
         // back as `Some(0)` rather than being mistaken for unavailable.
-        assert_relative_eq!(p.epm_batt_v().unwrap(), 12.6, epsilon = 0.01);
+        assert_relative_eq!(p.epm_batt_v().volts().unwrap(), 12.6, epsilon = 0.01);
         let rails = p.epm_rail_ma();
         assert_relative_eq!(rails[0].unwrap() as f32, 120.0, epsilon = 40.0);
         assert_relative_eq!(rails[1].unwrap() as f32, 340.0, epsilon = 40.0);
         assert_eq!(rails[2], None);
         assert_relative_eq!(rails[3].unwrap() as f32, 780.0, epsilon = 40.0);
-        assert_relative_eq!(rails[4].unwrap() as f32, 1500.0, epsilon = 40.0);
-        assert_relative_eq!(rails[5].unwrap() as f32, 2400.0, epsilon = 40.0);
+        assert_relative_eq!(rails[4].unwrap() as f32, 950.0, epsilon = 40.0);
+        // Over the top of the range, so it pins one code short of the absence
+        // sentinel rather than wrapping or becoming `None`. 2.4A on the wire
+        // reads as "at least 968mA"; the exact figure is on SD.
+        assert_eq!(rails[5], Some(968));
         let steps = p.sem_actuator_steps();
         assert_eq!(steps[0], Some(0));
         assert_relative_eq!(steps[1].unwrap() as f32, 1200.0, epsilon = 64.1);
@@ -1491,7 +1685,7 @@ mod tests {
         assert_eq!(p.icarus_air_brakes(), None);
         assert_eq!(p.air_brakes_actual_extension_percentage(), None);
         assert_eq!(p.air_brakes_servo_temp(), None);
-        assert_eq!(p.epm_batt_v(), None);
+        assert_eq!(p.epm_batt_v(), EpmBattV::Unavailable);
         assert_eq!(p.epm_rail_ma(), [None; 6]);
         assert_eq!(p.sem_actuator_steps(), [None; 3]);
         // AMP has not reported. This must not decode as 2.5V, which is the
@@ -1556,6 +1750,7 @@ mod tests {
             None,
             [None; 6],
             [None; 3],
+            [ExperimentChannelFlags::default(); 3],
         );
 
         assert_eq!(p.deployment_kf(), None);
@@ -1612,12 +1807,13 @@ mod tests {
             Some(u16::MAX),
             [Some(u16::MAX); 6],
             [Some(u16::MAX); 3],
+            [ExperimentChannelFlags::default(); 3],
         );
 
-        // One quantum below full scale, and emphatically not `None`.
-        assert_relative_eq!(p.epm_batt_v().unwrap(), 16.9917, epsilon = 0.001);
+        // One quantum below full scale, and emphatically not `Unavailable`.
+        assert_relative_eq!(p.epm_batt_v().volts().unwrap(), 16.9902, epsilon = 0.001);
         for rail in p.epm_rail_ma() {
-            assert_eq!(rail, Some(4961));
+            assert_eq!(rail, Some(968));
         }
         for steps in p.sem_actuator_steps() {
             assert_eq!(steps, Some(65471));
@@ -1687,9 +1883,10 @@ mod tests {
             round_trip(p).epm_batt_v()
         };
 
-        // Absence, a collapsed bus, a nominal pack, and an over-range reading
-        // that has to cap one code short of the sentinel on both.
-        for mv in [None, Some(0), Some(3300), Some(12600), Some(u16::MAX)] {
+        // Absence, a collapsed bus, a pack below the encodable floor, a
+        // nominal pack, and an over-range reading that has to cap one code
+        // short of the sentinel on both.
+        for mv in [None, Some(0), Some(3300), Some(11500), Some(12600), Some(u16::MAX)] {
             assert_eq!(
                 low_power(mv),
                 armed(mv),
@@ -1698,13 +1895,90 @@ mod tests {
             );
         }
 
-        assert_eq!(low_power(None), None);
-        assert_relative_eq!(low_power(Some(0)).unwrap(), 0.0, epsilon = 0.01);
-        assert_relative_eq!(low_power(Some(12600)).unwrap(), 12.6, epsilon = 0.01);
+        assert_eq!(low_power(None), EpmBattV::Unavailable);
+        // A collapsed bus and a merely-flat one are the same code, and neither
+        // is absence. That is the whole point of spending a code on it: before
+        // the range moved to 12V these decoded as 0.0V and 11.5V, and after it
+        // they would have decoded as a healthy 12.0V if under-range had been
+        // allowed to fall into the bottom of the scale.
+        assert_eq!(low_power(Some(0)), EpmBattV::BelowRange);
+        assert_eq!(low_power(Some(11500)), EpmBattV::BelowRange);
+        assert_relative_eq!(low_power(Some(12600)).volts().unwrap(), 12.6, epsilon = 0.01);
         assert_relative_eq!(
-            low_power(Some(u16::MAX)).unwrap(),
-            16.9917,
+            low_power(Some(u16::MAX)).volts().unwrap(),
+            16.9902,
             epsilon = 0.001
+        );
+    }
+
+    /// `EPM_BATT_V_MIN` and the floor of `EpmBattVFac` are written twice —
+    /// the factory macro takes literals — and everything about the under-range
+    /// code depends on them agreeing. If they drift, readings under the real
+    /// floor land at the bottom of the scale instead of on the under-range
+    /// code, which is exactly the "collapsed pack reads as healthy" failure
+    /// that code exists to prevent.
+    #[test]
+    fn epm_batt_v_range_matches_the_factory() {
+        use crate::vlp::packets::EPM_BATT_V_MIN;
+
+        let decode = |mv: u16| decode_epm_batt_v(encode_epm_batt_v(Some(mv)));
+
+        // One millivolt either side of the floor lands on either side of the
+        // under-range code, and the reading just above it decodes back to the
+        // floor rather than to some other part of the scale.
+        assert_eq!(decode(11_999), EpmBattV::BelowRange);
+        assert_relative_eq!(
+            decode(12_000).volts().unwrap(),
+            EPM_BATT_V_MIN,
+            epsilon = 0.02
+        );
+    }
+
+    /// The payload's arm sequence and its per-channel experiment flags reach
+    /// the ground unchanged. Each carried flag is set on exactly one channel,
+    /// so a pair that swapped channels — or a `homed` / `enabled` that quietly
+    /// got carried in place of one of them — fails here rather than showing
+    /// the operator another channel's fracture.
+    #[test]
+    fn payload_experiment_state_survives_the_wire() {
+        init_logger();
+
+        let mut p = packet_with_everything(12);
+
+        p.payload_arm_seq_running = false;
+        p.payload_arm_seq_complete = true;
+        p.payload_arm_seq_fault = true;
+
+        p.payload_exp1_fractured = true;
+        p.payload_exp2_finished = true;
+        p.payload_exp2_fault = true;
+        p.payload_exp3_closure_confirmed = true;
+        p.payload_exp3_monitoring = true;
+
+        let p = round_trip(p);
+
+        assert!(!p.payload_arm_seq_running());
+        assert!(p.payload_arm_seq_complete());
+        assert!(p.payload_arm_seq_fault());
+
+        assert_eq!(
+            p.payload_experiment_flags(),
+            [
+                DownlinkExperimentFlags {
+                    fractured: true,
+                    ..Default::default()
+                },
+                DownlinkExperimentFlags {
+                    finished: true,
+                    fault: true,
+                    ..Default::default()
+                },
+                DownlinkExperimentFlags {
+                    closure_confirmed: true,
+                    monitoring: true,
+                    ..Default::default()
+                },
+            ]
         );
     }
 

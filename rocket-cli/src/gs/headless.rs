@@ -20,7 +20,7 @@ use firmware_common_new::{
         client::{VLPGroundStation, VLPTXError},
         lora_config::LoraConfig,
         packets::{
-            VLPDownlinkPacket, VLPUplinkPacket,
+            EpmBattV, VLPDownlinkPacket, VLPUplinkPacket,
             change_mode::{ChangeModePacket, Mode},
             fire_pyro::{FirePyroPacket, PyroSelect},
             reset::{DeviceToReset, ResetPacket},
@@ -251,7 +251,8 @@ fn downlink_json(packet: &VLPDownlinkPacket, status: &PacketStatus) -> Value {
             "air_temperature": p.air_temperature(),
             "vl_battery_v": p.vl_battery_v(),
             "shared_battery_v": p.shared_battery_v(),
-            "epm_batt_v": p.epm_batt_v(),
+            "epm_batt_v": p.epm_batt_v().volts(),
+            "epm_batt_below_range": p.epm_batt_v() == EpmBattV::BelowRange,
             "amp_online": p.amp_online,
         }),
         VLPDownlinkPacket::SelfTestResult(p) => json!({

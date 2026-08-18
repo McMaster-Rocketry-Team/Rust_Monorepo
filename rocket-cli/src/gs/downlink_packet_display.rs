@@ -13,7 +13,7 @@ use firmware_common_new::{
         },
         messages::{amp_status::PowerOutputStatus, node_status::NodeMode},
     },
-    vlp::packets::{VLPDownlinkPacket, self_test_result::NodeStatus},
+    vlp::packets::{EpmBattV, VLPDownlinkPacket, self_test_result::NodeStatus},
 };
 use lora_phy::mod_params::PacketStatus;
 use pad::PadStr as _;
@@ -159,6 +159,25 @@ impl DownlinkPacketDisplay {
         StyledString::single_span("n/a", Style::from_color_style(ColorStyle::front(MUTED)))
     }
 
+    /// The payload's EPM battery bus, which has three states rather than two.
+    ///
+    /// `BelowRange` gets red text and its own word rather than a number: the
+    /// packet cannot say how far under 12V the bus is, and printing "12.0V"
+    /// for it would turn the most urgent reading the payload produces into
+    /// the most reassuring one on the panel. "n/a" would be just as wrong in
+    /// the other direction — it reads as "nobody measured", when in fact
+    /// somebody measured and the answer was bad.
+    fn format_epm_batt_v(value: EpmBattV) -> StyledString {
+        match value {
+            EpmBattV::Volts(v) => format!("{:.2}V", v).into(),
+            EpmBattV::BelowRange => StyledString::single_span(
+                "<12V",
+                Style::from_color_style(ColorStyle::front(BaseColor::Red.dark())),
+            ),
+            EpmBattV::Unavailable => Self::format_unavailable(),
+        }
+    }
+
     /// Render a reading that the packet may not carry. Every `Option`-returning
     /// getter goes through here, so no call site can quietly `unwrap_or(0.0)`
     /// its way back to a number the rocket never sent.
@@ -285,16 +304,16 @@ impl DownlinkPacketDisplay {
                             ),
                         ]],
                     ),
-                    // The payload's own pack, relayed over CAN. "n/a" here is
-                    // the payload saying nothing (or saying it could not read
-                    // the bus) — distinct from a real 0.00V, which is a
-                    // collapsed or disconnected pack.
+                    // The payload's own pack, relayed over CAN. Three states:
+                    // "n/a" is the payload saying nothing (or saying it could
+                    // not read the bus), "<12V" is a collapsed or disconnected
+                    // pack, and a number is a number.
                     Section::new(
                         "Payload",
                         vec![vec![(
                             "epm batt",
                             false,
-                            Self::format_optional(p.epm_batt_v(), |v| format!("{:.2}V", v)),
+                            Self::format_epm_batt_v(p.epm_batt_v()),
                         )]],
                     ),
                 ]
@@ -370,6 +389,7 @@ impl DownlinkPacketDisplay {
             }
             VLPDownlinkPacket::Telemetry(p) => {
                 let (lat, lon) = Self::format_lat_lon(p.lat_lon());
+                let exp = p.payload_experiment_flags();
                 vec![
                     // The deployment KF goes absent for the whole Mach
                     // lockout, so altitude and vertical velocity read "n/a"
@@ -672,6 +692,167 @@ impl DownlinkPacketDisplay {
                                     ),
                                 ),
                             ],
+                            // The arm sequence, which is the one payload
+                            // question the ground has to answer before the
+                            // rocket leaves the pad. Running clear next to
+                            // complete clear, after the bundle has had time to
+                            // finish, is a payload that never started.
+                            vec![
+                                (
+                                    "arm running",
+                                    true,
+                                    Self::format_bool_reported(
+                                        p.payload_sdrm_online(),
+                                        p.payload_arm_seq_running(),
+                                    ),
+                                ),
+                                (
+                                    "arm done",
+                                    true,
+                                    Self::format_bool_reported(
+                                        p.payload_sdrm_online(),
+                                        p.payload_arm_seq_complete(),
+                                    ),
+                                ),
+                                (
+                                    "arm fault",
+                                    true,
+                                    Self::format_bool_reported(
+                                        p.payload_sdrm_online(),
+                                        p.payload_arm_seq_fault(),
+                                    ),
+                                ),
+                            ],
+                            // Five of the payload's seven per-channel flags —
+                            // `homed` and `enabled` stayed on SD, see
+                            // `DownlinkExperimentFlags`. "closed" is the launch
+                            // commit signal.
+                            vec![
+                                (
+                                    "e1 frac",
+                                    true,
+                                    Self::format_bool_reported(
+                                        p.payload_sdrm_online(),
+                                        exp[0].fractured,
+                                    ),
+                                ),
+                                (
+                                    "e1 done",
+                                    true,
+                                    Self::format_bool_reported(
+                                        p.payload_sdrm_online(),
+                                        exp[0].finished,
+                                    ),
+                                ),
+                                (
+                                    "e1 flt",
+                                    true,
+                                    Self::format_bool_reported(
+                                        p.payload_sdrm_online(),
+                                        exp[0].fault,
+                                    ),
+                                ),
+                                (
+                                    "e1 closed",
+                                    true,
+                                    Self::format_bool_reported(
+                                        p.payload_sdrm_online(),
+                                        exp[0].closure_confirmed,
+                                    ),
+                                ),
+                                (
+                                    "e1 mon",
+                                    true,
+                                    Self::format_bool_reported(
+                                        p.payload_sdrm_online(),
+                                        exp[0].monitoring,
+                                    ),
+                                ),
+                            ],
+                            vec![
+                                (
+                                    "e2 frac",
+                                    true,
+                                    Self::format_bool_reported(
+                                        p.payload_sdrm_online(),
+                                        exp[1].fractured,
+                                    ),
+                                ),
+                                (
+                                    "e2 done",
+                                    true,
+                                    Self::format_bool_reported(
+                                        p.payload_sdrm_online(),
+                                        exp[1].finished,
+                                    ),
+                                ),
+                                (
+                                    "e2 flt",
+                                    true,
+                                    Self::format_bool_reported(
+                                        p.payload_sdrm_online(),
+                                        exp[1].fault,
+                                    ),
+                                ),
+                                (
+                                    "e2 closed",
+                                    true,
+                                    Self::format_bool_reported(
+                                        p.payload_sdrm_online(),
+                                        exp[1].closure_confirmed,
+                                    ),
+                                ),
+                                (
+                                    "e2 mon",
+                                    true,
+                                    Self::format_bool_reported(
+                                        p.payload_sdrm_online(),
+                                        exp[1].monitoring,
+                                    ),
+                                ),
+                            ],
+                            vec![
+                                (
+                                    "e3 frac",
+                                    true,
+                                    Self::format_bool_reported(
+                                        p.payload_sdrm_online(),
+                                        exp[2].fractured,
+                                    ),
+                                ),
+                                (
+                                    "e3 done",
+                                    true,
+                                    Self::format_bool_reported(
+                                        p.payload_sdrm_online(),
+                                        exp[2].finished,
+                                    ),
+                                ),
+                                (
+                                    "e3 flt",
+                                    true,
+                                    Self::format_bool_reported(
+                                        p.payload_sdrm_online(),
+                                        exp[2].fault,
+                                    ),
+                                ),
+                                (
+                                    "e3 closed",
+                                    true,
+                                    Self::format_bool_reported(
+                                        p.payload_sdrm_online(),
+                                        exp[2].closure_confirmed,
+                                    ),
+                                ),
+                                (
+                                    "e3 mon",
+                                    true,
+                                    Self::format_bool_reported(
+                                        p.payload_sdrm_online(),
+                                        exp[2].monitoring,
+                                    ),
+                                ),
+                            ],
                             // Each payload reading is separately absent: one
                             // dead sensor blanks its own column and leaves the
                             // rest readable. A rail that is switched off still
@@ -681,9 +862,7 @@ impl DownlinkPacketDisplay {
                                 (
                                     "epm batt",
                                     false,
-                                    Self::format_optional(p.epm_batt_v(), |v| {
-                                        format!("{:.2}V", v)
-                                    }),
+                                    Self::format_epm_batt_v(p.epm_batt_v()),
                                 ),
                                 (
                                     "sys 3v3",
