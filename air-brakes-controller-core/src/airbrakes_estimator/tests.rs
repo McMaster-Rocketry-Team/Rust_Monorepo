@@ -3,6 +3,7 @@ use icao_units::si::Pascals;
 use nalgebra::Vector3;
 
 use super::*;
+use super::estimator::BARO_RING_SPAN_S;
 use crate::{
     FlightConfig, FlightEstimators, ImuSample,
     tests::fixtures::{lc25_airbrakes, subsonic_profile},
@@ -441,6 +442,63 @@ fn lc25_config() -> AirbrakesConfig {
             subsonic_crossing_altitude_asl: 3013.0,
         }),
         ..lc25_airbrakes()
+    }
+}
+
+/// The filter must be born at the altitude it is at, not the one it had.
+///
+/// `ring_median` picks nine samples evenly across a `BARO_RING_SPAN_S` ring,
+/// so a plain median of them is the MIDDLE pick — the altitude of half a
+/// ring-span ago. Handed to `VerticalKF::born` as the altitude now, that is a
+/// systematic error of `velocity * BARO_RING_SPAN_S / 2`, which at the
+/// 200-300 m/s birth happens at is 70-105 m. The filter cannot express that:
+/// `p00` is `KF_R_ALT_STD^2`, so it is tens of sigma wrong and certain of it,
+/// and the standing innovation gets worked off through the velocity channel —
+/// a spike arriving exactly when the MPC starts.
+///
+/// Measured against a short local median of the raw baro rather than a single
+/// sample, so baro noise does not decide the verdict; the bound is a few
+/// times that noise, which is what "not stale" means here.
+#[test]
+fn the_filter_is_born_at_the_altitude_it_is_at() {
+    init_logger();
+    let cases: [(&str, Vec<Row>, AirbrakesConfig); 2] = [
+        ("void lake", extend_pad(void_lake_rows(), 8.0), lc25_airbrakes()),
+        ("lc25", extend_pad(lc25_rows(), 12.0), lc25_config()),
+    ];
+    for (name, rows, config) in cases {
+        let result = replay(&rows, config);
+        let (birth_t, _) = result.birth.expect("filter never born");
+        let (birth_i, born_alt) = result
+            .alt_track
+            .iter()
+            .find(|(i, _)| rows[*i].timestamp_us >= birth_t)
+            .copied()
+            .expect("no altitude reported at birth");
+
+        // Local median of the raw baro over +-0.1 s of the birth row.
+        let mut local: Vec<f32> = rows
+            .iter()
+            .filter(|r| {
+                (r.timestamp_us as i64 - birth_t as i64).unsigned_abs() <= 100_000
+            })
+            .map(|r| r.altitude_asl)
+            .collect();
+        local.sort_by(f32::total_cmp);
+        let truth = local[local.len() / 2];
+
+        let vv_ref = reference_velocity(&rows, birth_i);
+        eprintln!(
+            "{name}: born at {born_alt:.1} m, baro says {truth:.1} m \
+             ({:+.1} m), climbing {vv_ref:.0} m/s — half a ring span is {:.0} m",
+            born_alt - truth,
+            vv_ref * BARO_RING_SPAN_S / 2.0
+        );
+        assert!(
+            (born_alt - truth).abs() < 25.0,
+            "{name}: born {:+.1} m from where the baro says it was",
+            born_alt - truth
+        );
     }
 }
 

@@ -166,7 +166,7 @@ const DRAG_LP_TAU_S: f32 = 0.3;
 /// Ring of recent raw baro samples, used only to pick the birth altitude
 /// by median. Covers `BARO_RING_SPAN_S` even at a 500 Hz feed.
 const BARO_RING_CAP: usize = 512;
-const BARO_RING_SPAN_S: f32 = 0.7;
+pub(super) const BARO_RING_SPAN_S: f32 = 0.7;
 
 // --- Birth of the vertical filter (Piece 4) -------------------------------
 /// Initial vertical-velocity uncertainty at a check-approved birth (the
@@ -799,12 +799,12 @@ impl AirbrakesEstimator {
 
                 // Birth ("born subsonic"): nothing from the garbage period
                 // survives into the filter except these two numbers.
-                let alt0_asl = match ring_median(baro_ring) {
+                let vv0 = reckoner.vertical_velocity;
+                let alt0_asl = match ring_median(baro_ring, timestamp_us, vv0) {
                     Some(m) => m,
                     // no baro at all yet — wait
                     None => return BaroGateOutcome::Accepted,
                 };
-                let vv0 = reckoner.vertical_velocity;
                 let kf = VerticalKF::born(
                     alt0_asl,
                     vv0,
@@ -1084,18 +1084,45 @@ fn drag_airspeed(a_drag: f32, altitude_asl: f32, cda_over_mass: f32) -> Option<f
     Some(libm::sqrtf(2.0 * a_drag / (rho * cda_over_mass)))
 }
 
-/// Median of 9 samples spaced evenly across the ring — a transient can't
-/// move it, unlike a mean or a single reading.
-fn ring_median(ring: &Deque<(u64, f32), BARO_RING_CAP>) -> Option<f32> {
+/// Median of 9 samples spaced evenly across the ring, each carried forward
+/// to `now_us` at `vertical_velocity` — a transient can't move it, unlike a
+/// mean or a single reading, and unlike a plain median it is not stale.
+///
+/// The carry is the whole point and it was missing until 2026-08-17. Nine
+/// picks evenly spaced across the ring make the median the MIDDLE pick, i.e.
+/// the altitude the rocket had half a ring-span ago: `BARO_RING_SPAN_S / 2`
+/// = 0.35 s, which at the 224 m/s this is called at is **80 m low**. The
+/// filter was then born believing an altitude it had left a third of a
+/// second earlier, while `p00` said it knew that altitude to 3 m — 27 sigma
+/// wrong and confident about it. The baro's standing +80 m innovation got
+/// worked off partly through the velocity channel, which on the Void Lake
+/// replay peaked at +62 m/s (285 against a true 224) 84 ms after birth and
+/// took half a second to bleed off. The Mach gate saw that excursion and
+/// shut the brakes again; when it reopened the MPC's velocity input was
+/// still 12% high.
+///
+/// Carrying each pick forward removes the lag exactly for a constant-velocity
+/// climb, and leaves only the curvature over half a ring span — at -4.5 m/s^2
+/// and 0.35 s, about 0.3 m. It is done per pick rather than once on the
+/// median so that the median still ranks readings that are comparable: at
+/// 224 m/s the raw picks span 157 m, which is fifty times the baro noise the
+/// median is there to reject, and ranking them ranks time rather than
+/// plausibility.
+fn ring_median(
+    ring: &Deque<(u64, f32), BARO_RING_CAP>,
+    now_us: u64,
+    vertical_velocity: f32,
+) -> Option<f32> {
     let n = ring.len();
     if n == 0 {
         return None;
     }
     let mut picks = [0.0f32; 9];
     let mut count = 0usize;
-    for (i, (_, alt)) in ring.iter().enumerate() {
+    for (i, (t_us, alt)) in ring.iter().enumerate() {
         while count < 9 && i == (count * (n - 1)) / 8 {
-            picks[count] = *alt;
+            let age_s = (now_us.saturating_sub(*t_us)) as f32 * 1e-6;
+            picks[count] = *alt + vertical_velocity * age_s;
             count += 1;
         }
     }
