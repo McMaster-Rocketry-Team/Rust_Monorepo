@@ -12,12 +12,16 @@
 //!
 //! **Ignition is the one decision the barometer does not make.** It is a
 //! magnitude check on the raw accelerometer and nothing else
-//! ([`FlightProfile::ignition_detection_acc_threshold`]): a 10 Hz low pass, a
+//! ([`FlightConfig::ignition_detection_acc_threshold`]): a 10 Hz low pass, a
 //! threshold, and a 0.1 s sustain, implemented once in
 //! [`crate::ignition_detector`] and instantiated here. It needs no pad
 //! calibration, no mounting orientation, no gyro bias — and it shares the
 //! *code* with the airbrakes half's detector but not the *instance*, so
-//! neither half can hold the other's ignition decision hostage.
+//! neither half can hold the other's ignition decision hostage. The
+//! threshold is not even per-half: it is one field above both of them.
+//!
+//! [`FlightConfig::ignition_detection_acc_threshold`]:
+//!     crate::FlightConfig::ignition_detection_acc_threshold
 //!
 //! The barometric detector it replaced (10 m/s of filtered climb AND 15 m of
 //! rise) decided the most load-bearing instant in the flight — the anchor
@@ -197,12 +201,14 @@ pub struct FlightProfile {
     /// sensors*. They do not, and have not since `b901ace` deleted this
     /// half's barometric ignition detector. Both halves now run the one
     /// accelerometer detector in [`crate::ignition_detector`] — one
-    /// implementation, two instances, the same 10 Hz low pass and 0.1 s
-    /// sustain — and on the flown `FLIGHT_CONFIG` both at 8 g. Given the
-    /// same threshold and both halves free to act, they latch on the same
-    /// sample: `tests::osiris_sim::ignition_latch_time_by_threshold` sweeps
-    /// 4-12 g and fails outright if the two ever disagree about which
-    /// sample the motor lit on.
+    /// implementation, two instances, the same 10 Hz low pass, the same
+    /// 0.1 s sustain and — since 2026-08-18 — literally the same threshold:
+    /// [`FlightConfig::ignition_detection_acc_threshold`](crate::FlightConfig::ignition_detection_acc_threshold)
+    /// is one field above both halves, so no config can set them apart.
+    /// With both halves free to act they latch on the same sample:
+    /// `tests::osiris_sim::ignition_latch_time_by_threshold` sweeps 4-12 g
+    /// and fails outright if the two ever disagree about which sample the
+    /// motor lit on.
     ///
     /// **"Both free to act" is the caveat, and it is not hypothetical.**
     /// The airbrakes half refuses to detect ignition until its pad ring has
@@ -228,55 +234,6 @@ pub struct FlightProfile {
     /// coincidence rather than a link: they are answers to different
     /// questions that merely happen to be timed from the same event.
     pub mach_lockout_duration_us: Option<u32>,
-
-    /// Low-passed |accel| (m/s^2) above which ignition is latched. **The
-    /// only ignition detector this estimator has.**
-    ///
-    /// It IS the airbrakes estimator's detector — the same implementation,
-    /// [`crate::ignition_detector`] — but its own instance, and not wired
-    /// to that one: a magnitude check on the raw accelerometer, which is
-    /// all this half needs. No pad calibration to wait for, no gyro bias,
-    /// no mounting orientation, no dead reckoner — a sensor and a
-    /// threshold. (Separate instances because the airbrakes half refuses to
-    /// detect ignition until its pad calibration completes, and a board
-    /// powered up seconds before launch would fire no pyros at all if this
-    /// half waited on that.)
-    ///
-    /// This replaced a barometric pair (10 m/s of filtered climb AND 15 m
-    /// of rise) that used to run alongside it. The barometric version
-    /// decided the single most load-bearing instant in the flight — the
-    /// anchor for the Mach lockout — from the very static port that was
-    /// about to go transonic, through a filter with ~1 s of bandwidth, and
-    /// it finished only 0.75 s before that port started lying on Osiris.
-    /// It also completed ~1.1 s later than the accelerometer on every
-    /// flight measured (1.04 s Osiris bench, 1.26 s Void Lake, 1.32 s
-    /// LC'25), and its filter was the only reason one had to exist on the
-    /// pad at all.
-    ///
-    /// Not an `Option`, because a profile with no ignition detector is a
-    /// profile that never leaves the pad and never fires a pyro. There is
-    /// nothing to fall back to: if the accelerometer is silent or lying low
-    /// this estimator does not detect a launch. That is the trade — a
-    /// detector that is right about the moment it matters, against a second
-    /// opinion from a sensor that is wrong about exactly that moment.
-    ///
-    /// ~4 g suits most motors: far above pad handling and wind, far below
-    /// liftoff thrust (the O3400 pulls ~15 g, held for the whole 6.3 s
-    /// burn). The quietest measured pad sits at 1.02 g. Raising it is
-    /// nearly free on a punchy motor — on Osiris, 8 g latches only 20 ms
-    /// later than 4 g — but it is airframe-specific: on LC'25's softer
-    /// curve, 8 g costs 0.45 s and 10 g never latches at all.
-    ///
-    /// The detector itself is
-    /// [`crate::ignition_detector`], shared with the airbrakes half, so the
-    /// two halves now differ in exactly this number and nothing else. They
-    /// are still two settings rather than one because the threshold is the
-    /// one parameter a caller might legitimately want to split — but if you
-    /// find yourself splitting it, say why here and in
-    /// [`AirbrakesConfig::ignition_detection_acc_threshold`](crate::airbrakes_estimator::AirbrakesConfig::ignition_detection_acc_threshold),
-    /// because "the motor lit" is one event and two answers to it need a
-    /// reason.
-    pub ignition_detection_acc_threshold: f32,
 
     pub deployment: DeploymentProfile,
 }
@@ -482,7 +439,12 @@ pub struct RocketStateEstimator {
 }
 
 impl RocketStateEstimator {
-    pub fn new(profile: FlightProfile) -> Self {
+    /// `ignition_detection_acc_threshold` is not part of [`FlightProfile`]
+    /// because it is not this half's to own — it is
+    /// [`FlightConfig::ignition_detection_acc_threshold`](crate::FlightConfig::ignition_detection_acc_threshold),
+    /// the one number both halves detect ignition at, handed down by
+    /// [`FlightEstimators::new`](crate::FlightEstimators::new).
+    pub fn new(profile: FlightProfile, ignition_detection_acc_threshold: f32) -> Self {
         Self {
             profile,
             kf: None,
@@ -491,7 +453,7 @@ impl RocketStateEstimator {
                 gate_rejected_s: 0.0,
             },
             prev_timestamp_us: None,
-            ignition: IgnitionDetector::new(),
+            ignition: IgnitionDetector::new(ignition_detection_acc_threshold),
         }
     }
 
@@ -525,10 +487,10 @@ impl RocketStateEstimator {
     /// `acc` is the RAW sensor vector, not anything another estimator
     /// derived from it, and it feeds exactly one decision: the ignition
     /// magnitude check (see
-    /// [`FlightProfile::ignition_detection_acc_threshold`]). Nothing else in
-    /// this estimator reads it, and it can only ever move ignition
-    /// detection earlier — `None`, a dead IMU, or a threshold of `None`
-    /// leaves the baro condition to fire on its own exactly as before.
+    /// [`FlightConfig::ignition_detection_acc_threshold`](crate::FlightConfig::ignition_detection_acc_threshold)).
+    /// Nothing else in this estimator reads it, and it is the ONLY thing
+    /// that can start a flight: `None` on every sample, or a dead IMU, and
+    /// this estimator stays on the pad forever.
     ///
     /// Returns the pyro command for this sample — `Some(pyro)` when a pyro
     /// channel should be fired — and what the innovation gate did with this
@@ -554,9 +516,7 @@ impl RocketStateEstimator {
         let dt = self.timer_dt(timestamp_us);
         // Run every sample so the low pass and the sustain are already warm
         // when the motor lights; the result is only consulted on the pad.
-        let accel_says_ignition =
-            self.ignition
-                .update(acc, dt, self.profile.ignition_detection_acc_threshold);
+        let accel_says_ignition = self.ignition.update(acc, dt);
 
         // Mach lockout, handled here and not in the stage machine below,
         // because there is no filter during it to run that machine on.

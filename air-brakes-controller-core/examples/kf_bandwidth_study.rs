@@ -422,12 +422,18 @@ fn lc25_rocket() -> RocketParameters {
     }
 }
 
+/// The 4 g both replayed flights clear with margin. A constant here rather
+/// than a config field because it is no longer one: the threshold is
+/// `FlightConfig::ignition_detection_acc_threshold`, above both estimator
+/// halves, and this study drives the airbrakes half on its own.
+const IGNITION_ACC_THRESHOLD: f32 = 4.0 * 9.81;
+
 fn run_flight(name: &str, rows: Vec<Row>, config: AirbrakesConfig) {
     let (apogee_i, apogee_alt) = baro_apogee(&rows);
     let ign_i = find_ignition(&rows);
 
     // ---- pass 1: the flown estimator, and where it is born
-    let mut est = AirbrakesEstimator::new(config.clone());
+    let mut est = AirbrakesEstimator::new(config.clone(), IGNITION_ACC_THRESHOLD);
     let mut flown: Vec<(usize, f32, Vector2<f32>)> = Vec::new();
     let mut birth: Option<(u64, bool, usize)> = None;
     for (i, r) in rows.iter().enumerate() {
@@ -887,7 +893,6 @@ fn run_flight(name: &str, rows: Vec<Row>, config: AirbrakesConfig) {
 
 fn main() {
     let base = AirbrakesConfig {
-        ignition_detection_acc_threshold: 4.0 * 9.81,
         mach_lockout: None,
         max_open_mach: 0.8,
         rocket: lc25_rocket(),

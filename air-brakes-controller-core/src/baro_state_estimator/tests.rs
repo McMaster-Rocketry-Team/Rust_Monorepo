@@ -1,5 +1,5 @@
 use super::*;
-use crate::tests::fixtures::subsonic_profile;
+use crate::tests::fixtures::{IGNITION_ACC_THRESHOLD, subsonic_profile};
 
 /// Deterministic pseudo-gaussian noise (sum of 4 LCG uniforms, mean 0)
 struct NoiseGen {
@@ -162,15 +162,18 @@ fn simulate_flight(
 #[test]
 fn dual_deploys_drogue_near_apogee_and_main_at_altitude() {
     let main_agl = 457.2;
-    let mut estimator = RocketStateEstimator::new(FlightProfile {
-        deployment: DeploymentProfile::Dual {
-            drogue_chute_minimum_altitude_agl: 500.0,
-            drogue_chute_delay_us: 0,
-            main_chute_altitude_agl: main_agl,
-            main_chute_delay_us: 0,
+    let mut estimator = RocketStateEstimator::new(
+        FlightProfile {
+            deployment: DeploymentProfile::Dual {
+                drogue_chute_minimum_altitude_agl: 500.0,
+                drogue_chute_delay_us: 0,
+                main_chute_altitude_agl: main_agl,
+                main_chute_delay_us: 0,
+            },
+            ..subsonic_profile()
         },
-        ..subsonic_profile()
-    });
+        IGNITION_ACC_THRESHOLD,
+    );
 
     let result = simulate_flight(&mut estimator, 200.0, 80.0, 3.0);
     assert!(result.apogee_agl > 1000.0, "apogee={}", result.apogee_agl);
@@ -195,15 +198,18 @@ fn dual_deploys_drogue_near_apogee_and_main_at_altitude() {
 
 #[test]
 fn single_deploys_both_near_apogee() {
-    let mut estimator = RocketStateEstimator::new(FlightProfile {
-        // 500 m, against an apogee the test then asserts is over 1000 m:
-        // the minimum has to be cleared for either chute to come out.
-        deployment: DeploymentProfile::Single {
-            minimum_deployment_altitude_agl: 500.0,
-            delay_us: 0,
+    let mut estimator = RocketStateEstimator::new(
+        FlightProfile {
+            // 500 m, against an apogee the test then asserts is over 1000 m:
+            // the minimum has to be cleared for either chute to come out.
+            deployment: DeploymentProfile::Single {
+                minimum_deployment_altitude_agl: 500.0,
+                delay_us: 0,
+            },
+            ..subsonic_profile()
         },
-        ..subsonic_profile()
-    });
+        IGNITION_ACC_THRESHOLD,
+    );
 
     let result = simulate_flight(&mut estimator, 200.0, 80.0, 3.0);
     assert!(result.apogee_agl > 1000.0);
@@ -228,17 +234,20 @@ fn single_deploys_both_near_apogee() {
 
 #[test]
 fn below_min_apogee_does_not_deploy() {
-    let mut estimator = RocketStateEstimator::new(FlightProfile {
-        // 5000 m against a flight that reaches nowhere near it — this
-        // number is the whole test.
-        deployment: DeploymentProfile::Dual {
-            drogue_chute_minimum_altitude_agl: 5000.0,
-            drogue_chute_delay_us: 0,
-            main_chute_altitude_agl: 457.2,
-            main_chute_delay_us: 0,
+    let mut estimator = RocketStateEstimator::new(
+        FlightProfile {
+            // 5000 m against a flight that reaches nowhere near it — this
+            // number is the whole test.
+            deployment: DeploymentProfile::Dual {
+                drogue_chute_minimum_altitude_agl: 5000.0,
+                drogue_chute_delay_us: 0,
+                main_chute_altitude_agl: 457.2,
+                main_chute_delay_us: 0,
+            },
+            ..subsonic_profile()
         },
-        ..subsonic_profile()
-    });
+        IGNITION_ACC_THRESHOLD,
+    );
 
     let result = simulate_flight(&mut estimator, 200.0, 40.0, 1.5);
     assert!(result.drogue.is_none());
@@ -253,7 +262,7 @@ fn below_min_apogee_does_not_deploy() {
 fn no_false_ignition_on_pad() {
     let mut clock = SampleClock::new();
     // The rocket never leaves the pad, so no chute number can matter here.
-    let mut estimator = RocketStateEstimator::new(subsonic_profile());
+    let mut estimator = RocketStateEstimator::new(subsonic_profile(), IGNITION_ACC_THRESHOLD);
     let mut noise = NoiseGen::new(0.5);
 
     // 2 minutes armed on the pad
@@ -271,7 +280,7 @@ fn blast_transient_during_coast_does_not_deploy_early() {
     let mut clock = SampleClock::new();
     // What is asserted is *when* apogee is latched relative to the true
     // apogee, not what altitude the chute comes out at.
-    let mut estimator = RocketStateEstimator::new(subsonic_profile());
+    let mut estimator = RocketStateEstimator::new(subsonic_profile(), IGNITION_ACC_THRESHOLD);
     let mut noise = NoiseGen::new(0.5);
     let pad = 200.0f32;
 
@@ -351,14 +360,17 @@ fn mach_lockout_survives_supersonic_garbage() {
     // gravity-only coast, apogee ~72.8 s. Ignition detection completes ~1.5 s
     // into the burn; back below Mach 0.75 at ~43 s. Lockout = 48 s from
     // detection (~margin), ending ~23 s before apogee.
-    let mut estimator = RocketStateEstimator::new(FlightProfile {
-        mach_lockout_duration_us: Some(48_000_000),
-        deployment: DeploymentProfile::Single {
-            minimum_deployment_altitude_agl: 1000.0,
-            delay_us: 0,
+    let mut estimator = RocketStateEstimator::new(
+        FlightProfile {
+            mach_lockout_duration_us: Some(48_000_000),
+            deployment: DeploymentProfile::Single {
+                minimum_deployment_altitude_agl: 1000.0,
+                delay_us: 0,
+            },
+            ..subsonic_profile()
         },
-        ..subsonic_profile()
-    });
+        IGNITION_ACC_THRESHOLD,
+    );
     let mut noise = NoiseGen::new(0.5);
     let pad = 200.0f32;
 
@@ -470,10 +482,13 @@ fn kf_accessors_absent_before_birth_and_during_lockout() {
     let mut clock = SampleClock::new();
     // The 10 s lockout is one of the two ways to have no reading, so it is
     // stated here; the chute profile never comes into it.
-    let mut estimator = RocketStateEstimator::new(FlightProfile {
-        mach_lockout_duration_us: Some(10_000_000),
-        ..subsonic_profile()
-    });
+    let mut estimator = RocketStateEstimator::new(
+        FlightProfile {
+            mach_lockout_duration_us: Some(10_000_000),
+            ..subsonic_profile()
+        },
+        IGNITION_ACC_THRESHOLD,
+    );
 
     assert_eq!(estimator.kf_altitude_asl(), None, "no filter before the first sample");
     assert_eq!(estimator.kf_vertical_velocity(), None, "no filter before the first sample");
@@ -611,15 +626,18 @@ fn void_lake_flight_replay() {
         .expect("no liftoff in data");
 
     // Void Lake's own dual-deploy numbers, on the subsonic base.
-    let mut estimator = RocketStateEstimator::new(FlightProfile {
-        deployment: DeploymentProfile::Dual {
-            drogue_chute_minimum_altitude_agl: 500.0,
-            drogue_chute_delay_us: 0,
-            main_chute_altitude_agl: 457.2,
-            main_chute_delay_us: 0,
+    let mut estimator = RocketStateEstimator::new(
+        FlightProfile {
+            deployment: DeploymentProfile::Dual {
+                drogue_chute_minimum_altitude_agl: 500.0,
+                drogue_chute_delay_us: 0,
+                main_chute_altitude_agl: 457.2,
+                main_chute_delay_us: 0,
+            },
+            ..subsonic_profile()
         },
-        ..subsonic_profile()
-    });
+        IGNITION_ACC_THRESHOLD,
+    );
 
     let mut ignition_i = None;
     let mut drogue = None;
@@ -852,7 +870,7 @@ struct Events {
 
 /// Fly `flight` at `hz` and record when each event happened.
 fn fly_at_rate(hz: f64, profile: FlightProfile, flight: &AnalyticFlight) -> Events {
-    let mut estimator = RocketStateEstimator::new(profile);
+    let mut estimator = RocketStateEstimator::new(profile, IGNITION_ACC_THRESHOLD);
     let mut noise = NoiseGen::new(0.5);
     let mut ev = Events::default();
 
@@ -1044,7 +1062,7 @@ fn a_sensor_stall_does_not_stretch_a_pyro_delay() {
         ..subsonic_profile()
     };
 
-    let mut estimator = RocketStateEstimator::new(profile);
+    let mut estimator = RocketStateEstimator::new(profile, IGNITION_ACC_THRESHOLD);
     let mut noise = NoiseGen::new(0.5);
     let mut clock = SampleClock::new();
     let mut delay_start: Option<f32> = None;
@@ -1110,7 +1128,7 @@ fn ignition_comes_from_the_accelerometer_alone() {
     let detect = |feed_imu: bool| -> Option<f32> {
         // What is measured is the instant the state leaves `OnPad`, which
         // no chute number touches.
-        let mut estimator = RocketStateEstimator::new(subsonic_profile());
+        let mut estimator = RocketStateEstimator::new(subsonic_profile(), IGNITION_ACC_THRESHOLD);
         let mut noise = NoiseGen::new(0.5);
         let mut clock = SampleClock::new();
         let end = ((flight.touchdown_s() + 20.0) * SAMPLES_PER_S as f32) as usize;
@@ -1157,20 +1175,19 @@ fn ignition_comes_from_the_accelerometer_alone() {
     );
 }
 
-/// A knock on the rail is not a launch. The 5 Hz low pass lets a short
+/// A knock on the rail is not a launch. The 10 Hz low pass lets a short
 /// transient through at surprising amplitude — a 40 ms burst of 12 g reaches
 /// well past a 4 g threshold — so what actually rejects it is the sustain:
 /// the channel has to STAY up, and a knock does not.
 #[test]
 fn a_knock_on_the_pad_does_not_latch_ignition() {
+    // Restated rather than taken from `IGNITION_ACC_THRESHOLD`: the doc
+    // above is an argument about 12 g knocks against a 4 g threshold, and
+    // the number it argues from belongs next to it.
+    const THRESHOLD: f32 = 4.0 * 9.81;
+
     let flight = AnalyticFlight { pad_asl: 200.0 };
-    let mut estimator = RocketStateEstimator::new(FlightProfile {
-        // Restated rather than inherited: the doc above is an argument
-        // about 12 g knocks against a 4 g threshold, and the number it
-        // argues from belongs next to it.
-        ignition_detection_acc_threshold: 4.0 * 9.81,
-        ..subsonic_profile()
-    });
+    let mut estimator = RocketStateEstimator::new(subsonic_profile(), THRESHOLD);
     let mut noise = NoiseGen::new(0.5);
     let mut clock = SampleClock::new();
     let mut peak_lp = 0.0f32;
@@ -1283,7 +1300,7 @@ fn a_garbage_sample_at_lockout_exit_does_not_fire_the_drogue() {
     // sample the filter is born from — and the drogue fire as
     // (wall-clock time, TRUE vertical velocity there).
     let fly = |inject_at: Option<usize>| -> (Option<(usize, f32)>, Option<(f32, f32)>) {
-        let mut estimator = RocketStateEstimator::new(profile.clone());
+        let mut estimator = RocketStateEstimator::new(profile.clone(), IGNITION_ACC_THRESHOLD);
         let mut noise = NoiseGen::new(0.5);
         let mut clock = SampleClock::new();
         let mut in_lockout = false;

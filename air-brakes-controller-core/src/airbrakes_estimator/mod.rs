@@ -117,18 +117,6 @@ pub struct ImuSample {
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Clone, Debug)]
 pub struct AirbrakesConfig {
-    /// Low-passed |accel| above this, held for the shared sustain, latches
-    /// ignition detection (m/s^2). The detector is
-    /// [`crate::ignition_detector`], the same implementation the pyro half
-    /// runs; this is the only parameter the two halves can differ in.
-    ///
-    /// ~4 g works for most motors: well above pad handling and wind, well
-    /// below liftoff thrust. Raising it is nearly free on a punchy motor —
-    /// on Osiris, 8 g latches only ~20 ms later than 4 g — but it is
-    /// airframe-specific: on LC'25's softer curve 8 g costs 0.45 s and 10 g
-    /// never latches at all.
-    pub ignition_detection_acc_threshold: f32,
-
     /// `Some` for flights that go near or above the speed of sound: the
     /// baro is ignored from ignition until the drag check (bounded by
     /// these timers) says the flow is subsonic again. `None` for subsonic
@@ -208,25 +196,30 @@ pub struct AirbrakesConfig {
 /// from the DEPLOYMENT half's ignition detection. Since 2026-08-17 that is
 /// the same detector this half runs — one implementation
 /// ([`crate::ignition_detector`]), two instances, same 10 Hz low pass on the
-/// raw accelerometer and same 0.1 s sustain — so the only parameter that can
-/// separate the two origins is each half's own
-/// `ignition_detection_acc_threshold`. Osiris sets both to 8 g and they
-/// latch on the same sample; `osiris_sim::ignition_latch_time_by_threshold`
-/// sweeps the threshold and asserts the two halves never disagree.
+/// raw accelerometer and same 0.1 s sustain — and since 2026-08-18 the same
+/// threshold too: it lives once, in
+/// [`FlightConfig::ignition_detection_acc_threshold`], and is handed to both
+/// detectors at construction. No parameter can separate the two origins any
+/// more; `osiris_sim::ignition_latch_time_by_threshold` sweeps that one
+/// number and asserts the two halves never disagree.
 ///
-/// One thing still can separate them in flight, and it is not a threshold:
-/// this half refuses to detect ignition until its pad calibration completes
-/// (three 2 s windows), so a board armed seconds before liftoff gives this
-/// half a later origin, or none, while the pyro half's is unaffected. That
-/// is why the halves hold separate instances rather than sharing one.
+/// One thing still can separate them in flight, and it never was a
+/// threshold: this half refuses to detect ignition until its pad calibration
+/// completes (three 2 s windows), so a board armed seconds before liftoff
+/// gives this half a later origin, or none, while the pyro half's is
+/// unaffected. That is why the halves hold separate instances rather than
+/// sharing one.
 ///
 /// What remains independent is the two lockouts themselves — different
 /// subsystems, different exit conditions, and different Mach numbers
 /// (0.75 there, [`AirbrakesConfig::max_open_mach`] here). Equal values in a
 /// config are still coincidence, not a relationship; changing one does not
-/// imply changing the other.
+/// imply changing the other. The ignition threshold is the one thing that
+/// was never independent, which is why it stopped being two fields.
 ///
 /// [`FlightProfile::mach_lockout_duration_us`]: crate::FlightProfile::mach_lockout_duration_us
+/// [`FlightConfig::ignition_detection_acc_threshold`]:
+///     crate::FlightConfig::ignition_detection_acc_threshold
 pub struct MachLockoutConfig {
     /// Earliest the rocket could possibly be below
     /// [`AirbrakesConfig::max_open_mach`]; the drag check is not consulted

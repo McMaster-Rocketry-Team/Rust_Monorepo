@@ -6,7 +6,7 @@ use super::*;
 use super::estimator::BARO_RING_SPAN_S;
 use crate::{
     FlightConfig, FlightEstimators, ImuSample,
-    tests::fixtures::{lc25_airbrakes, subsonic_profile},
+    tests::fixtures::{IGNITION_ACC_THRESHOLD, lc25_airbrakes, subsonic_profile},
     tests::init_logger,
 };
 
@@ -220,7 +220,7 @@ struct ReplayResult {
 }
 
 fn replay(rows: &[Row], config: AirbrakesConfig) -> ReplayResult {
-    let mut estimator = AirbrakesEstimator::new(config);
+    let mut estimator = AirbrakesEstimator::new(config, IGNITION_ACC_THRESHOLD);
     let mut result = ReplayResult {
         birth: None,
         apogee_i: None,
@@ -648,7 +648,7 @@ fn lc25_clipped_accel_replay() {
 fn short_pad_refuses_ignition() {
     init_logger();
     let rows = lc25_rows();
-    let mut estimator = AirbrakesEstimator::new(lc25_config());
+    let mut estimator = AirbrakesEstimator::new(lc25_config(), IGNITION_ACC_THRESHOLD);
     for (i, z) in rows.iter().enumerate() {
         estimator.update(z.timestamp_us, &z.imu, z.altitude_asl);
         assert!(
@@ -688,7 +688,12 @@ fn a_knock_on_the_pad_does_not_latch_ignition() {
     // timestamps it is handed.
     const KNOCK_DT_S: f32 = 1.0 / 416.0;
     let dt_us = (KNOCK_DT_S * 1e6) as u64;
-    let mut estimator = AirbrakesEstimator::new(lc25_config());
+    // Restated rather than taken from `IGNITION_ACC_THRESHOLD`, for the
+    // same reason as the pyro half's twin: the doc above argues 12 g knocks
+    // against a 4 g threshold, so the number it argues from stays here.
+    const THRESHOLD: f32 = 4.0 * 9.81;
+
+    let mut estimator = AirbrakesEstimator::new(lc25_config(), THRESHOLD);
     let gyro = Vector3::zeros();
 
     // Phase 1: 10 s of quiet rail, enough for >= 3 screened 2 s windows.
@@ -712,7 +717,7 @@ fn a_knock_on_the_pad_does_not_latch_ignition() {
     // transient really does cross the threshold.
     let mut lp: Option<Vector3<f32>> = None;
     let mut peak_lp = 0.0f32;
-    let threshold = lc25_config().ignition_detection_acc_threshold;
+    let threshold = THRESHOLD;
     for k in 0..(10.0 / KNOCK_DT_S) as u64 {
         let t = k as f32 * KNOCK_DT_S;
         let acc = if (t % 1.0) < 0.04 {
@@ -812,6 +817,7 @@ fn airbrakes_half_retires_at_apogee_and_stays_retired() {
     // Nothing here reads a config number: the retirement instant is scored
     // against the baro apogee of the replayed log, not against a threshold.
     let mut est = FlightEstimators::new(FlightConfig {
+        ignition_detection_acc_threshold: IGNITION_ACC_THRESHOLD,
         profile: subsonic_profile(),
         airbrakes: lc25_airbrakes(),
     });

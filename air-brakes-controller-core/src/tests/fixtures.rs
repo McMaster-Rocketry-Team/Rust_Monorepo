@@ -21,9 +21,10 @@
 //! threshold every scripted motor clears by 25%, the chute profile on a
 //! flight that never gets near a chute.
 //!
-//! Three bases rather than one, because there are three unrelated things
-//! being defaulted — the deployment half's profile, the LC'25 airframe, and
-//! the airbrakes half's config — and a single fixture with a dozen
+//! Three bases and a constant rather than one fixture, because there are
+//! four unrelated things being defaulted — the deployment half's profile,
+//! the LC'25 airframe, the airbrakes half's config, and the one ignition
+//! threshold both halves share — and a single fixture with a dozen
 //! overrides at each call site would put every number back on screen while
 //! making it harder to see which ones matter.
 //!
@@ -36,13 +37,26 @@ use crate::airbrakes_estimator::AirbrakesConfig;
 use crate::baro_state_estimator::{DeploymentProfile, FlightProfile};
 use crate::controller::RocketParameters;
 
+/// The ignition threshold for tests that are not about ignition.
+///
+/// A constant rather than a fixture field because it is not a field any
+/// more: it is [`crate::FlightConfig::ignition_detection_acc_threshold`],
+/// one number above both halves, so both estimator constructors take it
+/// directly. The scripted motors in `baro_state_estimator::tests` pull
+/// 5.1-11.2 g of specific force and both replayed flights pull more, so 4 g
+/// clears every one of them with margin while sitting far above pad
+/// handling and wind.
+///
+/// The two tests that are about ignition — `a_knock_on_the_pad_does_not_latch_ignition`
+/// in each half — restate 4 g at their own call sites, because the argument
+/// they make (a 12 g knock against a 4 g threshold) is only readable next
+/// to the number it argues from.
+pub const IGNITION_ACC_THRESHOLD: f32 = 4.0 * 9.81;
 /// Deployment-half profile for tests that are not about deployment.
 ///
-/// Subsonic — `mach_lockout_duration_us: None` — with the 4 g ignition
-/// threshold and a single-deploy at 300 m AGL with no delay. The scripted
-/// motors in `baro_state_estimator::tests` pull 5.1-11.2 g of specific
-/// force and both replayed flights pull more, so 4 g clears every one of
-/// them with margin while sitting far above pad handling and wind.
+/// Subsonic — `mach_lockout_duration_us: None` — with a single-deploy at
+/// 300 m AGL and no delay. The ignition threshold is not in here because it
+/// is not in this struct; see [`IGNITION_ACC_THRESHOLD`].
 ///
 /// The 300 m / 0 s chute profile is the "this flight never gets near a
 /// chute, or gets nowhere near this altitude" case: every test that takes
@@ -54,7 +68,6 @@ use crate::controller::RocketParameters;
 pub fn subsonic_profile() -> FlightProfile {
     FlightProfile {
         mach_lockout_duration_us: None,
-        ignition_detection_acc_threshold: 4.0 * 9.81,
         deployment: DeploymentProfile::Single {
             minimum_deployment_altitude_agl: 300.0,
             delay_us: 0,
@@ -97,7 +110,6 @@ pub fn lc25_rocket() -> RocketParameters {
 /// not get to live in here.
 pub fn lc25_airbrakes() -> AirbrakesConfig {
     AirbrakesConfig {
-        ignition_detection_acc_threshold: 4.0 * 9.81,
         mach_lockout: None,
         max_open_mach: 0.8,
         rocket: lc25_rocket(),

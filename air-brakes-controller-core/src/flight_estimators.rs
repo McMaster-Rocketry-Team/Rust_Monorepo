@@ -9,9 +9,9 @@
 //! * The **deployment** half ([`RocketStateEstimator`]) is baro-driven, and
 //!   its output is trusted outright — it fires the pyros. It never reads
 //!   anything from the airbrakes half. The one non-baro input it takes is
-//!   the raw accelerometer, feeding a magnitude check that can only make
-//!   ignition detection *earlier* than the baro pair would (see
-//!   [`FlightProfile::ignition_detection_acc_threshold`]); everything after
+//!   the raw accelerometer, feeding the magnitude check that is its ONLY
+//!   ignition detector (see
+//!   [`FlightConfig::ignition_detection_acc_threshold`]); everything after
 //!   that instant is barometric. Its *filter* is sample-clocked on
 //!   purpose (a fixed `DT` step per sample, so no clock can surprise it);
 //!   its *timers* read the sample timestamp, so a lockout configured as
@@ -65,14 +65,49 @@ pub struct AirbrakesMPCStates {
 /// Everything [`FlightEstimators`] is configured with, in one value.
 ///
 /// The two halves stay independent at runtime — [`FlightEstimators::new`]
-/// hands each estimator only its own field and nothing crosses afterwards.
-/// There is no invariant between the two halves to check: "never under
-/// thrust" is a property of the airbrakes state machine itself, which
-/// refuses to birth the vertical filter before its own measured burnout
-/// latch. So this is a plain pair: somewhere for firmware to write both
-/// halves down, and one value for [`FlightEstimators::new`] to take.
+/// hands each estimator its own field and nothing crosses afterwards. There
+/// is no invariant between the two halves to check: "never under thrust" is
+/// a property of the airbrakes state machine itself, which refuses to birth
+/// the vertical filter before its own measured burnout latch.
+///
+/// The one exception is the field below, and it is not an invariant between
+/// two settings — it is a single setting both halves read.
 #[derive(Debug, Clone)]
 pub struct FlightConfig {
+    /// Low-passed |accel| (m/s^2) above which ignition latches, for **both**
+    /// halves. The one thing they are configured with jointly.
+    ///
+    /// One field rather than two because "the motor lit" is one event about
+    /// one airframe, and it is the origin of both Mach lockout clocks. It
+    /// was two — one in [`FlightProfile`], one in [`AirbrakesConfig`] — until
+    /// 2026-08-18, on the argument that a caller might want to split them.
+    /// No caller ever did; every profile in the tree set them equal; and the
+    /// only outcome a split could actually produce was two answers to the
+    /// same question, silently timing the two lockouts from different
+    /// instants. The detector itself has been one implementation
+    /// ([`crate::ignition_detector`] — a 10 Hz low pass, this threshold, a
+    /// 0.1 s sustain) since 2026-08-17, so this was the last thing that
+    /// could separate them.
+    ///
+    /// Two *instances* of the detector still, and that stays deliberate:
+    /// the airbrakes half refuses to detect ignition until its pad
+    /// calibration completes, and a board armed seconds before liftoff must
+    /// still fire pyros. Same number, same code, independent gating.
+    ///
+    /// ~4 g suits most motors: far above pad handling and wind (the
+    /// quietest measured pad sits at 1.02 g), far below liftoff thrust (the
+    /// O3400 pulls ~15 g for its whole 6.3 s burn). Raising it is nearly
+    /// free on a punchy motor — on Osiris 8 g latches only ~20 ms later
+    /// than 4 g — but it is airframe-specific: on LC'25's softer curve 8 g
+    /// costs 0.45 s and 10 g never latches at all.
+    ///
+    /// Not an `Option`: a config with no ignition detector is a config that
+    /// never leaves the pad and never fires a pyro. There is no second
+    /// opinion to fall back on — if the accelerometer is silent or reads
+    /// low, neither half detects a launch. That is the trade, one detector
+    /// that is right about the moment that matters over a barometric second
+    /// one that is specifically wrong about it.
+    pub ignition_detection_acc_threshold: f32,
     /// The deployment estimator's profile: Mach lockout, burn timer, and
     /// the drogue/main deployment scheme. This half fires the pyros.
     pub profile: FlightProfile,
@@ -95,11 +130,18 @@ pub struct FlightEstimators {
 
 impl FlightEstimators {
     pub fn new(config: FlightConfig) -> Self {
-        // Each half gets only its own half of the config; nothing is shared
-        // past this point.
+        // Each half gets its own half of the config, plus the one setting
+        // that is genuinely shared — the ignition threshold, by value into
+        // each half's own detector. Nothing crosses past this point.
         Self {
-            deployment: RocketStateEstimator::new(config.profile),
-            airbrakes: Some(AirbrakesEstimator::new(config.airbrakes)),
+            deployment: RocketStateEstimator::new(
+                config.profile,
+                config.ignition_detection_acc_threshold,
+            ),
+            airbrakes: Some(AirbrakesEstimator::new(
+                config.airbrakes,
+                config.ignition_detection_acc_threshold,
+            )),
         }
     }
 
@@ -164,8 +206,8 @@ impl FlightEstimators {
         // never anything the airbrakes half derived from it. That half is
         // not consulted here and is not even constructed yet at the only
         // moment this value matters. See
-        // `FlightProfile::ignition_detection_acc_threshold` for what it
-        // does with it, which is one magnitude check and nothing else.
+        // `FlightConfig::ignition_detection_acc_threshold` for what it does
+        // with it, which is one magnitude check and nothing else.
         let (pyro, deployment_baro_gate) =
             self.deployment
                 .update(timestamp_us, imu.map(|imu| imu.acc), baro_altitude_asl);
@@ -369,7 +411,7 @@ pub struct AirbrakesLogSample {
 mod tests {
     use super::*;
     use crate::baro_state_estimator::{DT, SAMPLES_PER_S};
-    use crate::tests::fixtures::{lc25_airbrakes, subsonic_profile};
+    use crate::tests::fixtures::{IGNITION_ACC_THRESHOLD, lc25_airbrakes, subsonic_profile};
     use nalgebra::Vector3;
 
     /// Nominal 416 Hz sample spacing in microseconds.
@@ -385,6 +427,7 @@ mod tests {
     #[test]
     fn no_mpc_states_before_coasting() {
         let mut est = FlightEstimators::new(FlightConfig {
+            ignition_detection_acc_threshold: IGNITION_ACC_THRESHOLD,
             profile: subsonic_profile(),
             airbrakes: lc25_airbrakes(),
         });
@@ -411,8 +454,9 @@ mod tests {
         // The bare half and the composed one must be handed the SAME
         // profile — that is what makes the comparison below meaningful —
         // so both take the fixture rather than two hand-written copies.
-        let mut bare = RocketStateEstimator::new(subsonic_profile());
+        let mut bare = RocketStateEstimator::new(subsonic_profile(), IGNITION_ACC_THRESHOLD);
         let mut composed = FlightEstimators::new(FlightConfig {
+            ignition_detection_acc_threshold: IGNITION_ACC_THRESHOLD,
             profile: subsonic_profile(),
             airbrakes: lc25_airbrakes(),
         });

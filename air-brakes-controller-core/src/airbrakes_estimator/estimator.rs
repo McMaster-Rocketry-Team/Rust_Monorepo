@@ -145,13 +145,15 @@ const STAGE1_DURATION_S: f32 = 0.5;
 // own span record, not the check changing its mind.
 //
 // What the second actually bought was margin, and only where nothing else
-// was binding. The unsafe direction — a Cd*A/m too large, which reads the
-// airspeed low and votes early — is held by the inertial Mach test at the
-// birth site below, which is a pure accelerometer integration and so cannot
-// be fooled by a wrong drag model: at Cd +30% on LC'25 the check votes at
-// true Mach 0.857 and that test still holds the birth to Mach 0.787, with
-// the sustain or without it. What the second cost was ~1 s of control
-// window on every flight where the drag model was right.
+// was binding — and on the flown ceiling nothing else was binding either,
+// because it never moved the birth at all. The unsafe direction is a Cd*A/m
+// too large, which reads the airspeed low and votes early; measured on
+// LC'25 at Cd +30% the check votes at true Mach 0.857 with the sustain and
+// without it. The second was held by the inertial Mach test at the birth
+// site, which was itself dropped on 2026-08-18 — see there for what that
+// costs and why the ceiling is read with +-0.05 Mach of tolerance. What the
+// second cost was ~1 s of control window on every flight where the drag
+// model was right.
 /// Burnout is latched when the axial channel — deceleration-positive, the
 /// same `a_axial` the drag check inverts — has been at least this positive
 /// continuously for `BURNOUT_SUSTAIN_S`.
@@ -393,11 +395,16 @@ pub struct AirbrakesEstimator {
 }
 
 impl AirbrakesEstimator {
-    pub fn new(config: AirbrakesConfig) -> Self {
+    /// `ignition_detection_acc_threshold` is not part of
+    /// [`AirbrakesConfig`] because it is not this half's to own — it is
+    /// [`FlightConfig::ignition_detection_acc_threshold`](crate::FlightConfig::ignition_detection_acc_threshold),
+    /// the one number both halves detect ignition at, handed down by
+    /// [`FlightEstimators::new`](crate::FlightEstimators::new).
+    pub fn new(config: AirbrakesConfig, ignition_detection_acc_threshold: f32) -> Self {
         Self {
             state: State::Armed {
                 pad_ring: Deque::new(),
-                ignition: IgnitionDetector::new(),
+                ignition: IgnitionDetector::new(ignition_detection_acc_threshold),
                 pad_windows: heapless::Vec::new(),
                 window_sum: SVector::zeros(),
                 window_n: 0,
@@ -457,11 +464,7 @@ impl AirbrakesEstimator {
                 // Run every sample so the low pass and the sustain are
                 // already warm when the motor lights; the result is only
                 // consulted once the two readiness gates below have passed.
-                let accel_says_ignition = ignition.update(
-                    Some(acc),
-                    dt,
-                    self.config.ignition_detection_acc_threshold,
-                );
+                let accel_says_ignition = ignition.update(Some(acc), dt);
 
                 if pad_ring.is_full() {
                     pad_ring.pop_front();

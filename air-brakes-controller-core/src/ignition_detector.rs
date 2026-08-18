@@ -13,10 +13,22 @@
 //! *instance* would be wrong, because the halves are not allowed to detect
 //! at the same instant — see [`IgnitionDetector::update`].
 //!
-//! The threshold stays out here, in each half's config, because it is the
-//! one parameter that is genuinely per-airframe: it is sized against the
-//! motor's thrust curve, and a bench profile whose scripted motor reads
-//! 9.15 g cannot use the number a 14 g O-motor wants.
+//! The threshold is genuinely per-airframe — sized against the motor's
+//! thrust curve, and a bench profile whose scripted motor reads 9.15 g
+//! cannot use the number a 14 g O-motor wants — so it stays configuration
+//! rather than becoming a constant here. But it is ONE piece of
+//! configuration: [`FlightConfig::ignition_detection_acc_threshold`], held
+//! above both halves and handed to each detector at construction.
+//!
+//! It was two fields until 2026-08-18, one in each half's own config, on
+//! the theory that a caller might legitimately want to split them. No
+//! caller ever did — every profile in the tree set the two to the same
+//! number — and the only thing the second field could actually produce was
+//! two answers to "the motor lit", which silently gives the two Mach
+//! lockouts different origins. One field cannot.
+//!
+//! [`FlightConfig::ignition_detection_acc_threshold`]:
+//!     crate::FlightConfig::ignition_detection_acc_threshold
 
 use nalgebra::Vector3;
 
@@ -51,6 +63,11 @@ const SUSTAIN_S: f32 = 0.1;
 /// One half's view of "has the motor lit?".
 #[derive(Debug, Clone, Copy)]
 pub struct IgnitionDetector {
+    /// Specific-force magnitude the low pass must exceed (m/s^2). Fixed at
+    /// construction rather than passed per sample: it is one number for the
+    /// whole flight, and a per-sample argument is a place for the two halves
+    /// to drift apart again.
+    acc_threshold: f32,
     /// Low-passed accelerometer. `None` until the first sample that carries
     /// one.
     acc_lp: Option<Vector3<f32>>,
@@ -60,15 +77,16 @@ pub struct IgnitionDetector {
 }
 
 impl IgnitionDetector {
-    pub const fn new() -> Self {
+    pub const fn new(acc_threshold: f32) -> Self {
         Self {
+            acc_threshold,
             acc_lp: None,
             sustain_s: 0.0,
         }
     }
 
     /// Advance the detector by one sample and report whether ignition has
-    /// latched. `threshold` is the specific-force magnitude in m/s^2.
+    /// latched.
     ///
     /// Call this on EVERY sample, so the low pass and the sustain are
     /// already warm when the motor lights, and consult the result only
@@ -82,7 +100,7 @@ impl IgnitionDetector {
     /// A sample without an IMU reading leaves the filter and the sustain
     /// exactly where they were rather than resetting them: a one-sample SPI
     /// glitch mid-boost is not evidence that the motor stopped.
-    pub fn update(&mut self, acc: Option<Vector3<f32>>, dt: f32, threshold: f32) -> bool {
+    pub fn update(&mut self, acc: Option<Vector3<f32>>, dt: f32) -> bool {
         let Some(acc) = acc else {
             return false;
         };
@@ -99,17 +117,11 @@ impl IgnitionDetector {
         };
         self.acc_lp = Some(lp);
 
-        if lp.magnitude_squared() > threshold * threshold {
+        if lp.magnitude_squared() > self.acc_threshold * self.acc_threshold {
             self.sustain_s += dt;
         } else {
             self.sustain_s = 0.0;
         }
         self.sustain_s >= SUSTAIN_S
-    }
-}
-
-impl Default for IgnitionDetector {
-    fn default() -> Self {
-        Self::new()
     }
 }

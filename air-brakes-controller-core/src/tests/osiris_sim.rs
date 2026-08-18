@@ -87,11 +87,11 @@ fn osiris_rocket() -> RocketParameters {
 /// drifts out of date fails loudly rather than quietly passing.
 fn osiris_config() -> FlightConfig {
     FlightConfig {
+        // Mirrors VLF5's `FLIGHT_CONFIG`. One field, both halves — see
+        // `crate::ignition_detector`.
+        ignition_detection_acc_threshold: 8.0 * 9.81,
         profile: FlightProfile {
             mach_lockout_duration_us: Some(26_000_000),
-            // Mirrors VLF5's `FLIGHT_CONFIG`. Both halves run the same
-            // detector at the same 8 g — see `crate::ignition_detector`.
-            ignition_detection_acc_threshold: 8.0 * 9.81,
             deployment: DeploymentProfile::Dual {
                 drogue_chute_minimum_altitude_agl: 2000.0,
                 drogue_chute_delay_us: 1_000_000,
@@ -100,7 +100,6 @@ fn osiris_config() -> FlightConfig {
             },
         },
         airbrakes: AirbrakesConfig {
-            ignition_detection_acc_threshold: 8.0 * 9.81,
             mach_lockout: Some(MachLockoutConfig {
                 earliest_subsonic_after_ignition_us: 17_700_000,
                 force_birth_after_ignition_us: 25_000_000,
@@ -1988,13 +1987,14 @@ fn air_density_matches_the_isa_reference() {
 //
 // The same sweep over the two archived flight logs was retired on
 // 2026-08-17; its answer is transcribed into
-// `AirbrakesConfig::ignition_detection_acc_threshold` (on LC'25's softer
-// curve 8 g costs 0.45 s and 10 g never latches at all). This one answers it
-// on the two simulated Osiris motors, which is where `FLIGHT_CONFIG`'s 8 g
+// `FlightConfig::ignition_detection_acc_threshold` (on LC'25's softer curve
+// 8 g costs 0.45 s and 10 g never latches at all). This one answers it on
+// the two simulated Osiris motors, which is where `FLIGHT_CONFIG`'s 8 g
 // actually has to hold. Since 2026-08-17 both halves run the same detector
-// (`crate::ignition_detector`), so one latch time describes both — the only
-// thing that could separate them is a different threshold, which is exactly
-// what this sweeps.
+// (`crate::ignition_detector`), and since 2026-08-18 they read one threshold
+// field rather than two, so one latch time describes both. The equality
+// assertion below is now a check on the two halves' gating rather than on
+// their configuration — nothing a caller can write splits them.
 //
 // Times are seconds after TRUE ignition, so they are the detector's lag,
 // which is also the error in the origin of every Mach lockout timer.
@@ -2012,8 +2012,7 @@ fn ignition_latch_time_by_threshold() {
         let mut reference: Option<f32> = None;
         for g in [4.0f32, 6.0, 8.0, 10.0, 12.0] {
             let mut cfg = osiris_config();
-            cfg.profile.ignition_detection_acc_threshold = g * 9.81;
-            cfg.airbrakes.ignition_detection_acc_threshold = g * 9.81;
+            cfg.ignition_detection_acc_threshold = g * 9.81;
             let mut est = FlightEstimators::new(cfg);
 
             let mut pyro_t: Option<f32> = None;
