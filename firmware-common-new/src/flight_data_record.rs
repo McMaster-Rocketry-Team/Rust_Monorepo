@@ -248,6 +248,12 @@ pub struct AmpRecord {
 /// unavailable, so a live EPM with one dead rail sensor is a real state and
 /// stays distinguishable from a payload that has said nothing at all (every
 /// field `None`).
+///
+/// `experiment_flags` is the exception, and is not optional. Every bit pattern
+/// of that word is a legal state — a channel with nothing to report says so by
+/// reporting `enabled` clear — so there is no absence to encode. "The payload
+/// never sent a status message" is carried one level up, by the `Option`
+/// around this whole struct.
 #[derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive, Debug, Clone, PartialEq)]
 pub struct PayloadRecord {
     /// Payload EPM battery bus voltage (mV).
@@ -257,6 +263,17 @@ pub struct PayloadRecord {
     pub rail_ma: [Option<u16>; 6],
     /// SEM linear actuator positions (steps), experiment channels 1..3.
     pub actuator_steps: [Option<u16>; 3],
+    /// SEM fracture load (centinewtons, tension positive), experiment channels
+    /// 1..3. `None` for a channel SEM did not report, which includes every
+    /// channel that is not fitted.
+    pub load_cell_cn: [Option<i16>; 3],
+    /// Per-channel experiment state, stored as the packed word the payload
+    /// sent. Decode with
+    /// [`ExperimentChannelFlags::from_raw`](crate::can_bus::messages::custom_payload_status::ExperimentChannelFlags::from_raw),
+    /// the same way `NodeStatusRecord::custom_status` is stored raw and
+    /// decoded by the node's own custom-status type — one packed word in the
+    /// log, one implementation of the layout.
+    pub experiment_flags: u32,
 }
 
 #[derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive, Debug, Clone, PartialEq)]

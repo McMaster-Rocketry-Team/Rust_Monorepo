@@ -11,11 +11,25 @@
         "epm_per_12v_ma": 0,
         "sem_actuator_1_steps": 0,
         "sem_actuator_2_steps": 0,
-        "sem_actuator_3_steps": 0
+        "sem_actuator_3_steps": 0,
+        "sem_load_cell_1_cn": 0,
+        "sem_load_cell_2_cn": 0,
+        "sem_load_cell_3_cn": 0,
+        "experiment_flags": 0
       }
     },
     "message_type": 35,
     "serialized_data": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
       0,
       0,
       0,
@@ -40,8 +54,8 @@
     "frame_id": 344760340,
     "encoded_data": [
       [
-        184,
-        246,
+        69,
+        42,
         0,
         0,
         0,
@@ -71,7 +85,20 @@
       ],
       [
         0,
-        96
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        32
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        64
       ]
     ]
   },
@@ -87,7 +114,11 @@
         "epm_per_12v_ma": 65535,
         "sem_actuator_1_steps": 65535,
         "sem_actuator_2_steps": 65535,
-        "sem_actuator_3_steps": 65535
+        "sem_actuator_3_steps": 65535,
+        "sem_load_cell_1_cn": -32768,
+        "sem_load_cell_2_cn": -32768,
+        "sem_load_cell_3_cn": -32768,
+        "experiment_flags": 0
       }
     },
     "message_type": 35,
@@ -111,13 +142,23 @@
       255,
       255,
       255,
-      255
+      255,
+      128,
+      0,
+      128,
+      0,
+      128,
+      0,
+      0,
+      0,
+      0,
+      0
     ],
     "frame_id": 344760340,
     "encoded_data": [
       [
-        234,
-        69,
+        240,
+        213,
         255,
         255,
         255,
@@ -147,7 +188,20 @@
       ],
       [
         255,
-        96
+        128,
+        0,
+        128,
+        0,
+        128,
+        0,
+        32
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        64
       ]
     ]
   },
@@ -163,7 +217,11 @@
         "epm_per_12v_ma": 2400,
         "sem_actuator_1_steps": 0,
         "sem_actuator_2_steps": 1200,
-        "sem_actuator_3_steps": 34567
+        "sem_actuator_3_steps": 34567,
+        "sem_load_cell_1_cn": 0,
+        "sem_load_cell_2_cn": -250,
+        "sem_load_cell_3_cn": 12345,
+        "experiment_flags": 301866
       }
     },
     "message_type": 35,
@@ -187,13 +245,23 @@
       4,
       176,
       135,
-      7
+      7,
+      0,
+      0,
+      255,
+      6,
+      48,
+      57,
+      0,
+      4,
+      155,
+      42
     ],
     "frame_id": 344760340,
     "encoded_data": [
       [
-        167,
-        219,
+        84,
+        115,
         49,
         56,
         0,
@@ -223,7 +291,20 @@
       ],
       [
         7,
-        96
+        0,
+        0,
+        255,
+        6,
+        48,
+        57,
+        32
+      ],
+      [
+        0,
+        4,
+        155,
+        42,
+        64
       ]
     ]
   }

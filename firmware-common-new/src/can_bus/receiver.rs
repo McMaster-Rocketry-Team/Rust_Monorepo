@@ -331,6 +331,10 @@ mod tests {
             sem_actuator_1_steps: 0,
             sem_actuator_2_steps: 1200,
             sem_actuator_3_steps: 34567,
+            sem_load_cell_1_cn: 0,
+            sem_load_cell_2_cn: -250,
+            sem_load_cell_3_cn: 12345,
+            experiment_flags: 0x0012_3456,
         });
 
         let id = message.get_id(0, 1);

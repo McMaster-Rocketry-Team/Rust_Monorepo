@@ -340,6 +340,10 @@ TEST(CustomPayloadStatusTest, ReferenceData) {
         uint16_t expected_act_1 = message_content["sem_actuator_1_steps"];
         uint16_t expected_act_2 = message_content["sem_actuator_2_steps"];
         uint16_t expected_act_3 = message_content["sem_actuator_3_steps"];
+        int16_t expected_load_1 = message_content["sem_load_cell_1_cn"];
+        int16_t expected_load_2 = message_content["sem_load_cell_2_cn"];
+        int16_t expected_load_3 = message_content["sem_load_cell_3_cn"];
+        uint32_t expected_flags = message_content["experiment_flags"];
 
         auto msg = firmware_common::can_bus::CustomPayloadStatusMessage::deserialize(serialized_data.data());
         EXPECT_EQ(msg.epm_batt_mv, expected_batt);
@@ -352,6 +356,10 @@ TEST(CustomPayloadStatusTest, ReferenceData) {
         EXPECT_EQ(msg.sem_actuator_1_steps, expected_act_1);
         EXPECT_EQ(msg.sem_actuator_2_steps, expected_act_2);
         EXPECT_EQ(msg.sem_actuator_3_steps, expected_act_3);
+        EXPECT_EQ(msg.sem_load_cell_1_cn, expected_load_1);
+        EXPECT_EQ(msg.sem_load_cell_2_cn, expected_load_2);
+        EXPECT_EQ(msg.sem_load_cell_3_cn, expected_load_3);
+        EXPECT_EQ(msg.experiment_flags, expected_flags);
         EXPECT_EQ(firmware_common::can_bus::get_frame_id(msg, 10, 20), expected_id);
 
         uint8_t buffer[firmware_common::can_bus::CustomPayloadStatusMessage::SIZE_BYTES];
@@ -456,13 +464,21 @@ TEST(CustomPayloadStatusTest, FullScaleActuatorDoesNotReportItselfAsUnreadable) 
     auto msg = CustomPayloadStatusMessage::new_msg(
         FULL_SCALE,
         {FULL_SCALE, FULL_SCALE, FULL_SCALE, FULL_SCALE, FULL_SCALE, FULL_SCALE},
-        {FULL_SCALE, FULL_SCALE, FULL_SCALE});
+        {FULL_SCALE, FULL_SCALE, FULL_SCALE},
+        {INT16_MIN, INT16_MIN, INT16_MIN},
+        {});
 
     EXPECT_EQ(msg.epm_batt_mv_reading().value(), MAX_REPORTED);
     for (const auto& rail : msg.rail_ma()) EXPECT_EQ(rail.value(), MAX_REPORTED);
     for (const auto& step : msg.actuator_steps()) {
         ASSERT_TRUE(step.has_value());
         EXPECT_EQ(step.value(), MAX_REPORTED);
+    }
+    // Same rule from the other end: full-scale compression is clamped one
+    // centinewton short of the sentinel rather than becoming it.
+    for (const auto& load : msg.load_cell_cn()) {
+        ASSERT_TRUE(load.has_value());
+        EXPECT_EQ(load.value(), CustomPayloadStatusMessage::MIN_REPORTED_PAYLOAD_LOAD_CELL);
     }
 }
 
@@ -474,7 +490,9 @@ TEST(CustomPayloadStatusTest, ConstructorRoundTripsAbsenceAndZero) {
     auto msg = CustomPayloadStatusMessage::new_msg(
         uint16_t{0},
         {uint16_t{0}, std::nullopt, uint16_t{120}, uint16_t{0}, std::nullopt, uint16_t{2400}},
-        {uint16_t{0}, std::nullopt, uint16_t{34567}});
+        {uint16_t{0}, std::nullopt, uint16_t{34567}},
+        {int16_t{0}, std::nullopt, int16_t{-32000}},
+        {});
 
     EXPECT_EQ(msg.epm_batt_mv_reading().value(), 0);
 
@@ -515,6 +533,75 @@ TEST(DataTransferTest, DataSizeClampsToCapacity) {
 
 // Mirrors payload_sdrm_custom_status.rs: the SDRM's own layout, epm_alive is
 // bit 0, bits 8..10 are spare.
+// The load cells are signed, so 0xFFFF is a legal reading of -1cN and cannot
+// double as absence the way it does for the ten unsigned fields. INT16_MIN is
+// the code instead, from the other end of the range.
+TEST(CustomPayloadStatusTest, LoadCellSentinelIsSeparateFromTheUnsignedOne) {
+    using firmware_common::can_bus::CustomPayloadStatusMessage;
+
+    auto unavailable = CustomPayloadStatusMessage::new_unavailable();
+    EXPECT_EQ(unavailable.sem_load_cell_1_cn,
+              CustomPayloadStatusMessage::PAYLOAD_LOAD_CELL_UNAVAILABLE);
+    for (const auto& load : unavailable.load_cell_cn()) EXPECT_FALSE(load.has_value());
+
+    CustomPayloadStatusMessage msg{};
+    msg.sem_load_cell_1_cn = 0;
+    msg.sem_load_cell_2_cn = -1; // shares its bits with PAYLOAD_READING_UNAVAILABLE
+    msg.sem_load_cell_3_cn = CustomPayloadStatusMessage::PAYLOAD_LOAD_CELL_UNAVAILABLE;
+
+    auto loads = msg.load_cell_cn();
+    EXPECT_EQ(loads[0].value(), 0);
+    EXPECT_EQ(loads[1].value(), -1);
+    EXPECT_FALSE(loads[2].has_value());
+
+    // And it survives the wire, which is where a sign-extension bug would show.
+    uint8_t buffer[CustomPayloadStatusMessage::SIZE_BYTES];
+    msg.serialize(buffer);
+    auto round_tripped = CustomPayloadStatusMessage::deserialize(buffer);
+    EXPECT_EQ(round_tripped.load_cell_cn()[1].value(), -1);
+    EXPECT_FALSE(round_tripped.load_cell_cn()[2].has_value());
+}
+
+// Every flag of every channel sits where Rust's experiment_flag_bit_positions
+// pins it: group g at bits 3g..3g+3, channel c at bit 3g + c. Pinned one flag
+// at a time, because a layout only ever checked with everything set cannot
+// catch two flags that swapped places.
+TEST(CustomPayloadStatusTest, ExperimentFlagBitPositions) {
+    using firmware_common::can_bus::CustomPayloadStatusMessage;
+    using firmware_common::can_bus::ExperimentChannelFlags;
+
+    using Setter = void (*)(ExperimentChannelFlags&);
+    const std::array<std::pair<uint32_t, Setter>, 7> setters = {{
+        {0, [](ExperimentChannelFlags& f) { f.fractured = true; }},
+        {1, [](ExperimentChannelFlags& f) { f.finished = true; }},
+        {2, [](ExperimentChannelFlags& f) { f.fault = true; }},
+        {3, [](ExperimentChannelFlags& f) { f.homed = true; }},
+        {4, [](ExperimentChannelFlags& f) { f.closure_confirmed = true; }},
+        {5, [](ExperimentChannelFlags& f) { f.enabled = true; }},
+        {6, [](ExperimentChannelFlags& f) { f.monitoring = true; }},
+    }};
+
+    std::array<ExperimentChannelFlags, 3> everything{};
+    for (const auto& [group, apply] : setters) {
+        for (size_t channel = 0; channel < 3; ++channel) {
+            std::array<ExperimentChannelFlags, 3> only_this{};
+            apply(only_this[channel]);
+
+            uint32_t raw = CustomPayloadStatusMessage::pack_experiment_flags(only_this);
+            EXPECT_EQ(raw, 1u << (3 * group + channel))
+                << "group " << group << " channel " << channel << " misplaced";
+
+            auto decoded = ExperimentChannelFlags::from_raw(raw, channel);
+            EXPECT_EQ(decoded.to_raw(channel), raw);
+
+            apply(everything[channel]);
+        }
+    }
+
+    // 21 bits used, 11 spare and clear even with every flag set.
+    EXPECT_EQ(CustomPayloadStatusMessage::pack_experiment_flags(everything), 0x001FFFFFu);
+}
+
 TEST(PayloadSDRMCustomStatusTest, PackedBitLayout) {
     using firmware_common::can_bus::PayloadSDRMCustomStatus;
 
@@ -527,6 +614,18 @@ TEST(PayloadSDRMCustomStatusTest, PackedBitLayout) {
     status = PayloadSDRMCustomStatus{};
     status.sem_sd_logging = true;
     EXPECT_EQ(status.to_raw(), 0b10000000);
+
+    status = PayloadSDRMCustomStatus{};
+    status.arm_seq_running = true;
+    EXPECT_EQ(status.to_raw(), 1u << 8);
+
+    status = PayloadSDRMCustomStatus{};
+    status.arm_seq_complete = true;
+    EXPECT_EQ(status.to_raw(), 1u << 9);
+
+    status = PayloadSDRMCustomStatus{};
+    status.arm_seq_fault = true;
+    EXPECT_EQ(status.to_raw(), 1u << 10);
 
     status = PayloadSDRMCustomStatus{};
     status.epm_alive = true;
@@ -577,16 +676,19 @@ TEST(PayloadSDRMCustomStatusTest, ClearFlags) {
     all_set.exp1_active = true;
     all_set.exp2_active = true;
     all_set.exp3_active = true;
+    all_set.arm_seq_complete = true;
+    all_set.arm_seq_fault = true;
 
     // LowPower safe-reset: experiment flags cleared, everything else kept
     auto status = all_set;
     status.clear_experiment_flags();
-    EXPECT_EQ(status.to_raw(), 0b11000111);
+    EXPECT_EQ(status.to_raw(), 0b11011000111);
 
-    // Landed shutdown: rails and logging cleared too, liveness kept
+    // Landed shutdown: rails and logging cleared too, liveness kept. The
+    // arm-sequence verdict outlives the shutdown that follows it.
     status = all_set;
     status.clear_powered_flags();
-    EXPECT_EQ(status.to_raw(), 0b00000011);
+    EXPECT_EQ(status.to_raw(), 0b11000000011);
 }
 
 TEST(DataTransferTest, ReferenceData) {

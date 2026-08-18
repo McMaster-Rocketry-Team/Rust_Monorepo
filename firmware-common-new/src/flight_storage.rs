@@ -58,6 +58,12 @@ pub const DEFAULT_TARGET_APOGEE_AGL: f32 = 4000.0;
 
 /// On-disk format version. Bump when the record or superblock layout changes;
 /// logs written at any other version are treated as absent.
+/// v20: payload fracture load cells and the per-channel experiment flag word
+///     in the slow record, from `CustomPayloadStatusMessage` growing 20 -> 30
+///     bytes. The message length is the reason this is a version break and
+///     not an append: a v19 card was written by firmware whose payload node
+///     could not have reported either field, so there is no v19 value to read
+///     them from.
 /// v19: the airbrakes commanded + actual extension and the validation-deploy
 ///     flag move from the slow record back to the fast one, reversing v10.
 ///     v10 was right about the rates and wrong about what was being measured:
@@ -142,7 +148,7 @@ pub const DEFAULT_TARGET_APOGEE_AGL: f32 = 4000.0;
 ///     `mpc_predicted_apogee_agl` added to the slow record, `VALID_BARO` dropped.
 /// v8: payload EPM rail currents + SEM actuator steps in the slow record.
 /// v7: tagged FAST/SLOW stream (see `flight_data_record`). Older formats: see git history.
-pub const STORAGE_VERSION: u32 = 19;
+pub const STORAGE_VERSION: u32 = 20;
 
 /// rkyv body sizes for tagged record types.
 pub const FAST_BODY_LEN: usize = size_of::<<FlightDataFastRecord as rkyv::Archive>::Archived>();
@@ -606,6 +612,8 @@ mod tests {
                 epm_batt_mv: Some(12600),
                 rail_ma: [Some(120), Some(340), None, Some(780), Some(1500), Some(2400)],
                 actuator_steps: [Some(0), Some(1200), Some(34567)],
+                load_cell_cn: [Some(0), None, Some(-1250)],
+                experiment_flags: 0x0012_3456,
             },
             amp_node: Some(NodeStatusRecord {
                 online: true,

@@ -83,6 +83,13 @@ impl MockVLPClient {
             exp3_active: false,
             sdrm_sd_logging: true,
             sem_sd_logging: false,
+            // Self test runs before the Armed transition, so the arm sequence
+            // has not started: all three bits clear is the honest state here,
+            // and it is also the one the ground has to tell apart from a
+            // sequence that started and died.
+            arm_seq_running: false,
+            arm_seq_complete: false,
+            arm_seq_fault: false,
         };
 
         let builder = SelfTestResultPacketBuilder::<NoopRawMutex>::new();
@@ -225,6 +232,9 @@ impl MockVLPClient {
                         exp3_active: false,
                         sdrm_sd_logging: true,
                         sem_sd_logging: false,
+                        arm_seq_running: false,
+                        arm_seq_complete: true,
+                        arm_seq_fault: false,
                     },
                     Some(12600),
                     [Some(120), Some(340), Some(55), Some(780), Some(1500), None],

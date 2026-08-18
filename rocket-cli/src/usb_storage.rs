@@ -21,6 +21,7 @@ use firmware_common_new::flight_data_record::{
     merge_log_records,
 };
 use firmware_common_new::can_bus::messages::amp_status::PowerOutputStatus;
+use firmware_common_new::can_bus::messages::custom_payload_status::ExperimentChannelFlags;
 use firmware_common_new::flight_storage::{
     BLOCK_SIZE, HEADER_LEN, RESPONSE_MAGIC, STORAGE_VERSION, decode_response_header,
     parse_log_records,
@@ -416,6 +417,35 @@ fn write_csv(path: &str, records: &[FlightDataRecord]) -> Result<()> {
         "payload_actuator_1_steps",
         "payload_actuator_2_steps",
         "payload_actuator_3_steps",
+        "payload_load_cell_1_cn",
+        "payload_load_cell_2_cn",
+        "payload_load_cell_3_cn",
+        // Seven flags per experiment channel, grouped by channel rather than
+        // by flag: the packed word groups by flag because that is how the
+        // payload packs it, but the question asked of the log is always "what
+        // happened on channel 2", so the columns read down one channel at a
+        // time.
+        "payload_exp1_fractured",
+        "payload_exp1_finished",
+        "payload_exp1_fault",
+        "payload_exp1_homed",
+        "payload_exp1_closure_confirmed",
+        "payload_exp1_enabled",
+        "payload_exp1_monitoring",
+        "payload_exp2_fractured",
+        "payload_exp2_finished",
+        "payload_exp2_fault",
+        "payload_exp2_homed",
+        "payload_exp2_closure_confirmed",
+        "payload_exp2_enabled",
+        "payload_exp2_monitoring",
+        "payload_exp3_fractured",
+        "payload_exp3_finished",
+        "payload_exp3_fault",
+        "payload_exp3_homed",
+        "payload_exp3_closure_confirmed",
+        "payload_exp3_enabled",
+        "payload_exp3_monitoring",
     ])?;
 
     for r in records {
@@ -503,7 +533,25 @@ fn write_csv(path: &str, records: &[FlightDataRecord]) -> Result<()> {
             cell(payload.and_then(|p| p.actuator_steps[0])),
             cell(payload.and_then(|p| p.actuator_steps[1])),
             cell(payload.and_then(|p| p.actuator_steps[2])),
+            cell(payload.and_then(|p| p.load_cell_cn[0])),
+            cell(payload.and_then(|p| p.load_cell_cn[1])),
+            cell(payload.and_then(|p| p.load_cell_cn[2])),
         ]);
+        // Blank, not `false`, on a row no payload status backed: `false` there
+        // would be a statement about a channel the payload never described.
+        for channel in 0..3 {
+            let flags =
+                payload.map(|p| ExperimentChannelFlags::from_raw(p.experiment_flags, channel));
+            row.extend([
+                cell(flags.map(|f| f.fractured)),
+                cell(flags.map(|f| f.finished)),
+                cell(flags.map(|f| f.fault)),
+                cell(flags.map(|f| f.homed)),
+                cell(flags.map(|f| f.closure_confirmed)),
+                cell(flags.map(|f| f.enabled)),
+                cell(flags.map(|f| f.monitoring)),
+            ]);
+        }
         w.write_record(&row)?;
     }
 

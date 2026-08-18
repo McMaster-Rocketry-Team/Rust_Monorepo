@@ -494,9 +494,71 @@ namespace can_bus {
     // Everything here is relayed from EPM / SEM on the intra-stack bus, not
     // measured by SDRM: EPM reports the battery bus voltage and the load current
     // of all six switched rails, SEM reports the linear actuator positions.
+    // State of one fracture-experiment channel, packed into
+    // CustomPayloadStatusMessage::experiment_flags.
+    //
+    // Seven flags per channel, three channels, packed as seven groups of three
+    // bits: group g occupies bits 3g..3g+3 of the word, and within a group bit
+    // 0 is channel 1, bit 1 is channel 2, bit 2 is channel 3. Grouped by flag
+    // rather than by channel because that is the layout the payload's own
+    // firmware packs, and a second layout here would be a second thing to get
+    // wrong.
+    //
+    // A channel that is not fitted reports enabled clear, every other flag
+    // clear, and its load cell absent. That is "absent", not "failed" — do not
+    // read a clear finished on an unfitted channel as an experiment that did
+    // not run.
+    struct ExperimentChannelFlags {
+        bool fractured = false;         // The sample on this channel has fractured
+        bool finished = false;          // This experiment ran to completion
+        bool fault = false;             // This channel is in its fault state
+        bool homed = false;             // This channel has a valid home reference
+        bool closure_confirmed = false; // Closure reached the commanded target
+        bool enabled = false;           // Fitted and compiled in; clear means absent
+        bool monitoring = false;        // Holds closure and streams load
+
+        // Bit position of flag group `group` for channel index `channel` (0..3).
+        // The one place the layout is written down; from_raw and to_raw both go
+        // through it, so they cannot disagree.
+        static constexpr uint32_t bit_index(uint32_t group, size_t channel) noexcept {
+            return 3 * group + static_cast<uint32_t>(channel);
+        }
+
+        // Unpack one channel (index 0..3, i.e. experiment channels 1..3).
+        static ExperimentChannelFlags from_raw(uint32_t raw, size_t channel) noexcept {
+            auto flag = [raw, channel](uint32_t group) {
+                return (raw & (1u << bit_index(group, channel))) != 0;
+            };
+            ExperimentChannelFlags flags;
+            flags.fractured = flag(0);
+            flags.finished = flag(1);
+            flags.fault = flag(2);
+            flags.homed = flag(3);
+            flags.closure_confirmed = flag(4);
+            flags.enabled = flag(5);
+            flags.monitoring = flag(6);
+            return flags;
+        }
+
+        // This channel's contribution to the packed word. Bits belonging to the
+        // other two channels are zero, so the three ORed together are the word.
+        uint32_t to_raw(size_t channel) const noexcept {
+            auto flag = [channel](bool set, uint32_t group) -> uint32_t {
+                return set ? (1u << bit_index(group, channel)) : 0u;
+            };
+            return flag(fractured, 0)
+                 | flag(finished, 1)
+                 | flag(fault, 2)
+                 | flag(homed, 3)
+                 | flag(closure_confirmed, 4)
+                 | flag(enabled, 5)
+                 | flag(monitoring, 6);
+        }
+    };
+
     struct CustomPayloadStatusMessage {
         static constexpr uint32_t MESSAGE_TYPE = 35;
-        static constexpr size_t SIZE_BYTES = 20;
+        static constexpr size_t SIZE_BYTES = 30;
 
         // Reported for a reading that is invalid or unavailable.
         //
@@ -518,6 +580,22 @@ namespace can_bus {
         // re-derive when a rail or a sensor is rescaled.
         static constexpr uint16_t MAX_REPORTED_PAYLOAD_READING = PAYLOAD_READING_UNAVAILABLE - 1;
 
+        // Reported for a load cell reading SEM could not take.
+        //
+        // PAYLOAD_READING_UNAVAILABLE cannot serve here. The load cells are
+        // signed, and its bit pattern is a legal reading of minus one
+        // centinewton — one gram of compression, which is exactly the kind of
+        // near-zero reading an idle channel produces all day. So this field
+        // spends the bottom of its range instead of the top, the opposite of
+        // every unsigned field above.
+        static constexpr int16_t PAYLOAD_LOAD_CELL_UNAVAILABLE = INT16_MIN;
+
+        // Most compressive load a channel may report, one above the reserved
+        // sentinel. 327.67 N of tension is reportable, 327.67 N of compression
+        // is not, and a channel pressed that hard reports 327.66 N rather than
+        // reporting itself unreadable.
+        static constexpr int16_t MIN_REPORTED_PAYLOAD_LOAD_CELL = PAYLOAD_LOAD_CELL_UNAVAILABLE + 1;
+
         uint16_t epm_batt_mv;
 
         uint16_t epm_sys_3v3_ma;
@@ -531,6 +609,16 @@ namespace can_bus {
         uint16_t sem_actuator_2_steps;
         uint16_t sem_actuator_3_steps;
 
+        // Fracture load per experiment channel, centinewtons, tension positive.
+        int16_t sem_load_cell_1_cn;
+        int16_t sem_load_cell_2_cn;
+        int16_t sem_load_cell_3_cn;
+
+        // Per-channel experiment state, seven flags per channel. Decode with
+        // experiment_flags_channels() rather than by hand; the layout lives in
+        // ExperimentChannelFlags. Bits 21..32 are spare and sent as zero.
+        uint32_t experiment_flags;
+
         static constexpr uint8_t PRIORITY = 5;
 
         // The write-side inverse of reading(): absence becomes the reserved
@@ -540,6 +628,26 @@ namespace can_bus {
             if (!value) return PAYLOAD_READING_UNAVAILABLE;
             if (*value > MAX_REPORTED_PAYLOAD_READING) return MAX_REPORTED_PAYLOAD_READING;
             return *value;
+        }
+
+        // encode() for a signed load cell: same rule, opposite end of the
+        // range. A reading is clamped up to MIN_REPORTED_PAYLOAD_LOAD_CELL, so
+        // a channel under extreme compression reports one centinewton short of
+        // full scale rather than reporting itself unreadable.
+        static int16_t encode_load_cell(std::optional<int16_t> value) noexcept {
+            if (!value) return PAYLOAD_LOAD_CELL_UNAVAILABLE;
+            if (*value < MIN_REPORTED_PAYLOAD_LOAD_CELL) return MIN_REPORTED_PAYLOAD_LOAD_CELL;
+            return *value;
+        }
+
+        // Fold three channels' flags into the word that goes on the wire.
+        static uint32_t pack_experiment_flags(
+            const std::array<ExperimentChannelFlags, 3>& channels) noexcept {
+            uint32_t raw = 0;
+            for (size_t channel = 0; channel < channels.size(); ++channel) {
+                raw |= channels[channel].to_raw(channel);
+            }
+            return raw;
         }
 
         // Build a message from readings that may or may not have been taken,
@@ -560,12 +668,21 @@ namespace can_bus {
         // itself as unreadable — is worse than an actuator at full extension
         // reporting itself one step short of it.
         //
+        // The load cells get the same treatment against their own sentinel,
+        // from the other end of the range: see PAYLOAD_LOAD_CELL_UNAVAILABLE.
+        // The experiment flags need none — every bit pattern of that word is a
+        // legal state, and "the payload has said nothing" is already carried by
+        // the absence of the message rather than by a value inside it.
+        //
         // Rail index order: 0 SYS_3V3, 1 SYS_5V, 2 PER_3V3, 3 PER_5V,
-        // 4 PER_9V, 5 PER_12V. Actuator index order: experiment channels 1..3.
+        // 4 PER_9V, 5 PER_12V. Actuator, load cell and flag index order:
+        // experiment channels 1..3.
         static CustomPayloadStatusMessage new_msg(
             std::optional<uint16_t> epm_batt_mv,
             const std::array<std::optional<uint16_t>, 6>& epm_rail_ma,
-            const std::array<std::optional<uint16_t>, 3>& sem_actuator_steps) noexcept {
+            const std::array<std::optional<uint16_t>, 3>& sem_actuator_steps,
+            const std::array<std::optional<int16_t>, 3>& sem_load_cell_cn,
+            const std::array<ExperimentChannelFlags, 3>& experiment_flags) noexcept {
             CustomPayloadStatusMessage msg;
             msg.epm_batt_mv = encode(epm_batt_mv);
 
@@ -579,14 +696,23 @@ namespace can_bus {
             msg.sem_actuator_1_steps = encode(sem_actuator_steps[0]);
             msg.sem_actuator_2_steps = encode(sem_actuator_steps[1]);
             msg.sem_actuator_3_steps = encode(sem_actuator_steps[2]);
+
+            msg.sem_load_cell_1_cn = encode_load_cell(sem_load_cell_cn[0]);
+            msg.sem_load_cell_2_cn = encode_load_cell(sem_load_cell_cn[1]);
+            msg.sem_load_cell_3_cn = encode_load_cell(sem_load_cell_cn[2]);
+
+            msg.experiment_flags = pack_experiment_flags(experiment_flags);
             return msg;
         }
 
-        // Every reading unavailable, e.g. before EPM / SEM have reported.
+        // Every reading unavailable and every experiment flag clear, e.g.
+        // before EPM / SEM have reported.
         static CustomPayloadStatusMessage new_unavailable() noexcept {
             return new_msg(std::nullopt,
                            std::array<std::optional<uint16_t>, 6>{},
-                           std::array<std::optional<uint16_t>, 3>{});
+                           std::array<std::optional<uint16_t>, 3>{},
+                           std::array<std::optional<int16_t>, 3>{},
+                           std::array<ExperimentChannelFlags, 3>{});
         }
 
         // std::nullopt if the reading is invalid or unavailable.
@@ -598,6 +724,13 @@ namespace can_bus {
         // unwrap rather than a 0xFFFF it has to remember to check for.
         static std::optional<uint16_t> reading(uint16_t raw) noexcept {
             if (raw == PAYLOAD_READING_UNAVAILABLE) return std::nullopt;
+            return raw;
+        }
+
+        // reading() for a signed load cell. std::nullopt if SEM did not report
+        // that channel — which includes every channel that is not fitted.
+        static std::optional<int16_t> load_cell_reading(int16_t raw) noexcept {
+            if (raw == PAYLOAD_LOAD_CELL_UNAVAILABLE) return std::nullopt;
             return raw;
         }
 
@@ -657,6 +790,41 @@ namespace can_bus {
             };
         }
 
+        // Experiment channel 1 fracture load, centinewtons, tension positive.
+        // std::nullopt if SEM did not report the channel. A channel resting at
+        // zero load reads 0.
+        std::optional<int16_t> sem_load_cell_1_cn_reading() const noexcept { return load_cell_reading(sem_load_cell_1_cn); }
+        // Experiment channel 2 fracture load, centinewtons. std::nullopt if SEM did not report it.
+        std::optional<int16_t> sem_load_cell_2_cn_reading() const noexcept { return load_cell_reading(sem_load_cell_2_cn); }
+        // Experiment channel 3 fracture load, centinewtons. std::nullopt if SEM did not report it.
+        std::optional<int16_t> sem_load_cell_3_cn_reading() const noexcept { return load_cell_reading(sem_load_cell_3_cn); }
+
+        // Fracture loads for experiment channels 1..3, each std::nullopt if SEM
+        // did not report that channel.
+        std::array<std::optional<int16_t>, 3> load_cell_cn() const noexcept {
+            return {
+                sem_load_cell_1_cn_reading(),
+                sem_load_cell_2_cn_reading(),
+                sem_load_cell_3_cn_reading(),
+            };
+        }
+
+        // Experiment state for channels 1..3.
+        //
+        // Not optional: every bit pattern is a legal state, and a channel with
+        // nothing to say says so by reporting enabled clear rather than by
+        // going absent. "The payload never sent this message" is carried one
+        // level up, by the absence of the message. Named with a _channels
+        // suffix because C++ cannot give a member and an accessor the same
+        // name the way the Rust side does.
+        std::array<ExperimentChannelFlags, 3> experiment_flags_channels() const noexcept {
+            return {
+                ExperimentChannelFlags::from_raw(experiment_flags, 0),
+                ExperimentChannelFlags::from_raw(experiment_flags, 1),
+                ExperimentChannelFlags::from_raw(experiment_flags, 2),
+            };
+        }
+
         void serialize(uint8_t* buffer) const noexcept {
             write_u16_be(buffer, epm_batt_mv);
             write_u16_be(buffer + 2, epm_sys_3v3_ma);
@@ -668,6 +836,10 @@ namespace can_bus {
             write_u16_be(buffer + 14, sem_actuator_1_steps);
             write_u16_be(buffer + 16, sem_actuator_2_steps);
             write_u16_be(buffer + 18, sem_actuator_3_steps);
+            write_i16_be(buffer + 20, sem_load_cell_1_cn);
+            write_i16_be(buffer + 22, sem_load_cell_2_cn);
+            write_i16_be(buffer + 24, sem_load_cell_3_cn);
+            write_u32_be(buffer + 26, experiment_flags);
         }
 
         static CustomPayloadStatusMessage deserialize(const uint8_t* buffer) noexcept {
@@ -682,6 +854,10 @@ namespace can_bus {
             msg.sem_actuator_1_steps = read_u16_be(buffer + 14);
             msg.sem_actuator_2_steps = read_u16_be(buffer + 16);
             msg.sem_actuator_3_steps = read_u16_be(buffer + 18);
+            msg.sem_load_cell_1_cn = read_i16_be(buffer + 20);
+            msg.sem_load_cell_2_cn = read_i16_be(buffer + 22);
+            msg.sem_load_cell_3_cn = read_i16_be(buffer + 24);
+            msg.experiment_flags = read_u32_be(buffer + 26);
             return msg;
         }
     };
@@ -939,11 +1115,15 @@ namespace can_bus {
     // NodeStatusMessage::custom_status_raw.
     //
     // The SDRM's own layout, least significant bit first (matching
-    // stack_protocol.h). Bits 8..10 of the 11 available are spare.
+    // stack_protocol.h). All 11 available bits are defined.
     //
-    //     0 epm_alive     3 exp1_active   6 sdrm_sd_logging
-    //     1 sem_alive     4 exp2_active   7 sem_sd_logging
-    //     2 epm_rails_on  5 exp3_active   8..10 spare
+    //     0 epm_alive     3 exp1_active   6 sdrm_sd_logging   9  arm_seq_complete
+    //     1 sem_alive     4 exp2_active   7 sem_sd_logging    10 arm_seq_fault
+    //     2 epm_rails_on  5 exp3_active   8 arm_seq_running
+    //
+    // The last three are read together, and the state that matters is the one
+    // they make expressible: running clear AND complete clear, after the arm
+    // sequence has had time to finish, means the payload never started.
     //
     //     PayloadSDRMCustomStatus status;
     //     status.epm_alive = true;
@@ -959,6 +1139,9 @@ namespace can_bus {
         bool exp3_active = false;     // Experiment channel 3 active
         bool sdrm_sd_logging = false; // SDRM SD log active
         bool sem_sd_logging = false;  // SEM SD log active
+        bool arm_seq_running = false;  // Working through the arm sequence
+        bool arm_seq_complete = false; // Sequence reached its end, pass or fail
+        bool arm_seq_fault = false;    // An enabled channel failed all attempts
 
         // Pack into the 11-bit value carried by NodeStatusMessage::custom_status_raw.
         uint16_t to_raw() const noexcept {
@@ -971,6 +1154,9 @@ namespace can_bus {
             if (exp3_active)     raw |= 1u << 5;
             if (sdrm_sd_logging) raw |= 1u << 6;
             if (sem_sd_logging)  raw |= 1u << 7;
+            if (arm_seq_running)  raw |= 1u << 8;
+            if (arm_seq_complete) raw |= 1u << 9;
+            if (arm_seq_fault)    raw |= 1u << 10;
             return raw;
         }
 
@@ -984,6 +1170,9 @@ namespace can_bus {
             status.exp3_active     = (raw & (1u << 5)) != 0;
             status.sdrm_sd_logging = (raw & (1u << 6)) != 0;
             status.sem_sd_logging  = (raw & (1u << 7)) != 0;
+            status.arm_seq_running  = (raw & (1u << 8)) != 0;
+            status.arm_seq_complete = (raw & (1u << 9)) != 0;
+            status.arm_seq_fault    = (raw & (1u << 10)) != 0;
             return status;
         }
 
@@ -1002,6 +1191,11 @@ namespace can_bus {
         // Applied after the Landed shutdown completes. Clearing epm_rails_on here
         // is only an immediate optimistic update — EPM's next intra-stack status
         // frame is what the bit actually tracks.
+        //
+        // The three arm_seq_* bits survive both this and
+        // clear_experiment_flags(). They are the record of a sequence that ran,
+        // and powering the stack down does not un-run it — a flight whose arm
+        // sequence faulted has to still say so on the ground.
         void clear_powered_flags() noexcept {
             clear_experiment_flags();
             epm_rails_on = false;

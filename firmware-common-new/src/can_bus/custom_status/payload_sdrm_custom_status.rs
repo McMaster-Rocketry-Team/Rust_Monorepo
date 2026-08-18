@@ -7,8 +7,7 @@ use crate::can_bus::custom_status::NodeCustomStatus;
 /// `NodeStatusMessage::custom_status_raw`.
 ///
 /// The SDRM's own layout, least significant bit first (matching
-/// `stack_protocol.h` on the payload side). Bits 8..10 of the 11 available are
-/// spare.
+/// `stack_protocol.h` on the payload side). All 11 available bits are defined.
 ///
 /// | Bit | Flag |
 /// |-----|------|
@@ -20,7 +19,16 @@ use crate::can_bus::custom_status::NodeCustomStatus;
 /// | 5 | `exp3_active` |
 /// | 6 | `sdrm_sd_logging` |
 /// | 7 | `sem_sd_logging` |
-/// | 8..10 | spare |
+/// | 8 | `arm_seq_running` |
+/// | 9 | `arm_seq_complete` |
+/// | 10 | `arm_seq_fault` |
+///
+/// The last three are read together, and the state that matters is the one
+/// they make expressible: running clear *and* complete clear, after the arm
+/// sequence has had time to finish, means the payload never started. Before
+/// they existed the ground watched `epm_rails_on` and `exp1..3_active` come up
+/// and had to guess, from a timeout it had no way to calibrate, whether a
+/// sequence was slow or dead.
 ///
 /// The `bits` attributes are positions in the packed 2-byte buffer, which
 /// `NodeCustomStatusExt::to_u16` shifts right by 5: packed bit `i` becomes
@@ -30,6 +38,17 @@ use crate::can_bus::custom_status::NodeCustomStatus;
 #[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "2")]
 #[repr(C)]
 pub struct PayloadSDRMCustomStatus {
+    /// At least one enabled channel failed all of its attempts. Says the
+    /// sequence reached a bad end, not that it is still trying — read it with
+    /// `arm_seq_complete`.
+    #[packed_field(bits = "0..1")]
+    pub arm_seq_fault: bool,
+    /// The arm sequence reached its end, whether or not every channel passed.
+    #[packed_field(bits = "1..2")]
+    pub arm_seq_complete: bool,
+    /// The payload is working through the arm sequence.
+    #[packed_field(bits = "2..3")]
+    pub arm_seq_running: bool,
     /// SEM SD log active
     #[packed_field(bits = "3..4")]
     pub sem_sd_logging: bool,
@@ -62,6 +81,9 @@ impl PayloadSDRMCustomStatus {
     /// Nothing brought up yet.
     pub fn new() -> Self {
         Self {
+            arm_seq_fault: false,
+            arm_seq_complete: false,
+            arm_seq_running: false,
             sem_sd_logging: false,
             sdrm_sd_logging: false,
             exp3_active: false,
@@ -88,6 +110,11 @@ impl PayloadSDRMCustomStatus {
     /// Applied after the `Landed` shutdown completes. Clearing `epm_rails_on`
     /// here is only an immediate optimistic update — EPM's next intra-stack
     /// status frame is what the bit actually tracks.
+    ///
+    /// The three `arm_seq_*` bits survive both this and
+    /// [`Self::clear_experiment_flags`]. They are the record of a sequence
+    /// that ran, and powering the stack down does not un-run it — a flight
+    /// whose arm sequence faulted has to still say so on the ground.
     pub fn clear_powered_flags(&mut self) {
         self.clear_experiment_flags();
         self.epm_rails_on = false;
@@ -123,17 +150,20 @@ mod tests {
             exp1_active: false,
             exp2_active: false,
             exp3_active: false,
+            arm_seq_running: true,
+            arm_seq_complete: false,
+            arm_seq_fault: false,
         };
 
         let status_u16 = status.to_u16();
-        assert_eq!(status_u16, 0b00000000111);
+        assert_eq!(status_u16, 0b00100000111);
 
         let status2 = PayloadSDRMCustomStatus::from_u16(status_u16);
         assert_eq!(status, status2);
     }
 
     /// Every flag sits exactly where the SDRM's `packCustomStatusRaw` puts it,
-    /// and bits 8..10 stay clear.
+    /// across all 11 bits the heartbeat reserves.
     #[test]
     fn test_bit_positions() {
         let mut status = PayloadSDRMCustomStatus::new();
@@ -149,6 +179,9 @@ mod tests {
             (5, |s| s.exp3_active = true),
             (6, |s| s.sdrm_sd_logging = true),
             (7, |s| s.sem_sd_logging = true),
+            (8, |s| s.arm_seq_running = true),
+            (9, |s| s.arm_seq_complete = true),
+            (10, |s| s.arm_seq_fault = true),
         ] {
             let mut only_this = PayloadSDRMCustomStatus::new();
             apply(&mut only_this);
@@ -157,12 +190,12 @@ mod tests {
             apply(&mut status);
         }
 
-        // Bits 8..10 are spare and must stay zero even with everything set.
-        assert_eq!(status.to_u16(), 0xFF);
+        // All 11 bits, and nothing above them.
+        assert_eq!(status.to_u16(), 0x7FF);
     }
 
     /// Reference frame for the payload team: rails up, all experiments active,
-    /// both SD logs healthy, uptime 120s.
+    /// both SD logs healthy, the arm sequence finished cleanly, uptime 120s.
     #[test]
     fn test_reference_node_status_frame() {
         let status = PayloadSDRMCustomStatus {
@@ -174,15 +207,18 @@ mod tests {
             exp1_active: true,
             exp2_active: true,
             exp3_active: true,
+            arm_seq_running: false,
+            arm_seq_complete: true,
+            arm_seq_fault: false,
         };
-        assert_eq!(status.to_u16(), 0xFF);
+        assert_eq!(status.to_u16(), 0x2FF);
 
         let message =
             NodeStatusMessage::new(120, NodeHealth::Healthy, NodeMode::Operational, status);
 
         let mut buffer = [0u8; 5];
         FixedLenSerializable::serialize(&message, &mut buffer);
-        assert_eq!(buffer, [0x00, 0x00, 0x78, 0x01, 0xFE]);
+        assert_eq!(buffer, [0x00, 0x00, 0x78, 0x05, 0xFE]);
     }
 
     #[test]
@@ -196,16 +232,20 @@ mod tests {
             exp1_active: true,
             exp2_active: true,
             exp3_active: true,
+            arm_seq_running: false,
+            arm_seq_complete: true,
+            arm_seq_fault: true,
         };
 
         // LowPower safe-reset: experiments cleared, rest kept
         let mut status = all_set.clone();
         status.clear_experiment_flags();
-        assert_eq!(status.to_u16(), 0b11000111);
+        assert_eq!(status.to_u16(), 0b11011000111);
 
-        // Landed shutdown: also rails and both SD logging flags, liveness kept
+        // Landed shutdown: also rails and both SD logging flags, liveness kept.
+        // The arm-sequence verdict outlives the shutdown that follows it.
         let mut status = all_set.clone();
         status.clear_powered_flags();
-        assert_eq!(status.to_u16(), 0b00000011);
+        assert_eq!(status.to_u16(), 0b11000000011);
     }
 }

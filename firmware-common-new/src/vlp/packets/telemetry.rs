@@ -1328,6 +1328,11 @@ mod tests {
                 exp3_active: false,
                 sdrm_sd_logging: true,
                 sem_sd_logging: false,
+                // Set, but not carried: the downlink has no field for the
+                // arm-sequence bits yet. See `TelemetryPacket`'s size comment.
+                arm_seq_running: false,
+                arm_seq_complete: true,
+                arm_seq_fault: false,
             },
             Some(12600),
             [Some(120), Some(340), None, Some(780), Some(1500), Some(2400)],
