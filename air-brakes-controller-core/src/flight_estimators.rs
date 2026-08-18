@@ -207,6 +207,14 @@ impl FlightEstimators {
             }
         }
 
+        // Read here, off the post-retirement state, so the logged bit is the
+        // same answer the caller is about to get from `airbrakes_mpc_states`
+        // for this tick. Asking the gate rather than re-deriving its terms is
+        // the point: the permission is a decision with three parts and a
+        // config constant in it, and a log that stored the parts would leave
+        // the reader to re-implement the `and`.
+        let mpc_permitted = self.airbrakes_mpc_states().is_some();
+
         // (d) The log sample, built AFTER retirement so that the sample the
         // airbrakes half is dropped on already reports the whole airbrakes
         // group absent — the same instant the SD record and the downlink go
@@ -225,6 +233,7 @@ impl FlightEstimators {
                 baro_trusted: ab.baro_trusted(),
                 baro_gate: airbrakes_baro_gate,
                 calibration_complete: ab.calibration_complete(),
+                mpc_permitted,
             }),
         };
 
@@ -383,6 +392,17 @@ pub struct AirbrakesLogSample {
     /// [`AirbrakesEstimator::calibration_complete`]:
     ///     crate::airbrakes_estimator::AirbrakesEstimator::calibration_complete
     pub calibration_complete: bool,
+    /// The brakes are permitted to open on this sample — exactly
+    /// [`FlightEstimators::airbrakes_mpc_states`] being `Some`.
+    ///
+    /// The one flag here that is a *decision* rather than an observation, and
+    /// the reason it is logged separately from the three conditions behind it:
+    /// two of them (filter alive, baro trusted) are already bits of their own,
+    /// but the third is a comparison against `max_open_mach` times a speed of
+    /// sound computed from the filter's own altitude, which no reader could
+    /// reconstruct from the log without also knowing the config. Without this
+    /// bit "why did the brakes not open here" is unanswerable offline.
+    pub mpc_permitted: bool,
 }
 
 #[cfg(test)]

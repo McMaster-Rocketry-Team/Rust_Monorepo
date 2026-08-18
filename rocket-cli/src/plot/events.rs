@@ -72,9 +72,12 @@ pub fn detect(
             && stages[i - 1] != Some(stage)
             && stages[i - 1].is_some()
         {
-            // Ascent-onset *is* liftoff, and that is the word for it on a
-            // chart whose axis is already labelled T+.
-            let label = if stage == 3 { "liftoff" } else { stage_name(stage) };
+            // Ascent-onset is the flight computer deciding the motor has lit,
+            // which is what "ignition" names. It is not called liftoff because
+            // the detector is an acceleration threshold, not a break-wire: it
+            // fires while the rocket is still on the rail, and the burn band
+            // this rule opens is measured from it.
+            let label = if stage == 3 { "ignition" } else { stage_name(stage) };
             raw.push((times[i], label.to_string()));
         }
     }

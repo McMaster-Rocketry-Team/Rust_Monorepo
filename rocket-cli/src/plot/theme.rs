@@ -79,6 +79,37 @@ pub fn stage_color(stage: u8) -> RGBAColor {
     stage_hue(stage).mix(opacity)
 }
 
+/// The motor burn — ignition to burnout.
+///
+/// Not a flight stage: the flight computer has one `Ascent`, and the moment
+/// the motor stops is invisible in it even though it is the moment the
+/// airframe stops being driven and the air brakes become worth anything. So
+/// the burn gets its own wash, laid over the stage band rather than replacing
+/// it, and a hue no stage uses so the overlap cannot be mistaken for one.
+pub const BURN_HUE: RGBColor = RGBColor(0xC0, 0x27, 0x24);
+
+/// Background wash for the burn. Fainter than the stage bands it sits on top
+/// of, because it is the second layer and the two add.
+pub fn burn_color() -> RGBAColor {
+    BURN_HUE.mix(0.09)
+}
+
+/// The stretch the MPC was permitted to open the brakes.
+///
+/// Like the burn, not a flight stage — it opens and closes on a gate the
+/// software evaluates every sample, and can do so more than once inside one
+/// `Ascent`.
+pub const BRAKES_HUE: RGBColor = RGBColor(0x00, 0x7A, 0xB8);
+
+/// Background wash for the brakes-permitted spans.
+///
+/// Stronger than the stage bands and than the burn, because unlike them it is
+/// laid over a stage band that is already tinted — at the stage-band alpha the
+/// two multiply to a grey that reads as neither.
+pub fn brakes_color() -> RGBAColor {
+    BRAKES_HUE.mix(0.15)
+}
+
 pub fn stage_name(stage: u8) -> &'static str {
     match stage {
         0 => "LowPower",

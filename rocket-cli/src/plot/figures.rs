@@ -1,9 +1,9 @@
 //! Rendering the three 3840×2160 figures.
 //!
-//! All three share one time ORIGIN: T+0 is liftoff, and a few seconds of pad
+//! All three share one time ORIGIN: T+0 is ignition, and a few seconds of pad
 //! sit in front of it so the ignition transient has something to be read
-//! against — an axis that begins exactly at liftoff shows the step but not what
-//! it stepped from.
+//! against — an axis that begins exactly at ignition shows the step but not
+//! what it stepped from.
 //!
 //! They do not share a time RANGE. The air-brakes figure ends at apogee,
 //! because the estimator behind every trace on it is retired there; the other
@@ -27,6 +27,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use anyhow::{Result, anyhow};
+use plotters::chart::SeriesAnno;
 use plotters::coord::Shift;
 use plotters::coord::types::RangedCoordf64;
 use plotters::prelude::*;
@@ -51,8 +52,38 @@ const Y_GUTTER: i32 = 232;
 const X_LABELS_H: u32 = 74;
 /// Length of the colour swatch drawn beside each legend entry.
 const LEGEND_SWATCH: i32 = 44;
+/// Dash and gap lengths for a [`Line::dashed`] trace, in pixels.
+const DASH: i32 = 26;
+const DASH_GAP: i32 = 18;
 
 type Area<'a> = DrawingArea<BitMapBackend<'a>, Shift>;
+
+/// Label a drawn series, with a swatch that matches how it was drawn.
+///
+/// The dashed swatch is two strokes rather than one: a legend that shows a
+/// solid rule against a dashed trace makes the reader match by colour alone,
+/// which is exactly what the dashing was introduced to avoid needing.
+fn legend_swatch<'a, DB: DrawingBackend + 'a>(series: &mut SeriesAnno<'a, DB>, line: &Line) {
+    let color = line.color;
+    if line.dashed {
+        series.label(line.label).legend(move |(x, y)| {
+            EmptyElement::at((x, y))
+                + PathElement::new(vec![(0, 0), (18, 0)], color.stroke_width(6))
+                + PathElement::new(
+                    vec![(LEGEND_SWATCH - 18, 0), (LEGEND_SWATCH, 0)],
+                    color.stroke_width(6),
+                )
+        });
+    } else {
+        series.label(line.label).legend(move |(x, y)| {
+            EmptyElement::at((x, y))
+                + PathElement::new(
+                    vec![(0, 0), (LEGEND_SWATCH, 0)],
+                    color.stroke_width(6),
+                )
+        });
+    }
+}
 
 /// plotters' error type is parameterised by the backend and is awkward to carry
 /// through `?` into `anyhow`. Every drawing failure here means the same thing —
@@ -75,6 +106,13 @@ struct Line {
     /// Applied after reduction, to bring a column onto the panel's unit — the
     /// payload battery is logged in mV and shares a panel with two voltages.
     scale: f32,
+    /// Draw the trace broken rather than solid.
+    ///
+    /// Reserved for a value that is a *setting* rather than a measurement —
+    /// the apogee the controller was aiming at is a constant somebody typed
+    /// in, and drawing it in the same weight as the altitude it is being
+    /// compared against invites reading it as another thing the rocket did.
+    dashed: bool,
 }
 
 impl Line {
@@ -84,11 +122,17 @@ impl Line {
             column,
             color,
             scale: 1.0,
+            dashed: false,
         }
     }
 
     fn scaled(mut self, scale: f32) -> Self {
         self.scale = scale;
+        self
+    }
+
+    fn dashed(mut self) -> Self {
+        self.dashed = true;
         self
     }
 }
@@ -102,21 +146,11 @@ impl Line {
 struct Secondary {
     unit: &'static str,
     lines: Vec<Line>,
-    zero_line: bool,
 }
 
 impl Secondary {
     fn new(unit: &'static str, lines: Vec<Line>) -> Self {
-        Self {
-            unit,
-            lines,
-            zero_line: false,
-        }
-    }
-
-    fn with_zero(mut self) -> Self {
-        self.zero_line = true;
-        self
+        Self { unit, lines }
     }
 }
 
@@ -189,6 +223,21 @@ pub struct Window {
     pub end: usize,
 }
 
+/// A vertical rule drawn through every panel.
+///
+/// Two kinds share the presentation because they answer the same question —
+/// "what changed here?" — but they are styled apart on purpose: the flight
+/// events are things that happened to the rocket, and the brakes-permission
+/// divider is a decision the software made. Reading the second as the first
+/// would be reading a permission as an occurrence.
+struct Rule {
+    at_s: f64,
+    label: String,
+    color: RGBColor,
+    /// Dotted rather than dashed, and drawn opaque rather than washed out.
+    dotted: bool,
+}
+
 pub struct Renderer<'a> {
     log: &'a FlightLog,
     session: &'a Session,
@@ -204,6 +253,17 @@ pub struct Renderer<'a> {
     /// estimator reported one, or when the log carries no pad reference to
     /// measure it from.
     apogee_agl: Option<f32>,
+    /// `(ignition, burnout)` in figure seconds — the stretch the motor was
+    /// driving the airframe. `None` when the log carries no burnout flag, or
+    /// when it never went true.
+    burn_span: Option<(f64, f64)>,
+    /// Every stretch the brakes were permitted to open, in figure seconds.
+    ///
+    /// Plural, and not simply "from the first one onwards": the gate is
+    /// re-evaluated every sample, and a coast that dips back above the Mach
+    /// limit — or a barometer that loses trust — closes it again. Drawing it
+    /// as spans is what makes that visible instead of assumed.
+    brakes_spans: Vec<(f64, f64)>,
     x_range: (f64, f64),
     events: Vec<Event>,
     source_name: String,
@@ -330,25 +390,32 @@ impl<'a> Renderer<'a> {
             _ => None,
         };
 
-        // How far the MPC's prediction was from where the flight actually
-        // ended, at every moment it could still have done something about it.
-        // Zero is what the controller was solving for, so this trace walking
-        // into the zero line is the flight going right — and unlike the
-        // prediction itself, it can only be drawn after the fact, which is why
-        // it lives here and not on the downlink.
-        if let (Some(predicted), Some(actual)) =
-            (derived.get("mpc_predicted_apogee_agl"), apogee_agl)
-        {
-            let error: Vec<f32> = predicted.iter().map(|p| p - actual).collect();
-            derived.insert("mpc_prediction_error", error);
-        }
-
-        // T+0 stays liftoff; the axis simply starts at a negative number when
+        // T+0 stays ignition; the axis simply starts at a negative number when
         // there is a lead-in.
         let x_range = (
             times[window.start],
             times[window.end - 1].max(times[window.start] + 0.001),
         );
+
+        // The motor burn, as a span rather than as the two rules bounding it.
+        // It opens at T+0 by definition — the flight-start row IS the ignition
+        // detection — and closes on the first row the estimator declares
+        // burnout. Left `None` rather than guessed at when the flag is absent:
+        // a shaded region that says "the motor was lit here" has to be sourced
+        // from the flag that decided it, not from a plausible duration.
+        let burn_span = log.column("airbrakes_burnout").and_then(|flag| {
+            (session.flight_start..window.end)
+                .find(|&i| flag[i] >= 0.5)
+                .map(|row| (times[session.flight_start], times[row]))
+        });
+
+        // The MPC's own permission, straight off the logged gate — no
+        // re-derivation from the filter's altitude and velocity, because the
+        // Mach term needs a config constant the log does not carry.
+        let brakes_spans = log
+            .column("airbrakes_mpc_permitted")
+            .map(|flag| true_spans(&times, flag, window.start, window.end))
+            .unwrap_or_default();
 
         // Half a percent of the flight. Two events closer together than that
         // cannot be told apart on the axis, so they are drawn as one.
@@ -372,13 +439,45 @@ impl<'a> Renderer<'a> {
             derived,
             window: (window.start, window.end),
             apogee_agl,
+            burn_span,
+            brakes_spans,
             x_range,
             events,
             source_name,
         }
     }
 
-    /// Apogee on this figure's axis — seconds after liftoff.
+    /// Every vertical rule on this figure, in time order.
+    ///
+    /// The brakes divider is the first sample the gate opened on, and only the
+    /// first: the gate can close and reopen during the coast, and a rule per
+    /// edge would bury the one moment that matters — when the controller was
+    /// first allowed to act — under its own noise. The reopenings are still on
+    /// the figure, as the background band starting again.
+    fn rules(&self) -> Vec<Rule> {
+        let mut rules: Vec<Rule> = self
+            .events
+            .iter()
+            .map(|event| Rule {
+                at_s: event.at_s,
+                label: event.label.clone(),
+                color: theme::EVENT,
+                dotted: false,
+            })
+            .collect();
+        if let Some(&(at_s, _)) = self.brakes_spans.first() {
+            rules.push(Rule {
+                at_s,
+                label: "brakes enabled".to_string(),
+                color: theme::BRAKES_HUE,
+                dotted: true,
+            });
+        }
+        rules.sort_by(|a, b| a.at_s.partial_cmp(&b.at_s).unwrap_or(std::cmp::Ordering::Equal));
+        rules
+    }
+
+    /// Apogee on this figure's axis — seconds after ignition.
     fn apogee_at_s(&self) -> Option<f64> {
         self.session.apogee_row.map(|row| self.times[row])
     }
@@ -421,10 +520,10 @@ impl<'a> Renderer<'a> {
     /// axis to landing would spend more than half the width drawing the gap
     /// after them.
     ///
-    /// Four panels, read top to bottom as one argument: where the rocket was
-    /// going and what the controller did about it, how fast and how far off
-    /// vertical, how the prediction converged on the target, and the estimator's
-    /// own account of why it was allowed to act at all.
+    /// Three panels, read top to bottom as one argument: where the rocket was
+    /// going and what the controller did about it, the vertical state that
+    /// drove the decision, and the estimator's own account of why it was
+    /// allowed to act at all.
     pub fn render_airbrakes(&self, path: &Path) -> Result<()> {
         let root = BitMapBackend::new(path, (WIDTH, HEIGHT)).into_drawing_area();
         root.fill(&theme::BG).plot()?;
@@ -434,9 +533,8 @@ impl<'a> Renderer<'a> {
         // The flag strip gets a full-size share rather than the remainder:
         // seven lanes at a readable label size need about as much height as a
         // trace panel, and squeezing them was what made the labels collide.
-        let (p1, rest) = body.split_vertically(700);
-        let (p2, rest) = rest.split_vertically(450);
-        let (p3, p4) = rest.split_vertically(450);
+        let (p1, rest) = body.split_vertically(820);
+        let (p2, p3) = rest.split_vertically(620);
 
         self.draw_panel(
             &p1,
@@ -453,7 +551,8 @@ impl<'a> Renderer<'a> {
                     // saying it can.
                     Line::new("airbrakes KF altitude", "airbrakes_kf_altitude_agl", theme::CYAN),
                     Line::new("MPC predicted apogee", "mpc_predicted_apogee_agl", theme::AMBER),
-                    Line::new("target apogee", "air_brakes_target_apogee_agl", theme::VIOLET),
+                    Line::new("target apogee", "air_brakes_target_apogee_agl", theme::VIOLET)
+                        .dashed(),
                 ],
             )
             .with_event_labels()
@@ -471,14 +570,31 @@ impl<'a> Renderer<'a> {
         self.draw_panel(
             &p2,
             &Panel::new(
-                "Vertical speed & tilt",
-                "m/s",
-                vec![Line::new(
-                    "airbrakes KF",
-                    "airbrakes_kf_vertical_velocity",
-                    theme::CYAN,
-                )],
+                // Speed and acceleration share the left axis rather than being
+                // split across two: one is the derivative of the other, they
+                // are within a factor of three of each other on this flight,
+                // and the question the panel exists to answer — did the speed
+                // start falling when the acceleration went negative — is a
+                // question about where two curves cross, which needs them on
+                // one grid.
+                "Vertical speed, acceleration & tilt",
+                "m/s · m/s²",
+                vec![
+                    Line::new(
+                        "vertical speed (airbrakes KF)",
+                        "airbrakes_kf_vertical_velocity",
+                        theme::CYAN,
+                    ),
+                    Line::new(
+                        "vertical acceleration (earth)",
+                        "vertical_acc_earth",
+                        theme::GREEN,
+                    ),
+                ],
             )
+            // Zero means two different things on this panel and both are
+            // worth a rule: velocity crossing it is apogee, acceleration
+            // crossing it is the top of the drag-only coast.
             .with_zero()
             .with_secondary(Secondary::new(
                 "°",
@@ -486,39 +602,8 @@ impl<'a> Renderer<'a> {
             )),
             Y_GUTTER,
         )?;
-        self.draw_panel(
-            &p3,
-            &Panel::new(
-                "Prediction error vs the apogee actually reached",
-                "m",
-                vec![
-                    // The whole controller in one trace: how far the prediction
-                    // was from the truth, at every moment it was still possible
-                    // to do something about it. Zero is what the MPC was trying
-                    // to achieve, so the zero line is the target and the trace
-                    // walking into it is the flight going right.
-                    //
-                    // Only computable after the fact, which is why it is here
-                    // and not on the downlink.
-                    Line::new("predicted - actual", "mpc_prediction_error", theme::AMBER),
-                ],
-            )
-            .with_zero()
-            .with_secondary(
-                Secondary::new(
-                    "m/s²",
-                    vec![Line::new(
-                        "vertical acceleration (earth)",
-                        "vertical_acc_earth",
-                        theme::GREEN,
-                    )],
-                )
-                .with_zero(),
-            ),
-            Y_GUTTER,
-        )?;
         self.draw_lanes(
-            &p4,
+            &p3,
             "Airbrakes estimator flags",
             &[
                 // In the order the estimator passes through them, so the strip
@@ -528,7 +613,7 @@ impl<'a> Renderer<'a> {
                 ("subsonic drag", "airbrakes_subsonic_drag", theme::VIOLET),
                 ("baro trusted", "airbrakes_baro_trusted", theme::CYAN),
                 ("valid. deploy", "air_brakes_validation_deploy", theme::ROSE),
-                ("gate reject", "airbrakes_baro_gate_reject", theme::ALERT),
+                ("gate dropped", "airbrakes_baro_gate_reject", theme::ALERT),
                 ("baro resync", "airbrakes_baro_resync", theme::ROSE),
             ],
             true,
@@ -603,8 +688,10 @@ impl<'a> Renderer<'a> {
                 ("main fire", "pyro_main_fire", theme::AMBER),
                 ("short circuit", "pyro_short_circuit", theme::ALERT),
                 // The filter that fired those charges, and what it made of its
-                // own barometer at the time.
-                ("gate reject", "deployment_baro_gate_reject", theme::ALERT),
+                // own barometer at the time. "Dropped" rather than "rejected"
+                // because the bundled font clips the descender of a `j` at
+                // this size, and a lane label is too small to lose a glyph in.
+                ("gate dropped", "deployment_baro_gate_reject", theme::ALERT),
                 ("baro resync", "deployment_baro_resync", theme::ROSE),
             ],
             true,
@@ -799,7 +886,7 @@ impl<'a> Renderer<'a> {
         };
         area.draw_text(
             &format!(
-                "T+0 = liftoff · {:.1} s of flight · {} rows · {}",
+                "T+0 = ignition · {:.1} s of flight · {} rows · {}",
                 s.duration_s(self.log),
                 s.flight_rows(),
                 apogee
@@ -844,35 +931,56 @@ impl<'a> Renderer<'a> {
         Ok(())
     }
 
-    /// Name the flight-stage bands, in the order they occurred.
+    /// Name the background washes, in the order they occurred.
     ///
     /// Every panel is washed with these, and an unlabelled wash is just a stain.
     /// The chip is drawn as panel background plus the same translucent fill the
-    /// bands use, over an opaque rule in the stage's hue — so the swatch is
+    /// bands use, over an opaque rule in the band's hue — so the swatch is
     /// literally what the reader sees behind the traces, with enough edge to
     /// find it.
+    ///
+    /// The burn joins the stages here rather than being explained in a caption,
+    /// because on the figure it is exactly the same kind of mark: a coloured
+    /// region behind the traces, which the reader has to be able to name.
     fn draw_stage_key(&self, area: &Area) -> Result<()> {
+        let mut entries: Vec<(&str, RGBColor, RGBAColor)> = Vec::new();
         let mut stages: Vec<u8> = Vec::new();
         for (_, _, stage) in self.stage_spans_in_window() {
             if !stages.contains(&stage) {
                 stages.push(stage);
+                entries.push((
+                    theme::stage_name(stage),
+                    theme::stage_hue(stage),
+                    stage_color(stage),
+                ));
             }
         }
-        if stages.is_empty() {
+        // Last, because it is the layer drawn last on the panels too, and the
+        // key reads in the order the colours are stacked.
+        if self.burn_span.is_some() {
+            entries.push(("Burn", theme::BURN_HUE, theme::burn_color()));
+        }
+        if !self.brakes_spans.is_empty() {
+            entries.push((
+                "Brakes enabled",
+                theme::BRAKES_HUE,
+                theme::brakes_color(),
+            ));
+        }
+        if entries.is_empty() {
             return Ok(());
         }
 
         const CHIP_W: i32 = 54;
         const CHIP_H: i32 = 28;
         const GAP: i32 = 26;
-        let label = |s: u8| theme::stage_name(s);
         // ~0.52 em per character is close enough to centre the row; being a few
         // pixels off is invisible, and measuring text would mean rendering it
         // twice.
-        let widths: Vec<i32> = stages
+        let widths: Vec<i32> = entries
             .iter()
-            .map(|s| {
-                CHIP_W + 10 + (label(*s).len() as i32 * theme::F_SUBTITLE * 52) / 100 + GAP
+            .map(|(label, _, _)| {
+                CHIP_W + 10 + (label.len() as i32 * theme::F_SUBTITLE * 52) / 100 + GAP
             })
             .collect();
         let total: i32 = widths.iter().sum::<i32>() - GAP;
@@ -883,18 +991,18 @@ impl<'a> Renderer<'a> {
             .color(&theme::MUTED)
             .pos(Pos::new(HPos::Left, VPos::Center));
 
-        for (stage, width) in stages.iter().zip(widths) {
+        for ((label, hue, wash), width) in entries.iter().zip(widths) {
             let chip = [(x, y - CHIP_H / 2), (x + CHIP_W, y + CHIP_H / 2)];
             area.draw(&Rectangle::new(chip, theme::PANEL_BG.filled()))
                 .plot()?;
-            area.draw(&Rectangle::new(chip, stage_color(*stage).filled()))
+            area.draw(&Rectangle::new(chip, wash.filled()))
                 .plot()?;
             area.draw(&Rectangle::new(
                 [(x, y + CHIP_H / 2), (x + CHIP_W, y + CHIP_H / 2 + 4)],
-                theme::stage_hue(*stage).filled(),
+                hue.filled(),
             ))
             .plot()?;
-            area.draw_text(label(*stage), &text, (x + CHIP_W + 10, y))
+            area.draw_text(label, &text, (x + CHIP_W + 10, y))
                 .plot()?;
             x += width;
         }
@@ -1003,10 +1111,14 @@ impl<'a> Renderer<'a> {
             .flat_map(|s| s.lines.iter())
             .map(|line| (line, self.trace(line, buckets)))
             .collect();
+        // Never forced through zero, unlike the primary: the right-hand axis
+        // carries whatever did not fit on the left, and there is no reason its
+        // zero should be meaningful. Tilt is the case in point — it cannot be
+        // negative, and pinning it to zero would waste half the panel.
         let s_axis = panel
             .secondary
             .as_ref()
-            .map(|sec| self.axis_range(&secondary, sec.zero_line));
+            .map(|_| self.axis_range(&secondary, false));
         let (s_lo, s_hi) = s_axis
             .as_ref()
             .map(|a| (a.lo as f64, a.hi as f64))
@@ -1101,21 +1213,29 @@ impl<'a> Renderer<'a> {
                 // stray data in someone else's chart. A two-point path has no
                 // join to compute, so the failure cannot arise. At 2 px the
                 // missing joins are not visible.
-                let style = line.color.stroke_width(2);
-                let series = chart
-                    .draw_series(
-                        points
-                            .windows(2)
-                            .map(|w| PathElement::new(vec![w[0], w[1]], style)),
-                    )
-                    .plot()?;
+                let style = line.color.stroke_width(if line.dashed { 3 } else { 2 });
+                let series = if line.dashed {
+                    chart
+                        .draw_series(DashedLineSeries::new(
+                            points.iter().copied(),
+                            DASH,
+                            DASH_GAP,
+                            style,
+                        ))
+                        .plot()?
+                } else {
+                    chart
+                        .draw_series(
+                            points
+                                .windows(2)
+                                .map(|w| PathElement::new(vec![w[0], w[1]], style)),
+                        )
+                        .plot()?
+                };
                 // Only the first run carries the legend entry, or a gapped
                 // trace would appear once per fragment.
                 if i == 0 {
-                    let color = line.color;
-                    series.label(line.label).legend(move |(x, y)| {
-                        PathElement::new(vec![(x, y), (x + LEGEND_SWATCH, y)], color.stroke_width(6))
-                    });
+                    legend_swatch(series, line);
                 }
             }
         }
@@ -1125,35 +1245,75 @@ impl<'a> Renderer<'a> {
             for (i, run) in trace.runs.iter().enumerate() {
                 let points: Vec<(f64, f64)> =
                     run.iter().map(|&(t, v)| (t, v as f64)).collect();
-                let style = line.color.stroke_width(2);
-                let series = chart
-                    .draw_secondary_series(
-                        points
-                            .windows(2)
-                            .map(|w| PathElement::new(vec![w[0], w[1]], style)),
-                    )
-                    .plot()?;
+                let style = line.color.stroke_width(if line.dashed { 3 } else { 2 });
+                let series = if line.dashed {
+                    chart
+                        .draw_secondary_series(DashedLineSeries::new(
+                            points.iter().copied(),
+                            DASH,
+                            DASH_GAP,
+                            style,
+                        ))
+                        .plot()?
+                } else {
+                    chart
+                        .draw_secondary_series(
+                            points
+                                .windows(2)
+                                .map(|w| PathElement::new(vec![w[0], w[1]], style)),
+                        )
+                        .plot()?
+                };
                 // `draw_secondary_series` hands back an annotation on the
                 // *primary* chart, so one legend covers both axes.
                 if i == 0 {
-                    let color = line.color;
-                    series.label(line.label).legend(move |(x, y)| {
-                        PathElement::new(
-                            vec![(x, y), (x + LEGEND_SWATCH, y)],
-                            color.stroke_width(6),
-                        )
-                    });
+                    legend_swatch(series, line);
                 }
             }
         }
 
         if panel.event_labels {
-            self.draw_event_labels(&mut chart, y_lo, y_hi)?;
+            // Measured, not guessed at, because the event labels have to dodge
+            // it: the legend moved to the upper left, which is also where the
+            // labels start, and on the auxiliary figure every event of the
+            // flight falls inside the first tenth of a 500 s axis — directly
+            // under it.
+            //
+            // plotters does not report the box it drew, so this reproduces its
+            // sizing: one row per labelled series, at the swatch gutter plus
+            // ~0.52 em per character. Being a little generous is free — the
+            // cost of overestimating is a label one row lower than it had to
+            // be, and of underestimating is two texts on top of each other.
+            let rows = traces
+                .iter()
+                .chain(secondary.iter())
+                .filter(|(_, t)| t.is_some())
+                .count();
+            let widest = traces
+                .iter()
+                .chain(secondary.iter())
+                .filter(|(_, t)| t.is_some())
+                .map(|(l, _)| l.label.chars().count())
+                .max()
+                .unwrap_or(0);
+            let legend = (rows > 0).then(|| {
+                (
+                    (LEGEND_SWATCH + 18) as f64
+                        + widest as f64 * theme::F_LEGEND as f64 * 0.52
+                        + 30.0,
+                    rows as f64 * (theme::F_LEGEND as f64 + 12.0) + 24.0,
+                )
+            });
+            self.draw_event_labels(&mut chart, y_lo, y_hi, legend)?;
         }
 
         chart
             .configure_series_labels()
-            .position(SeriesLabelPosition::UpperRight)
+            // Top left, where the eye starts. It is also the corner the data
+            // is least likely to be in on these figures: every trace here
+            // begins on the pad at rest, so the upper left is the one region
+            // that is empty by physics rather than by luck.
+            .position(SeriesLabelPosition::UpperLeft)
             // plotters sizes the swatch gutter from this, not from the element
             // the closure draws; leaving it at the default puts the last few
             // pixels of every swatch through the first letter of its label.
@@ -1424,7 +1584,14 @@ impl<'a> Renderer<'a> {
         Ok(())
     }
 
-    /// Wash the flight-stage bands in behind a chart's data.
+    /// Wash the flight-stage bands in behind a chart's data, then the burn on
+    /// top of them.
+    ///
+    /// Two layers rather than one, because the burn is not a stage: it starts
+    /// inside `Ascent` and ends inside it, and cutting `Ascent` into two bands
+    /// would claim the flight computer changed state at burnout when it did
+    /// not. Laid over, the reader sees one continuous `Ascent` with its powered
+    /// portion picked out — which is what actually happened.
     fn draw_stage_bands<DB: DrawingBackend>(
         &self,
         chart: &mut ChartContext<'_, DB, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
@@ -1440,6 +1607,34 @@ impl<'a> Renderer<'a> {
                 Rectangle::new([(a, y_lo), (b, y_hi)], stage_color(stage).filled())
             }))
             .plot()?;
+        // Under the burn, because the two do not overlap in practice (the
+        // brakes cannot be permitted while the motor is lit) and where they do,
+        // the burn is the more surprising fact.
+        for &(a, b) in &self.brakes_spans {
+            let (a, b) = (a.max(self.x_range.0), b.min(self.x_range.1));
+            if b > a {
+                chart
+                    .draw_series(std::iter::once(Rectangle::new(
+                        [(a, y_lo), (b, y_hi)],
+                        theme::brakes_color().filled(),
+                    )))
+                    .plot()?;
+            }
+        }
+        if let Some((a, b)) = self.burn_span {
+            // Clipped to the axis: the airbrakes figure ends at apogee and the
+            // others do not, but the burn is the same span of seconds on all
+            // three, so the clip lives here rather than at each call site.
+            let (a, b) = (a.max(self.x_range.0), b.min(self.x_range.1));
+            if b > a {
+                chart
+                    .draw_series(std::iter::once(Rectangle::new(
+                        [(a, y_lo), (b, y_hi)],
+                        theme::burn_color().filled(),
+                    )))
+                    .plot()?;
+            }
+        }
         Ok(())
     }
 
@@ -1468,7 +1663,7 @@ impl<'a> Renderer<'a> {
         Ok(())
     }
 
-    /// Dotted vertical rules at each event, on every panel.
+    /// Broken vertical rules at each event, on every panel.
     ///
     /// Drawn under the traces, not over them: the rule is there to locate a
     /// feature in the data, and a rule that hides the feature has inverted its
@@ -1482,13 +1677,18 @@ impl<'a> Renderer<'a> {
     where
         DB::ErrorType: 'static,
     {
-        for event in &self.events {
+        for rule in self.rules() {
+            let (dash, gap, style) = if rule.dotted {
+                (3, 13, rule.color.mix(0.85).stroke_width(3))
+            } else {
+                (5, 9, rule.color.mix(0.55).stroke_width(2))
+            };
             chart
                 .draw_series(DashedLineSeries::new(
-                    vec![(event.at_s, y_lo), (event.at_s, y_hi)],
-                    5,
-                    9,
-                    theme::EVENT.mix(0.55).stroke_width(2),
+                    vec![(rule.at_s, y_lo), (rule.at_s, y_hi)],
+                    dash,
+                    gap,
+                    style,
                 ))
                 .plot()?;
         }
@@ -1505,53 +1705,81 @@ impl<'a> Renderer<'a> {
         chart: &mut ChartContext<'_, DB, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
         y_lo: f64,
         y_hi: f64,
+        legend: Option<(f64, f64)>,
     ) -> Result<()>
     where
         DB::ErrorType: 'static,
     {
         let span = y_hi - y_lo;
         let x_span = self.x_range.1 - self.x_range.0;
-        let plot_w = {
-            let (px, _) = chart.plotting_area().get_pixel_range();
-            (px.end - px.start).max(1) as f64
+        let (plot_w, plot_h) = {
+            let (px, py) = chart.plotting_area().get_pixel_range();
+            (
+                (px.end - px.start).max(1) as f64,
+                (py.end - py.start).max(1) as f64,
+            )
         };
         // Labels are placed on the first level that is still clear at this x,
         // rather than alternating between two. Events cluster — liftoff,
         // burnout, apogee and drogue deployment can fall inside the first tenth
         // of the axis — and a fixed two-level scheme overstrikes as soon as
         // three of them are close.
-        const LEVELS: usize = 4;
+        // Ten, because the levels are now shared between two demands: the
+        // packing that keeps neighbouring labels apart, and the offset that
+        // clears the legend. On the auxiliary figure's 500 s axis the whole
+        // flight — five events — falls inside the legend's own width, so all
+        // five stack below it, and a shorter ladder ran out and overstruck.
+        // The step is tightened to match, so ten levels still fit in the top
+        // three quarters of a panel.
+        const LEVELS: usize = 10;
+        const FIRST: f64 = 0.055;
+        const STEP: f64 = 0.07;
+        // The lowest level clear of the legend, and how far right the legend
+        // reaches — a label whose text starts beyond that can use level 0
+        // however tall the legend is.
+        let (legend_right, blocked_levels) = match legend {
+            Some((w, h)) => (
+                self.x_range.0 + w / plot_w * x_span,
+                (((h / plot_h) - FIRST) / STEP).ceil().max(0.0) as usize,
+            ),
+            None => (f64::NEG_INFINITY, 0),
+        };
         let mut level_free = [f64::NEG_INFINITY; LEVELS];
-        for event in &self.events {
+        for rule in self.rules() {
             // ~0.52 em per character, converted from pixels into axis units so
             // the packing holds at any figure width.
             let text_w =
-                event.label.chars().count() as f64 * theme::F_EVENT as f64 * 0.52 / plot_w
+                rule.label.chars().count() as f64 * theme::F_EVENT as f64 * 0.52 / plot_w
                     * x_span;
             // An event in the last fifth of the axis would run its label off the
             // right edge, so it hangs to the left of its rule instead.
-            let near_right = event.at_s > self.x_range.0 + x_span * 0.8;
+            let near_right = rule.at_s > self.x_range.0 + x_span * 0.8;
             let (anchor, dx) = if near_right {
                 (HPos::Right, -x_span * 0.006)
             } else {
                 (HPos::Left, x_span * 0.006)
             };
             let left = if near_right {
-                event.at_s + dx - text_w
+                rule.at_s + dx - text_w
             } else {
-                event.at_s + dx
+                rule.at_s + dx
             };
-            let level = (0..LEVELS)
+            let lowest = if left < legend_right {
+                blocked_levels.min(LEVELS - 1)
+            } else {
+                0
+            };
+            let level = (lowest..LEVELS)
                 .find(|&l| left >= level_free[l])
                 .unwrap_or(LEVELS - 1);
             level_free[level] = left + text_w + x_span * 0.012;
-            let y = y_hi - span * (0.055 + 0.075 * level as f64);
+            let y = y_hi - span * (FIRST + STEP * level as f64);
             chart
                 .draw_series(std::iter::once(Text::new(
-                    event.label.clone(),
-                    (event.at_s + dx, y),
+                    rule.label.clone(),
+                    (rule.at_s + dx, y),
                     TextStyle::from((theme::FONT, theme::F_EVENT).into_font())
-                        .color(&theme::EVENT)
+                        .color(&rule.color)
                         .pos(Pos::new(anchor, VPos::Center)),
                 )))
                 .plot()?;

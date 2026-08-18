@@ -511,7 +511,7 @@ pub const DEPLOYMENT_BARO_RESYNC: u8 = 1 << 1;
 ///
 /// The mach-lockout exit is a single drag measurement (the drag-inverted
 /// airspeed below Mach 0.8, sustained 1 s), so there is one bit for it;
-/// logging it per sample reconstructs the exit post-flight. Bit 2 is free.
+/// logging it per sample reconstructs the exit post-flight.
 pub const AIRBRAKES_SUBSONIC_DRAG: u8 = 1 << 0;
 /// The vertical filter's innovation gate threw out this sample's baro
 /// altitude. Per-sample, like the `DEPLOYMENT_*` pair above, so a run of set
@@ -543,7 +543,19 @@ pub const AIRBRAKES_BARO_RESYNC: u8 = 1 << 4;
 /// stay set; it is re-derived every 2 s and CAN drop if the airframe is
 /// picked up or turned.
 pub const AIRBRAKES_PAD_CALIBRATED: u8 = 1 << 5;
-// bits 6-7 unallocated.
+/// The brakes were permitted to open on this sample: the airbrakes filter is
+/// alive, its barometer is trusted, and its own velocity is below
+/// `max_open_mach` of the local speed of sound. This is the MPC's run/stop
+/// condition, logged per sample.
+///
+/// The only bit here that is a decision rather than an observation, and it is
+/// stored rather than re-derived because it cannot be re-derived: the Mach
+/// term compares against a config constant and a speed of sound computed from
+/// the filter's own altitude, neither of which is in the log. The first row it
+/// is set on is the instant the control loop was allowed to start; a run of
+/// clear rows in the middle of the coast is the gate having closed again.
+pub const AIRBRAKES_MPC_PERMITTED: u8 = 1 << 6;
+// bit 7 unallocated.
 
 pub const PYRO_MAIN_CONTINUITY: u8 = 1 << 0;
 pub const PYRO_MAIN_FIRE: u8 = 1 << 1;
