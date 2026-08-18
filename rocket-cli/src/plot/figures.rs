@@ -546,20 +546,16 @@ impl<'a> Renderer<'a> {
         let (header, body) = root.split_vertically(HEADER_H);
         self.draw_header(&header, "Air brakes")?;
 
-        // The top two are equal halves of what is left after the extension
-        // panel: they are read against each other — where the speed trace
-        // bends is where the altitude trace flattens — and equal heights are
-        // what keep a slope on one comparable to a slope on the other. The
-        // extension panel is shorter because its trace only ever spans 0-100%,
-        // and it is last because it carries the tick labels.
-        const EXTENSION_H: u32 = 490;
-        let (top, p3) = body.split_vertically(HEIGHT - HEADER_H - EXTENSION_H);
-        let (p1, p2) = top.split_vertically((HEIGHT - HEADER_H - EXTENSION_H) / 2);
+        // Equal halves. The two panels are read against each other — where the
+        // speed trace bends is where the altitude trace flattens — and equal
+        // heights are what keep a slope on one comparable to a slope on the
+        // other.
+        let (p1, p2) = body.split_vertically((HEIGHT - HEADER_H) / 2);
 
         self.draw_panel(
             &p1,
             &Panel::new(
-                "Altitude & apogee prediction",
+                "Altitude, apogee prediction & tilt",
                 "m AGL",
                 vec![
                     // Three numbers in one reference, which is the point of the
@@ -574,7 +570,15 @@ impl<'a> Renderer<'a> {
                         .dashed(),
                 ],
             )
-            .with_event_labels(),
+            .with_event_labels()
+            // Tilt belongs against the altitude rather than against the speed:
+            // what it explains is why the prediction and the target diverge —
+            // a rocket leaning over is one that will not reach the apogee a
+            // vertical flight would.
+            .with_secondary(Secondary::new(
+                "°",
+                vec![Line::new("tilt", "airbrakes_kf_tilt_deg", theme::ROSE)],
+            )),
             Y_GUTTER,
         )?;
         self.draw_panel(
@@ -586,8 +590,10 @@ impl<'a> Renderer<'a> {
                 // and the question the panel exists to answer — did the speed
                 // start falling when the acceleration went negative — is a
                 // question about where two curves cross, which needs them on
-                // one grid.
-                "Vertical speed, acceleration & tilt",
+                // one grid. The extension rides the right axis of the same
+                // panel because it is the cause and those two are the effect:
+                // the brakes coming out is what bends the acceleration down.
+                "Vertical speed, acceleration & brake extension",
                 "m/s · m/s²",
                 vec![
                     Line::new(
@@ -606,32 +612,20 @@ impl<'a> Renderer<'a> {
             // worth a rule: velocity crossing it is apogee, acceleration
             // crossing it is the top of the drag-only coast.
             .with_zero()
+            .with_x_labels()
             .with_secondary(Secondary::new(
-                "°",
-                vec![Line::new("tilt", "airbrakes_kf_tilt_deg", theme::ROSE)],
-            )),
-            Y_GUTTER,
-        )?;
-        self.draw_panel(
-            &p3,
-            &Panel::new(
-                // What the controller asked for against what the mechanism
-                // did. On its own axis rather than riding the altitude panel's
-                // right edge, because the lag between the two is a few tens of
-                // milliseconds and a few percent — differences that vanish when
-                // the trace is squeezed into a fraction of a shared panel.
-                "Air brake extension",
                 "%",
                 vec![
-                    Line::new("commanded", "air_brakes_commanded_extension", theme::GREEN)
+                    // Warm pair against the cool pair on the left, so which
+                    // axis a trace belongs to is readable without chasing it
+                    // to the legend. Commanded is not green here — that is the
+                    // acceleration on this panel now.
+                    Line::new("brakes commanded", "air_brakes_commanded_extension", theme::AMBER)
                         .scaled(100.0),
-                    Line::new("actual", "air_brakes_actual_extension", theme::ROSE).scaled(100.0),
+                    Line::new("brakes actual", "air_brakes_actual_extension", theme::ROSE)
+                        .scaled(100.0),
                 ],
-            )
-            // Zero is stowed, and it is the value the trace sits at for most of
-            // the window, so the axis has to show it rather than start above it.
-            .with_zero()
-            .with_x_labels(),
+            )),
             Y_GUTTER,
         )?;
 
