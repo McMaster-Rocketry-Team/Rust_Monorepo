@@ -2019,12 +2019,12 @@ fn ignition_latch_time_by_threshold() {
                 if pyro_t.is_none() && !matches!(est.state(), crate::RocketState::OnPad) {
                     pyro_t = Some(s.truth_t);
                 }
-                if ab_t.is_none() {
-                    if let Some(ab) = est.airbrakes_estimator() {
-                        if ab.launch_pad_altitude_asl().is_some() {
-                            ab_t = Some(s.truth_t);
-                        }
-                    }
+                if ab_t.is_none()
+                    && est
+                        .airbrakes_estimator()
+                        .is_some_and(|ab| ab.ignition_latched())
+                {
+                    ab_t = Some(s.truth_t);
                 }
                 if pyro_t.is_some() && ab_t.is_some() {
                     break;

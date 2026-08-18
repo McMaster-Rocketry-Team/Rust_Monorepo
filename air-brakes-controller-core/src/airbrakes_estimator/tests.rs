@@ -602,7 +602,7 @@ fn short_pad_refuses_ignition() {
     assert!(estimator.birth().is_none(), "filter born without calibration");
     assert!(!estimator.baro_trusted());
     assert!(estimator.altitude_asl().is_none(), "left the pad state");
-    assert!(estimator.launch_pad_altitude_asl().is_none());
+    assert!(!estimator.ignition_latched());
     assert!(estimator.velocity().is_none(), "handed out an MPC velocity");
 }
 
@@ -674,7 +674,7 @@ fn a_knock_on_the_pad_does_not_latch_ignition() {
         peak_lp = peak_lp.max(v.magnitude());
 
         assert!(
-            estimator.launch_pad_altitude_asl().is_none(),
+            !estimator.ignition_latched(),
             "a knock at t={t:.3}s latched ignition and left the pad state"
         );
         assert!(estimator.birth().is_none(), "a knock at t={t:.3}s birthed the filter");

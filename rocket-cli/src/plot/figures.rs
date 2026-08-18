@@ -323,12 +323,13 @@ impl<'a> Renderer<'a> {
                 "Altitude & vertical acceleration",
                 "m",
                 vec![
-                    // Both are metres and both are plotted as logged, but they
-                    // are referenced to different data — the estimator reports
-                    // above sea level, the MPC predicts above ground — so the
-                    // labels carry the reference rather than the axis.
-                    Line::new("airbrakes KF altitude (ASL)", "airbrakes_kf_altitude_asl", theme::CYAN),
-                    Line::new("predicted apogee (AGL)", "mpc_predicted_apogee_agl", theme::AMBER),
+                    // Both are metres ASL, so they share the axis honestly —
+                    // the predicted apogee reads directly against the altitude
+                    // climbing toward it. The log stores every altitude in that
+                    // one reference and carries `launch_pad_altitude_asl` for
+                    // anyone who wants AGL back.
+                    Line::new("airbrakes KF altitude", "airbrakes_kf_altitude_asl", theme::CYAN),
+                    Line::new("predicted apogee", "mpc_predicted_apogee_asl", theme::AMBER),
                 ],
             )
             .with_event_labels()
@@ -498,10 +499,13 @@ impl<'a> Renderer<'a> {
             ),
             Panel::new(
                 "Apogee prediction",
-                "m AGL",
+                "m ASL",
                 vec![
-                    Line::new("MPC predicted", "mpc_predicted_apogee_agl", theme::CYAN),
-                    Line::new("target", "air_brakes_target_apogee_agl", theme::AMBER),
+                    Line::new("MPC predicted", "mpc_predicted_apogee_asl", theme::CYAN),
+                    Line::new("target", "air_brakes_target_apogee_asl", theme::AMBER),
+                    // The pad, so the gap between it and the other two lines
+                    // reads as the AGL numbers the flight was configured in.
+                    Line::new("launch pad", "launch_pad_altitude_asl", theme::GREEN),
                 ],
             ),
             Panel::new(

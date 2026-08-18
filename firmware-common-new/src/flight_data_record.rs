@@ -136,16 +136,22 @@ pub struct AirBrakesRecord {
     /// Slow-rate because the control loop only produces one every 100 ms;
     /// logging it per fast record stored the same value ~42 times over.
     pub commanded_extension: Option<f32>,
-    /// Apogee AGL (m) the MPC predicts at the extension it is commanding.
+    /// Apogee ASL (m) the MPC predicts at the extension it is commanding.
     /// `None` whenever the MPC is not running: before the brakes are
     /// permitted, again once the airbrakes estimator is retired and it stops,
     /// and throughout the validation deploy.
-    pub predicted_apogee_agl: Option<f32>,
+    ///
+    /// ASL, like every other altitude in this log, and like the MPC's own
+    /// internal number — the AGL the downlink carries is this minus
+    /// [`FlightDataSlowRecord::launch_pad_altitude_asl`], which is on the
+    /// same row, so the conversion is available offline in a way it was not
+    /// when the log stored the difference and not the reference.
+    pub predicted_apogee_asl: Option<f32>,
     /// The commanded extension is the forced validation deploy, not the MPC's
     /// output: the MPC never asked for full extension the whole way up, so the
     /// firmware opened the brakes anyway once slow enough for it to be
     /// harmless, to leave in-flight evidence they actuate. While this is set,
-    /// `commanded_extension` is 1.0 and `predicted_apogee_agl` is `None` —
+    /// `commanded_extension` is 1.0 and `predicted_apogee_asl` is `None` —
     /// read the commanded column there as a servo test, not as MPC intent.
     pub validation_deploy: bool,
     /// Reported extension from Icarus, 0.0 = retracted, 1.0 = fully extended.
@@ -160,11 +166,12 @@ pub struct AirBrakesRecord {
     /// Airbrakes servo temperature (C) reported by Icarus. `None` until Icarus
     /// reports, for the same reason as `actual_extension`.
     pub servo_temp: Option<f32>,
-    /// Apogee AGL (m) the MPC is aiming at — the operator-set value persisted
-    /// in the SD config block, or the stored default.
+    /// Apogee ASL (m) the MPC is actually aiming at — the operator's AGL
+    /// target plus the pad altitude, as the MPC latched the pair when it was
+    /// constructed.
     ///
-    /// Logged even though it is near-constant, because without it
-    /// `predicted_apogee_agl` and `commanded_extension` cannot be read: a
+    /// Logged even though it is constant, because without it
+    /// `predicted_apogee_asl` and `commanded_extension` cannot be read: a
     /// prediction well above target with the brakes barely open is a broken
     /// controller if the target was reachable and correct behaviour if it was
     /// not, and the log alone could not tell those apart. A bench flight on
@@ -172,10 +179,18 @@ pub struct AirBrakesRecord {
     /// natural apogee, which is why the MPC never saturated and the validation
     /// deploy fired.
     ///
-    /// `None` only if the SD config has not been read yet. It can change
-    /// mid-flight, since `SetTargetApogee` is accepted while Armed, so it is
-    /// sampled per record rather than assumed constant.
-    pub target_apogee_agl: Option<f32>,
+    /// This is the MPC's own value rather than a per-record sample of the
+    /// operator's target watch, and the two are not the same claim: the MPC
+    /// takes its target once, at construction, so a `SetTargetApogee` accepted
+    /// later in the flight moves the watch and the SD config block but not the
+    /// number the controller is chasing. The log now says what the controller
+    /// is doing; the operator's latest setting is on the card either way, in
+    /// the config block.
+    ///
+    /// `None` until the MPC is constructed, which is the same window
+    /// `predicted_apogee_asl` and a non-default `commanded_extension` are
+    /// absent for — before it there is no target, only a setting.
+    pub target_apogee_asl: Option<f32>,
 }
 
 /// Last `AmpStatusMessage`, which is a different stream from the AMP node
@@ -229,6 +244,27 @@ pub struct FlightDataSlowRecord {
     pub hdop: Option<f32>,
     pub vdop: Option<f32>,
     pub pdop: Option<f32>,
+    /// Launch pad altitude (m ASL) held by the deployment estimator — the ONE
+    /// reference every AGL number in the firmware is measured from: the pyro
+    /// thresholds, the downlink's altitude and apogee, and the MPC's target.
+    ///
+    /// This is what makes the log self-contained. Every altitude stored here
+    /// is ASL, which is the honest unit — it is what the barometer and the GPS
+    /// both measure, and it needs no reference to interpret — but the numbers
+    /// the flight actually acted on are AGL, and until this field existed the
+    /// log had no way to reproduce them. The pad reference lived only inside
+    /// the estimator and in the downlink's already-subtracted altitudes, so a
+    /// finished log could not answer "what did the firmware think its AGL
+    /// was?" at all.
+    ///
+    /// A low-passed barometer reading while the rocket is on the rail, and a
+    /// constant latched at ignition detection afterwards, so it moves only
+    /// during the pad segment and is flat for the whole flight.
+    ///
+    /// `None` only when this record's tick had no matching estimator sample —
+    /// the same condition that empties the fast record's `deployment` group,
+    /// i.e. before the estimator's first sample of the session.
+    pub launch_pad_altitude_asl: Option<f32>,
     pub air_brakes: AirBrakesRecord,
     /// `None` until the first `AmpStatusMessage` heartbeat arrives.
     pub amp: Option<AmpRecord>,
@@ -333,6 +369,10 @@ pub struct FlightDataRecord {
     pub hdop: Option<f32>,
     pub vdop: Option<f32>,
     pub pdop: Option<f32>,
+    /// Launch pad altitude (m ASL) from the slow snapshot — the reference every
+    /// AGL number on this row is measured from. See
+    /// [`FlightDataSlowRecord::launch_pad_altitude_asl`].
+    pub launch_pad_altitude_asl: Option<f32>,
 
     /// From the fast record, so it is full-rate.
     pub flight_stage: FlightStage,
@@ -388,6 +428,7 @@ impl FlightDataRecord {
             hdop: slow.and_then(|s| s.hdop),
             vdop: slow.and_then(|s| s.vdop),
             pdop: slow.and_then(|s| s.pdop),
+            launch_pad_altitude_asl: slow.and_then(|s| s.launch_pad_altitude_asl),
             flight_stage: fast.flight_stage,
             pyro_flags: fast.pyro_flags,
             air_brakes: slow.map(|s| s.air_brakes.clone()),

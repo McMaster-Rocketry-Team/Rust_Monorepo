@@ -12,10 +12,11 @@ use crate::{
 };
 
 // --- Pad calibration (Piece 1) ---------------------------------------------
-// Everything flight needs to learn while the rocket is still — gyro bias,
-// gravity direction (pad orientation), and pad altitude — comes from ONE
-// structure: finished 2 s window means (gyro + accel + baro together),
-// averaged over the windows that look like a rocket sitting on a rail.
+// Everything flight needs to learn while the rocket is still — gyro bias
+// and gravity direction (pad orientation) — comes from ONE structure:
+// finished 2 s window means (gyro + accel together), averaged over the
+// windows that look like a rocket sitting on a rail. The pad ALTITUDE is
+// not among them; see the note on `PadCalibration` for where it lives.
 // There is no fallback path: until enough windows qualify, the estimator
 // is not launch-ready and refuses to detect ignition (see
 // `calibration_complete`).
@@ -33,7 +34,8 @@ use crate::{
 // radius. Measured on Void Lake — the only log in the archive with a real
 // pad segment (11.4 s, five windows) — that apparatus moved the gyro bias
 // 0.03 deg/s and the gravity direction 0.002 deg, against a 5 deg tilt
-// budget, and moved the pad altitude 0.1 m the WRONG way. Deleting it
+// budget, and moved the (since removed) pad altitude 0.1 m the WRONG way.
+// Deleting it
 // outright left 45 of 46 tests passing; the 46th is the in-flight-windows
 // case above, which the absolute check covers directly. The one
 // disturbance it ever fired on was Void Lake's ~8 Hz airframe ring, 19
@@ -213,16 +215,31 @@ struct PadCalibration {
     /// Mean accel of the surviving windows: gravity in the avionics
     /// frame, i.e. the pad orientation.
     gravity_av_frame: Vector3<f32>,
-    /// Mean baro altitude of the surviving windows.
-    launch_pad_altitude_asl: f32,
 }
+
+// The pad ALTITUDE is deliberately not in there, and this half does not
+// measure one. There is exactly one pad altitude in the system — the
+// deployment half's, reached through
+// [`FlightEstimators::launch_pad_altitude_asl`] — and it is what every AGL
+// number in the firmware is measured from: the pyro thresholds, the
+// downlink, the MPC's apogee target and the SD log.
+//
+// This half used to average its own out of the same screened windows and
+// carry it through every state after ignition. Nothing ever read it — the
+// vertical filter is born at the baro ring's median, not at the pad — and
+// the two numbers are derived differently enough to disagree: a 10 s low
+// pass over the whole pad period against the mean of the last ~minute of
+// 2 s windows. A future caller reaching for whichever accessor was nearer
+// would have silently picked up a second, differently-wrong reference. One
+// number, one owner.
+//
+// [`FlightEstimators::launch_pad_altitude_asl`]: crate::FlightEstimators::launch_pad_altitude_asl
 
 /// One buffered pre-ignition sample: everything the rewind replays, and
 /// nothing else. The baro altitude is deliberately absent — the rewind
-/// only drives the dead reckoner, and the pad altitude it starts from
-/// comes from the screened windows. At 32 bytes against the 40 a
-/// timestamp + [`ImuSample`] + altitude would take, dropping it pays for
-/// the ring's capacity headroom outright.
+/// only drives the dead reckoner, which carries no altitude. At 32 bytes
+/// against the 40 a timestamp + [`ImuSample`] + altitude would take,
+/// dropping it pays for the ring's capacity headroom outright.
 #[derive(Debug, Clone, Copy)]
 struct PadSample {
     timestamp_us: u64,
@@ -233,7 +250,7 @@ struct PadSample {
 #[derive(Debug)]
 enum State {
     /// Stable on pad: collect screened calibration windows (gyro bias,
-    /// gravity direction, pad altitude), and watch for ignition with a
+    /// gravity direction), and watch for ignition with a
     /// 0.25 s rolling buffer that is rewound once ignition is detected. The
     /// rolling buffer's ONLY job is that rewind — calibration comes
     /// entirely from the windows.
@@ -242,10 +259,10 @@ enum State {
         /// This half's ignition detector. Its own instance, not shared with
         /// the pyro half's — see [`IgnitionDetector::update`].
         ignition: IgnitionDetector,
-        /// Finished window means, packed acc[0..3], gyro[3..6], baro
-        /// altitude [6] — one vector so the three channels are averaged and
-        /// screened over exactly the same window.
-        pad_windows: heapless::Vec<SVector<f32, 7>, MAX_PAD_WINDOWS>,
+        /// Finished window means, packed acc[0..3], gyro[3..6] — one
+        /// vector so both channels are averaged and screened over exactly
+        /// the same window.
+        pad_windows: heapless::Vec<SVector<f32, 6>, MAX_PAD_WINDOWS>,
         /// Running sum and sample count of the window in progress; its mean
         /// is `window_sum / window_n`.
         ///
@@ -259,7 +276,7 @@ enum State {
         /// samples, a window this code cannot produce, the two trade places
         /// in both directions: Welford's `1/n` increment underflows just as
         /// the sum loses digits.
-        window_sum: SVector<f32, 7>,
+        window_sum: SVector<f32, 6>,
         window_n: u32,
         window_elapsed: f32,
         /// Latest screening result; `None` until enough windows agree.
@@ -284,7 +301,6 @@ enum State {
         pad_up_av: Vector3<f32>,
         reckoner: DeadReckoner,
         gyro_bias: Vector3<f32>,
-        launch_pad_altitude_asl: f32,
         ignition_t_us: u64,
     },
 
@@ -298,7 +314,6 @@ enum State {
         thrust_axis_av: Vector3<f32>,
         reckoner: DeadReckoner,
         gyro_bias: Vector3<f32>,
-        launch_pad_altitude_asl: f32,
         ignition_t_us: u64,
         /// (timestamp_us, raw baro altitude)
         baro_ring: Deque<(u64, f32), BARO_RING_CAP>,
@@ -329,7 +344,6 @@ enum State {
         thrust_axis_av: Vector3<f32>,
         reckoner: DeadReckoner,
         gyro_bias: Vector3<f32>,
-        launch_pad_altitude_asl: f32,
         kf: VerticalKF,
         born_t_us: u64,
         born_forced: bool,
@@ -451,14 +465,13 @@ impl AirbrakesEstimator {
                 }
 
                 // Calibration window collector: finished 2 s windows are
-                // kept as candidate (bias, gravity, pad-altitude)
-                // measurements; the current (possibly ignition-shaken)
+                // kept as candidate (bias, gravity) measurements; the
+                // current (possibly ignition-shaken)
                 // window is never used. Even a finished window that caught
                 // motor spool-up gets rejected by the accel screen.
-                let mut sample = SVector::<f32, 7>::zeros();
+                let mut sample = SVector::<f32, 6>::zeros();
                 sample.fixed_view_mut::<3, 1>(0, 0).copy_from(&acc);
                 sample.fixed_view_mut::<3, 1>(3, 0).copy_from(&gyro);
-                sample[6] = altitude_asl;
                 *window_sum += sample;
                 *window_n += 1;
                 *window_elapsed += dt;
@@ -501,8 +514,8 @@ impl AirbrakesEstimator {
                 // to re-cover its span.
                 //
                 // Calibration is a hard precondition of ignition
-                // detection: without a trustworthy bias, gravity direction
-                // and pad altitude there is nothing sane to hand the dead
+                // detection: without a trustworthy bias and gravity
+                // direction there is nothing sane to hand the dead
                 // reckoner, so a launch before calibration completes is
                 // deliberately NOT detected. `calibration_complete()`
                 // surfaces this as an arming/self-test condition — the
@@ -518,9 +531,8 @@ impl AirbrakesEstimator {
                 }
                 log_info!("ignition detected, rewinding pad buffer");
                 log_info!(
-                    "pad calibration: gyro bias {} deg/s, pad altitude {} m",
-                    cal.gyro_bias.magnitude().to_degrees(),
-                    cal.launch_pad_altitude_asl
+                    "pad calibration: gyro bias {} deg/s",
+                    cal.gyro_bias.magnitude().to_degrees()
                 );
 
                 // The pad's own mean specific force IS earth UP in the
@@ -535,8 +547,8 @@ impl AirbrakesEstimator {
                 // threshold), so the buffer's tail holds the first moments
                 // of real thrust — replay the whole 0.25 s through the dead
                 // reckoner. This replay is the ring buffer's ONLY job;
-                // gravity, pad altitude and bias all came from the
-                // screened windows above.
+                // gravity and bias both came from the screened windows
+                // above.
                 let mut prev_t: Option<u64> = None;
                 for past in pad_ring.iter() {
                     let past_dt = match prev_t {
@@ -560,7 +572,6 @@ impl AirbrakesEstimator {
                     pad_up_av,
                     reckoner,
                     gyro_bias: cal.gyro_bias,
-                    launch_pad_altitude_asl: cal.launch_pad_altitude_asl,
                     ignition_t_us: timestamp_us,
                 };
             }
@@ -571,7 +582,6 @@ impl AirbrakesEstimator {
                 pad_up_av,
                 reckoner,
                 gyro_bias,
-                launch_pad_altitude_asl,
                 ignition_t_us,
             } => {
                 *acc_sum += acc;
@@ -612,7 +622,6 @@ impl AirbrakesEstimator {
                     thrust_axis_av,
                     reckoner: reckoner.clone(),
                     gyro_bias: *gyro_bias,
-                    launch_pad_altitude_asl: *launch_pad_altitude_asl,
                     ignition_t_us: *ignition_t_us,
                     baro_ring: Deque::new(),
                     subsonic_sustain: 0.0,
@@ -627,7 +636,6 @@ impl AirbrakesEstimator {
                 thrust_axis_av,
                 reckoner,
                 gyro_bias,
-                launch_pad_altitude_asl,
                 ignition_t_us,
                 baro_ring,
                 subsonic_sustain,
@@ -818,7 +826,6 @@ impl AirbrakesEstimator {
                     thrust_axis_av: *thrust_axis_av,
                     reckoner: reckoner.clone(),
                     gyro_bias: *gyro_bias,
-                    launch_pad_altitude_asl: *launch_pad_altitude_asl,
                     kf,
                     born_t_us: timestamp_us,
                     born_forced: forced,
@@ -862,10 +869,9 @@ impl AirbrakesEstimator {
     /// This used to hand out the dead reckoner's doubly-integrated altitude
     /// there, which no consumer needed: the MPC gate cannot be reached before
     /// [`State::Tracking`] anyway, and the log and downlink carry the
-    /// deployment half's barometric altitude, plus
-    /// [`Self::launch_pad_altitude_asl`] in every state. What the pre-birth
-    /// value did instead was look like a position fix while being a drifting
-    /// open-loop integral nothing corrected.
+    /// deployment half's barometric altitude, which is present in every
+    /// state. What the pre-birth value did instead was look like a position
+    /// fix while being a drifting open-loop integral nothing corrected.
     pub fn altitude_asl(&self) -> Option<f32> {
         match &self.state {
             State::OnPad { .. } | State::Stage1 { .. } | State::DeadReckoning { .. } => None,
@@ -873,22 +879,16 @@ impl AirbrakesEstimator {
         }
     }
 
-    pub fn launch_pad_altitude_asl(&self) -> Option<f32> {
-        match &self.state {
-            State::OnPad { .. } => None,
-            State::Stage1 {
-                launch_pad_altitude_asl,
-                ..
-            }
-            | State::DeadReckoning {
-                launch_pad_altitude_asl,
-                ..
-            }
-            | State::Tracking {
-                launch_pad_altitude_asl,
-                ..
-            } => Some(*launch_pad_altitude_asl),
-        }
+    /// Whether this half has latched ignition and left the pad state.
+    ///
+    /// Deliberately a question about the state machine rather than a side
+    /// effect of some value that happens to appear at the same moment: this
+    /// used to be read as `launch_pad_altitude_asl().is_some()`, which tied
+    /// a timing observation to a number that had no other reader and is now
+    /// gone. Note this is THIS half's ignition detector, which runs its own
+    /// instance and can latch a sample or two apart from the pyro half's.
+    pub fn ignition_latched(&self) -> bool {
+        !matches!(self.state, State::OnPad { .. })
     }
 
     /// MPC velocity input: (horizontal, vertical) m/s. Only available once
@@ -1028,7 +1028,7 @@ impl AirbrakesEstimator {
 /// measurement that retired that, and for why the disagreement test was
 /// the wrong shape for the one job it was doing.
 fn screen_pad_windows(
-    windows: &heapless::Vec<SVector<f32, 7>, MAX_PAD_WINDOWS>,
+    windows: &heapless::Vec<SVector<f32, 6>, MAX_PAD_WINDOWS>,
 ) -> Option<PadCalibration> {
     if windows.len() < MIN_CALIBRATION_WINDOWS {
         return None;
@@ -1037,17 +1037,18 @@ fn screen_pad_windows(
     // A rocket on a rail reads 1 g and is not turning. Nothing else about
     // a pad window is knowable in absolute terms — the gyro bias and the
     // pad orientation are precisely what this function exists to measure
-    // — so nothing else is asserted. In particular the baro channel is
-    // unscreened: a pressure transient is not evidence that the airframe
-    // moved, and the old unit-screen let one throw away good gyro data.
-    let on_the_pad = |w: &SVector<f32, 7>| -> bool {
+    // — so nothing else is asserted. A baro channel used to ride along in
+    // these windows, unscreened for the same reason (a pressure transient
+    // is not evidence that the airframe moved); it is gone, and the pad
+    // altitude now has exactly one owner, the deployment half.
+    let on_the_pad = |w: &SVector<f32, 6>| -> bool {
         let acc: Vector3<f32> = w.fixed_view::<3, 1>(0, 0).into();
         let gyro: Vector3<f32> = w.fixed_view::<3, 1>(3, 0).into();
         (acc.magnitude() - 9.81).abs() <= PAD_GRAVITY_TOLERANCE_M_S2
             && gyro.magnitude() <= PAD_ROTATION_LIMIT_RAD_S
     };
 
-    let mut sum = SVector::<f32, 7>::zeros();
+    let mut sum = SVector::<f32, 6>::zeros();
     let mut n = 0usize;
     for w in windows.iter().filter(|w| on_the_pad(w)) {
         sum += w;
@@ -1061,7 +1062,6 @@ fn screen_pad_windows(
     Some(PadCalibration {
         gyro_bias: mean.fixed_view::<3, 1>(3, 0).into(),
         gravity_av_frame: mean.fixed_view::<3, 1>(0, 0).into(),
-        launch_pad_altitude_asl: mean[6],
     })
 }
 

@@ -19,6 +19,17 @@ impl AirBrakesMPC {
         }
     }
 
+    /// The apogee (m ASL) this MPC is solving for, as it was handed to
+    /// [`Self::new`].
+    ///
+    /// Fixed for the controller's whole life — there is no setter, and that
+    /// is the point: a target the flight can move is a different controller.
+    /// Exposed so the SD log can record what was actually being chased rather
+    /// than resampling the operator's setting, which can drift from it.
+    pub fn target_apogee_asl(&self) -> f32 {
+        self.target_apogee_asl
+    }
+
     /// Solve for the brake extension that lands the predicted apogee on the
     /// target, and report the apogee that command is predicted to reach.
     ///

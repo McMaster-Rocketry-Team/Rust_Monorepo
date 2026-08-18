@@ -58,6 +58,17 @@ pub const DEFAULT_TARGET_APOGEE_AGL: f32 = 4000.0;
 
 /// On-disk format version. Bump when the record or superblock layout changes;
 /// logs written at any other version are treated as absent.
+/// v15: every altitude in the log is ASL, and the slow record carries the
+///     launch pad altitude to convert them with. `launch_pad_altitude_asl`
+///     added; `air_brakes_predicted_apogee_agl` and
+///     `air_brakes_target_apogee_agl` become `..._asl`. The log stored two
+///     AGL numbers and never the reference they were measured from, so
+///     nothing offline could reproduce the AGL the firmware actually flew
+///     on, or put those two columns on the same axis as the estimator and
+///     GPS altitudes beside them. The target additionally changes source: it
+///     is now the value the MPC latched at construction rather than a
+///     per-record sample of the operator's target watch, which could drift
+///     from it mid-flight.
 /// v14: `air_brakes_target_apogee_agl` added to the slow record. The log
 ///     carried the MPC's prediction and its command but not the target they
 ///     were computed against, which lives only in the SD config block and the
@@ -91,7 +102,7 @@ pub const DEFAULT_TARGET_APOGEE_AGL: f32 = 4000.0;
 ///     `mpc_predicted_apogee_agl` added to the slow record, `VALID_BARO` dropped.
 /// v8: payload EPM rail currents + SEM actuator steps in the slow record.
 /// v7: tagged FAST/SLOW stream (see `flight_data_record`). Older formats: see git history.
-pub const STORAGE_VERSION: u32 = 14;
+pub const STORAGE_VERSION: u32 = 15;
 
 /// rkyv body sizes for tagged record types.
 pub const FAST_BODY_LEN: usize = size_of::<<FlightDataFastRecord as rkyv::Archive>::Archived>();
@@ -535,13 +546,14 @@ mod tests {
             hdop: Some(1.1),
             vdop: Some(2.2),
             pdop: Some(3.3),
+            launch_pad_altitude_asl: Some(200.0),
             air_brakes: AirBrakesRecord {
                 commanded_extension: Some(0.25),
-                predicted_apogee_agl: Some(3010.0),
+                predicted_apogee_asl: Some(3210.0),
                 validation_deploy: false,
                 actual_extension: Some(0.2),
                 servo_temp: Some(41.5),
-                target_apogee_agl: Some(3000.0),
+                target_apogee_asl: Some(3200.0),
             },
             amp: Some(AmpRecord {
                 shared_battery_v: 8.2,

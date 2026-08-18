@@ -370,6 +370,7 @@ fn write_csv(path: &str, records: &[FlightDataRecord]) -> Result<()> {
         "hdop",
         "vdop",
         "pdop",
+        "launch_pad_altitude_asl",
         "flight_stage",
         "pyro_main_continuity",
         "pyro_main_fire",
@@ -380,8 +381,8 @@ fn write_csv(path: &str, records: &[FlightDataRecord]) -> Result<()> {
         "air_brakes_actual_extension",
         "air_brakes_servo_temp",
         "air_brakes_validation_deploy",
-        "mpc_predicted_apogee_agl",
-        "air_brakes_target_apogee_agl",
+        "mpc_predicted_apogee_asl",
+        "air_brakes_target_apogee_asl",
         "amp_online",
         "amp_uptime_s",
         "amp_health",
@@ -465,6 +466,7 @@ fn write_csv(path: &str, records: &[FlightDataRecord]) -> Result<()> {
             cell(r.hdop),
             cell(r.vdop),
             cell(r.pdop),
+            cell(r.launch_pad_altitude_asl),
             format!("{:?}", r.flight_stage),
             bit(pyro, PYRO_MAIN_CONTINUITY),
             bit(pyro, PYRO_MAIN_FIRE),
@@ -475,8 +477,8 @@ fn write_csv(path: &str, records: &[FlightDataRecord]) -> Result<()> {
             cell(air_brakes.and_then(|a| a.actual_extension)),
             cell(air_brakes.and_then(|a| a.servo_temp)),
             cell(air_brakes.map(|a| a.validation_deploy as u8)),
-            cell(air_brakes.and_then(|a| a.predicted_apogee_agl)),
-            cell(air_brakes.and_then(|a| a.target_apogee_agl)),
+            cell(air_brakes.and_then(|a| a.predicted_apogee_asl)),
+            cell(air_brakes.and_then(|a| a.target_apogee_asl)),
         ];
         row.extend(node_cells(r.amp_node.as_ref()));
         row.extend(node_cells(r.icarus_node.as_ref()));
