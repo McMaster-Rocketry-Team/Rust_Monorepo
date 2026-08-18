@@ -30,9 +30,11 @@ pub struct FlightLog {
     /// `FlightStage` discriminant, or `None` where the cell was blank or held a
     /// name this build does not know.
     pub stage: Vec<Option<u8>>,
-    /// `AirbrakesState` discriminant, same rules. Absent from logs written
-    /// before the estimator's state was logged outright, which is why it is
-    /// per-row optional rather than a column that is simply missing.
+    /// `AirbrakesState` discriminant, same rules. Per-row optional for the
+    /// same reason `stage` is — a blank cell is a row the estimator produced
+    /// nothing for — and not to accommodate a CSV that predates the column:
+    /// the exporter only reads the current storage version, so every CSV this
+    /// tool can produce has it.
     pub airbrakes_state: Vec<Option<u8>>,
     /// Every other column that parses as a number, absent cells as `NaN`.
     columns: HashMap<String, Vec<f32>>,
