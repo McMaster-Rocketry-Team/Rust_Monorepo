@@ -103,11 +103,12 @@ pub const BRAKES_HUE: RGBColor = RGBColor(0x00, 0x7A, 0xB8);
 
 /// Background wash for the brakes-permitted spans.
 ///
-/// Stronger than the stage bands and than the burn, because unlike them it is
-/// laid over a stage band that is already tinted — at the stage-band alpha the
-/// two multiply to a grey that reads as neither.
+/// The lightest of the three washes despite being the one laid over an
+/// already-tinted stage band, which is why it is a light tint of the hue
+/// rather than the hue at a lower alpha: dropping the alpha instead let the
+/// amber underneath dominate and the band read grey.
 pub fn brakes_color() -> RGBAColor {
-    BRAKES_HUE.mix(0.15)
+    RGBColor(0x62, 0xB6, 0xE0).mix(0.16)
 }
 
 pub fn stage_name(stage: u8) -> &'static str {

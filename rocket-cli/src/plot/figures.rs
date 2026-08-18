@@ -1602,8 +1602,18 @@ impl<'a> Renderer<'a> {
         // Under the burn, because the two do not overlap in practice (the
         // brakes cannot be permitted while the motor is lit) and where they do,
         // the burn is the more surprising fact.
+        //
+        // Widened to a pixel floor, for the same reason the pyro lanes are:
+        // the gate is evaluated per sample and its first opening can be a
+        // couple of dozen milliseconds before the filter's birth transient
+        // shuts it again. That is a finding, and at 25 ms on a 45 s axis it is
+        // a third of a pixel wide — drawn honestly, it would not be drawn.
+        let min_width = {
+            let (px, _) = chart.plotting_area().get_pixel_range();
+            (self.x_range.1 - self.x_range.0) / (px.end - px.start).max(1) as f64 * 3.0
+        };
         for &(a, b) in &self.brakes_spans {
-            let (a, b) = (a.max(self.x_range.0), b.min(self.x_range.1));
+            let (a, b) = (a.max(self.x_range.0), b.max(a + min_width).min(self.x_range.1));
             if b > a {
                 chart
                     .draw_series(std::iter::once(Rectangle::new(
