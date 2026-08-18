@@ -135,9 +135,23 @@ const STAGE1_DURATION_S: f32 = 0.5;
 // because "the flow is subsonic" and "the flaps may open" are one fact
 // about the airframe. It is the Mach the config's own Cd table is
 // tabulated at, so the threshold and the Cd travel together.
-/// The drag check must hold continuously this long before the baro is
-/// declared honest.
-const SUBSONIC_SUSTAIN_S: f32 = 1.0;
+//
+// The check votes on one sample. It required a continuous second of
+// agreement until 2026-08-18, on the theory that a sustain rejects flicker
+// at the crossing — measured on LC'25, there is no flicker to reject: the
+// low pass below crosses the threshold once and the margin grows
+// monotonically from there (+1.03, +1.13, +1.21, +1.44 m/s over the four
+// samples around it). The apparent chatter was a test harness splitting its
+// own span record, not the check changing its mind.
+//
+// What the second actually bought was margin, and only where nothing else
+// was binding. The unsafe direction — a Cd*A/m too large, which reads the
+// airspeed low and votes early — is held by the inertial Mach test at the
+// birth site below, which is a pure accelerometer integration and so cannot
+// be fooled by a wrong drag model: at Cd +30% on LC'25 the check votes at
+// true Mach 0.857 and that test still holds the birth to Mach 0.787, with
+// the sustain or without it. What the second cost was ~1 s of control
+// window on every flight where the drag model was right.
 /// Burnout is latched when the axial channel — deceleration-positive, the
 /// same `a_axial` the drag check inverts — has been at least this positive
 /// continuously for `BURNOUT_SUSTAIN_S`.
@@ -333,7 +347,6 @@ enum State {
         ignition_t_us: u64,
         /// (timestamp_us, raw baro altitude)
         baro_ring: Deque<(u64, f32), BARO_RING_CAP>,
-        subsonic_sustain: f32,
         /// Low-passed axial specific force, deceleration-positive —
         /// drag/mass once the motor is out, and negative while it is not.
         /// The same channel `burnout` latches on, read through the low pass
@@ -630,7 +643,6 @@ impl AirbrakesEstimator {
                     gyro_bias: *gyro_bias,
                     ignition_t_us: *ignition_t_us,
                     baro_ring: Deque::new(),
-                    subsonic_sustain: 0.0,
                     drag_lp: None,
                     last_subsonic: false,
                     burnout: false,
@@ -644,7 +656,6 @@ impl AirbrakesEstimator {
                 gyro_bias,
                 ignition_t_us,
                 baro_ring,
-                subsonic_sustain,
                 drag_lp,
                 last_subsonic,
                 burnout,
@@ -744,17 +755,14 @@ impl AirbrakesEstimator {
                             // input are all equally broken, so staying shut
                             // is the honest outcome.
                             *last_subsonic = false;
-                            *subsonic_sustain = 0.0;
                             (false, false)
                         } else if t_since_ignition_s >= t_max_s {
                             log_info!("lockout T_max reached, forced birth");
                             (true, true)
                         } else if t_since_ignition_s < t_min_s {
                             // Before the earliest the sim says we could be
-                            // subsonic. Hold the clock at zero so an early
-                            // reading cannot bank sustain.
+                            // subsonic, so the check does not get a vote yet.
                             *last_subsonic = false;
-                            *subsonic_sustain = 0.0;
                             (false, false)
                         } else {
                             // Invert the drag to an airspeed and compare to
@@ -786,12 +794,7 @@ impl AirbrakesEstimator {
                                 None => false,
                             };
                             *last_subsonic = subsonic;
-                            if subsonic {
-                                *subsonic_sustain += dt;
-                            } else {
-                                *subsonic_sustain = 0.0;
-                            }
-                            (*subsonic_sustain >= SUBSONIC_SUSTAIN_S, false)
+                            (subsonic, false)
                         }
                     }
                 };
@@ -837,6 +840,15 @@ impl AirbrakesEstimator {
                 // which is the intended reading of the backstop — it exists
                 // to stop waiting for a broken drag model, not to open the
                 // brakes at any speed.
+                //
+                // Since the drag check lost its 1 s sustain this is the only
+                // thing standing between an optimistic Cd and a supersonic
+                // birth, and it is the right thing for the job precisely
+                // because it shares nothing with the check: the check
+                // inverts a drag model, this integrates an accelerometer.
+                // Measured on the LC'25 replay with the drag model 30% too
+                // large, it holds the birth for 1.4 s past the check's vote,
+                // at 269.3 m/s against a 262.9 m/s limit.
                 if vv0 > self.config.max_open_mach * approximate_speed_of_sound(alt0_asl) {
                     return;
                 }

@@ -561,9 +561,21 @@ pub const DEPLOYMENT_BARO_RESYNC: u8 = 1 << 1;
 /// hole in this byte protects nobody and only makes the next reader wonder
 /// what used to be in it.
 ///
-/// The mach-lockout exit is a single drag measurement (the drag-inverted
-/// airspeed below Mach 0.8, sustained 1 s), so there is one bit for it;
-/// logging it per sample reconstructs the exit post-flight.
+/// The mach-lockout drag check voted subsonic on this sample — the
+/// drag-inverted airspeed was below `max_open_mach` — and the filter was
+/// NOT born on it.
+///
+/// Normally 0 for an entire flight, which is the point. The check used to
+/// need a continuous second before it could conclude, so this bit marked
+/// that second and every flight had a run of it; since it concludes on the
+/// sample it votes on, the vote and the birth are the same row and the birth
+/// is already visible as the state going to `AirbrakesEnabled`. What is left
+/// is the disagreement case: the check said go and something at the birth
+/// site refused — the inertial Mach test on the dead reckoner's own
+/// velocity, or a baro ring too empty to take a median from. A run of these
+/// is the drag model reading the airframe faster than the accelerometers do,
+/// which is the one thing about the lockout exit that nothing else in the
+/// log would show.
 pub const AIRBRAKES_SUBSONIC_DRAG: u8 = 1 << 0;
 /// The axial-sign burnout latch has fired: the motor is out and the drag
 /// channel is honest. Nothing can birth the vertical filter before this, on

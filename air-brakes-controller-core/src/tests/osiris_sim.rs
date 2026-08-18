@@ -102,7 +102,7 @@ fn osiris_config() -> FlightConfig {
         airbrakes: AirbrakesConfig {
             ignition_detection_acc_threshold: 8.0 * 9.81,
             mach_lockout: Some(MachLockoutConfig {
-                earliest_subsonic_after_ignition_us: 17_500_000,
+                earliest_subsonic_after_ignition_us: 17_700_000,
                 force_birth_after_ignition_us: 25_000_000,
                 subsonic_crossing_altitude_asl: 6800.0,
             }),
@@ -1043,17 +1043,16 @@ fn mach_lockout_timers_bracket_every_simulation() {
             truth.at(m08).altitude_asl
         );
 
-        // Never able to CONCLUDE while genuinely supersonic. The check
-        // must hold continuously for `SUBSONIC_SUSTAIN_S` (1 s) before it
-        // approves a birth, so the earliest possible birth is the gate
-        // opening plus one second — that is the number that has to clear
-        // the true crossing, not the gate itself.
-        const SUBSONIC_SUSTAIN_S: f32 = 1.0;
+        // Never able to CONCLUDE while genuinely supersonic. The check votes
+        // on one sample now — it held for a second until 2026-08-18 — so
+        // this floor is the whole of the timing guarantee and has to clear
+        // the true crossing on its own. That is what pushed it from 17.50 s
+        // to 17.70 s: the O3400 crosses at 17.56 s, so the old value plus
+        // the old sustain cleared it and the old value alone did not.
         assert!(
-            t_early + SUBSONIC_SUSTAIN_S >= m08,
-            "{path}: the check could approve a birth at {}s, while the airframe \
-             is still above Mach 0.8 until {m08}s",
-            t_early + SUBSONIC_SUSTAIN_S
+            t_early >= m08,
+            "{path}: the check could approve a birth at {t_early}s, while the \
+             airframe is still above Mach 0.8 until {m08}s"
         );
         // Erring late is safe but costs control window; say how much.
         if t_early > m08 {
@@ -1430,28 +1429,33 @@ fn clipped_accel_still_flies_the_profile() {
         born > m08,
         "clipping opened the lockout at {born}s, while still supersonic ({m08}s)"
     );
-    // How early the check is allowed to SPEAK, which is not the same as how
-    // early it is allowed to CONCLUDE. The design rule — stated in
-    // `mach_lockout_timers_bracket_every_simulation`, which checks the
-    // config against exactly this — is that the check must hold for
-    // `SUBSONIC_SUSTAIN_S` (1 s) before it approves a birth, so the number
-    // that has to clear the true crossing is the gate opening PLUS one
-    // second, not the gate itself. `born > m08` above is that property, and
-    // it passes here with ~1 s to spare.
+    // This is the thinnest margin in the suite, and worth knowing as a
+    // number: born 17.84 s against a true crossing at 17.56 s, so +0.28 s.
+    // It is thin for two reasons at once, which is why this flight and not
+    // the nominal one is the case to watch. Clipping drags the
+    // dead-reckoned altitude low, which reads the density high and the
+    // inverted airspeed low, so the drag check speaks early; and it drags
+    // the dead-reckoned VELOCITY low too (-10.1% at birth here), which is
+    // the unsafe direction for the inertial Mach test that would otherwise
+    // catch an early vote. Both of the lockout's independent checks are
+    // biased the same way by the same cause.
     //
-    // This bounds the other end: a drag model wrong enough to vote subsonic
-    // seconds early would still eat the sustain and has to fail. Under
-    // clipping the check does vote a few tens of milliseconds before the
-    // crossing (measured -35 ms) — clipping drags the dead-reckoned
-    // altitude low, which reads the density high and the inverted airspeed
-    // low — and that is the honest worst case, well inside the sustain.
+    // The check used to have to hold for a second before it could conclude,
+    // which absorbed all of this. It does not any more (see
+    // `SUBSONIC_SUSTAIN_S`'s removal on 2026-08-18), so the margin here is
+    // the drag check's own lead over the crossing and nothing else. If a
+    // future airframe cannot show at least a few tenths here, the honest fix
+    // is a later `earliest_subsonic_after_ignition_us`, not a sustain.
+    //
+    // The span loop below still bites in the other case: a span is recorded
+    // only when the check voted and the birth was REFUSED, so anything it
+    // sees is a vote the inertial test had to catch.
     const CHECK_MAY_LEAD_S: f32 = 0.25;
     for (start, end) in &r.subsonic_spans {
         assert!(
             *start >= m08 - CHECK_MAY_LEAD_S,
             "drag check read subsonic at {start}s..{end}s under clipping, \
-             {:.3}s before the true Mach 0.8 crossing at {m08}s — more than \
-             the {CHECK_MAY_LEAD_S}s the 1 s sustain is allowed to absorb",
+             {:.3}s before the true Mach 0.8 crossing at {m08}s",
             m08 - *start
         );
     }

@@ -952,8 +952,8 @@ fn truth_mach_at(rows: &[Row], ign_s: f32, t_rel: f32) -> f32 {
 ///    with a hard-coded 0.8 leaves all 48 other tests passing and only this
 ///    one failing. (Raising it outright to Mach 2 is caught elsewhere too —
 ///    `lc25_v2_replay` and `lc25_clipped_accel_replay` both notice — because
-///    the birth then falls back onto the `T_min` + 1 s sustain floor at
-///    ignition+9.07 s, where LC'25 is still doing Mach 0.905.)
+///    the birth then falls back onto the `T_min` floor, where LC'25 is still
+///    supersonic.)
 /// 2. **A wrong drag model costs bounded margin, in a known direction.**
 ///    `Cd*A/m` is not a free parameter — it comes from `ROCKET_PARAMETERS`,
 ///    which the MPC already needs — but it is a model, and models are wrong.
@@ -999,8 +999,8 @@ fn drag_check_timing_and_sensitivity() {
         );
         assert!(!forced, "ceiling {ceiling}: fell through to the T_max timeout");
 
-        // ...and the ceiling is what decides, not the T_min floor or the
-        // sustain: raising it must move the birth earlier every time.
+        // ...and the ceiling is what decides, not the T_min floor: raising
+        // it must move the birth earlier every time.
         // Measured steps are 0.97-2.39 s apart; 0.5 s is comfortably inside
         // that and far outside the 2 ms sample spacing.
         if let Some((prev_ceiling, prev_born)) = prev {
@@ -1026,9 +1026,11 @@ fn drag_check_timing_and_sensitivity() {
         let (born_s, forced) =
             birth.unwrap_or_else(|| panic!("Cd x{scale}: filter never born"));
         let mach = truth_mach_at(&rows, ign_s, born_s);
-        let (first_read_s, _) = *spans
-            .first()
-            .unwrap_or_else(|| panic!("Cd x{scale}: the check never read subsonic"));
+        // The check votes on one sample, so a span is recorded only when the
+        // vote did NOT produce a birth — i.e. when the inertial Mach test at
+        // the birth site refused it. No span therefore means "voted and was
+        // born on the same sample", and the vote time is the birth time.
+        let first_read_s = spans.first().map(|(start, _)| *start).unwrap_or(born_s);
         let first_read_mach = truth_mach_at(&rows, ign_s, first_read_s);
         eprintln!(
             "Cd x{scale:.2}: first read subsonic at ignition+{first_read_s:.2}s \
@@ -1045,10 +1047,11 @@ fn drag_check_timing_and_sensitivity() {
             (scale - 1.0) * 100.0
         );
 
-        // The unsafe direction, bounded. Worst measured is Mach 0.803 at
-        // +30%, i.e. 0.003 over the 0.8 ceiling: a drag model wrong by a
-        // third buys back only 0.05 Mach of the margin the subsonic Cd and
-        // the sustain put there. 0.85 is that worst case plus room, and is
+        // The unsafe direction, bounded. Worst measured is Mach 0.787 at
+        // +30%: a drag model wrong by a third buys back only 0.015 Mach of
+        // the margin the subsonic Cd and the inertial test put there — and
+        // it is the inertial test that stops it there, since the check
+        // itself votes at 0.857. 0.85 is that worst case plus room, and is
         // still below the transonic rise the port error lives in.
         assert!(
             mach < 0.85,
@@ -1057,18 +1060,29 @@ fn drag_check_timing_and_sensitivity() {
             (scale - 1.0) * 100.0
         );
 
-        // The 1 s sustain is load-bearing, not decoration: the check always
-        // reads subsonic first at a HIGHER true Mach than the one it
-        // eventually births at (0.855 vs 0.803 in the worst case).
-        assert!(
-            first_read_mach > mach,
-            "Cd x{scale}: the sustain bought nothing — first subsonic read at Mach \
-             {first_read_mach:.3}, birth at {mach:.3}"
-        );
+        // What bounds the unsafe direction is the inertial Mach test at the
+        // birth site, not the drag check and not the 1 s sustain the check
+        // used to carry. It is a pure accelerometer integration, so a Cd
+        // that is too large cannot fool it: at x1.30 the check votes at true
+        // Mach 0.857 and the birth is still held back to 0.787. Assert that
+        // deferral directly — whenever the check speaks while genuinely
+        // supersonic, something else must be what stops it.
+        if first_read_mach > 0.8 {
+            assert!(
+                born_s > first_read_s,
+                "Cd x{scale}: the check voted at true Mach {first_read_mach:.3} — \
+                 above the ceiling — and the birth followed it immediately at \
+                 ignition+{born_s:.2}s, so nothing held the supersonic case"
+            );
+        }
 
         if let Some((prev_scale, prev_born)) = prev {
+            // `<=`, not `<`: once the drag model is optimistic enough that
+            // the inertial test is what decides, every scale beyond that
+            // births on the same sample (x1.15 and x1.30 both at +11.20 s).
+            // Ties are the backstop working, not the ceiling failing.
             assert!(
-                born_s < prev_born,
+                born_s <= prev_born,
                 "Cd x{prev_scale} born at ignition+{prev_born:.2}s but x{scale} at \
                  +{born_s:.2}s — a HIGHER Cd*A/m must read the speed lower and \
                  exit earlier"

@@ -156,10 +156,9 @@ pub struct AirbrakesConfig {
     /// arrives on its own, from two places that are already load-bearing:
     /// inverting with the SUBSONIC Cd reads high while the true Cd is
     /// transonically elevated, and
-    /// [`MachLockoutConfig::earliest_subsonic_after_ignition_us`] plus the
-    /// 1 s sustain delay the decision further. Measured, birth lands well
-    /// under this threshold rather than at it — Osiris 0.749 nominal and
-    /// 0.752 with a 5x-wrong Cd, LC'25 0.732 — so the velocity check is
+    /// [`MachLockoutConfig::earliest_subsonic_after_ignition_us`] delays the
+    /// decision further. Measured, birth lands under this threshold rather
+    /// than at it — LC'25 0.772 — so the velocity check is
     /// slack on a healthy flight without needing a separate, higher number
     /// to make it so. It bit at Mach 0.887 on an LC'25 replay whose Cd
     /// overestimated drag by 2x, which is the case it exists for: the check
@@ -168,8 +167,8 @@ pub struct AirbrakesConfig {
     ///
     /// This was two constants until 2026-08-17 — a 0.8 exit and a 0.85
     /// ceiling with an invariant between them. The 0.85 was never derived
-    /// from anything; it was 0.8 plus margin that `t_min` and the sustain
-    /// already supply. If an airframe ever turns up whose flaps are
+    /// from anything; it was 0.8 plus margin that `t_min` and the subsonic
+    /// Cd already supply. If an airframe ever turns up whose flaps are
     /// qualified *below* the Mach at which its baro recovers, split it again
     /// then — and note that limit would sit under this one, the opposite way
     /// round from the invariant the split used to carry.
