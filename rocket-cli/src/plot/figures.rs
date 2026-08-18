@@ -546,22 +546,25 @@ impl<'a> Renderer<'a> {
         let (header, body) = root.split_vertically(HEADER_H);
         self.draw_header(&header, "Air brakes")?;
 
-        // Equal halves. The two panels are read against each other — where the
-        // speed trace bends is where the altitude trace flattens — and equal
-        // heights are what keep a slope on one comparable to a slope on the
-        // other.
-        let (p1, p2) = body.split_vertically((HEIGHT - HEADER_H) / 2);
+        // The top two are equal halves of what is left after the extension
+        // panel: they are read against each other — where the speed trace
+        // bends is where the altitude trace flattens — and equal heights are
+        // what keep a slope on one comparable to a slope on the other. The
+        // extension panel is shorter because its trace only ever spans 0-100%,
+        // and it is last because it carries the tick labels.
+        const EXTENSION_H: u32 = 490;
+        let (top, p3) = body.split_vertically(HEIGHT - HEADER_H - EXTENSION_H);
+        let (p1, p2) = top.split_vertically((HEIGHT - HEADER_H - EXTENSION_H) / 2);
 
         self.draw_panel(
             &p1,
             &Panel::new(
-                "Altitude, apogee prediction & brake extension",
+                "Altitude & apogee prediction",
                 "m AGL",
                 vec![
-                    // Four numbers in one reference, which is the point of the
+                    // Three numbers in one reference, which is the point of the
                     // panel: the altitude climbing, the apogee it is predicted
-                    // to reach from here, the apogee being aimed at, and — once
-                    // the flight is over — where it actually ended. A gap
+                    // to reach from here, and the apogee being aimed at. A gap
                     // between the prediction and the target is the controller
                     // saying it cannot get there; the two converging is it
                     // saying it can.
@@ -571,16 +574,7 @@ impl<'a> Renderer<'a> {
                         .dashed(),
                 ],
             )
-            .with_event_labels()
-            .with_secondary(Secondary::new(
-                "%",
-                vec![
-                    Line::new("brakes commanded", "air_brakes_commanded_extension", theme::GREEN)
-                        .scaled(100.0),
-                    Line::new("brakes actual", "air_brakes_actual_extension", theme::ROSE)
-                        .scaled(100.0),
-                ],
-            )),
+            .with_event_labels(),
             Y_GUTTER,
         )?;
         self.draw_panel(
@@ -612,11 +606,32 @@ impl<'a> Renderer<'a> {
             // worth a rule: velocity crossing it is apogee, acceleration
             // crossing it is the top of the drag-only coast.
             .with_zero()
-            .with_x_labels()
             .with_secondary(Secondary::new(
                 "°",
                 vec![Line::new("tilt", "airbrakes_kf_tilt_deg", theme::ROSE)],
             )),
+            Y_GUTTER,
+        )?;
+        self.draw_panel(
+            &p3,
+            &Panel::new(
+                // What the controller asked for against what the mechanism
+                // did. On its own axis rather than riding the altitude panel's
+                // right edge, because the lag between the two is a few tens of
+                // milliseconds and a few percent — differences that vanish when
+                // the trace is squeezed into a fraction of a shared panel.
+                "Air brake extension",
+                "%",
+                vec![
+                    Line::new("commanded", "air_brakes_commanded_extension", theme::GREEN)
+                        .scaled(100.0),
+                    Line::new("actual", "air_brakes_actual_extension", theme::ROSE).scaled(100.0),
+                ],
+            )
+            // Zero is stowed, and it is the value the trace sits at for most of
+            // the window, so the axis has to show it rather than start above it.
+            .with_zero()
+            .with_x_labels(),
             Y_GUTTER,
         )?;
 
