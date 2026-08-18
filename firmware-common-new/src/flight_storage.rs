@@ -58,6 +58,16 @@ pub const DEFAULT_TARGET_APOGEE_AGL: f32 = 4000.0;
 
 /// On-disk format version. Bump when the record or superblock layout changes;
 /// logs written at any other version are treated as absent.
+/// v19: the airbrakes commanded + actual extension and the validation-deploy
+///     flag move from the slow record back to the fast one, reversing v10.
+///     v10 was right about the rates and wrong about what was being measured:
+///     neither value moves faster than 100 Hz, but on a 10 Hz row each of
+///     their edges was quantised by ~100 ms and the pair could not be read as
+///     a step response. Icarus now reports every cycle of its 100 Hz control
+///     loop (it was measuring at 100 Hz and sending one in ten), so the log
+///     resolves command-to-servo latency. The fast record grows 16 B to 160 B
+///     and still packs three to a block; the slow record loses 24 B and now
+///     packs two, so the SD block rate goes slightly DOWN, not up.
 /// v18: the airbrakes estimator's state is logged outright, as a two-bit
 ///     `AirbrakesState` in the top of the airbrakes flags byte. The
 ///     `AIRBRAKES_ENABLED` bit it replaces was true in exactly one state and
@@ -118,7 +128,7 @@ pub const DEFAULT_TARGET_APOGEE_AGL: f32 = 4000.0;
 ///     `mpc_predicted_apogee_agl` added to the slow record, `VALID_BARO` dropped.
 /// v8: payload EPM rail currents + SEM actuator steps in the slow record.
 /// v7: tagged FAST/SLOW stream (see `flight_data_record`). Older formats: see git history.
-pub const STORAGE_VERSION: u32 = 18;
+pub const STORAGE_VERSION: u32 = 19;
 
 /// rkyv body sizes for tagged record types.
 pub const FAST_BODY_LEN: usize = size_of::<<FlightDataFastRecord as rkyv::Archive>::Archived>();
@@ -515,8 +525,9 @@ mod tests {
     use crate::can_bus::messages::vl_status::FlightStage;
     use crate::can_bus::messages::node_status::{NodeHealth, NodeMode};
     use crate::flight_data_record::{
-        AirBrakesRecord, AirbrakesEstimatorRecord, AmpRecord, DeploymentEstimatorRecord, ImuRecord,
-        NodeStatusRecord, ParsedLogRecord, PayloadRecord, merge_log_records,
+        AirBrakesActuationRecord, AirBrakesRecord, AirbrakesEstimatorRecord, AmpRecord,
+        DeploymentEstimatorRecord, ImuRecord, NodeStatusRecord, ParsedLogRecord, PayloadRecord,
+        merge_log_records,
     };
 
     /// Records straight out of a block whose CRC checked out.
@@ -548,6 +559,11 @@ mod tests {
             }),
             flight_stage: FlightStage::Ascent,
             pyro_flags: Some(0b0000_0101),
+            air_brakes: AirBrakesActuationRecord {
+                commanded_extension: Some(0.25),
+                actual_extension: Some(0.2),
+                validation_deploy: false,
+            },
         }
     }
 
@@ -564,10 +580,7 @@ mod tests {
             pdop: Some(3.3),
             launch_pad_altitude_asl: Some(200.0),
             air_brakes: AirBrakesRecord {
-                commanded_extension: Some(0.25),
                 predicted_apogee_asl: Some(3210.0),
-                validation_deploy: false,
-                actual_extension: Some(0.2),
                 servo_temp: Some(41.5),
                 target_apogee_asl: Some(3200.0),
             },
@@ -786,7 +799,11 @@ mod tests {
         assert_eq!(merged.len(), 1);
         assert!(merged[0].temperature.is_none());
         assert!(merged[0].num_of_fix_satellites.is_none());
-        assert!(merged[0].air_brakes.is_none());
+        assert!(merged[0].air_brakes_mpc.is_none());
+        // But the command and Icarus's report are fast-record fields, so they
+        // are on the row regardless of whether a snapshot has landed yet.
+        assert_eq!(merged[0].air_brakes.commanded_extension, Some(0.25));
+        assert_eq!(merged[0].air_brakes.actual_extension, Some(0.2));
         assert!(merged[0].payload.is_none());
         assert!(merged[0].amp.is_none());
         assert!(merged[0].slow_timestamp_us.is_none());
@@ -847,7 +864,7 @@ mod tests {
             assert!(row.amp.is_none());
             assert!(row.amp_node.is_none());
             assert!(row.payload.is_none());
-            assert!(row.air_brakes.is_none());
+            assert!(row.air_brakes_mpc.is_none());
             assert!(row.slow_timestamp_us.is_none());
         }
         // Fast-record columns are untouched by the reset.

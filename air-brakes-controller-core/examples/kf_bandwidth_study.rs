@@ -906,6 +906,10 @@ fn main() {
             mach_lockout: Some(MachLockoutConfig {
                 earliest_subsonic_after_ignition_us: 8_000_000,
                 force_birth_after_ignition_us: 20_000_000,
+                // The altitude LC'25 crosses Mach 0.8 at, as the estimator's
+                // own tests configure it — the drag check evaluates air
+                // density here rather than at the pad.
+                subsonic_crossing_altitude_asl: 3013.0,
             }),
             ..base
         },

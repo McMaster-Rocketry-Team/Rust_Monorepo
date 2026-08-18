@@ -331,8 +331,10 @@ fn write_csv(path: &str, records: &[FlightDataRecord]) -> Result<()> {
     // `slow_timestamp_us` is the clock of the snapshot the slow columns were
     // copied from. `timestamp_us - slow_timestamp_us` bounds how old the
     // snapshot is (≤ ~100 ms). It does NOT bound the age of the readings inside
-    // it: `air_brakes_actual_extension` and `air_brakes_servo_temp` arrive from
-    // Icarus at 10 Hz, so they can be a further ~100 ms older still.
+    // it: `air_brakes_servo_temp` is read off the servo at 10 Hz, so it can be
+    // a further ~100 ms older still. The extension columns are not on the slow
+    // snapshot at all — they come off the fast record, and `slow_timestamp_us`
+    // says nothing about them.
     w.write_record([
         "record_count",
         "source_block_crc_failed",
@@ -424,7 +426,11 @@ fn write_csv(path: &str, records: &[FlightDataRecord]) -> Result<()> {
         let imu = r.imu.as_ref();
         let deployment = r.deployment.as_ref();
         let airbrakes = r.airbrakes.as_ref();
-        let air_brakes = r.air_brakes.as_ref();
+        // Two groups, two rates: the command and Icarus's report come off the
+        // fast record and are on every row; the MPC's numbers and the servo
+        // temperature come off the slow snapshot and repeat across ~42 rows.
+        let air_brakes = &r.air_brakes;
+        let air_brakes_mpc = r.air_brakes_mpc.as_ref();
         let amp = r.amp.as_ref();
         let payload = r.payload.as_ref();
         let pyro = r.pyro_flags;
@@ -478,12 +484,12 @@ fn write_csv(path: &str, records: &[FlightDataRecord]) -> Result<()> {
             bit(pyro, PYRO_DROGUE_CONTINUITY),
             bit(pyro, PYRO_DROGUE_FIRE),
             bit(pyro, PYRO_SHORT_CIRCUIT),
-            cell(air_brakes.and_then(|a| a.commanded_extension)),
-            cell(air_brakes.and_then(|a| a.actual_extension)),
-            cell(air_brakes.and_then(|a| a.servo_temp)),
-            cell(air_brakes.map(|a| a.validation_deploy as u8)),
-            cell(air_brakes.and_then(|a| a.predicted_apogee_asl)),
-            cell(air_brakes.and_then(|a| a.target_apogee_asl)),
+            cell(air_brakes.commanded_extension),
+            cell(air_brakes.actual_extension),
+            cell(air_brakes_mpc.and_then(|a| a.servo_temp)),
+            cell(Some(air_brakes.validation_deploy as u8)),
+            cell(air_brakes_mpc.and_then(|a| a.predicted_apogee_asl)),
+            cell(air_brakes_mpc.and_then(|a| a.target_apogee_asl)),
         ];
         row.extend(node_cells(r.amp_node.as_ref()));
         row.extend(node_cells(r.icarus_node.as_ref()));
@@ -574,8 +580,8 @@ mod tests {
     use super::*;
     use firmware_common_new::can_bus::messages::vl_status::FlightStage;
     use firmware_common_new::flight_data_record::{
-        DeploymentEstimatorRecord, FlightDataFastRecord, LogRecord, ParsedLogRecord,
-        merge_log_records,
+        AirBrakesActuationRecord, DeploymentEstimatorRecord, FlightDataFastRecord, LogRecord,
+        ParsedLogRecord, merge_log_records,
     };
 
     /// A CSV whose rows are narrower or wider than its header silently
@@ -602,6 +608,14 @@ mod tests {
             airbrakes: None,
             flight_stage: FlightStage::Ascent,
             pyro_flags: None,
+            // Nothing commanded and nothing heard from Icarus, which is what
+            // the pad looks like — and must reach the spreadsheet as two empty
+            // cells, not as a pair of stowed zeroes.
+            air_brakes: AirBrakesActuationRecord {
+                commanded_extension: None,
+                actual_extension: None,
+                validation_deploy: false,
+            },
         };
         // No slow record ahead of it, so every slow column is absent too. The
         // second row is the same sample read out of a block that failed its

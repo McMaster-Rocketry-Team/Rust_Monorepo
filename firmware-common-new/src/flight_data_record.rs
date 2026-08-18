@@ -125,17 +125,66 @@ pub struct FlightDataFastRecord {
     /// the full fast rate so pyro fire edges are timestamped to ±2.3 ms.
     /// `None` until there is anything on the continuity watch to report.
     pub pyro_flags: Option<u8>,
+    /// Brake command and Icarus's reported extension, at the full fast rate
+    /// for the same reason as `pyro_flags`: the edges are the measurement.
+    ///
+    /// Not behind an `Option` like the other groups, because it is not one
+    /// source that comes and goes — the command and the report arrive from
+    /// different places at different times, and each carries its own absence.
+    pub air_brakes: AirBrakesActuationRecord,
 }
 
-/// Airbrakes actuation: what was commanded, why, and what Icarus did with it.
+/// Airbrakes actuation: what was commanded, why, and what Icarus reports back.
+///
+/// Fast-rate, and the only group here that is about *latency*. Neither number
+/// changes faster than 100 Hz — the control loop commands at 10 Hz, Icarus
+/// measures and reports at 100 Hz — so this is not stored at 427 Hz to resolve
+/// the values themselves. It is stored at 427 Hz to timestamp their EDGES to
+/// ±2.3 ms, which is what makes a commanded step and the actual extension that
+/// follows it a measurable step response instead of two columns quantised onto
+/// a shared 100 ms grid. On the slow record each edge cost ~100 ms of
+/// quantisation plus up to another 100 ms of snapshot staleness — the same
+/// order as the servo travel being measured.
+///
+/// Both are `None` until their source has spoken — the firmware for the
+/// command, Icarus for the report — so an offline Icarus reads as an empty
+/// cell, never as stowed brakes.
 #[derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive, Debug, Clone, PartialEq)]
-pub struct AirBrakesRecord {
+pub struct AirBrakesActuationRecord {
     /// Commanded extension, 0.0 = retracted, 1.0 = fully extended. `None`
     /// until the firmware has commanded anything (i.e. outside Armed and Demo).
     ///
-    /// Slow-rate because the control loop only produces one every 100 ms;
-    /// logging it per fast record stored the same value ~42 times over.
+    /// The control loop only produces one every 100 ms, so the value repeats
+    /// across ~42 rows; the row it first changes on is the point of logging it
+    /// here.
     pub commanded_extension: Option<f32>,
+    /// Reported extension from Icarus, 0.0 = retracted, 1.0 = fully extended.
+    /// `None` until Icarus reports — which is the interesting case, since an
+    /// Icarus that is offline or silent would otherwise be indistinguishable
+    /// from one reporting fully-stowed brakes.
+    ///
+    /// Icarus measures the servo angle every cycle of its 100 Hz control loop
+    /// and now reports every one of them, so the reading is at most one Icarus
+    /// cycle (~10 ms) plus one CAN hop older than this record's timestamp.
+    pub actual_extension: Option<f32>,
+    /// The commanded extension is the forced validation deploy, not the MPC's
+    /// output: the MPC never asked for full extension the whole way up, so the
+    /// firmware opened the brakes anyway once slow enough for it to be
+    /// harmless, to leave in-flight evidence they actuate. While this is set,
+    /// `commanded_extension` is 1.0 and [`AirBrakesRecord::predicted_apogee_asl`]
+    /// is `None` — read the commanded column there as a servo test, not as MPC
+    /// intent.
+    ///
+    /// Here rather than beside the prediction it also qualifies, because what
+    /// it qualifies first is the command: the two must not be able to disagree
+    /// about which row the validation deploy started on.
+    pub validation_deploy: bool,
+}
+
+/// The airbrakes numbers that genuinely only move at 10 Hz: what the MPC
+/// predicts and aims at, and how hot the servo is.
+#[derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive, Debug, Clone, PartialEq)]
+pub struct AirBrakesRecord {
     /// Apogee ASL (m) the MPC predicts at the extension it is commanding.
     /// `None` whenever the MPC is not running: before the brakes are
     /// permitted, again once the airbrakes estimator is retired and it stops,
@@ -147,31 +196,20 @@ pub struct AirBrakesRecord {
     /// same row, so the conversion is available offline in a way it was not
     /// when the log stored the difference and not the reference.
     pub predicted_apogee_asl: Option<f32>,
-    /// The commanded extension is the forced validation deploy, not the MPC's
-    /// output: the MPC never asked for full extension the whole way up, so the
-    /// firmware opened the brakes anyway once slow enough for it to be
-    /// harmless, to leave in-flight evidence they actuate. While this is set,
-    /// `commanded_extension` is 1.0 and `predicted_apogee_asl` is `None` —
-    /// read the commanded column there as a servo test, not as MPC intent.
-    pub validation_deploy: bool,
-    /// Reported extension from Icarus, 0.0 = retracted, 1.0 = fully extended.
-    /// `None` until Icarus reports — which is the interesting case, since an
-    /// Icarus that is offline or silent would otherwise be indistinguishable
-    /// from one reporting fully-stowed brakes.
-    ///
-    /// Slow-rate because Icarus reports at 10 Hz; the reading is up to 100 ms
-    /// older than this record's timestamp, so a commanded/actual pair on one
-    /// row is not a step response.
-    pub actual_extension: Option<f32>,
     /// Airbrakes servo temperature (C) reported by Icarus. `None` until Icarus
-    /// reports, for the same reason as `actual_extension`.
+    /// reports, for the same reason as
+    /// [`AirBrakesActuationRecord::actual_extension`].
+    ///
+    /// Slow-rate for the reason the extension beside it is not: Icarus reads
+    /// the servo's temperature once per ten control cycles and repeats it in
+    /// the reports between, so there is nothing here a 10 Hz row cannot hold.
     pub servo_temp: Option<f32>,
     /// Apogee ASL (m) the MPC is actually aiming at — the operator's AGL
     /// target plus the pad altitude, as the MPC latched the pair when it was
     /// constructed.
     ///
     /// Logged even though it is constant, because without it
-    /// `predicted_apogee_asl` and `commanded_extension` cannot be read: a
+    /// `predicted_apogee_asl` and the commanded extension cannot be read: a
     /// prediction well above target with the brakes barely open is a broken
     /// controller if the target was reachable and correct behaviour if it was
     /// not, and the log alone could not tell those apart. A bench flight on
@@ -188,7 +226,7 @@ pub struct AirBrakesRecord {
     /// the config block.
     ///
     /// `None` until the MPC is constructed, which is the same window
-    /// `predicted_apogee_asl` and a non-default `commanded_extension` are
+    /// `predicted_apogee_asl` and a non-default commanded extension are
     /// absent for — before it there is no target, only a setting.
     pub target_apogee_asl: Option<f32>,
 }
@@ -339,10 +377,11 @@ pub struct FlightDataRecord {
     /// `timestamp_us - slow_timestamp_us` bounds how stale the VL-side snapshot
     /// is (at most one slow period, ~100 ms). That bound is about the SNAPSHOT
     /// ONLY. It says nothing about how old the readings inside it are:
-    /// [`AirBrakesRecord::actual_extension`] and
-    /// [`AirBrakesRecord::servo_temp`] come off Icarus at 10 Hz, so they can be
+    /// [`AirBrakesRecord::servo_temp`] comes off Icarus at 10 Hz, so it can be
     /// a further ~100 ms older than this timestamp, and that latency is
-    /// upstream of the snapshot where nothing here can see it.
+    /// upstream of the snapshot where nothing here can see it. The extension
+    /// pair used to be the example here; it is on the fast record now, which
+    /// is why it no longer is.
     pub slow_timestamp_us: Option<u64>,
     /// GPS-disciplined unix clock (µs since epoch), `None` until the clock is
     /// ready.
@@ -381,9 +420,14 @@ pub struct FlightDataRecord {
     /// Full rate, from the fast record.
     pub pyro_flags: Option<u8>,
 
-    /// Airbrakes actuation from the slow snapshot (the control loop runs at
-    /// 10 Hz, so there is nothing faster to log).
-    pub air_brakes: Option<AirBrakesRecord>,
+    /// Brake command and Icarus's report, from the fast record — so a
+    /// commanded step and the extension that follows it are on rows 2.3 ms
+    /// apart, not on the same 100 ms grid point.
+    pub air_brakes: AirBrakesActuationRecord,
+
+    /// The MPC's prediction and target, and the servo temperature, from the
+    /// slow snapshot.
+    pub air_brakes_mpc: Option<AirBrakesRecord>,
 
     /// CAN node heartbeats from the slow record.
     pub amp_node: Option<NodeStatusRecord>,
@@ -431,7 +475,8 @@ impl FlightDataRecord {
             launch_pad_altitude_asl: slow.and_then(|s| s.launch_pad_altitude_asl),
             flight_stage: fast.flight_stage,
             pyro_flags: fast.pyro_flags,
-            air_brakes: slow.map(|s| s.air_brakes.clone()),
+            air_brakes: fast.air_brakes.clone(),
+            air_brakes_mpc: slow.map(|s| s.air_brakes.clone()),
             amp_node: slow.and_then(|s| s.amp_node.clone()),
             icarus_node: slow.and_then(|s| s.icarus_node.clone()),
             ozys_node: slow.and_then(|s| s.ozys_node.clone()),

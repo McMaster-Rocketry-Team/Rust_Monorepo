@@ -3,6 +3,13 @@ use serde::{Deserialize, Serialize};
 
 use super::{CanBusMessage, CanBusMessageEnum};
 
+/// Icarus's report of what the air brake servo is actually doing.
+///
+/// Sent every cycle of Icarus's 100 Hz servo control loop, which is also how
+/// often the angle behind `actual_extension_percentage` is measured. The rate
+/// is set by the extension alone: VLF5 logs it on the fast record so that a
+/// commanded step and the servo's response to it land on rows ~2.3 ms apart,
+/// and one report in ten quantised every movement to 100 ms.
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PackedStruct, Clone, Debug, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize)]
 #[packed_struct(bit_numbering = "msb0", endian = "msb", size_bytes = "4")]
@@ -11,6 +18,11 @@ pub struct IcarusStatusMessage {
     /// Unit: 0.1%, e.g. 10 = 1%
     actual_extension_percentage: u16,
     /// Unit: 0.1C, e.g. 10 = 1C, -155 = -15.5C
+    ///
+    /// Unlike the extension beside it, this is NOT fresh in every message:
+    /// Icarus reads the servo's temperature once per ten control cycles and
+    /// repeats the last reading in between. It is a second UART round trip
+    /// inside a 10 ms budget, and it moves on a thermal timescale.
     ///
     /// Signed, for the same reason as `BaroMeasurementMessage`: float-to-int
     /// `as` saturates, so an unsigned raw field reported every sub-zero servo
