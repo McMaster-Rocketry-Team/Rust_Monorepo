@@ -16,7 +16,7 @@ use firmware_common_new::flight_data_record::{
     PYRO_MAIN_CONTINUITY,
     PYRO_MAIN_FIRE, PYRO_SHORT_CIRCUIT, AIRBRAKES_PAD_CALIBRATED,
     AirbrakesState,
-    AIRBRAKES_BURNOUT, AIRBRAKES_SUBSONIC_DRAG,
+    AIRBRAKES_BURNOUT,
     DEPLOYMENT_BARO_RESYNC, DEPLOYMENT_BARO_GATE_REJECT,
     merge_log_records,
 };
@@ -358,7 +358,6 @@ fn write_csv(path: &str, records: &[FlightDataRecord]) -> Result<()> {
         "airbrakes_kf_vertical_velocity",
         "airbrakes_kf_tilt_deg",
         "airbrakes_pad_calibrated",
-        "airbrakes_subsonic_drag",
         "airbrakes_burnout",
         "airbrakes_state",
         "temperature",
@@ -456,7 +455,6 @@ fn write_csv(path: &str, records: &[FlightDataRecord]) -> Result<()> {
             cell(airbrakes.and_then(|a| a.kf_vertical_velocity)),
             cell(airbrakes.and_then(|a| a.kf_tilt_deg)),
             bit(airbrakes.map(|a| a.flags), AIRBRAKES_PAD_CALIBRATED),
-            bit(airbrakes.map(|a| a.flags), AIRBRAKES_SUBSONIC_DRAG),
             bit(airbrakes.map(|a| a.flags), AIRBRAKES_BURNOUT),
             // The name, like `flight_stage`, rather than the discriminant:
             // a CSV is read by people first.

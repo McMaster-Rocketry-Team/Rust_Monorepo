@@ -211,7 +211,6 @@ impl FlightEstimators {
                 altitude_asl: ab.altitude_asl(),
                 vertical_velocity: ab.velocity().map(|v| v.y),
                 tilt_rad: ab.tilt(),
-                subsonic_by_drag: ab.subsonic_by_drag(),
                 burnout_detected: ab.burnout_detected(),
                 state: ab.state(),
                 calibration_complete: ab.calibration_complete(),
@@ -335,7 +334,6 @@ pub struct AirbrakesLogSample {
     pub altitude_asl: Option<f32>,
     pub vertical_velocity: Option<f32>,
     pub tilt_rad: Option<f32>,
-    pub subsonic_by_drag: Option<bool>,
     pub burnout_detected: bool,
     /// Which of the four states produced this sample.
     ///

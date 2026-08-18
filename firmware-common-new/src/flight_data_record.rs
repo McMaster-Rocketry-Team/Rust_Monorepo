@@ -79,7 +79,7 @@ pub struct AirbrakesEstimatorRecord {
     /// Tilt from vertical (deg). `None` before ignition.
     pub kf_tilt_deg: Option<f32>,
     /// Status bits (`AIRBRAKES_*` consts): the two-bit [`AirbrakesState`],
-    /// the drag check, the burnout latch and the pad calibration.
+    /// the burnout latch and the pad calibration.
     pub flags: u8,
 }
 
@@ -553,36 +553,23 @@ pub const DEPLOYMENT_BARO_RESYNC: u8 = 1 << 1;
 
 /// `AirbrakesEstimatorRecord::flags` bits — the airbrakes estimator's status.
 ///
-/// Three flags and a two-bit state, packed from the bottom with bits 5-7
-/// free. There is no reserved hole: bit 3 was one for a while, held by
-/// `AIRBRAKES_BARO_TRUSTED` and then briefly `AIRBRAKES_ENABLED`, and bits 2
-/// and 4 were the baro innovation gate's pair. Nothing decodes an older
-/// layout — a card at any other `STORAGE_VERSION` is rejected outright — so a
-/// hole in this byte protects nobody and only makes the next reader wonder
-/// what used to be in it.
+/// Two flags and a two-bit state, packed from the bottom with bits 4-7 free.
+/// There is no reserved hole and no bit kept for old readers: a card at any
+/// other `STORAGE_VERSION` is rejected outright, so a hole would protect
+/// nobody and only make the next reader wonder what used to be in it. Three
+/// bits have been reclaimed this way — `AIRBRAKES_BARO_TRUSTED` (later
+/// `AIRBRAKES_ENABLED`), the baro innovation gate's reject/resync pair, and
+/// the drag check's own bit.
 ///
-/// The mach-lockout drag check voted subsonic on this sample — the
-/// drag-inverted airspeed was below `max_open_mach` — and the filter was
-/// NOT born on it.
-///
-/// Normally 0 for an entire flight, which is the point. The check used to
-/// need a continuous second before it could conclude, so this bit marked
-/// that second and every flight had a run of it; since it concludes on the
-/// sample it votes on, the vote and the birth are the same row and the birth
-/// is already visible as the state going to `AirbrakesEnabled`. What is left
-/// is the disagreement case: the check said go and something at the birth
-/// site refused — the inertial Mach test on the dead reckoner's own
-/// velocity, or a baro ring too empty to take a median from. A run of these
-/// is the drag model reading the airframe faster than the accelerometers do,
-/// which is the one thing about the lockout exit that nothing else in the
-/// log would show.
-pub const AIRBRAKES_SUBSONIC_DRAG: u8 = 1 << 0;
+/// The drag check has no bit because it can no longer say anything a row
+/// does not already say. It concludes on the sample it votes on and nothing
+/// defers it any more, so the vote and the birth are one row — and the birth
+/// is already logged, as the state going to `AirbrakesEnabled`.
 /// The axial-sign burnout latch has fired: the motor is out and the drag
-/// channel is honest. Nothing can birth the vertical filter before this, on
-/// either the supersonic or the subsonic path, so it separates "the brakes
-/// never opened because the motor never looked out" from "because the drag
-/// check never passed".
-pub const AIRBRAKES_BURNOUT: u8 = 1 << 1;
+/// channel is honest. Nothing can birth the vertical filter before this, so
+/// it separates "the brakes never opened because the motor never looked out"
+/// from "because the drag check never passed".
+pub const AIRBRAKES_BURNOUT: u8 = 1 << 0;
 /// The pad calibration completed: gyro bias, pad orientation and pad altitude
 /// exist, and the estimator is willing to detect ignition.
 ///
@@ -593,12 +580,12 @@ pub const AIRBRAKES_BURNOUT: u8 = 1 << 1;
 /// no-deployment. Expect it set within ~6 s of the estimator starting and to
 /// stay set; it is re-derived every 2 s and CAN drop if the airframe is
 /// picked up or turned.
-pub const AIRBRAKES_PAD_CALIBRATED: u8 = 1 << 2;
+pub const AIRBRAKES_PAD_CALIBRATED: u8 = 1 << 1;
 
 /// The two bits of `AirbrakesEstimatorRecord::flags` holding
 /// [`AirbrakesState`].
-pub const AIRBRAKES_STATE_SHIFT: u32 = 3;
-pub const AIRBRAKES_STATE_MASK: u8 = 0b0001_1000;
+pub const AIRBRAKES_STATE_SHIFT: u32 = 2;
+pub const AIRBRAKES_STATE_MASK: u8 = 0b0000_1100;
 
 /// Which state of the airbrakes estimator produced this sample.
 ///
@@ -628,8 +615,8 @@ pub enum AirbrakesState {
     Stage1 = 1,
     /// Boost and the Mach lockout: inertial dead reckoning, tilt available,
     /// the barometer buffered but never fused. The burnout latch and the drag
-    /// check both live here, which is why `AIRBRAKES_BURNOUT` and
-    /// `AIRBRAKES_SUBSONIC_DRAG` only ever say anything in this state.
+    /// check both live here, which is why `AIRBRAKES_BURNOUT` only ever
+    /// changes in this state.
     DeadReckoning = 2,
     /// The brakes may open, and will be allowed to for the rest of the
     /// flight: motor out, drag check (or the T_max backstop) passed, vertical

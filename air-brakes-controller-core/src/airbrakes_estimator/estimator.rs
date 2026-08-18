@@ -815,44 +815,30 @@ impl AirbrakesEstimator {
                     None => return,
                 };
 
-                // The second Mach test, and the last one: the dead
-                // reckoner's own velocity against `max_open_mach` of the
-                // local speed of sound. Cd-independent, unlike the drag
-                // check that got us here, which is the point — a drag model
-                // that overestimates drag reads the inverted airspeed low
-                // and passes the check early (measured at Mach 0.887 on an
-                // LC'25 replay with a 2x Cd error), and the dead reckoner
-                // does not share that error.
+                // No second opinion on the speed. The drag check that got
+                // us here is the whole decision, and `max_open_mach` is
+                // read as an approximation with about +-0.05 Mach of
+                // tolerance either side rather than as a hard edge.
                 //
-                // It lives here, on the way INTO the state, rather than
-                // downstream on every sample. Downstream it could withdraw a
-                // permission it had already granted, and did: the vertical
-                // filter's own birth transient threw its velocity over the
-                // limit for 170 ms and shut the brakes again after they had
-                // opened. Asked once, of the number the filter is about to
-                // be born with, it answers the question it exists for —
-                // "is the airframe subsonic enough to open" — and cannot
-                // answer it again from a filter that is briefly wrong.
+                // What stood here until 2026-08-18 was the dead reckoner's
+                // own vertical velocity against the same ceiling — a second
+                // estimate that shared no input with the drag model, so a
+                // Cd*A/m too large (which reads the inverted airspeed low
+                // and votes early) could not fool both. It cost what a
+                // second opinion costs: the numbers it vetoed on were its
+                // own, and it is the estimate that degrades. It reads 24 m/s
+                // low on the clipped-accelerometer replay — the unsafe
+                // direction — and holds only ~8 m/s of margin on a clean
+                // flight, because it is raw integration since ignition with
+                // nothing correcting it.
                 //
-                // The state simply stays here if the test fails: the drag
-                // check has already latched, so the next sample retries with
-                // a slower rocket. A T_max forced birth waits the same way,
-                // which is the intended reading of the backstop — it exists
-                // to stop waiting for a broken drag model, not to open the
-                // brakes at any speed.
-                //
-                // Since the drag check lost its 1 s sustain this is the only
-                // thing standing between an optimistic Cd and a supersonic
-                // birth, and it is the right thing for the job precisely
-                // because it shares nothing with the check: the check
-                // inverts a drag model, this integrates an accelerometer.
-                // Measured on the LC'25 replay with the drag model 30% too
-                // large, it holds the birth for 1.4 s past the check's vote,
-                // at 269.3 m/s against a 262.9 m/s limit.
-                if vv0 > self.config.max_open_mach * approximate_speed_of_sound(alt0_asl) {
-                    return;
-                }
-
+                // Measured cost of dropping it, against the log's own
+                // barometer on the LC'25 replay: at the flown ceiling of
+                // 0.8 the birth does not move at all (Mach 0.772 either
+                // way). Lower ceilings land a hair over instead of a hair
+                // under — 0.610 at a 0.6 ceiling, 0.701 at 0.7 — and a
+                // drag model 30% too large births at 0.857 instead of
+                // 0.787, which is the outer edge of the tolerance above.
                 let kf = VerticalKF::born(
                     alt0_asl,
                     vv0,

@@ -77,6 +77,11 @@ pub const DEFAULT_TARGET_APOGEE_AGL: f32 = 4000.0;
 ///     empty since v18, and a hole only earns its keep if something might
 ///     still decode the old numbering, which nothing can. The deployment
 ///     estimator keeps its gate and both of its bits; it flies through both.
+///     `AIRBRAKES_SUBSONIC_DRAG` goes the same way, in the same version, for
+///     the same reason a hole does: the drag check now concludes on the
+///     sample it votes on, so the vote and the birth are one row and the
+///     birth is already logged as the state going to `AirbrakesEnabled`.
+///     What is left is two flags and the state, packed from bit 0.
 /// v18: the airbrakes estimator's state is logged outright, as a two-bit
 ///     `AirbrakesState` in the top of the airbrakes flags byte. The
 ///     `AIRBRAKES_ENABLED` bit it replaces was true in exactly one state and

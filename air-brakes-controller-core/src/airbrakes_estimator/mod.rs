@@ -160,10 +160,17 @@ pub struct AirbrakesConfig {
     /// decision further. Measured, birth lands under this threshold rather
     /// than at it — LC'25 0.772 — so the velocity check is
     /// slack on a healthy flight without needing a separate, higher number
-    /// to make it so. It bit at Mach 0.887 on an LC'25 replay whose Cd
-    /// overestimated drag by 2x, which is the case it exists for: the check
-    /// reads low, births early, and the dead reckoner (which does not depend
-    /// on Cd) is what disagrees.
+    /// to make it so.
+    ///
+    /// Read as an approximation with about +-0.05 Mach either side, not as a
+    /// hard edge — it is an estimate of where the flaps stop being qualified,
+    /// and the drag check that enforces it inverts a Cd that is itself a
+    /// model. A second, Cd-independent opinion (the dead reckoner's own
+    /// velocity, tested once at the birth site) enforced it more tightly
+    /// until 2026-08-18; what it cost is in `estimator.rs` at the birth
+    /// site, and what its removal costs is +0.01 Mach at a 0.6 ceiling,
+    /// nothing at the flown 0.8, and 0.857 rather than 0.787 if `Cd*A/m` is
+    /// a third too large.
     ///
     /// This was two constants until 2026-08-17 — a 0.8 exit and a 0.85
     /// ceiling with an invariant between them. The 0.85 was never derived
