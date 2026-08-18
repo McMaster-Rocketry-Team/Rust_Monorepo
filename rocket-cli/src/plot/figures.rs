@@ -1,10 +1,19 @@
-//! Rendering the two 3840×2160 figures.
+//! Rendering the three 3840×2160 figures.
 //!
-//! Both share one time axis. T+0 is liftoff and the axis runs to landing, with
-//! a few seconds of pad in front of it so the ignition transient has something
-//! to be read against — an axis that begins exactly at liftoff shows the step
-//! but not what it stepped from. A point read off one figure is at the same x
-//! on the other.
+//! All three share one time ORIGIN: T+0 is liftoff, and a few seconds of pad
+//! sit in front of it so the ignition transient has something to be read
+//! against — an axis that begins exactly at liftoff shows the step but not what
+//! it stepped from.
+//!
+//! They do not share a time RANGE. The air-brakes figure ends at apogee,
+//! because the estimator behind every trace on it is retired there; the other
+//! two run to landing. A point read off one figure is at the same T+ as on the
+//! others, but the figures are not the same width in seconds, so they are read
+//! by their labels rather than by laying them side by side.
+//!
+//! Altitudes are drawn AGL, converted from the ASL the log stores against the
+//! pad reference it carries — AGL is the unit every threshold in the firmware
+//! is configured in, so it is the unit these figures can be checked in.
 //!
 //! Within a figure the axis is shared in the stronger sense too: only the
 //! bottom panel of a column carries tick labels. Repeating an identical row of
@@ -168,6 +177,18 @@ struct AxisRange {
     clipped: Option<(f32, f32)>,
 }
 
+/// The rows one figure draws, as a half-open range into the log.
+///
+/// A figure-level rather than a session-level property, because the three
+/// figures deliberately do not cover the same stretch of flight: the airbrakes
+/// story is over at apogee and drawing the descent beside it would spend half
+/// the width on a window where every trace on the figure is absent.
+#[derive(Debug, Clone, Copy)]
+pub struct Window {
+    pub start: usize,
+    pub end: usize,
+}
+
 pub struct Renderer<'a> {
     log: &'a FlightLog,
     session: &'a Session,
@@ -175,13 +196,32 @@ pub struct Renderer<'a> {
     times: Vec<f64>,
     /// Columns computed rather than logged.
     derived: HashMap<&'static str, Vec<f32>>,
+    /// `(start, end)` rows this figure draws. Everything that reduces a column
+    /// or sizes an axis reads it, so a figure cannot accidentally draw outside
+    /// the window it advertised.
+    window: (usize, usize),
+    /// The apogee the flight actually reached, above the pad. `None` when no
+    /// estimator reported one, or when the log carries no pad reference to
+    /// measure it from.
+    apogee_agl: Option<f32>,
     x_range: (f64, f64),
     events: Vec<Event>,
     source_name: String,
 }
 
 impl<'a> Renderer<'a> {
-    pub fn new(log: &'a FlightLog, session: &'a Session, source_name: String) -> Self {
+    /// One renderer per figure — `window` is what distinguishes them.
+    ///
+    /// The derived columns below are recomputed per figure rather than shared.
+    /// They are two linear passes over the log and cost microseconds, and
+    /// paying them three times is cheaper than the plumbing that would let
+    /// three windows share one buffer.
+    pub fn new(
+        log: &'a FlightLog,
+        session: &'a Session,
+        source_name: String,
+        window: Window,
+    ) -> Self {
         let t0 = log.timestamp_us[session.flight_start];
         let times: Vec<f64> = log.timestamp_us.iter().map(|t| (t - t0) / 1e6).collect();
 
@@ -193,7 +233,7 @@ impl<'a> Renderer<'a> {
             log.column("acc_y"),
             log.column("acc_z"),
         ) {
-            let magnitude = (0..log.row_count)
+            let magnitude: Vec<f32> = (0..log.row_count)
                 .map(|i| (x[i] * x[i] + y[i] * y[i] + z[i] * z[i]).sqrt())
                 .collect();
             derived.insert("acc_magnitude", magnitude);
@@ -231,11 +271,83 @@ impl<'a> Renderer<'a> {
             derived.insert("vertical_acc_earth", vertical);
         }
 
+        // Every altitude on the card is ASL, which is the unit the barometer
+        // and the GPS measure in and the only one that needs no reference to
+        // interpret. Every altitude a reader of these figures cares about is
+        // AGL — it is what the deployment thresholds, the apogee target and
+        // the flight itself were specified in — so the conversion happens
+        // here, once, against the pad reference the log now carries.
+        //
+        // Row-wise rather than against a single scalar: on the pad the
+        // reference is a settling low pass, and subtracting it row by row is
+        // what puts the pre-launch trace at 0 instead of at whatever the low
+        // pass had reached. Rows before the first slow record have no
+        // reference of their own and fall back to the first one the session
+        // ever recorded, so the conversion leaves no gap that the source
+        // column did not already have.
+        let pad_asl = log.column("launch_pad_altitude_asl");
+        let pad_fallback = pad_asl
+            .and_then(|pad| pad[session.start..session.end].iter().find(|v| v.is_finite()).copied());
+        if let Some(pad) = pad_asl {
+            for (asl_name, agl_name) in [
+                ("deployment_kf_altitude_asl", "deployment_kf_altitude_agl"),
+                ("airbrakes_kf_altitude_asl", "airbrakes_kf_altitude_agl"),
+                ("gps_altitude_asl", "gps_altitude_agl"),
+                ("mpc_predicted_apogee_asl", "mpc_predicted_apogee_agl"),
+                ("air_brakes_target_apogee_asl", "air_brakes_target_apogee_agl"),
+            ] {
+                let Some(asl) = log.column(asl_name) else {
+                    continue;
+                };
+                let agl = (0..log.row_count)
+                    .map(|i| {
+                        let reference = if pad[i].is_finite() {
+                            Some(pad[i])
+                        } else {
+                            pad_fallback
+                        };
+                        match reference {
+                            Some(r) if asl[i].is_finite() => asl[i] - r,
+                            _ => f32::NAN,
+                        }
+                    })
+                    .collect();
+                derived.insert(agl_name, agl);
+            }
+        }
+
+        // The apogee the flight actually reached, above the pad — the number
+        // the whole airbrakes controller was trying to place, and the one the
+        // header quotes.
+        let apogee_agl = match (session.apogee_asl, session.apogee_row) {
+            (Some(asl), Some(row)) => {
+                let reference = pad_asl
+                    .map(|pad| pad[row])
+                    .filter(|v| v.is_finite())
+                    .or(pad_fallback);
+                reference.map(|r| asl - r)
+            }
+            _ => None,
+        };
+
+        // How far the MPC's prediction was from where the flight actually
+        // ended, at every moment it could still have done something about it.
+        // Zero is what the controller was solving for, so this trace walking
+        // into the zero line is the flight going right — and unlike the
+        // prediction itself, it can only be drawn after the fact, which is why
+        // it lives here and not on the downlink.
+        if let (Some(predicted), Some(actual)) =
+            (derived.get("mpc_predicted_apogee_agl"), apogee_agl)
+        {
+            let error: Vec<f32> = predicted.iter().map(|p| p - actual).collect();
+            derived.insert("mpc_prediction_error", error);
+        }
+
         // T+0 stays liftoff; the axis simply starts at a negative number when
         // there is a lead-in.
         let x_range = (
-            times[session.plot_start],
-            times[session.flight_end - 1].max(times[session.plot_start] + 0.001),
+            times[window.start],
+            times[window.end - 1].max(times[window.start] + 0.001),
         );
 
         // Half a percent of the flight. Two events closer together than that
@@ -248,8 +360,8 @@ impl<'a> Renderer<'a> {
             log.column("pyro_drogue_fire"),
             log.column("pyro_main_fire"),
             session.apogee_row,
-            session.plot_start,
-            session.flight_end,
+            window.start,
+            window.end,
             merge_within,
         );
 
@@ -258,6 +370,8 @@ impl<'a> Renderer<'a> {
             session,
             times,
             derived,
+            window: (window.start, window.end),
+            apogee_agl,
             x_range,
             events,
             source_name,
@@ -281,8 +395,8 @@ impl<'a> Renderer<'a> {
         let mut trace = decimate(
             &self.times,
             values,
-            self.session.plot_start,
-            self.session.flight_end,
+            self.window.0,
+            self.window.1,
             buckets,
         )?;
         if line.scale != 1.0 {
@@ -299,40 +413,97 @@ impl<'a> Renderer<'a> {
 
     // ---------------------------------------------------------------- figures
 
-    /// The flight itself: where it went, how fast, and what the recovery and
-    /// air-brake hardware did about it.
+    /// The air brakes, from the pad to apogee.
     ///
-    /// Three panels, each pairing quantities that are read against each other.
-    /// Two of them carry a second y axis, because the pairings that matter here
-    /// are not in the same unit — altitude against vertical acceleration, and
-    /// vertical speed against tilt and brake extension. Splitting those into
-    /// one panel per unit is what a single axis would force, and it puts the
-    /// comparison the reader came for on two separate charts.
-    pub fn render_flight(&self, path: &Path) -> Result<()> {
+    /// The window ends at apogee because the controller does: the airbrakes
+    /// estimator is retired on the sample its vertical velocity reaches zero,
+    /// so every trace on this figure goes absent there at once. Carrying the
+    /// axis to landing would spend more than half the width drawing the gap
+    /// after them.
+    ///
+    /// Four panels, read top to bottom as one argument: where the rocket was
+    /// going and what the controller did about it, how fast and how far off
+    /// vertical, how the prediction converged on the target, and the estimator's
+    /// own account of why it was allowed to act at all.
+    pub fn render_airbrakes(&self, path: &Path) -> Result<()> {
         let root = BitMapBackend::new(path, (WIDTH, HEIGHT)).into_drawing_area();
         root.fill(&theme::BG).plot()?;
         let (header, body) = root.split_vertically(HEADER_H);
-        self.draw_header(&header, "Flight")?;
+        self.draw_header(&header, "Air brakes")?;
 
-        let (p1, rest) = body.split_vertically(760);
-        let (p2, p3) = rest.split_vertically(700);
+        // The flag strip gets a full-size share rather than the remainder:
+        // seven lanes at a readable label size need about as much height as a
+        // trace panel, and squeezing them was what made the labels collide.
+        let (p1, rest) = body.split_vertically(700);
+        let (p2, rest) = rest.split_vertically(450);
+        let (p3, p4) = rest.split_vertically(450);
 
         self.draw_panel(
             &p1,
             &Panel::new(
-                "Altitude & vertical acceleration",
-                "m",
+                "Altitude, apogee prediction & brake extension",
+                "m AGL",
                 vec![
-                    // Both are metres ASL, so they share the axis honestly —
-                    // the predicted apogee reads directly against the altitude
-                    // climbing toward it. The log stores every altitude in that
-                    // one reference and carries `launch_pad_altitude_asl` for
-                    // anyone who wants AGL back.
-                    Line::new("airbrakes KF altitude", "airbrakes_kf_altitude_asl", theme::CYAN),
-                    Line::new("predicted apogee", "mpc_predicted_apogee_asl", theme::AMBER),
+                    // Four numbers in one reference, which is the point of the
+                    // panel: the altitude climbing, the apogee it is predicted
+                    // to reach from here, the apogee being aimed at, and — once
+                    // the flight is over — where it actually ended. A gap
+                    // between the prediction and the target is the controller
+                    // saying it cannot get there; the two converging is it
+                    // saying it can.
+                    Line::new("airbrakes KF altitude", "airbrakes_kf_altitude_agl", theme::CYAN),
+                    Line::new("MPC predicted apogee", "mpc_predicted_apogee_agl", theme::AMBER),
+                    Line::new("target apogee", "air_brakes_target_apogee_agl", theme::VIOLET),
                 ],
             )
             .with_event_labels()
+            .with_secondary(Secondary::new(
+                "%",
+                vec![
+                    Line::new("brakes commanded", "air_brakes_commanded_extension", theme::GREEN)
+                        .scaled(100.0),
+                    Line::new("brakes actual", "air_brakes_actual_extension", theme::ROSE)
+                        .scaled(100.0),
+                ],
+            )),
+            Y_GUTTER,
+        )?;
+        self.draw_panel(
+            &p2,
+            &Panel::new(
+                "Vertical speed & tilt",
+                "m/s",
+                vec![Line::new(
+                    "airbrakes KF",
+                    "airbrakes_kf_vertical_velocity",
+                    theme::CYAN,
+                )],
+            )
+            .with_zero()
+            .with_secondary(Secondary::new(
+                "°",
+                vec![Line::new("tilt", "airbrakes_kf_tilt_deg", theme::ROSE)],
+            )),
+            Y_GUTTER,
+        )?;
+        self.draw_panel(
+            &p3,
+            &Panel::new(
+                "Prediction error vs the apogee actually reached",
+                "m",
+                vec![
+                    // The whole controller in one trace: how far the prediction
+                    // was from the truth, at every moment it was still possible
+                    // to do something about it. Zero is what the MPC was trying
+                    // to achieve, so the zero line is the target and the trace
+                    // walking into it is the flight going right.
+                    //
+                    // Only computable after the fact, which is why it is here
+                    // and not on the downlink.
+                    Line::new("predicted - actual", "mpc_prediction_error", theme::AMBER),
+                ],
+            )
+            .with_zero()
             .with_secondary(
                 Secondary::new(
                     "m/s²",
@@ -346,39 +517,19 @@ impl<'a> Renderer<'a> {
             ),
             Y_GUTTER,
         )?;
-        self.draw_panel(
-            &p2,
-            &Panel::new(
-                "Vertical speed, tilt & air brakes",
-                "m/s",
-                vec![
-                    Line::new("deployment KF", "deployment_kf_vertical_velocity", theme::CYAN),
-                    Line::new("airbrakes KF", "airbrakes_kf_vertical_velocity", theme::VIOLET),
-                ],
-            )
-            .with_zero()
-            .with_secondary(Secondary::new(
-                "° / %",
-                vec![
-                    Line::new("tilt", "airbrakes_kf_tilt_deg", theme::ROSE),
-                    Line::new("brakes commanded", "air_brakes_commanded_extension", theme::AMBER)
-                        .scaled(100.0),
-                    Line::new("brakes actual", "air_brakes_actual_extension", theme::GREEN)
-                        .scaled(100.0),
-                ],
-            )),
-            Y_GUTTER,
-        )?;
         self.draw_lanes(
-            &p3,
-            "Pyro & deployment",
+            &p4,
+            "Airbrakes estimator flags",
             &[
-                ("drogue cont.", "pyro_drogue_continuity", theme::CYAN),
-                ("drogue fire", "pyro_drogue_fire", theme::AMBER),
-                ("main cont.", "pyro_main_continuity", theme::CYAN),
-                ("main fire", "pyro_main_fire", theme::AMBER),
-                ("short circuit", "pyro_short_circuit", theme::ALERT),
-                ("valid. deploy", "air_brakes_validation_deploy", theme::VIOLET),
+                // In the order the estimator passes through them, so the strip
+                // reads as the sequence of permissions the brakes needed.
+                ("pad calib.", "airbrakes_pad_calibrated", theme::GREEN),
+                ("burnout", "airbrakes_burnout", theme::AMBER),
+                ("subsonic drag", "airbrakes_subsonic_drag", theme::VIOLET),
+                ("baro trusted", "airbrakes_baro_trusted", theme::CYAN),
+                ("valid. deploy", "air_brakes_validation_deploy", theme::ROSE),
+                ("gate reject", "airbrakes_baro_gate_reject", theme::ALERT),
+                ("baro resync", "airbrakes_baro_resync", theme::ROSE),
             ],
             true,
             Y_GUTTER,
@@ -388,25 +539,98 @@ impl<'a> Renderer<'a> {
         Ok(())
     }
 
-    /// Everything else that was logged.
+    /// The deployment estimator and the pyros, pad to landing.
     ///
-    /// This figure is where the raw and whole-flight signals live: the body
-    /// accelerometer, the deployment estimator that keeps reporting all the way
-    /// down, attitude, environment, power, GPS quality, the payload rails and
-    /// the estimator's own flags. Several of these used to sit on the flight
-    /// figure; they moved here rather than being dropped when that figure was
-    /// cut to three panels, because a column that is logged and plotted nowhere
-    /// is a column nobody will remember to look at.
+    /// This is the half of the avionics that runs the whole flight and fires
+    /// the charges, so its window is the whole flight — the descent is not
+    /// padding here, it is where two of the three panels do their work.
+    ///
+    /// Altitude is AGL because every threshold this estimator acts on is: the
+    /// drogue's minimum altitude and the main's deployment altitude are both
+    /// configured above ground, and a figure that made the reader subtract a
+    /// pad altitude before checking them against the pyro lanes would be
+    /// hiding the one comparison it exists to support.
+    pub fn render_deployment(&self, path: &Path) -> Result<()> {
+        let root = BitMapBackend::new(path, (WIDTH, HEIGHT)).into_drawing_area();
+        root.fill(&theme::BG).plot()?;
+        let (header, body) = root.split_vertically(HEADER_H);
+        self.draw_header(&header, "Deployment")?;
+
+        let (p1, rest) = body.split_vertically(820);
+        let (p2, p3) = rest.split_vertically(600);
+
+        self.draw_panel(
+            &p1,
+            &Panel::new(
+                "Altitude",
+                "m AGL",
+                vec![
+                    // The GPS rides along as the independent witness: it is the
+                    // only altitude on the figure that does not come from the
+                    // barometer, so a baro that drifted or iced shows up as the
+                    // two traces separating rather than as a plausible curve.
+                    Line::new("deployment KF", "deployment_kf_altitude_agl", theme::CYAN),
+                    Line::new("GPS", "gps_altitude_agl", theme::VIOLET),
+                ],
+            )
+            .with_event_labels()
+            .with_zero(),
+            Y_GUTTER,
+        )?;
+        self.draw_panel(
+            &p2,
+            &Panel::new(
+                "Vertical speed",
+                "m/s",
+                vec![Line::new(
+                    "deployment KF",
+                    "deployment_kf_vertical_velocity",
+                    theme::CYAN,
+                )],
+            )
+            // Zero is apogee, and the two descent rates either side of the main
+            // are read off this panel against it.
+            .with_zero(),
+            Y_GUTTER,
+        )?;
+        self.draw_lanes(
+            &p3,
+            "Pyro & deployment baro gate",
+            &[
+                ("drogue cont.", "pyro_drogue_continuity", theme::CYAN),
+                ("drogue fire", "pyro_drogue_fire", theme::AMBER),
+                ("main cont.", "pyro_main_continuity", theme::CYAN),
+                ("main fire", "pyro_main_fire", theme::AMBER),
+                ("short circuit", "pyro_short_circuit", theme::ALERT),
+                // The filter that fired those charges, and what it made of its
+                // own barometer at the time.
+                ("gate reject", "deployment_baro_gate_reject", theme::ALERT),
+                ("baro resync", "deployment_baro_resync", theme::ROSE),
+            ],
+            true,
+            Y_GUTTER,
+        )?;
+
+        root.present().plot()?;
+        Ok(())
+    }
+
+    /// Everything else that was logged, pad to landing.
+    ///
+    /// The raw sensors, the environment, power, GPS quality, the payload rails
+    /// and the CAN bus. A column that is logged and plotted nowhere is a column
+    /// nobody will remember to look at, so this figure is deliberately a
+    /// catch-all rather than a curated view.
     pub fn render_misc(&self, path: &Path) -> Result<()> {
         let root = BitMapBackend::new(path, (WIDTH, HEIGHT)).into_drawing_area();
         root.fill(&theme::BG).plot()?;
         let (header, body) = root.split_vertically(HEADER_H);
         self.draw_header(&header, "Auxiliary")?;
 
-        // Five rows of three. Only the bottom row carries tick labels, so it is
+        // Four rows of three. Only the bottom row carries tick labels, so it is
         // the only row that has to be taller.
         let (top, bottom) = body.split_vertically(HEIGHT - HEADER_H - 470);
-        let upper = top.split_evenly((4, 3));
+        let upper = top.split_evenly((3, 3));
         let lower = bottom.split_evenly((1, 3));
         let cells: Vec<_> = upper.into_iter().chain(lower).collect();
 
@@ -418,17 +642,6 @@ impl<'a> Renderer<'a> {
                     Line::new("x", "gyro_x", theme::CORAL),
                     Line::new("y", "gyro_y", theme::BLUE),
                     Line::new("z", "gyro_z", theme::ROSE),
-                ],
-            )
-            .with_zero()
-            .with_event_labels(),
-            Panel::new(
-                "Magnetometer",
-                "gauss",
-                vec![
-                    Line::new("x", "mag_x", theme::CORAL),
-                    Line::new("y", "mag_y", theme::BLUE),
-                    Line::new("z", "mag_z", theme::ROSE),
                 ],
             )
             .with_zero()
@@ -449,20 +662,33 @@ impl<'a> Renderer<'a> {
             .with_zero()
             .with_event_labels(),
             Panel::new(
-                "Altitude ASL",
-                "m",
+                "Magnetometer",
+                "gauss",
                 vec![
-                    // The deployment filter is the one that keeps reporting
-                    // through descent, which is why the whole-flight altitude
-                    // picture lives here and not on the flight figure.
-                    Line::new("deployment KF", "deployment_kf_altitude_asl", theme::CYAN),
-                    Line::new("GPS", "gps_altitude_asl", theme::VIOLET),
+                    Line::new("x", "mag_x", theme::CORAL),
+                    Line::new("y", "mag_y", theme::BLUE),
+                    Line::new("z", "mag_z", theme::ROSE),
                 ],
-            ),
+            )
+            .with_zero()
+            .with_event_labels(),
             Panel::new(
                 "Barometric pressure",
                 "Pa",
                 vec![Line::new("baro", "pressure", theme::CYAN)],
+            ),
+            Panel::new(
+                // The reference the other two figures subtract. Flat for the
+                // whole flight by construction — it is latched at ignition —
+                // so what this panel is really for is the pad segment in front
+                // of T+0, where the low pass is still settling, and for reading
+                // any AGL number on the other figures back to ASL.
+                "Launch pad altitude (AGL reference)",
+                "m ASL",
+                vec![
+                    Line::new("pad reference", "launch_pad_altitude_asl", theme::GREEN),
+                    Line::new("GPS", "gps_altitude_asl", theme::VIOLET),
+                ],
             ),
             Panel::new(
                 "Tilt from vertical",
@@ -497,17 +723,7 @@ impl<'a> Renderer<'a> {
                     Line::new("PDOP", "pdop", theme::ROSE),
                 ],
             ),
-            Panel::new(
-                "Apogee prediction",
-                "m ASL",
-                vec![
-                    Line::new("MPC predicted", "mpc_predicted_apogee_asl", theme::CYAN),
-                    Line::new("target", "air_brakes_target_apogee_asl", theme::AMBER),
-                    // The pad, so the gap between it and the other two lines
-                    // reads as the AGL numbers the flight was configured in.
-                    Line::new("launch pad", "launch_pad_altitude_asl", theme::GREEN),
-                ],
-            ),
+            // Bottom row: these carry the shared tick labels.
             Panel::new(
                 "Payload rail current",
                 "mA",
@@ -519,18 +735,8 @@ impl<'a> Renderer<'a> {
                     Line::new("per 9V", "payload_per_9v_ma", theme::CORAL),
                     Line::new("per 12V", "payload_per_12v_ma", theme::ROSE),
                 ],
-            ),
-            Panel::new(
-                "Air brakes extension",
-                "%",
-                vec![
-                    Line::new("commanded", "air_brakes_commanded_extension", theme::AMBER)
-                        .scaled(100.0),
-                    Line::new("actual", "air_brakes_actual_extension", theme::CYAN)
-                        .scaled(100.0),
-                ],
-            ),
-            // Bottom row: these carry the shared tick labels.
+            )
+            .with_x_labels(),
             Panel::new(
                 "Payload actuators",
                 "steps",
@@ -557,25 +763,6 @@ impl<'a> Renderer<'a> {
         for (cell, panel) in cells.iter().zip(panels.iter()) {
             self.draw_panel(cell, panel, 0)?;
         }
-        // The last cell is the flag strip: these are the estimator's own account
-        // of why it did what it did, and they only make sense against the same
-        // time axis as everything else.
-        self.draw_lanes(
-            &cells[14],
-            "Estimator & baro flags",
-            &[
-                ("pad calib.", "airbrakes_pad_calibrated", theme::GREEN),
-                ("burnout", "airbrakes_burnout", theme::AMBER),
-                ("baro trusted", "airbrakes_baro_trusted", theme::CYAN),
-                ("subsonic drag", "airbrakes_subsonic_drag", theme::VIOLET),
-                ("dep gate rej", "deployment_baro_gate_reject", theme::ALERT),
-                ("dep resync", "deployment_baro_resync", theme::ROSE),
-                ("ab gate rej", "airbrakes_baro_gate_reject", theme::ALERT),
-                ("ab resync", "airbrakes_baro_resync", theme::ROSE),
-            ],
-            true,
-            0,
-        )?;
 
         root.present().plot()?;
         Ok(())
@@ -599,8 +786,15 @@ impl<'a> Renderer<'a> {
             .plot()?;
 
         let s = self.session;
-        let apogee = match (s.apogee_asl, self.apogee_at_s()) {
-            (Some(a), Some(t)) => format!("apogee {a:.0} m ASL at T+{t:.1} s"),
+        // AGL, to match every altitude axis on the three figures. The ASL it
+        // was measured as rides along in parentheses, because that is the
+        // number the log actually stores and the one to quote when comparing
+        // against a GPS or a simulation.
+        let apogee = match (self.apogee_agl, s.apogee_asl, self.apogee_at_s()) {
+            (Some(agl), Some(asl), Some(t)) => {
+                format!("apogee {agl:.0} m AGL ({asl:.0} m ASL) at T+{t:.1} s")
+            }
+            (None, Some(asl), Some(t)) => format!("apogee {asl:.0} m ASL at T+{t:.1} s"),
             _ => "apogee not recorded".to_string(),
         };
         area.draw_text(
@@ -711,8 +905,8 @@ impl<'a> Renderer<'a> {
         stage_spans(
             &self.times,
             &self.log.stage,
-            self.session.plot_start,
-            self.session.flight_end,
+            self.window.0,
+            self.window.1,
         )
     }
 
@@ -1211,8 +1405,8 @@ impl<'a> Renderer<'a> {
                 let spans = true_spans(
                     &self.times,
                     values,
-                    self.session.plot_start,
-                    self.session.flight_end,
+                    self.window.0,
+                    self.window.1,
                 );
                 chart
                     .draw_series(spans.iter().map(|&(a, b)| {

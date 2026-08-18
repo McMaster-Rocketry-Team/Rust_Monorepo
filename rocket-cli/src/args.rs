@@ -46,7 +46,7 @@ pub enum ModeSelect {
     #[command(about = "erase the SD flight log on a connected VLF5")]
     ClearFlightLog,
 
-    #[command(about = "plot a downloaded flight-log CSV to two 4K PNGs")]
+    #[command(about = "plot a downloaded flight-log CSV to three 4K PNGs (airbrakes, deployment, auxiliary)")]
     PlotFlightLog(PlotFlightLogArgs),
 
     #[clap(subcommand)]
@@ -77,7 +77,7 @@ pub struct PlotFlightLogArgs {
     pub session: Option<usize>,
     #[arg(
         long,
-        default_value_t = 10.0,
+        default_value_t = 5.0,
         help = "seconds of pad time to show before liftoff; 0 starts exactly at T+0"
     )]
     pub lead_in: f64,
