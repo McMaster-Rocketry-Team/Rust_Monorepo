@@ -113,6 +113,12 @@ struct Line {
     /// in, and drawing it in the same weight as the altitude it is being
     /// compared against invites reading it as another thing the rocket did.
     dashed: bool,
+    /// Draw under every other trace on the panel, whichever axis they are on.
+    ///
+    /// For a trace that is context rather than subject: it is on the panel so
+    /// the others can be read against it, and it must not be what hides them
+    /// where they cross.
+    behind: bool,
 }
 
 impl Line {
@@ -123,6 +129,7 @@ impl Line {
             color,
             scale: 1.0,
             dashed: false,
+            behind: false,
         }
     }
 
@@ -133,6 +140,11 @@ impl Line {
 
     fn dashed(mut self) -> Self {
         self.dashed = true;
+        self
+    }
+
+    fn behind(mut self) -> Self {
+        self.behind = true;
         self
     }
 }
@@ -616,12 +628,14 @@ impl<'a> Renderer<'a> {
             .with_secondary(Secondary::new(
                 "%",
                 vec![
-                    // Warm pair against the cool pair on the left, so which
-                    // axis a trace belongs to is readable without chasing it
-                    // to the legend. Commanded is not green here — that is the
-                    // acceleration on this panel now.
-                    Line::new("brakes commanded", "air_brakes_commanded_extension", theme::AMBER)
-                        .scaled(100.0),
+                    // Grey and underneath, because commanded is the input the
+                    // other three traces are read against rather than a result
+                    // in its own right — and because it is the trace that
+                    // spends the flight pinned at 0 or 100%, straight through
+                    // where the others do their work.
+                    Line::new("brakes commanded", "air_brakes_commanded_extension", theme::MUTED)
+                        .scaled(100.0)
+                        .behind(),
                     Line::new("brakes actual", "air_brakes_actual_extension", theme::ROSE)
                         .scaled(100.0),
                 ],
@@ -1207,76 +1221,89 @@ impl<'a> Renderer<'a> {
                 .plot()?;
         }
 
-        for (line, trace) in &traces {
-            let Some(trace) = trace else { continue };
-            for (i, run) in trace.runs.iter().enumerate() {
-                let points: Vec<(f64, f64)> =
-                    run.iter().map(|&(t, v)| (t, v as f64)).collect();
-                // Drawn segment by segment rather than as one `LineSeries`.
-                //
-                // plotters builds a thick polyline by joining quads, and at a
-                // sharp enough cusp the join projects a miter spike far outside
-                // the plotting area — on this data the temperature trace, which
-                // min/max decimation turns into a picket fence of one-bucket
-                // spikes, threw them up through the panel above and read as
-                // stray data in someone else's chart. A two-point path has no
-                // join to compute, so the failure cannot arise. At 2 px the
-                // missing joins are not visible.
-                let style = line.color.stroke_width(if line.dashed { 3 } else { 2 });
-                let series = if line.dashed {
-                    chart
-                        .draw_series(DashedLineSeries::new(
-                            points.iter().copied(),
-                            DASH,
-                            DASH_GAP,
-                            style,
-                        ))
-                        .plot()?
-                } else {
-                    chart
-                        .draw_series(
-                            points
-                                .windows(2)
-                                .map(|w| PathElement::new(vec![w[0], w[1]], style)),
-                        )
-                        .plot()?
-                };
-                // Only the first run carries the legend entry, or a gapped
-                // trace would appear once per fragment.
-                if i == 0 {
-                    legend_swatch(series, line);
+        // Two passes over both axes, so a line marked `behind` ends up under
+        // every other trace on the panel and not merely under the ones that
+        // happen to be declared after it. Everything else — grid, bands, event
+        // rules, the zero line — is already drawn by here, so the pass only
+        // orders the data against itself.
+        for behind in [true, false] {
+            for (line, trace) in &traces {
+                let Some(trace) = trace else { continue };
+                if line.behind != behind {
+                    continue;
+                }
+                for (i, run) in trace.runs.iter().enumerate() {
+                    let points: Vec<(f64, f64)> =
+                        run.iter().map(|&(t, v)| (t, v as f64)).collect();
+                    // Drawn segment by segment rather than as one `LineSeries`.
+                    //
+                    // plotters builds a thick polyline by joining quads, and at a
+                    // sharp enough cusp the join projects a miter spike far outside
+                    // the plotting area — on this data the temperature trace, which
+                    // min/max decimation turns into a picket fence of one-bucket
+                    // spikes, threw them up through the panel above and read as
+                    // stray data in someone else's chart. A two-point path has no
+                    // join to compute, so the failure cannot arise. At 2 px the
+                    // missing joins are not visible.
+                    let style = line.color.stroke_width(if line.dashed { 3 } else { 2 });
+                    let series = if line.dashed {
+                        chart
+                            .draw_series(DashedLineSeries::new(
+                                points.iter().copied(),
+                                DASH,
+                                DASH_GAP,
+                                style,
+                            ))
+                            .plot()?
+                    } else {
+                        chart
+                            .draw_series(
+                                points
+                                    .windows(2)
+                                    .map(|w| PathElement::new(vec![w[0], w[1]], style)),
+                            )
+                            .plot()?
+                    };
+                    // Only the first run carries the legend entry, or a gapped
+                    // trace would appear once per fragment.
+                    if i == 0 {
+                        legend_swatch(series, line);
+                    }
                 }
             }
-        }
 
-        for (line, trace) in &secondary {
-            let Some(trace) = trace else { continue };
-            for (i, run) in trace.runs.iter().enumerate() {
-                let points: Vec<(f64, f64)> =
-                    run.iter().map(|&(t, v)| (t, v as f64)).collect();
-                let style = line.color.stroke_width(if line.dashed { 3 } else { 2 });
-                let series = if line.dashed {
-                    chart
-                        .draw_secondary_series(DashedLineSeries::new(
-                            points.iter().copied(),
-                            DASH,
-                            DASH_GAP,
-                            style,
-                        ))
-                        .plot()?
-                } else {
-                    chart
-                        .draw_secondary_series(
-                            points
-                                .windows(2)
-                                .map(|w| PathElement::new(vec![w[0], w[1]], style)),
-                        )
-                        .plot()?
-                };
-                // `draw_secondary_series` hands back an annotation on the
-                // *primary* chart, so one legend covers both axes.
-                if i == 0 {
-                    legend_swatch(series, line);
+            for (line, trace) in &secondary {
+                let Some(trace) = trace else { continue };
+                if line.behind != behind {
+                    continue;
+                }
+                for (i, run) in trace.runs.iter().enumerate() {
+                    let points: Vec<(f64, f64)> =
+                        run.iter().map(|&(t, v)| (t, v as f64)).collect();
+                    let style = line.color.stroke_width(if line.dashed { 3 } else { 2 });
+                    let series = if line.dashed {
+                        chart
+                            .draw_secondary_series(DashedLineSeries::new(
+                                points.iter().copied(),
+                                DASH,
+                                DASH_GAP,
+                                style,
+                            ))
+                            .plot()?
+                    } else {
+                        chart
+                            .draw_secondary_series(
+                                points
+                                    .windows(2)
+                                    .map(|w| PathElement::new(vec![w[0], w[1]], style)),
+                            )
+                            .plot()?
+                    };
+                    // `draw_secondary_series` hands back an annotation on the
+                    // *primary* chart, so one legend covers both axes.
+                    if i == 0 {
+                        legend_swatch(series, line);
+                    }
                 }
             }
         }
