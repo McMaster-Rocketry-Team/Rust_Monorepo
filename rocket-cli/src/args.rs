@@ -46,7 +46,9 @@ pub enum ModeSelect {
     #[command(about = "erase the SD flight log on a connected VLF5")]
     ClearFlightLog,
 
-    #[command(about = "plot a downloaded flight-log CSV to three 4K PNGs (airbrakes, deployment, auxiliary)")]
+    #[command(
+        about = "plot a downloaded flight-log CSV to four 4K PNGs (airbrakes, deployment, auxiliary, payload)"
+    )]
     PlotFlightLog(PlotFlightLogArgs),
 
     #[clap(subcommand)]

@@ -1,15 +1,20 @@
-//! `plot-flight-log`: turn a downloaded flight-log CSV into three 4K figures.
+//! `plot-flight-log`: turn a downloaded flight-log CSV into four 4K figures.
 //!
 //! The three things this has to get right, in the order a reader meets them:
 //! pick the *right flight* out of a log that may hold several, cut it down to
 //! the part where the rocket was actually in the air, and then draw it.
 //!
-//! The three figures split by *which half of the avionics is being asked
-//! about*, and they do not share a time window. The air-brakes figure ends at
-//! apogee, because the estimator behind every trace on it is retired there and
-//! the descent would be one long gap. The deployment figure and the auxiliary
-//! figure run to landing, because that is where the deployment estimator and
-//! the pyros do their work.
+//! The four figures split by *which part of the stack is being asked about*,
+//! and they do not share a time window. The air-brakes figure ends at apogee,
+//! because the estimator behind every trace on it is retired there and the
+//! descent would be one long gap. The deployment, auxiliary and payload
+//! figures run to landing, because that is where the deployment estimator, the
+//! pyros and the payload's own experiments do their work.
+//!
+//! The payload gets a figure of its own rather than a corner of the auxiliary
+//! one: its rails, actuators, load cells and per-channel state machines are
+//! most of a figure's worth of columns by themselves, and sharing left both
+//! halves narrower than either could be read at.
 //!
 //! Altitudes are drawn AGL throughout, converted from the ASL the log stores
 //! using the pad reference it now carries. AGL is the unit every threshold in
@@ -86,15 +91,19 @@ pub fn plot_flight_log(args: &PlotFlightLogArgs) -> Result<()> {
     Renderer::new(&log, session, source_name.clone(), to_landing)
         .render_deployment(&paths.deployment)
         .with_context(|| format!("writing {}", paths.deployment.display()))?;
-    Renderer::new(&log, session, source_name, to_landing)
+    Renderer::new(&log, session, source_name.clone(), to_landing)
         .render_misc(&paths.misc)
         .with_context(|| format!("writing {}", paths.misc.display()))?;
+    Renderer::new(&log, session, source_name, to_landing)
+        .render_payload(&paths.payload)
+        .with_context(|| format!("writing {}", paths.payload.display()))?;
 
     println!(
-        "Wrote {}, {} and {} ({}×{})",
+        "Wrote {}, {}, {} and {} ({}×{})",
         paths.airbrakes.display(),
         paths.deployment.display(),
         paths.misc.display(),
+        paths.payload.display(),
         figures::WIDTH,
         figures::HEIGHT
     );
@@ -184,14 +193,15 @@ fn report_window(session: &Session, log: &FlightLog) {
     }
 }
 
-/// Where the three PNGs go.
+/// Where the four PNGs go.
 struct OutputPaths {
     airbrakes: PathBuf,
     deployment: PathBuf,
     misc: PathBuf,
+    payload: PathBuf,
 }
 
-/// Name the three PNGs.
+/// Name the four PNGs.
 ///
 /// The session number only enters the filename when there was a choice to make,
 /// so the ordinary one-flight case produces predictable names.
@@ -224,6 +234,7 @@ fn output_paths(
         airbrakes: dir.join(format!("{stem}_airbrakes.png")),
         deployment: dir.join(format!("{stem}_deployment.png")),
         misc: dir.join(format!("{stem}_misc.png")),
+        payload: dir.join(format!("{stem}_payload.png")),
     })
 }
 
@@ -257,6 +268,10 @@ mod tests {
             "hil_dual_2026-08-17_deployment.png"
         );
         assert_eq!(p.misc.file_name().unwrap(), "hil_dual_2026-08-17_misc.png");
+        assert_eq!(
+            p.payload.file_name().unwrap(),
+            "hil_dual_2026-08-17_payload.png"
+        );
 
         let p = output_paths(&input, &args(None), 1, 3).unwrap();
         assert_eq!(

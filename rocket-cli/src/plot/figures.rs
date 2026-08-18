@@ -1,15 +1,15 @@
-//! Rendering the three 3840×2160 figures.
+//! Rendering the four 3840×2160 figures.
 //!
-//! All three share one time ORIGIN: T+0 is ignition, and a few seconds of pad
+//! All four share one time ORIGIN: T+0 is ignition, and a few seconds of pad
 //! sit in front of it so the ignition transient has something to be read
 //! against — an axis that begins exactly at ignition shows the step but not
 //! what it stepped from.
 //!
 //! They do not share a time RANGE. The air-brakes figure ends at apogee,
 //! because the estimator behind every trace on it is retired there; the other
-//! two run to landing. A point read off one figure is at the same T+ as on the
-//! others, but the figures are not the same width in seconds, so they are read
-//! by their labels rather than by laying them side by side.
+//! three run to landing. A point read off one figure is at the same T+ as on
+//! the others, but the figures are not the same width in seconds, so they are
+//! read by their labels rather than by laying them side by side.
 //!
 //! Altitudes are drawn AGL, converted from the ASL the log stores against the
 //! pad reference it carries — AGL is the unit every threshold in the firmware
@@ -225,7 +225,7 @@ struct AxisRange {
 
 /// The rows one figure draws, as a half-open range into the log.
 ///
-/// A figure-level rather than a session-level property, because the three
+/// A figure-level rather than a session-level property, because the four
 /// figures deliberately do not cover the same stretch of flight: the airbrakes
 /// story is over at apogee and drawing the descent beside it would spend half
 /// the width on a window where every trace on the figure is absent.
@@ -248,6 +248,41 @@ struct Rule {
     color: RGBColor,
     /// Dotted rather than dashed, and drawn opaque rather than washed out.
     dotted: bool,
+}
+
+/// The seven flags one experiment channel reports, top to bottom in the order
+/// its own state machine reaches them: fitted, referenced, closed, watching,
+/// and then the three outcomes.
+///
+/// `enabled` leads because it qualifies everything under it — a clear
+/// `enabled` means the channel is not fitted, not that it failed, so a column
+/// of clear lanes beneath it is the absence of an experiment rather than an
+/// experiment that did nothing.
+fn experiment_lanes(channel: usize) -> [(&'static str, &'static str, RGBColor); 7] {
+    // The column names differ only by the channel digit, and the digit is the
+    // one thing a hand-written third copy would get wrong.
+    macro_rules! lanes {
+        ($n:literal) => {
+            [
+                ("enabled", concat!("payload_exp", $n, "_enabled"), theme::CYAN),
+                ("homed", concat!("payload_exp", $n, "_homed"), theme::VIOLET),
+                (
+                    "closure conf.",
+                    concat!("payload_exp", $n, "_closure_confirmed"),
+                    theme::BLUE,
+                ),
+                ("monitoring", concat!("payload_exp", $n, "_monitoring"), theme::GREEN),
+                ("fractured", concat!("payload_exp", $n, "_fractured"), theme::AMBER),
+                ("finished", concat!("payload_exp", $n, "_finished"), theme::ROSE),
+                ("fault", concat!("payload_exp", $n, "_fault"), theme::ALERT),
+            ]
+        };
+    }
+    match channel {
+        0 => lanes!("1"),
+        1 => lanes!("2"),
+        _ => lanes!("3"),
+    }
 }
 
 pub struct Renderer<'a> {
@@ -286,8 +321,8 @@ impl<'a> Renderer<'a> {
     ///
     /// The derived columns below are recomputed per figure rather than shared.
     /// They are two linear passes over the log and cost microseconds, and
-    /// paying them three times is cheaper than the plumbing that would let
-    /// three windows share one buffer.
+    /// paying them once per figure is cheaper than the plumbing that would let
+    /// four windows share one buffer.
     pub fn new(
         log: &'a FlightLog,
         session: &'a Session,
@@ -726,26 +761,40 @@ impl<'a> Renderer<'a> {
         Ok(())
     }
 
-    /// Everything else that was logged, pad to landing.
+    /// Everything else the avionics logged, pad to landing.
     ///
-    /// The raw sensors, the environment, power, GPS quality, the payload rails
-    /// and the CAN bus. A column that is logged and plotted nowhere is a column
-    /// nobody will remember to look at, so this figure is deliberately a
-    /// catch-all rather than a curated view.
+    /// The raw sensors, the environment, power, GPS quality and the CAN bus. A
+    /// column that is logged and plotted nowhere is a column nobody will
+    /// remember to look at, so this figure is deliberately a catch-all rather
+    /// than a curated view — but a catch-all of what is *not already drawn
+    /// somewhere it means more*. Tilt is the case in point and used to have a
+    /// panel here: the estimator that produces it is retired at apogee, so the
+    /// panel was the same forty seconds the air-brakes figure already draws
+    /// against the altitude they explain, followed by four hundred seconds of
+    /// nothing. The payload is the other case, and it has
+    /// [`render_payload`](Self::render_payload) — its rails and experiments
+    /// are a figure's worth of columns by themselves, and sharing one left
+    /// both halves too narrow.
+    ///
+    /// Three rows of three, read across: what the airframe was doing, what the
+    /// air around it was doing, and what the electronics were doing.
     pub fn render_misc(&self, path: &Path) -> Result<()> {
         let root = BitMapBackend::new(path, (WIDTH, HEIGHT)).into_drawing_area();
         root.fill(&theme::BG).plot()?;
         let (header, body) = root.split_vertically(HEADER_H);
         self.draw_header(&header, "Auxiliary")?;
 
-        // Four rows of three. Only the bottom row carries tick labels, so it is
-        // the only row that has to be taller.
-        let (top, bottom) = body.split_vertically(HEIGHT - HEADER_H - 470);
-        let upper = top.split_evenly((3, 3));
+        // Only the bottom row carries tick labels, so it is the only row that
+        // has to be taller.
+        let (top, bottom) = body.split_vertically(HEIGHT - HEADER_H - 660);
+        let upper = top.split_evenly((2, 3));
         let lower = bottom.split_evenly((1, 3));
         let cells: Vec<_> = upper.into_iter().chain(lower).collect();
 
         let panels = [
+            // Top row: these three carry the event names for their columns, so
+            // the rules crossing every panel below are named once at the top
+            // of each.
             Panel::new(
                 "Angular rate",
                 "°/s",
@@ -789,23 +838,30 @@ impl<'a> Renderer<'a> {
                 vec![Line::new("baro", "pressure", theme::CYAN)],
             ),
             Panel::new(
-                // The reference the other two figures subtract. Flat for the
+                // The reference the other three figures subtract. Flat for the
                 // whole flight by construction — it is latched at ignition —
                 // so what this panel is really for is the pad segment in front
                 // of T+0, where it steps once per averaging window (and reads
                 // 0 until the second window closes), and for reading any AGL
                 // number on the other figures back to ASL.
+                //
+                // The GPS altitude used to ride along here in ASL and is gone:
+                // it is the same column the deployment figure draws in AGL,
+                // one constant apart, and that constant is the trace beside
+                // it. What that cost is the one comparison the pair supported
+                // and AGL cannot — pad reference against GPS on the pad, which
+                // is the only place a wrong reference is visible rather than
+                // subtracted out of both traces at once. It was not worth a
+                // second copy of the whole flight profile to keep: the two
+                // disagree by tens of metres on a good day, so the check was
+                // never sharp enough to act on.
                 "Launch pad altitude (AGL reference)",
                 "m ASL",
-                vec![
-                    Line::new("pad reference", "launch_pad_altitude_asl", theme::GREEN),
-                    Line::new("GPS", "gps_altitude_asl", theme::VIOLET),
-                ],
-            ),
-            Panel::new(
-                "Tilt from vertical",
-                "°",
-                vec![Line::new("airbrakes KF", "airbrakes_kf_tilt_deg", theme::VIOLET)],
+                vec![Line::new(
+                    "pad reference",
+                    "launch_pad_altitude_asl",
+                    theme::GREEN,
+                )],
             ),
             Panel::new(
                 "Temperature",
@@ -815,16 +871,16 @@ impl<'a> Renderer<'a> {
                     Line::new("airbrakes servo", "air_brakes_servo_temp", theme::CORAL),
                 ],
             ),
+            // Bottom row: these three carry the shared tick labels.
             Panel::new(
                 "Supply voltage",
                 "V",
                 vec![
                     Line::new("VL battery", "battery_voltage", theme::GREEN),
                     Line::new("AMP shared", "amp_shared_battery_v", theme::AMBER),
-                    // Logged in mV, shown alongside two volt readings.
-                    Line::new("payload EPM", "payload_epm_batt_mv", theme::VIOLET).scaled(0.001),
                 ],
-            ),
+            )
+            .with_x_labels(),
             Panel::new(
                 "GPS fix quality",
                 "count / DOP",
@@ -833,29 +889,6 @@ impl<'a> Renderer<'a> {
                     Line::new("HDOP", "hdop", theme::CYAN),
                     Line::new("VDOP", "vdop", theme::AMBER),
                     Line::new("PDOP", "pdop", theme::ROSE),
-                ],
-            ),
-            // Bottom row: these carry the shared tick labels.
-            Panel::new(
-                "Payload rail current",
-                "mA",
-                vec![
-                    Line::new("sys 3V3", "payload_sys_3v3_ma", theme::CYAN),
-                    Line::new("sys 5V", "payload_sys_5v_ma", theme::AMBER),
-                    Line::new("per 3V3", "payload_per_3v3_ma", theme::GREEN),
-                    Line::new("per 5V", "payload_per_5v_ma", theme::VIOLET),
-                    Line::new("per 9V", "payload_per_9v_ma", theme::CORAL),
-                    Line::new("per 12V", "payload_per_12v_ma", theme::ROSE),
-                ],
-            )
-            .with_x_labels(),
-            Panel::new(
-                "Payload actuators",
-                "steps",
-                vec![
-                    Line::new("actuator 1", "payload_actuator_1_steps", theme::CYAN),
-                    Line::new("actuator 2", "payload_actuator_2_steps", theme::AMBER),
-                    Line::new("actuator 3", "payload_actuator_3_steps", theme::GREEN),
                 ],
             )
             .with_x_labels(),
@@ -874,6 +907,124 @@ impl<'a> Renderer<'a> {
 
         for (cell, panel) in cells.iter().zip(panels.iter()) {
             self.draw_panel(cell, panel, 0)?;
+        }
+
+        root.present().plot()?;
+        Ok(())
+    }
+
+    /// The payload stack, pad to landing.
+    ///
+    /// Everything here is relayed: EPM reports the battery bus and the six
+    /// switched rails, SEM reports where each linear actuator is, how hard
+    /// each specimen is being pulled and how far each experiment has got. None
+    /// of it is measured by the flight computer, so all of it is absent
+    /// wherever the payload node was not talking — which is itself the first
+    /// thing this figure is read for.
+    ///
+    /// Two columns, and the split is between a measurement and a claim. On the
+    /// left the analogue channels, which say what the hardware did; on the
+    /// right one lane panel per experiment channel, which says what that
+    /// channel's own state machine believed at the time. A fracture that the
+    /// load cell shows and the `fractured` lane does not is the failure this
+    /// layout exists to make visible, and it is a failure you can only see by
+    /// reading one against the other at the same T+.
+    ///
+    /// The three channels share a panel per quantity rather than getting a
+    /// column each: they are the same experiment run three times, so the
+    /// question is always which of them differs from the other two.
+    pub fn render_payload(&self, path: &Path) -> Result<()> {
+        let root = BitMapBackend::new(path, (WIDTH, HEIGHT)).into_drawing_area();
+        root.fill(&theme::BG).plot()?;
+        let (header, body) = root.split_vertically(HEADER_H);
+        self.draw_header(&header, "Payload")?;
+
+        let (left, right) = body.split_horizontally(WIDTH / 2);
+        // The bottom row of each column carries that column's tick labels and
+        // so is the taller one. Both columns split identically, so a feature
+        // on the left is at the same x as the lane it explains on the right.
+        let (l_top, l_bottom) = left.split_vertically(HEIGHT - HEADER_H - 700);
+        let l_upper = l_top.split_evenly((2, 1));
+        let (r_top, r_bottom) = right.split_vertically(HEIGHT - HEADER_H - 700);
+        let r_upper = r_top.split_evenly((2, 1));
+
+        self.draw_panel(
+            &l_upper[0],
+            &Panel::new(
+                "Payload rail current",
+                "mA",
+                vec![
+                    Line::new("sys 3V3", "payload_sys_3v3_ma", theme::CYAN),
+                    Line::new("sys 5V", "payload_sys_5v_ma", theme::AMBER),
+                    Line::new("per 3V3", "payload_per_3v3_ma", theme::GREEN),
+                    Line::new("per 5V", "payload_per_5v_ma", theme::VIOLET),
+                    Line::new("per 9V", "payload_per_9v_ma", theme::CORAL),
+                    Line::new("per 12V", "payload_per_12v_ma", theme::ROSE),
+                ],
+            )
+            .with_event_labels()
+            // The bus the six rails are drawn from, on its own axis because it
+            // is the cause the currents are read against: a rail current that
+            // steps while the battery sags is a load, one that steps while the
+            // battery holds is a switch.
+            .with_secondary(Secondary::new(
+                "V",
+                // Logged in mV, shown as volts alongside the two on the
+                // auxiliary figure so the three can be compared by eye.
+                vec![Line::new("EPM battery", "payload_epm_batt_mv", theme::BLUE).scaled(0.001)],
+            )),
+            Y_GUTTER,
+        )?;
+        self.draw_panel(
+            &l_upper[1],
+            &Panel::new(
+                // Tension positive, in centinewtons as the payload reports
+                // them. A fracture is the trace loading up and then dropping
+                // to nothing within one sample.
+                "Fracture load",
+                "cN",
+                vec![
+                    Line::new("channel 1", "payload_load_cell_1_cn", theme::CYAN),
+                    Line::new("channel 2", "payload_load_cell_2_cn", theme::AMBER),
+                    Line::new("channel 3", "payload_load_cell_3_cn", theme::GREEN),
+                ],
+            )
+            // Zero is the unloaded specimen, and the sign says tension from
+            // compression — both worth a rule to read the trace against.
+            .with_zero(),
+            Y_GUTTER,
+        )?;
+        self.draw_panel(
+            &l_bottom,
+            &Panel::new(
+                "Linear actuator position",
+                "steps",
+                vec![
+                    Line::new("channel 1", "payload_actuator_1_steps", theme::CYAN),
+                    Line::new("channel 2", "payload_actuator_2_steps", theme::AMBER),
+                    Line::new("channel 3", "payload_actuator_3_steps", theme::GREEN),
+                ],
+            )
+            .with_x_labels(),
+            Y_GUTTER,
+        )?;
+
+        for (i, (area, title)) in [
+            (&r_upper[0], "Experiment channel 1"),
+            (&r_upper[1], "Experiment channel 2"),
+            (&r_bottom, "Experiment channel 3"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            self.draw_lanes(
+                area,
+                title,
+                &experiment_lanes(i),
+                // Only the bottom panel of the column, matching the left.
+                i == 2,
+                Y_GUTTER,
+            )?;
         }
 
         root.present().plot()?;
@@ -1416,9 +1567,9 @@ impl<'a> Renderer<'a> {
 
         // Still a real chart, even with nothing to put in it. The bottom panel
         // of a column owns that column's tick labels, and whether that panel
-        // happens to have data is chance — on this log the bottom two cells are
-        // payload columns the flight never wrote, and returning early here left
-        // two entire columns of the auxiliary figure with no time axis at all.
+        // happens to have data is chance — the payload figure's bottom row is
+        // columns a flight without a payload never writes, and returning early
+        // here left both its columns with no time axis at all.
         let mut chart = ChartBuilder::on(area)
             .caption(
                 panel.title,

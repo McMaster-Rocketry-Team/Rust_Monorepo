@@ -9,3 +9,5 @@ secret.key
 .rocket-cli.toml
 .rocket-cli.log
 logs
+**/flight_log_*.csv
+**/flight_log_*.png
