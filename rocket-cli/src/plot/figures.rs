@@ -520,21 +520,29 @@ impl<'a> Renderer<'a> {
     /// axis to landing would spend more than half the width drawing the gap
     /// after them.
     ///
-    /// Three panels, read top to bottom as one argument: where the rocket was
-    /// going and what the controller did about it, the vertical state that
-    /// drove the decision, and the estimator's own account of why it was
-    /// allowed to act at all.
+    /// Two panels, read top to bottom as one argument: where the rocket was
+    /// going and what the controller did about it, and the vertical state that
+    /// drove the decision.
+    ///
+    /// The estimator's flag strip used to be a third panel and is gone. The
+    /// two flags that describe the *shape* of the flight — the burn and the
+    /// brakes-permission window — are background bands on both panels now,
+    /// which is where a reader wants them: behind the traces they qualify,
+    /// rather than in a strip that has to be read against them. The rest were
+    /// per-sample diagnostics that answer "why did this not happen", a
+    /// question worth its own look at the CSV rather than a permanent fifth of
+    /// this figure's height.
     pub fn render_airbrakes(&self, path: &Path) -> Result<()> {
         let root = BitMapBackend::new(path, (WIDTH, HEIGHT)).into_drawing_area();
         root.fill(&theme::BG).plot()?;
         let (header, body) = root.split_vertically(HEADER_H);
         self.draw_header(&header, "Air brakes")?;
 
-        // The flag strip gets a full-size share rather than the remainder:
-        // seven lanes at a readable label size need about as much height as a
-        // trace panel, and squeezing them was what made the labels collide.
-        let (p1, rest) = body.split_vertically(820);
-        let (p2, p3) = rest.split_vertically(620);
+        // Equal halves. The two panels are read against each other — where the
+        // speed trace bends is where the altitude trace flattens — and equal
+        // heights are what keep a slope on one comparable to a slope on the
+        // other.
+        let (p1, p2) = body.split_vertically((HEIGHT - HEADER_H) / 2);
 
         self.draw_panel(
             &p1,
@@ -596,27 +604,11 @@ impl<'a> Renderer<'a> {
             // worth a rule: velocity crossing it is apogee, acceleration
             // crossing it is the top of the drag-only coast.
             .with_zero()
+            .with_x_labels()
             .with_secondary(Secondary::new(
                 "°",
                 vec![Line::new("tilt", "airbrakes_kf_tilt_deg", theme::ROSE)],
             )),
-            Y_GUTTER,
-        )?;
-        self.draw_lanes(
-            &p3,
-            "Airbrakes estimator flags",
-            &[
-                // In the order the estimator passes through them, so the strip
-                // reads as the sequence of permissions the brakes needed.
-                ("pad calib.", "airbrakes_pad_calibrated", theme::GREEN),
-                ("burnout", "airbrakes_burnout", theme::AMBER),
-                ("subsonic drag", "airbrakes_subsonic_drag", theme::VIOLET),
-                ("baro trusted", "airbrakes_baro_trusted", theme::CYAN),
-                ("valid. deploy", "air_brakes_validation_deploy", theme::ROSE),
-                ("gate dropped", "airbrakes_baro_gate_reject", theme::ALERT),
-                ("baro resync", "airbrakes_baro_resync", theme::ROSE),
-            ],
-            true,
             Y_GUTTER,
         )?;
 
