@@ -74,13 +74,13 @@ pub struct AirbrakesEstimatorRecord {
     /// Estimator altitude ASL (m). `None` until it has a value.
     pub kf_altitude_asl: Option<f32>,
     /// Estimator vertical velocity (m/s). `None` until its vertical filter is
-    /// born (`AIRBRAKES_ENABLED`).
+    /// born ([`AirbrakesState::AirbrakesEnabled`]).
     pub kf_vertical_velocity: Option<f32>,
     /// Tilt from vertical (deg). `None` before ignition.
     pub kf_tilt_deg: Option<f32>,
-    /// Status bits (`AIRBRAKES_*` consts): drag check, burnout latch,
-    /// brakes-enabled, and what its baro innovation gate did with THIS
-    /// sample.
+    /// Status bits (`AIRBRAKES_*` consts): the two-bit [`AirbrakesState`],
+    /// the drag check, the burnout latch, and what its baro innovation gate
+    /// did with THIS sample.
     pub flags: u8,
 }
 
@@ -517,7 +517,7 @@ pub const AIRBRAKES_SUBSONIC_DRAG: u8 = 1 << 0;
 /// altitude. Per-sample, like the `DEPLOYMENT_*` pair above, so a run of set
 /// bits is one rejection episode — an ejection transient, or a port the shock
 /// front has disturbed. Only ever set while the vertical filter exists
-/// (`AIRBRAKES_ENABLED`).
+/// ([`AirbrakesState::AirbrakesEnabled`]).
 pub const AIRBRAKES_BARO_GATE_REJECT: u8 = 1 << 2;
 /// The axial-sign burnout latch has fired: the motor is out and the drag
 /// channel is honest. Nothing can birth the vertical filter before this, on
@@ -525,20 +525,8 @@ pub const AIRBRAKES_BARO_GATE_REJECT: u8 = 1 << 2;
 /// never opened because the motor never looked out" from "because the drag
 /// check never passed".
 pub const AIRBRAKES_BURNOUT: u8 = 1 << 1;
-/// The brakes may open, and will be allowed to for the rest of the flight.
-///
-/// The airbrakes estimator's last state: motor out, drag check (or the T_max
-/// backstop) passed, vertical filter alive and fusing the baro, and the
-/// airframe under `max_open_mach` when it got there. One-way — there is no
-/// transition out of it, only the estimator being dropped whole at apogee,
-/// which shows up as the whole airbrakes group going absent.
-///
-/// This was `AIRBRAKES_BARO_TRUSTED` beside a separate
-/// `AIRBRAKES_MPC_PERMITTED` until 2026-08-18, when the Mach limit moved from
-/// a downstream per-sample gate to a condition of entering the state. The two
-/// bits could differ only because the second could withdraw itself; now they
-/// are the same fact.
-pub const AIRBRAKES_ENABLED: u8 = 1 << 3;
+// bit 3 unallocated: it held `AIRBRAKES_BARO_TRUSTED`, then briefly
+// `AIRBRAKES_ENABLED`, both of which the state field below now answers.
 /// This sample ended a rejection run by re-anchoring: altitude snapped to the
 /// baro and velocity uncertainty was re-opened. Set together with
 /// `AIRBRAKES_BARO_GATE_REJECT`. A run that ends without this bit is the gate
@@ -555,7 +543,69 @@ pub const AIRBRAKES_BARO_RESYNC: u8 = 1 << 4;
 /// stay set; it is re-derived every 2 s and CAN drop if the airframe is
 /// picked up or turned.
 pub const AIRBRAKES_PAD_CALIBRATED: u8 = 1 << 5;
-// bits 6-7 unallocated.
+
+/// The two bits of `AirbrakesEstimatorRecord::flags` holding
+/// [`AirbrakesState`].
+pub const AIRBRAKES_STATE_SHIFT: u32 = 6;
+pub const AIRBRAKES_STATE_MASK: u8 = 0b1100_0000;
+
+/// Which state of the airbrakes estimator produced this sample.
+///
+/// The estimator is a four-state machine that only ever walks forward, so two
+/// bits hold it exactly and every question about "where was it" becomes a
+/// comparison rather than an inference across three flags. It is logged
+/// rather than derived because two of the four were not distinguishable from
+/// the outside at all: `Armed` and `Stage1` differ only by the airbrakes
+/// half's OWN ignition detection, which runs a separate detector from the one
+/// that moves `flight_stage` and can latch a sample or two apart from it.
+///
+/// This replaced a bit that meant "the vertical filter exists". That bit was
+/// true in exactly one state and so said the same thing as
+/// `kf_altitude_asl.is_some()` — the last `*_valid` flag in the format,
+/// arrived at from the other direction.
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum AirbrakesState {
+    /// Armed on the pad: screening for a calibration, watching for ignition.
+    /// No orientation, no altitude, no velocity.
+    Armed = 0,
+    /// The first half second after this half detected ignition, during which
+    /// the accumulated thrust direction solves how the avionics are mounted.
+    /// Still no tilt — the axis it is measured against is what this state is
+    /// computing.
+    Stage1 = 1,
+    /// Boost and the Mach lockout: inertial dead reckoning, tilt available,
+    /// the barometer buffered but never fused. The burnout latch and the drag
+    /// check both live here, which is why `AIRBRAKES_BURNOUT` and
+    /// `AIRBRAKES_SUBSONIC_DRAG` only ever say anything in this state.
+    DeadReckoning = 2,
+    /// The brakes may open, and will be allowed to for the rest of the
+    /// flight: motor out, drag check (or the T_max backstop) passed, vertical
+    /// filter alive and fusing the baro, and the airframe under
+    /// `max_open_mach` when it got here. One-way like the rest — the only way
+    /// out is the estimator being dropped whole at apogee, which shows up as
+    /// the airbrakes group going absent.
+    AirbrakesEnabled = 3,
+}
+
+impl AirbrakesState {
+    pub fn from_flags(flags: u8) -> Self {
+        match (flags & AIRBRAKES_STATE_MASK) >> AIRBRAKES_STATE_SHIFT {
+            0 => Self::Armed,
+            1 => Self::Stage1,
+            2 => Self::DeadReckoning,
+            // Two bits, four states, all four named: there is no unknown
+            // variant to fall through to, and inventing one would be a
+            // permanently dead branch.
+            _ => Self::AirbrakesEnabled,
+        }
+    }
+
+    pub fn to_flags(self) -> u8 {
+        (self as u8) << AIRBRAKES_STATE_SHIFT
+    }
+}
 
 pub const PYRO_MAIN_CONTINUITY: u8 = 1 << 0;
 pub const PYRO_MAIN_FIRE: u8 = 1 << 1;

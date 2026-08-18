@@ -30,6 +30,10 @@ pub struct FlightLog {
     /// `FlightStage` discriminant, or `None` where the cell was blank or held a
     /// name this build does not know.
     pub stage: Vec<Option<u8>>,
+    /// `AirbrakesState` discriminant, same rules. Absent from logs written
+    /// before the estimator's state was logged outright, which is why it is
+    /// per-row optional rather than a column that is simply missing.
+    pub airbrakes_state: Vec<Option<u8>>,
     /// Every other column that parses as a number, absent cells as `NaN`.
     columns: HashMap<String, Vec<f32>>,
     pub row_count: usize,
@@ -78,9 +82,26 @@ fn parse_stage(raw: &str) -> Option<u8> {
     })
 }
 
+/// Map an `AirbrakesState` debug name to its discriminant. Written out for
+/// the same reason as [`parse_stage`].
+fn parse_airbrakes_state(raw: &str) -> Option<u8> {
+    Some(match raw {
+        "Armed" => 0,
+        "Stage1" => 1,
+        "DeadReckoning" => 2,
+        "AirbrakesEnabled" => 3,
+        _ => return None,
+    })
+}
+
 /// Columns that get their own field on [`FlightLog`] and so are skipped by the
 /// generic float path.
-const SPECIAL: [&str; 3] = ["record_count", "timestamp_us", "flight_stage"];
+const SPECIAL: [&str; 4] = [
+    "record_count",
+    "timestamp_us",
+    "flight_stage",
+    "airbrakes_state",
+];
 
 impl FlightLog {
     pub fn load(path: &Path) -> Result<Self> {
@@ -107,6 +128,7 @@ impl FlightLog {
         let mut record_count = Vec::new();
         let mut timestamp_us = Vec::new();
         let mut stage = Vec::new();
+        let mut airbrakes_state = Vec::new();
         let mut columns: HashMap<String, Vec<f32>> = headers
             .iter()
             .filter(|h| !SPECIAL.contains(&h.as_str()))
@@ -129,6 +151,7 @@ impl FlightLog {
                     "record_count" => record_count.push(raw.parse::<u32>().unwrap_or(0)),
                     "timestamp_us" => timestamp_us.push(raw.parse::<f64>().unwrap_or(f64::NAN)),
                     "flight_stage" => stage.push(parse_stage(raw)),
+                    "airbrakes_state" => airbrakes_state.push(parse_airbrakes_state(raw)),
                     _ => {
                         if name == "source_block_crc_failed" {
                             saw_crc_column = true;
@@ -155,6 +178,9 @@ impl FlightLog {
         if stage.len() != row_count {
             stage.resize(row_count, None);
         }
+        if airbrakes_state.len() != row_count {
+            airbrakes_state.resize(row_count, None);
+        }
         if record_count.len() != row_count {
             record_count.resize(row_count, 0);
         }
@@ -163,6 +189,7 @@ impl FlightLog {
             record_count,
             timestamp_us,
             stage,
+            airbrakes_state,
             columns,
             row_count,
             crc_failed_rows: saw_crc_column.then_some(crc_failed),

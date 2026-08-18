@@ -42,6 +42,7 @@
 
 use core::f32::consts::FRAC_PI_2;
 
+use firmware_common_new::flight_data_record::AirbrakesState;
 use firmware_common_new::vlp::packets::fire_pyro::PyroSelect;
 use nalgebra::Vector2;
 
@@ -221,7 +222,7 @@ impl FlightEstimators {
                 tilt_rad: ab.tilt(),
                 subsonic_by_drag: ab.subsonic_by_drag(),
                 burnout_detected: ab.burnout_detected(),
-                airbrakes_enabled: ab.airbrakes_enabled(),
+                state: ab.state(),
                 baro_gate: airbrakes_baro_gate,
                 calibration_complete: ab.calibration_complete(),
             }),
@@ -346,16 +347,16 @@ pub struct AirbrakesLogSample {
     pub tilt_rad: Option<f32>,
     pub subsonic_by_drag: Option<bool>,
     pub burnout_detected: bool,
-    /// The brakes may open, and will be allowed to for the rest of the
-    /// flight — the airbrakes half has reached its last state.
+    /// Which of the four states produced this sample.
     ///
-    /// One bit rather than the two it replaced. It used to be `baro_trusted`
-    /// (the filter exists) beside a separately-logged `mpc_permitted` (the
-    /// filter exists AND the airframe is under `max_open_mach` right now),
-    /// which could differ because the second was recomputed every sample and
-    /// could withdraw itself. Now the Mach limit is a condition of entering
-    /// the state, so the two are the same fact and there is one bit for it.
-    pub airbrakes_enabled: bool,
+    /// The whole of "where was the estimator", replacing the two booleans it
+    /// used to be inferred from. `baro_trusted` (the filter exists) and
+    /// `mpc_permitted` (the filter exists AND the airframe is subsonic right
+    /// now) could differ only because the second was recomputed every sample
+    /// and could withdraw itself; once the Mach limit became a condition of
+    /// entering the last state they were the same fact, and once they were
+    /// the same fact the honest thing to log was the state.
+    pub state: AirbrakesState,
     /// No `is_apogee` twin: the airbrakes half has no apogee state to report
     /// from. It is retired at apogee instead (see
     /// [`FlightEstimators::update`]), and this whole struct goes absent on

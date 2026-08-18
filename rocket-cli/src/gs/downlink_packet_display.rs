@@ -448,7 +448,7 @@ impl DownlinkPacketDisplay {
                                     true,
                                     Self::format_bool(p.airbrakes_calibrated()),
                                 ),
-                                ("born", true, Self::format_bool(p.airbrakes_born())),
+                                ("enabled", true, Self::format_bool(p.airbrakes_enabled())),
                             ],
                             vec![
                                 (

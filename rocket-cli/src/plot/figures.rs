@@ -409,13 +409,21 @@ impl<'a> Renderer<'a> {
                 .map(|row| (times[session.flight_start], times[row]))
         });
 
-        // The MPC's own permission, straight off the logged gate — no
-        // re-derivation from the filter's altitude and velocity, because the
-        // Mach term needs a config constant the log does not carry.
-        let brakes_spans = log
-            .column("airbrakes_enabled")
-            .map(|flag| true_spans(&times, flag, window.start, window.end))
-            .unwrap_or_default();
+        // Straight off the estimator's logged state — the brakes are
+        // permitted in exactly one of its four, and that is a decision the
+        // log records rather than one this tool re-derives. Re-deriving it
+        // is not even possible: the Mach test behind the transition needs a
+        // config constant the log does not carry.
+        let brakes_flag: Vec<f32> = log
+            .airbrakes_state
+            .iter()
+            .map(|state| match state {
+                Some(3) => 1.0,
+                Some(_) => 0.0,
+                None => f32::NAN,
+            })
+            .collect();
+        let brakes_spans = true_spans(&times, &brakes_flag, window.start, window.end);
 
         // Half a percent of the flight. Two events closer together than that
         // cannot be told apart on the axis, so they are drawn as one.

@@ -210,16 +210,27 @@ pub struct TelemetryPacket {
     #[packed_field(element_size_bits = "3", ty = "enum")]
     flight_stage: FlightStage,
 
-    /// The airbrakes estimator's vertical filter is born (baro trusted).
-    airbrakes_born: bool,
+    /// The brakes may open, and will be allowed to for the rest of the
+    /// flight — the airbrakes estimator has reached
+    /// [`AirbrakesState::AirbrakesEnabled`].
+    ///
+    /// Called `airbrakes_born` until 2026-08-18, when it stopped being true
+    /// to say the filter merely exists: the Mach limit that used to be
+    /// re-tested downstream every sample is now a condition of reaching this
+    /// state, so the bit reports a permission and not just a birth. Same bit,
+    /// same position — only the claim it makes got stronger.
+    ///
+    /// [`AirbrakesState::AirbrakesEnabled`]:
+    ///     crate::flight_data_record::AirbrakesState::AirbrakesEnabled
+    airbrakes_enabled: bool,
     /// The airbrakes estimator's pad calibration is complete.
     ///
     /// The one bit in this packet that is actionable BEFORE launch. The
     /// estimator refuses to detect ignition without a calibration, so a
     /// rocket sitting on the rail with this clear will fly with no airbrakes
-    /// and nothing else in the downlink will say so — `airbrakes_born` is
-    /// sourced from `airbrakes_enabled`, which cannot go true until after the
-    /// Mach lockout. Treat it as a go/no-go item.
+    /// and nothing else in the downlink will say so — `airbrakes_enabled`
+    /// cannot go true until after the Mach lockout. Treat it as a go/no-go
+    /// item.
     ///
     /// It is re-derived every 2 s from the last minute of pad data and can go
     /// back to false, so it reports the pad as it is NOW rather than latching
@@ -391,7 +402,7 @@ impl TelemetryPacket {
 
         flight_stage: FlightStage,
 
-        airbrakes_born: bool,
+        airbrakes_enabled: bool,
         airbrakes_calibrated: bool,
         mpc_predicted_apogee_agl: Option<f32>,
         target_apogee_agl: f32,
@@ -486,7 +497,7 @@ impl TelemetryPacket {
 
             flight_stage: flight_stage.into(),
 
-            airbrakes_born,
+            airbrakes_enabled,
             airbrakes_calibrated,
             mpc_predicted_apogee_valid: mpc_predicted_apogee_agl.is_some(),
             mpc_predicted_apogee_agl: AltitudeFac::to_fixed_point_capped(
@@ -709,8 +720,8 @@ impl TelemetryPacket {
     }
 
     /// The airbrakes estimator's vertical filter is born (baro trusted).
-    pub fn airbrakes_born(&self) -> bool {
-        self.airbrakes_born
+    pub fn airbrakes_enabled(&self) -> bool {
+        self.airbrakes_enabled
     }
 
     /// The airbrakes estimator's pad calibration is complete — the only
@@ -957,7 +968,7 @@ impl TelemetryPacket {
             airbrakes_kf_tilt_deg: self.airbrakes_kf_tilt_deg(),
             flight_stage: format!("{:?}", self.flight_stage()),
 
-            airbrakes_born: self.airbrakes_born(),
+            airbrakes_enabled: self.airbrakes_enabled(),
             airbrakes_calibrated: self.airbrakes_calibrated(),
             mpc_predicted_apogee_agl: self.mpc_predicted_apogee_agl(),
             target_apogee_agl: self.target_apogee_agl(),
@@ -1056,7 +1067,7 @@ pub struct TelemetryPacketBuilderState {
     pub flight_stage: FlightStage,
 
     /// The airbrakes estimator's vertical filter is born (baro trusted).
-    pub airbrakes_born: bool,
+    pub airbrakes_enabled: bool,
     /// The airbrakes estimator's pad calibration is complete. The one
     /// pre-launch go/no-go bit here: false on the rail means the airbrakes
     /// will not fly.
@@ -1136,7 +1147,7 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
 
                 flight_stage: FlightStage::Armed,
 
-                airbrakes_born: false,
+                airbrakes_enabled: false,
                 airbrakes_calibrated: false,
                 mpc_predicted_apogee_agl: None,
                 target_apogee_agl: 0.0,
@@ -1200,7 +1211,7 @@ impl<M: RawMutex> TelemetryPacketBuilder<M> {
                 state.max_deployment_kf_altitude_agl,
                 state.airbrakes_kf_tilt_deg,
                 state.flight_stage,
-                state.airbrakes_born,
+                state.airbrakes_enabled,
                 state.airbrakes_calibrated,
                 state.mpc_predicted_apogee_agl,
                 state.target_apogee_agl,
@@ -1414,7 +1425,7 @@ mod tests {
             epsilon = 0.7
         );
         assert_relative_eq!(p.airbrakes_kf_tilt_deg().unwrap(), 10.0, epsilon = 0.8);
-        assert!(p.airbrakes_born());
+        assert!(p.airbrakes_enabled());
         assert_relative_eq!(
             p.mpc_predicted_apogee_agl().unwrap(),
             2900.0,

@@ -58,7 +58,12 @@ pub const DEFAULT_TARGET_APOGEE_AGL: f32 = 4000.0;
 
 /// On-disk format version. Bump when the record or superblock layout changes;
 /// logs written at any other version are treated as absent.
-/// v17: the airbrakes estimator is three one-way states (armed, ignition,
+/// v18: the airbrakes estimator's state is logged outright, as a two-bit
+///     `AirbrakesState` in the top of the airbrakes flags byte. The
+///     `AIRBRAKES_ENABLED` bit it replaces was true in exactly one state and
+///     so duplicated `kf_altitude_asl.is_some()`; the state also separates
+///     `Armed` from `Stage1`, which nothing in the log could do before.
+/// v17: the airbrakes estimator is four one-way states (armed, ignition,
 ///     airbrakes enabled), so `AIRBRAKES_BARO_TRUSTED` and
 ///     `AIRBRAKES_MPC_PERMITTED` are the same fact and collapse into
 ///     `AIRBRAKES_ENABLED` (the same bit 3). The Mach limit moved from a
@@ -113,7 +118,7 @@ pub const DEFAULT_TARGET_APOGEE_AGL: f32 = 4000.0;
 ///     `mpc_predicted_apogee_agl` added to the slow record, `VALID_BARO` dropped.
 /// v8: payload EPM rail currents + SEM actuator steps in the slow record.
 /// v7: tagged FAST/SLOW stream (see `flight_data_record`). Older formats: see git history.
-pub const STORAGE_VERSION: u32 = 17;
+pub const STORAGE_VERSION: u32 = 18;
 
 /// rkyv body sizes for tagged record types.
 pub const FAST_BODY_LEN: usize = size_of::<<FlightDataFastRecord as rkyv::Archive>::Archived>();

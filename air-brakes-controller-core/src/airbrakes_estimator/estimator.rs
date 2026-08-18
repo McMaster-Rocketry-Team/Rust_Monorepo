@@ -1,6 +1,8 @@
 use heapless::Deque;
 use nalgebra::{SVector, Vector2, Vector3};
 
+use firmware_common_new::flight_data_record::AirbrakesState;
+
 use crate::{
     airbrakes_estimator::{
         AirbrakesConfig, ImuSample, MAX_DT_S, dead_reckoner::DeadReckoner,
@@ -996,6 +998,23 @@ impl AirbrakesEstimator {
             State::Armed { .. } | State::Stage1 { .. } => false,
             State::DeadReckoning { burnout, .. } => *burnout,
             State::AirbrakesEnabled { .. } => true,
+        }
+    }
+
+    /// Which state this half is in — the whole of it, as one value.
+    ///
+    /// The private [`State`] carries each state's working data; this is its
+    /// projection onto the four names, which is what the log stores and what
+    /// a caller can compare. Kept as a projection rather than exposing
+    /// `State` itself so the working data stays unreachable: everything a
+    /// consumer needs from a state is already an accessor, and handing out
+    /// the dead reckoner would make that untrue.
+    pub fn state(&self) -> AirbrakesState {
+        match &self.state {
+            State::Armed { .. } => AirbrakesState::Armed,
+            State::Stage1 { .. } => AirbrakesState::Stage1,
+            State::DeadReckoning { .. } => AirbrakesState::DeadReckoning,
+            State::AirbrakesEnabled { .. } => AirbrakesState::AirbrakesEnabled,
         }
     }
 
