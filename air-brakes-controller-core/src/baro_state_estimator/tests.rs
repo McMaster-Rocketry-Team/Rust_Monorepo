@@ -272,6 +272,70 @@ fn no_false_ignition_on_pad() {
     assert!(matches!(estimator.state(), RocketState::OnPad));
 }
 
+/// The pad reference cannot contain a reading from the last second before
+/// the motor lights.
+///
+/// That is the whole reason `PadReference` hands its windows out one behind
+/// instead of averaging up to ignition: whatever an igniter does to a static
+/// port, and whatever the 0.1 s detection sustain costs on top of it, lands
+/// in a window nobody reads. A disturbance shorter than `PAD_WINDOW_S` can
+/// reach the window *waiting* to become the reference; it cannot reach the
+/// reference. 50 m here rather than something subtle because the assertion
+/// is 1 m wide — this test is about which samples are in the average, not
+/// about how well an average rejects anything.
+#[test]
+fn pad_reference_excludes_the_second_before_ignition() {
+    const PAD_ASL: f32 = 200.0;
+    const DISTURBANCE_M: f32 = 50.0;
+    const DISTURBANCE_S: f32 = 0.5;
+
+    let mut clock = SampleClock::new();
+    // Subsonic, so ignition goes straight to `Ascent` and freezes the
+    // reference there; no chute number is read.
+    let mut estimator = RocketStateEstimator::new(subsonic_profile(), IGNITION_ACC_THRESHOLD);
+    let mut noise = NoiseGen::new(0.5);
+
+    // 30 s of quiet rail.
+    for _ in 0..(30 * SAMPLES_PER_S) {
+        estimator.update(clock.tick(), sf(PAD_SF), PAD_ASL + noise.next());
+    }
+    let quiet = estimator.launch_pad_altitude_asl();
+    assert!(
+        (quiet - PAD_ASL).abs() < 1.0,
+        "quiet pad read {quiet:.2}m against a true {PAD_ASL}m"
+    );
+
+    // The half second before the motor lights, with the port reading 50 m out.
+    for _ in 0..(DISTURBANCE_S * SAMPLES_PER_S as f32) as usize {
+        estimator.update(
+            clock.tick(),
+            sf(PAD_SF),
+            PAD_ASL + DISTURBANCE_M + noise.next(),
+        );
+    }
+
+    // Motor lights, port still out for the whole 0.1 s the detector sustains
+    // over. Bounded so a detector that never latches fails as a missing
+    // ignition rather than as a hang.
+    let mut i = 0;
+    while matches!(estimator.state(), RocketState::OnPad) {
+        estimator.update(
+            clock.tick(),
+            sf(20.0 * 9.81),
+            PAD_ASL + DISTURBANCE_M + noise.next(),
+        );
+        i += 1;
+        assert!(i < SAMPLES_PER_S, "ignition never latched at 20 g");
+    }
+
+    let latched = estimator.launch_pad_altitude_asl();
+    eprintln!("pad reference at ignition {latched:.2}m, true pad {PAD_ASL}m");
+    assert!(
+        (latched - PAD_ASL).abs() < 1.0,
+        "pad reference {latched:.2}m carries the {DISTURBANCE_M}m disturbance"
+    );
+}
+
 /// Redundant-computer ejection blast during coast (60 ms of readings ~1400 m
 /// low, injected 3 s before apogee): the innovation gate must reject every
 /// sample and apogee detection must not fire early.
@@ -1152,7 +1216,7 @@ fn ignition_comes_from_the_accelerometer_alone() {
     let detected = detect(true).expect("ignition never detected with a healthy IMU");
     eprintln!("ignition detected {:+.3}s after the motor lit", detected - motor_lit);
 
-    // After the motor lit, and quickly — the 5 Hz low pass plus the 0.1 s
+    // After the motor lit, and quickly — the 10 Hz low pass plus the 0.1 s
     // sustain is the whole of the delay.
     assert!(
         detected > motor_lit,

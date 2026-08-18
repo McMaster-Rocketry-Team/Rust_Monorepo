@@ -42,8 +42,8 @@
 //! is worth filtering:
 //!
 //! * **On the pad** there is no filter. The barometer's one job is the pad
-//!   altitude reference, which is a gated low pass over a constant — see
-//!   [`PAD_ALTITUDE_GATE_M`].
+//!   altitude reference, which is a plain mean of one second of readings
+//!   taken a second before the rocket moves — see [`PadReference`].
 //! * **Through the Mach lockout** there is no filter. It is dropped at
 //!   ignition rather than frozen, so no caller can read a pre-ignition
 //!   altitude out of it while the rocket is kilometres away. The raw baro
@@ -105,31 +105,9 @@ const APOGEE_DROP_SUSTAIN_S: f32 = 0.5;
 const LANDED_VELOCITY_THRESHOLD: f32 = 2.0; // m/s
 /// How long the rocket has to stand still before it is considered landed
 const LANDED_DETECTION_S: f32 = 5.0;
-/// Time constant of the launch pad altitude low-pass filter
-const PAD_ALTITUDE_FILTER_TIME_CONSTANT: f32 = 10.0; // s
-/// Input validation for the pad altitude tracker: a reading this far from
-/// the running pad estimate is not the pad.
-///
-/// The tracker used to be fed the deployment KF's output, which meant it
-/// inherited that filter's innovation gate for free. No filter exists on
-/// the pad any more (there is nothing for one to do until the rocket
-/// moves), so the same job is done here directly. It has to be done
-/// somewhere: a bad SPI read decoding to pressure ~0 is a ~30 km reading,
-/// and one of those through a bare 10 s low pass would drag the pad
-/// altitude — the reference every AGL deployment decision is measured
-/// against — by about 7 m.
-///
-/// 100 m rather than the KF's 500 m because this estimate is of something
-/// that is not moving: baro noise on a still pad is under a metre and
-/// weather drift is metres over minutes, so anything at this scale is a
-/// bus fault, not the pad.
-const PAD_ALTITUDE_GATE_M: f32 = 100.0;
-/// ...but a gate that can never be wrong is a trap. If the very first
-/// sample was garbage, the estimate anchors to it and rejects every honest
-/// reading afterwards. Rejecting continuously for this long means the
-/// estimate is what is wrong, so it re-anchors to what the sensor is
-/// actually saying.
-const PAD_ALTITUDE_RESYNC_S: f32 = 1.0;
+/// Length of one pad-reference averaging window (s of measured time). See
+/// [`PadReference`] for why the windows are handed out one behind.
+const PAD_WINDOW_S: f32 = 1.0;
 
 /// Ring of recent raw baro samples kept through the Mach lockout, used for
 /// exactly one thing: picking the altitude the filter is born at when the
@@ -350,21 +328,94 @@ pub enum RocketState {
     FailedToReachMinApogee,
 }
 
+/// The launch pad altitude reference: the mean of one whole
+/// [`PAD_WINDOW_S`] window of barometer, handed out one window late.
+///
+/// This is the only thing the barometer is for before the rocket moves,
+/// and it is not a filter: there is nothing to estimate on a pad but a
+/// constant, and a filter that exists only to smooth one is a filter
+/// somebody can read a velocity out of.
+///
+/// **Handed out one window late** is the whole design. Windows close on
+/// wall clock, and the mean that [`Self::reference_asl`] returns is always
+/// the one before the one that closed most recently — so it covers a full
+/// second that ended between one and two seconds ago, and at the instant
+/// ignition latches it cannot contain a single sample taken within a
+/// second of the motor lighting. Nothing an igniter does to a static port
+/// is in it. That guard is why the previous sample is not simply averaged
+/// up to ignition, and it costs nothing: the rocket sits armed on the rail
+/// for minutes.
+///
+/// **And no gate.** Until 2026-08-18 this was a 10 s low pass behind a
+/// 100 m innovation gate with a 1 s resync, and the gate existed for one
+/// thing — a bad SPI read decoding to pressure ~0, which is a ~30 km
+/// reading. Nothing else can happen to a barometer on a rail: it is not
+/// moving, baro noise is under a metre, and weather drift is metres over
+/// minutes. The gate is gone because a gate on the pad has to solve the
+/// problem it creates — anchor to a garbage first sample and it rejects
+/// every honest reading after it, which is what the resync was for — and
+/// that machinery is a worse thing to own than the fault it catches.
+///
+/// What that trades: one 30 km sample inside a window moves that window's
+/// mean by 30000/416 = ~72 m, where the gated low pass held it to ~7 m.
+/// Every AGL deployment decision is measured against this number. Nothing
+/// in either archived flight log or either simulated Osiris motor contains
+/// such a sample; if one ever appears, the answer is a median of the
+/// window rather than a mean, which rejects nothing and needs no
+/// threshold.
+#[derive(Debug, Clone)]
+struct PadReference {
+    /// The reference itself: the mean of the second-most-recently closed
+    /// window. `None` until two have closed, i.e. for the first ~2 s.
+    reference_asl: Option<f32>,
+    /// The most recently closed window's mean, waiting one window to
+    /// become `reference_asl`.
+    pending_asl: Option<f32>,
+    /// Start of the window currently accumulating. `None` before the first
+    /// sample.
+    window_start_us: Option<u64>,
+    /// Running sum of the current window, in `f64` because it is a sum: 416
+    /// altitudes of ~1000 m accumulated in `f32` can round to metres, and
+    /// this is the number every AGL deployment is measured against.
+    sum: f64,
+    count: u32,
+}
+
+impl PadReference {
+    const fn new() -> Self {
+        Self {
+            reference_asl: None,
+            pending_asl: None,
+            window_start_us: None,
+            sum: 0.0,
+            count: 0,
+        }
+    }
+
+    /// Feed one pad sample. Closes the current window first if this sample
+    /// is past its end, so a window never contains a sample taken after it.
+    fn push(&mut self, timestamp_us: u64, baro_altitude_asl: f32) {
+        let start = *self.window_start_us.get_or_insert(timestamp_us);
+        if (timestamp_us.saturating_sub(start)) as f32 * 1e-6 >= PAD_WINDOW_S && self.count > 0 {
+            self.reference_asl = self.pending_asl;
+            self.pending_asl = Some((self.sum / self.count as f64) as f32);
+            self.window_start_us = Some(timestamp_us);
+            self.sum = 0.0;
+            self.count = 0;
+        }
+        self.sum += baro_altitude_asl as f64;
+        self.count += 1;
+    }
+
+    /// The reference, or `None` while fewer than two windows have closed.
+    fn reference_asl(&self) -> Option<f32> {
+        self.reference_asl
+    }
+}
+
 #[derive(Debug, Clone)]
 enum Stage {
-    OnPad {
-        /// Low-passed launch pad altitude, tracking slow baro drift.
-        /// `None` until the first sample anchors it.
-        ///
-        /// This is the only thing the barometer is for before the rocket
-        /// moves, and it is tracked here rather than by a Kalman filter:
-        /// there is nothing to estimate on a pad but a constant, and a
-        /// filter that exists only to smooth one is a filter somebody can
-        /// read a velocity out of.
-        pad_altitude_asl: Option<f32>,
-        /// How long the pad gate has been rejecting continuously (s).
-        gate_rejected_s: f32,
-    },
+    OnPad { pad: PadReference },
     Ascent {
         launch_pad_altitude_asl: f32,
         /// running maximum of the filtered altitude; apogee is detected when
@@ -449,8 +500,7 @@ impl RocketStateEstimator {
             profile,
             kf: None,
             stage: Stage::OnPad {
-                pad_altitude_asl: None,
-                gate_rejected_s: 0.0,
+                pad: PadReference::new(),
             },
             prev_timestamp_us: None,
             ignition: IgnitionDetector::new(ignition_detection_acc_threshold),
@@ -590,40 +640,16 @@ impl RocketStateEstimator {
         // On the pad, also handled before the stage machine, and for the
         // same reason: no filter exists yet. The barometer's only job here
         // is the pad altitude reference, tracked directly.
-        if let Stage::OnPad {
-            pad_altitude_asl,
-            gate_rejected_s,
-        } = &mut self.stage
-        {
-            // The pad tracker's own gate: same three outcomes, on the low
-            // pass rather than on a KF.
-            let gate = match pad_altitude_asl {
-                // First sample: nothing to compare against, so it IS the pad.
-                None => {
-                    *pad_altitude_asl = Some(baro_altitude_asl);
-                    *gate_rejected_s = 0.0;
-                    BaroGateOutcome::Accepted
-                }
-                Some(pad) if (baro_altitude_asl - *pad).abs() > PAD_ALTITUDE_GATE_M => {
-                    *gate_rejected_s += dt;
-                    if *gate_rejected_s >= PAD_ALTITUDE_RESYNC_S {
-                        log_info!("pad altitude re-anchored to {}m", baro_altitude_asl);
-                        *pad = baro_altitude_asl;
-                        *gate_rejected_s = 0.0;
-                        BaroGateOutcome::Resynced
-                    } else {
-                        BaroGateOutcome::Rejected
-                    }
-                }
-                Some(pad) => {
-                    *gate_rejected_s = 0.0;
-                    let alpha = (dt / PAD_ALTITUDE_FILTER_TIME_CONSTANT).min(1.0);
-                    *pad += alpha * (baro_altitude_asl - *pad);
-                    BaroGateOutcome::Accepted
-                }
-            };
-            // Copied out so the borrow of `self.stage` ends here.
-            let pad = pad_altitude_asl.unwrap_or(baro_altitude_asl);
+        if let Stage::OnPad { pad } = &mut self.stage {
+            // Every sample goes in, ungated — see `PadReference`. Nothing
+            // is fused on the pad, so nothing can be rejected here.
+            pad.push(timestamp_us, baro_altitude_asl);
+            // Copied out so the borrow of `self.stage` ends here. The
+            // fallback is for a launch inside the first two windows, which
+            // means an armed board that has been powered for under two
+            // seconds; the honest degradation is this one reading, not a
+            // number from a window that does not exist.
+            let pad = pad.reference_asl().unwrap_or(baro_altitude_asl);
 
             if accel_says_ignition {
                 log_info!("ignition detected by accel, pad asl={}m", pad);
@@ -645,10 +671,10 @@ impl RocketStateEstimator {
                     // for the reason the lockout exit above is seeded from a
                     // median: a birth reads one number and then defends it
                     // with an innovation gate, so that number must not be
-                    // able to be a single bad SPI read. `pad` has already
-                    // been through PAD_ALTITUDE_GATE_M and a 10 s low pass,
-                    // and on a rocket that has moved centimetres it is the
-                    // better estimate of where the rocket is anyway.
+                    // able to be a single bad SPI read. `pad` is the mean of
+                    // a whole second of them, and on a rocket that has moved
+                    // centimetres it is the better estimate of where the
+                    // rocket is anyway.
                     None => {
                         self.kf = Some(BaroAltitudeKF::new(pad));
                         Stage::Ascent {
@@ -659,7 +685,7 @@ impl RocketStateEstimator {
                     }
                 };
             }
-            return (None, gate);
+            return (None, BaroGateOutcome::Accepted);
         }
 
         // Past the pad and past the lockout, a filter always exists. If it
@@ -912,12 +938,10 @@ impl RocketStateEstimator {
     /// detection.
     pub fn launch_pad_altitude_asl(&self) -> f32 {
         match &self.stage {
-            // Zero before the first sample anchors it; there is genuinely
-            // no reading yet, and every caller of this is on the pad where
-            // that is about to be replaced microseconds later.
-            Stage::OnPad {
-                pad_altitude_asl, ..
-            } => pad_altitude_asl.unwrap_or(0.0),
+            // Zero until the second averaging window closes — for the
+            // first ~2 s there is genuinely no reference yet, and every
+            // caller of this is on the pad where it is about to exist.
+            Stage::OnPad { pad } => pad.reference_asl().unwrap_or(0.0),
             Stage::Ascent {
                 launch_pad_altitude_asl,
                 ..

@@ -538,8 +538,13 @@ pub fn merge_log_records(log: &[ParsedLogRecord]) -> std::vec::Vec<FlightDataRec
 /// Both bits describe **this record's sample**, not a running state: they are
 /// read in the same critical section as the estimator update that produced
 /// them, so a single-sample event cannot be missed or land on the wrong row.
-/// Both read 0 through Mach lockout, where the KF is frozen and nothing is
-/// fused at all — which is also where the altitude and velocity are `None`.
+///
+/// They report one gate — the in-flight KF's — and so read 0 wherever no KF
+/// is fusing anything: through the Mach lockout, which is also where the
+/// altitude and velocity are `None`, and on the pad. The pad altitude
+/// reference had a gate of its own until 2026-08-18, and these bits carried
+/// its verdict while `OnPad`; it is now a plain mean over a window, which
+/// rejects nothing and has nothing to report.
 ///
 /// The deployment KF is the one that fires pyros, so its gate is the first
 /// thing to look at when a deploy went wrong.

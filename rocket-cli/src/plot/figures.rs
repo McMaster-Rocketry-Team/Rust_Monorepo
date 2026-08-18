@@ -791,8 +791,9 @@ impl<'a> Renderer<'a> {
                 // The reference the other two figures subtract. Flat for the
                 // whole flight by construction — it is latched at ignition —
                 // so what this panel is really for is the pad segment in front
-                // of T+0, where the low pass is still settling, and for reading
-                // any AGL number on the other figures back to ASL.
+                // of T+0, where it steps once per averaging window (and reads
+                // 0 until the second window closes), and for reading any AGL
+                // number on the other figures back to ASL.
                 "Launch pad altitude (AGL reference)",
                 "m ASL",
                 vec![

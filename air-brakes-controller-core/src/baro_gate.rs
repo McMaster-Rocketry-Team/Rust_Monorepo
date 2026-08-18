@@ -5,9 +5,13 @@
 //! return value of the update, all the way out through
 //! [`FlightEstimators::update`], and is stored nowhere.
 //!
-//! The deployment estimator is the only one that gates now. The airbrakes
-//! filter did until 2026-08-18, which is why this type reads as if it were
-//! shared: it was. That filter is born subsonic and after burnout and retired
+//! The deployment estimator's in-flight KF is the only thing that gates
+//! now. The airbrakes filter did until 2026-08-18, which is why this type
+//! reads as if it were shared: it was. So did the deployment half's own pad
+//! altitude reference, on the same day it stopped being a low pass and
+//! became a plain windowed mean — an average rejects nothing, so there is
+//! nothing for it to report, and every sample on the pad now returns
+//! `Accepted`. That filter is born subsonic and after burnout and retired
 //! at apogee, so it lives in the one window with no shock front ahead of the
 //! static ports and no charge fired behind them — nothing it can see is what
 //! a gate is for. The deployment filter flies pad to landing through both.
