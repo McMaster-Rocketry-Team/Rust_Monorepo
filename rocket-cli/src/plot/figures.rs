@@ -413,7 +413,7 @@ impl<'a> Renderer<'a> {
         // re-derivation from the filter's altitude and velocity, because the
         // Mach term needs a config constant the log does not carry.
         let brakes_spans = log
-            .column("airbrakes_mpc_permitted")
+            .column("airbrakes_enabled")
             .map(|flag| true_spans(&times, flag, window.start, window.end))
             .unwrap_or_default();
 

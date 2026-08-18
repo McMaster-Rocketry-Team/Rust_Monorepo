@@ -74,12 +74,12 @@ pub struct AirbrakesEstimatorRecord {
     /// Estimator altitude ASL (m). `None` until it has a value.
     pub kf_altitude_asl: Option<f32>,
     /// Estimator vertical velocity (m/s). `None` until its vertical filter is
-    /// born (`AIRBRAKES_BARO_TRUSTED`).
+    /// born (`AIRBRAKES_ENABLED`).
     pub kf_vertical_velocity: Option<f32>,
     /// Tilt from vertical (deg). `None` before ignition.
     pub kf_tilt_deg: Option<f32>,
     /// Status bits (`AIRBRAKES_*` consts): drag check, burnout latch,
-    /// filter-born, apogee, and what its baro innovation gate did with THIS
+    /// brakes-enabled, and what its baro innovation gate did with THIS
     /// sample.
     pub flags: u8,
 }
@@ -517,7 +517,7 @@ pub const AIRBRAKES_SUBSONIC_DRAG: u8 = 1 << 0;
 /// altitude. Per-sample, like the `DEPLOYMENT_*` pair above, so a run of set
 /// bits is one rejection episode — an ejection transient, or a port the shock
 /// front has disturbed. Only ever set while the vertical filter exists
-/// (`AIRBRAKES_BARO_TRUSTED`).
+/// (`AIRBRAKES_ENABLED`).
 pub const AIRBRAKES_BARO_GATE_REJECT: u8 = 1 << 2;
 /// The axial-sign burnout latch has fired: the motor is out and the drag
 /// channel is honest. Nothing can birth the vertical filter before this, on
@@ -525,8 +525,20 @@ pub const AIRBRAKES_BARO_GATE_REJECT: u8 = 1 << 2;
 /// never opened because the motor never looked out" from "because the drag
 /// check never passed".
 pub const AIRBRAKES_BURNOUT: u8 = 1 << 1;
-/// The vertical filter is born (baro trusted; MPC state is live).
-pub const AIRBRAKES_BARO_TRUSTED: u8 = 1 << 3;
+/// The brakes may open, and will be allowed to for the rest of the flight.
+///
+/// The airbrakes estimator's last state: motor out, drag check (or the T_max
+/// backstop) passed, vertical filter alive and fusing the baro, and the
+/// airframe under `max_open_mach` when it got there. One-way — there is no
+/// transition out of it, only the estimator being dropped whole at apogee,
+/// which shows up as the whole airbrakes group going absent.
+///
+/// This was `AIRBRAKES_BARO_TRUSTED` beside a separate
+/// `AIRBRAKES_MPC_PERMITTED` until 2026-08-18, when the Mach limit moved from
+/// a downstream per-sample gate to a condition of entering the state. The two
+/// bits could differ only because the second could withdraw itself; now they
+/// are the same fact.
+pub const AIRBRAKES_ENABLED: u8 = 1 << 3;
 /// This sample ended a rejection run by re-anchoring: altitude snapped to the
 /// baro and velocity uncertainty was re-opened. Set together with
 /// `AIRBRAKES_BARO_GATE_REJECT`. A run that ends without this bit is the gate
@@ -543,19 +555,7 @@ pub const AIRBRAKES_BARO_RESYNC: u8 = 1 << 4;
 /// stay set; it is re-derived every 2 s and CAN drop if the airframe is
 /// picked up or turned.
 pub const AIRBRAKES_PAD_CALIBRATED: u8 = 1 << 5;
-/// The brakes were permitted to open on this sample: the airbrakes filter is
-/// alive, its barometer is trusted, and its own velocity is below
-/// `max_open_mach` of the local speed of sound. This is the MPC's run/stop
-/// condition, logged per sample.
-///
-/// The only bit here that is a decision rather than an observation, and it is
-/// stored rather than re-derived because it cannot be re-derived: the Mach
-/// term compares against a config constant and a speed of sound computed from
-/// the filter's own altitude, neither of which is in the log. The first row it
-/// is set on is the instant the control loop was allowed to start; a run of
-/// clear rows in the middle of the coast is the gate having closed again.
-pub const AIRBRAKES_MPC_PERMITTED: u8 = 1 << 6;
-// bit 7 unallocated.
+// bits 6-7 unallocated.
 
 pub const PYRO_MAIN_CONTINUITY: u8 = 1 << 0;
 pub const PYRO_MAIN_FIRE: u8 = 1 << 1;

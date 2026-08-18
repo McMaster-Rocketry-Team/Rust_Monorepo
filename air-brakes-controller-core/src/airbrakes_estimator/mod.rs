@@ -10,6 +10,26 @@
 //! ("born subsonic" — no state that existed during the garbage period
 //! survives into the filter).
 //!
+//! # Three states, and it only walks forward
+//!
+//! `Armed` -> `Ignition` -> `AirbrakesEnabled`. Nothing goes back, nothing
+//! skips, and there is no fourth: the estimator's life ends by being dropped
+//! whole at apogee, not by transitioning. Armed screens the pad for a
+//! calibration and watches for ignition; Ignition solves the mounting from
+//! the first half second of thrust and then dead-reckons through boost and
+//! the Mach lockout; AirbrakesEnabled is the vertical filter running, and the
+//! brakes permitted to open, until the drop.
+//!
+//! Everything that decides whether the brakes may open is therefore a
+//! transition condition, not a live one. That is the point rather than a
+//! detail of the encoding: the Mach limit used to be re-tested downstream on
+//! every sample against the filter's own velocity, and so could withdraw a
+//! permission it had already granted — the filter's birth transient did
+//! exactly that, shutting the brakes 25 ms after opening them and reopening
+//! them 170 ms later. Asked once, on the way in, of the dead-reckoned
+//! velocity the filter is about to be born with, it answers the question it
+//! exists for and cannot be re-answered by a filter that is briefly wrong.
+//!
 //! # The lockout exit is one measurement
 //!
 //! In free flight the accelerometer measures specific force, which

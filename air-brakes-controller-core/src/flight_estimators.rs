@@ -48,7 +48,6 @@ use nalgebra::Vector2;
 use crate::airbrakes_estimator::{AirbrakesConfig, AirbrakesEstimator, ImuSample};
 use crate::baro_gate::BaroGateOutcome;
 use crate::baro_state_estimator::{FlightProfile, RocketState, RocketStateEstimator};
-use crate::utils::approximate_speed_of_sound;
 
 /// The MPC's input state, handed out by
 /// [`FlightEstimators::airbrakes_mpc_states`] exactly when the airbrakes
@@ -207,14 +206,6 @@ impl FlightEstimators {
             }
         }
 
-        // Read here, off the post-retirement state, so the logged bit is the
-        // same answer the caller is about to get from `airbrakes_mpc_states`
-        // for this tick. Asking the gate rather than re-deriving its terms is
-        // the point: the permission is a decision with three parts and a
-        // config constant in it, and a log that stored the parts would leave
-        // the reader to re-implement the `and`.
-        let mpc_permitted = self.airbrakes_mpc_states().is_some();
-
         // (d) The log sample, built AFTER retirement so that the sample the
         // airbrakes half is dropped on already reports the whole airbrakes
         // group absent — the same instant the SD record and the downlink go
@@ -230,10 +221,9 @@ impl FlightEstimators {
                 tilt_rad: ab.tilt(),
                 subsonic_by_drag: ab.subsonic_by_drag(),
                 burnout_detected: ab.burnout_detected(),
-                baro_trusted: ab.baro_trusted(),
+                airbrakes_enabled: ab.airbrakes_enabled(),
                 baro_gate: airbrakes_baro_gate,
                 calibration_complete: ab.calibration_complete(),
-                mpc_permitted,
             }),
         };
 
@@ -245,50 +235,33 @@ impl FlightEstimators {
     /// "permitted but no state" cannot be expressed — the MPC's run/stop
     /// condition and its state source are the same value.
     ///
-    /// The gate, in order:
+    /// Two clauses, and neither is decided here:
     /// * the airbrakes half has not been retired — everything about *when
-    ///   the window ends* lives in [`Self::update`], not here;
-    /// * the filter is alive — baro trusted, and its altitude and velocity
-    ///   exist. "Never under thrust" is folded into this: the filter cannot
-    ///   be born before the estimator's own axial-sign burnout latch, on
-    ///   either the supersonic or the subsonic path, so a separate coasting
-    ///   clause would be redundant;
-    /// * vertical velocity at most the airframe's configured
-    ///   [`max_open_mach`] of the local speed of sound at the filter's own
-    ///   altitude — the same Mach the lockout-exit drag check votes at, read
-    ///   back out of the airbrakes half because this gate carries no config
-    ///   of its own.
+    ///   the window ends* lives in [`Self::update`];
+    /// * the half is in its last state, which is what
+    ///   [`AirbrakesEstimator::airbrakes_enabled`] reports and what
+    ///   `altitude_asl` and `velocity` being present already imply.
     ///
-    /// That last clause is normally slack: the check needs 1 s of sustain
-    /// and cannot speak before `earliest_subsonic_after_ignition_us`, so
-    /// birth lands well under the threshold rather than at it (Osiris 0.749,
-    /// LC'25 0.732). It earns its place on a Cd model that overestimates
-    /// drag, where the inverted airspeed reads low and births the filter
-    /// early — measured at Mach 0.887 on an LC'25 replay with a 2x Cd error.
-    /// The dead reckoner behind this clause does not depend on Cd, which is
-    /// why it can disagree with the check at all.
+    /// Everything the permission depends on — motor out, drag check passed,
+    /// filter alive, airframe under `max_open_mach` — was decided on the way
+    /// into that state and cannot be revisited from here. This function used
+    /// to re-derive the last of those every sample from the filter's own
+    /// velocity, which meant the permission could withdraw itself: the
+    /// filter's birth transient threw its velocity over the Mach limit for
+    /// 170 ms and shut the brakes after they had opened. A test that can
+    /// only be answered by a filter that is briefly wrong belongs at the
+    /// transition, where the estimator now asks it once.
     ///
-    /// Every clause here is evaluated on the airbrakes filter's OWN state —
-    /// never the slow filter's, which may be frozen (Mach lockout) or
-    /// lagging hundreds of metres during coast. Any clause failing yields
-    /// `None`: the brakes stay shut.
+    /// So the window is opened by the airbrakes half and closed by
+    /// retirement, and nothing in between can narrow it.
     ///
-    /// [`max_open_mach`]: crate::airbrakes_estimator::AirbrakesConfig::max_open_mach
+    /// [`AirbrakesEstimator::airbrakes_enabled`]:
+    ///     crate::airbrakes_estimator::AirbrakesEstimator::airbrakes_enabled
     pub fn airbrakes_mpc_states(&self) -> Option<AirbrakesMPCStates> {
         let airbrakes = self.airbrakes.as_ref()?;
-        if !airbrakes.baro_trusted() {
-            return None;
-        }
-        let altitude_asl = airbrakes.altitude_asl()?;
-        let velocity = airbrakes.velocity()?;
-
-        if velocity.y > airbrakes.max_open_mach() * approximate_speed_of_sound(altitude_asl) {
-            return None;
-        }
-
         Some(AirbrakesMPCStates {
-            altitude_asl,
-            velocity,
+            altitude_asl: airbrakes.altitude_asl()?,
+            velocity: airbrakes.velocity()?,
         })
     }
 
@@ -373,7 +346,16 @@ pub struct AirbrakesLogSample {
     pub tilt_rad: Option<f32>,
     pub subsonic_by_drag: Option<bool>,
     pub burnout_detected: bool,
-    pub baro_trusted: bool,
+    /// The brakes may open, and will be allowed to for the rest of the
+    /// flight — the airbrakes half has reached its last state.
+    ///
+    /// One bit rather than the two it replaced. It used to be `baro_trusted`
+    /// (the filter exists) beside a separately-logged `mpc_permitted` (the
+    /// filter exists AND the airframe is under `max_open_mach` right now),
+    /// which could differ because the second was recomputed every sample and
+    /// could withdraw itself. Now the Mach limit is a condition of entering
+    /// the state, so the two are the same fact and there is one bit for it.
+    pub airbrakes_enabled: bool,
     /// No `is_apogee` twin: the airbrakes half has no apogee state to report
     /// from. It is retired at apogee instead (see
     /// [`FlightEstimators::update`]), and this whole struct goes absent on
@@ -392,17 +374,6 @@ pub struct AirbrakesLogSample {
     /// [`AirbrakesEstimator::calibration_complete`]:
     ///     crate::airbrakes_estimator::AirbrakesEstimator::calibration_complete
     pub calibration_complete: bool,
-    /// The brakes are permitted to open on this sample — exactly
-    /// [`FlightEstimators::airbrakes_mpc_states`] being `Some`.
-    ///
-    /// The one flag here that is a *decision* rather than an observation, and
-    /// the reason it is logged separately from the three conditions behind it:
-    /// two of them (filter alive, baro trusted) are already bits of their own,
-    /// but the third is a comparison against `max_open_mach` times a speed of
-    /// sound computed from the filter's own altitude, which no reader could
-    /// reconstruct from the log without also knowing the config. Without this
-    /// bit "why did the brakes not open here" is unanswerable offline.
-    pub mpc_permitted: bool,
 }
 
 #[cfg(test)]

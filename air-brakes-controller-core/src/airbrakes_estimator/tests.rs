@@ -658,7 +658,7 @@ fn short_pad_refuses_ignition() {
         );
     }
     assert!(estimator.birth().is_none(), "filter born without calibration");
-    assert!(!estimator.baro_trusted());
+    assert!(!estimator.airbrakes_enabled());
     assert!(estimator.altitude_asl().is_none(), "left the pad state");
     assert!(!estimator.ignition_latched());
     assert!(estimator.velocity().is_none(), "handed out an MPC velocity");

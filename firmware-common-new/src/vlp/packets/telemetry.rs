@@ -218,8 +218,8 @@ pub struct TelemetryPacket {
     /// estimator refuses to detect ignition without a calibration, so a
     /// rocket sitting on the rail with this clear will fly with no airbrakes
     /// and nothing else in the downlink will say so — `airbrakes_born` is
-    /// sourced from `baro_trusted`, which cannot go true until after the Mach
-    /// lockout. Treat it as a go/no-go item.
+    /// sourced from `airbrakes_enabled`, which cannot go true until after the
+    /// Mach lockout. Treat it as a go/no-go item.
     ///
     /// It is re-derived every 2 s from the last minute of pad data and can go
     /// back to false, so it reports the pad as it is NOW rather than latching

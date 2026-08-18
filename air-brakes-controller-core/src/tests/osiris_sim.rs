@@ -768,7 +768,7 @@ fn replay(samples: &[Sample], config: FlightConfig, target_apogee_asl: f32) -> R
             {
                 out.birth = Some(((born_us as f32) * 1e-6 - samples[0].truth_t.abs(), forced));
             }
-            if !ab.baro_trusted() && out.birth.is_none() && t > 0.0 {
+            if !ab.airbrakes_enabled() && out.birth.is_none() && t > 0.0 {
                 let err = (s.baro_altitude_asl - s.truth.altitude_asl).abs();
                 out.worst_baro_error_in_lockout = out.worst_baro_error_in_lockout.max(err);
             }
