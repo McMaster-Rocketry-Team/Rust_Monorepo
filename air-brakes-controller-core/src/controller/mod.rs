@@ -83,15 +83,21 @@ impl AirBrakesMPC {
             .parameters
             .drag_percentage_to_extension_percentage(drag_percentage);
 
-        // Predict at the drag the COMMANDED extension actually delivers, not
-        // at the bisection's ideal. The conversion above clamps to [0,1], and
-        // a clamped command is exactly the case worth seeing on the ground:
-        // it means the target is out of reach and by how much.
-        let predicted_apogee_asl = simulate_apogee_rk2(
-            drag_percentage.clamp(0.0, 1.0),
-            &initial_state,
-            &self.parameters,
-        );
+        // Predict at the drag the COMMANDED extension actually delivers, so a
+        // command pinned at a rail reads on the ground as a visible miss
+        // rather than as target-equals-prediction. No clamp is needed or
+        // wanted: `drag_percentage` is a convex combination of two bracket
+        // ends that never leave [-1, 1], and
+        // `drag_percentage_to_extension_percentage` inverts this very cd, so
+        // the reported apogee and the commanded extension agree by
+        // construction.
+        //
+        // This used to clamp to [0, 1] -- the *extension* range applied to the
+        // drag axis. Every command below neutral, i.e. anything under ~60%
+        // extension, was then reported at drag 0.0: ask for stowed flaps and
+        // the downlink answered with the apogee for 60% flaps.
+        let predicted_apogee_asl =
+            simulate_apogee_rk2(drag_percentage, &initial_state, &self.parameters);
 
         MpcSolution {
             extension_percentage,
@@ -152,6 +158,30 @@ impl RocketParameters {
             (drag_percentage + 1.0) / 2.0,
             &[self.cd[0], self.cd[self.cd.len() - 1]],
         )
+    }
+
+    /// cd at a physical extension percentage, 0.0 (stowed) - 1.0 (full).
+    ///
+    /// The five-point table walked directly, so unlike
+    /// [`Self::get_cd_from_drag_percentage`] this sees the interior entries.
+    /// The two agree wherever they meet:
+    /// `get_cd_from_extension_percentage(drag_percentage_to_extension_percentage(d))`
+    /// is `get_cd_from_drag_percentage(d)` by construction, because the
+    /// conversion inverts this very interpolation.
+    fn get_cd_from_extension_percentage(&self, extension_percentage: f32) -> f32 {
+        lerp(extension_percentage.clamp(0.0, 1.0), &self.cd)
+    }
+
+    /// The extension the apogee simulation's terminal policy holds: drag 0.0,
+    /// half the brakes' full drag contribution.
+    ///
+    /// Not 50% of the stroke. cd rises faster the further the flaps come out
+    /// -- +0.085 over VLF5's first quarter of travel against +0.158 over its
+    /// last -- so the half-drag point sits at ~60% extension on that airframe
+    /// and ~58% on the single-flap one. It is whatever the table's curvature
+    /// puts it at, not a chosen number.
+    fn neutral_extension_percentage(&self) -> f32 {
+        self.drag_percentage_to_extension_percentage(0.0)
     }
 
     /// drag percentage: -1.0 - 1.0

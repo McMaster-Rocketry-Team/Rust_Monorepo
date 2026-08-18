@@ -10,10 +10,28 @@ pub fn calculate_state_derivatives(
     state: &State,
     rocket_param: &RocketParameters,
 ) -> Derivative<State> {
+    calculate_state_derivatives_at_cd(
+        rocket_param.get_cd_from_drag_percentage(air_brakes_drag_percentage),
+        state,
+        rocket_param,
+    )
+}
+
+/// The same dynamics with cd already resolved.
+///
+/// [`simulate_apogee_rk2`] holds cd fixed across both stages of an RK2 step and
+/// changes it only while the modelled servo is moving -- a handful of steps out
+/// of a coast that runs to a couple of hundred -- so resolving it per step
+/// instead of per derivative evaluation halves the interpolation work on the
+/// hot path and lets the tail run with no interpolation at all.
+fn calculate_state_derivatives_at_cd(
+    cd: f32,
+    state: &State,
+    rocket_param: &RocketParameters,
+) -> Derivative<State> {
     let air_density = approximate_air_density(state.altitude_asl);
 
     let speed_squared = state.velocity.magnitude_squared();
-    let cd = rocket_param.get_cd_from_drag_percentage(air_brakes_drag_percentage);
     // Drag acceleration is -(v/|v|) * k*|v|^2, which is just -k*|v|*v. Written
     // that way it costs one sqrt and a scalar multiply; written with
     // `normalize()` it cost a sqrt plus two divides, and nalgebra's sqrt comes
@@ -44,13 +62,72 @@ pub fn calculate_state_derivatives(
 /// finiteness check below does not catch still terminates.
 const MAX_APOGEE_STEPS: usize = 2000;
 
-// use rk2 to simulate the rocket until apogee
-// apogee is when the vertical velocity <= 0
-// in the first timestep, use first_tick_air_brakes_extension
-// in all the following timestep, use 0.0 as air brakes extension
-// returns the apogee altitude ASL (m)
+/// How many 0.1 s steps the solver holds its candidate before letting the
+/// modelled servo retract to the neutral tail.
+///
+/// FDR section 16.7.4.2's rule 1 is a single tick, which is the right model for
+/// an instantaneous actuator. Icarus's servo is not one. Measured off both
+/// transitions in VLF5's HIL log -- the deploy at 236.534 s and the retract at
+/// 258.336 s, which agree to 1% -- it takes 25.8 ms of dead time and then
+/// 0.376 s of slew at 2.67 /s to cross the full stroke: 0.40 s, four MPC
+/// ticks. A command issued now is therefore still in transit four ticks later,
+/// and the receding horizon re-issues it on every one of them. Holding the
+/// candidate for the stroke time is what the plant does with a command; holding
+/// it for one tick is what nothing does.
+///
+/// Against the one-tick hold, simulated on the rate-limited plant from the
+/// LC'25 birth state: apogee tracking is unchanged -- 0.00 m at every reachable
+/// target tried, with the plant's cd perturbed +/-10% and from a late gate --
+/// commanded servo travel over a flight falls about 30%, and the spread between
+/// the bisection's two rails widens from 10.3 m to 30.2 m, which is the signal
+/// the final interpolation resolves the command out of.
+///
+/// Feeding the servo's *measured* extension into the prediction was tried
+/// instead and rejected: it closes a loop from servo position to command that
+/// the one-tick horizon cannot damp, and multiplied commanded travel by 10-20x
+/// for no tracking gain.
+const CANDIDATE_HOLD_STEPS: usize = 4;
+
+/// Extension the modelled servo covers in one step on its way back to neutral.
+///
+/// The full stroke is [`CANDIDATE_HOLD_STEPS`] steps by definition of that
+/// constant, so one step is that fraction of it. This makes the handover as
+/// long as the travel demands rather than a fixed number of steps: from full
+/// deploy the flaps reach neutral in two steps, from stowed in three.
+const RETRACT_PER_STEP: f32 = 1.0 / CANDIDATE_HOLD_STEPS as f32;
+
+/// RK2 the rocket to apogee -- the first step where v_y <= 0 -- and return
+/// that altitude, ASL (m).
+///
+/// The schedule below is FDR section 16.7.4.2's optimal extension sequence, and
+/// every number in it is a *drag* percentage (-1 stowed, +1 full), never an
+/// extension percentage. The two are different axes; see
+/// [`RocketParameters::get_cd_from_drag_percentage`].
+///
+/// - steps 0..CANDIDATE_HOLD_STEPS: the candidate the solver is testing
+///   (the report's rule 1, stretched to the servo's stroke time -- see that
+///   constant)
+/// - then the flaps retract to neutral at the servo's rate, in *extension*,
+///   which is where the rate limit physically lives (rule 3's intermediate
+///   ticks, as many as the travel needs rather than a single half-drag step)
+/// - once neutral: drag 0.0, held all the way to apogee (rule 2)
+///
+/// Drag 0.0 is **not** stowed. It is the neutral position -- half the brakes'
+/// full drag contribution, ~60% extension on VLF5's cd table -- and the report
+/// picks it deliberately: parked mid-authority, a later disturbance can be
+/// answered by adding drag or by giving drag back, in equal measure. A stowed
+/// tail has nothing to give back, and a tail above neutral has less room to
+/// brake; both are rejected by name in the sequence table.
+///
+/// Two consequences to know before reading the number this returns:
+/// - it means "apogee if I fly neutral from here", which is the report's
+///   *nominal apogee*, not a forecast of where the rocket ends up;
+/// - only the held steps differ between candidates, so sweeping the whole
+///   [-1, +1] range moves the answer ~30 m against ~330 m of real brake
+///   authority. The loop closes by re-solving every tick, not by this
+///   gradient.
 pub fn simulate_apogee_rk2(
-    first_tick_air_brakes_drag_percentage: f32,
+    candidate_air_brakes_drag_percentage: f32,
     initial_state: &State,
     rocket_param: &RocketParameters,
 ) -> f32 {
@@ -78,24 +155,27 @@ pub fn simulate_apogee_rk2(
 
     let mut state = initial_state.clone();
 
-    for step_index in 0..MAX_APOGEE_STEPS {
-        let air_brakes_drag_percentage = match step_index {
-            0 => first_tick_air_brakes_drag_percentage,
-            1 => first_tick_air_brakes_drag_percentage / 2.0,
-            _ => 0.0,
-        };
+    // The schedule, carried as an extension rather than as a drag percentage.
+    // The retract is rate limited, and the rate limit lives in the linkage, so
+    // it is linear in extension and not in drag: ramping the drag percentage
+    // instead would walk the flaps back along the wrong curve, slowly at the
+    // deployed end where cd changes fastest. Both coordinates agree at the
+    // ends, so the held steps are unchanged -- only the handover moves.
+    let neutral_extension = rocket_param.neutral_extension_percentage();
+    let mut extension = rocket_param
+        .drag_percentage_to_extension_percentage(candidate_air_brakes_drag_percentage);
+    let mut cd = rocket_param.get_cd_from_extension_percentage(extension);
 
+    for step_index in 0..MAX_APOGEE_STEPS {
         // RK2 (midpoint) integration
-        let Derivative(k1) =
-            calculate_state_derivatives(air_brakes_drag_percentage, &state, rocket_param);
+        let Derivative(k1) = calculate_state_derivatives_at_cd(cd, &state, rocket_param);
 
         let mid_state = State {
             altitude_asl: state.altitude_asl + k1.altitude_asl * (0.5 * DT),
             velocity: state.velocity + k1.velocity * (0.5 * DT),
         };
 
-        let Derivative(k2) =
-            calculate_state_derivatives(air_brakes_drag_percentage, &mid_state, rocket_param);
+        let Derivative(k2) = calculate_state_derivatives_at_cd(cd, &mid_state, rocket_param);
 
         let next_state = State {
             altitude_asl: state.altitude_asl + k2.altitude_asl * DT,
@@ -141,6 +221,21 @@ pub fn simulate_apogee_rk2(
         }
 
         state = next_state;
+
+        // Step the servo for the next step. Exact assignment on arrival, so
+        // the comparison above stops the interpolation for good rather than
+        // creeping on float residue.
+        if step_index + 1 >= CANDIDATE_HOLD_STEPS && extension != neutral_extension {
+            let remaining = neutral_extension - extension;
+            extension = if remaining.abs() <= RETRACT_PER_STEP {
+                neutral_extension
+            } else if remaining > 0.0 {
+                extension + RETRACT_PER_STEP
+            } else {
+                extension - RETRACT_PER_STEP
+            };
+            cd = rocket_param.get_cd_from_extension_percentage(extension);
+        }
     }
 
     // Step cap exhausted: 200 s of simulated coast without v_y reaching zero.
@@ -153,6 +248,8 @@ pub fn simulate_apogee_rk2(
 #[cfg(test)]
 mod test {
     use nalgebra::Vector2;
+
+    use approx::assert_relative_eq;
 
     use crate::{controller::AirBrakesMPC, tests::init_logger};
 
@@ -188,6 +285,83 @@ mod test {
         );
         log_info!("straight {straight}, tilted {tilted}");
         assert!(tilted < straight - 100.0);
+    }
+
+    /// VLF5's hil-dual airframe at the LC'25 airbrakes birth state.
+    fn vlf5() -> (RocketParameters, State) {
+        (
+            RocketParameters {
+                burnout_mass: 18.696,
+                cd: [0.61365, 0.69816, 0.8084, 0.96641, 1.12441],
+                reference_area: 0.009854945,
+            },
+            State {
+                altitude_asl: 6802.0474,
+                velocity: Vector2::new(31.1866, 244.46007),
+            },
+        )
+    }
+
+    /// The bisection in `AirBrakesMPC::update` is only valid because apogee
+    /// falls monotonically as the candidate's drag rises -- FDR section
+    /// 16.7.4.3 rests the whole solver on it. Holding the candidate for the
+    /// servo stroke rather than one tick must not break that.
+    #[test]
+    fn apogee_is_strictly_decreasing_in_drag_percentage() {
+        init_logger();
+        let (rocket, state) = vlf5();
+
+        let mut previous = f32::INFINITY;
+        for i in 0..=40 {
+            let drag = -1.0 + 2.0 * (i as f32) / 40.0;
+            let apogee = simulate_apogee_rk2(drag, &state, &rocket);
+            assert!(
+                apogee < previous,
+                "apogee {apogee} at drag {drag} did not fall below {previous}"
+            );
+            previous = apogee;
+        }
+
+        let spread =
+            simulate_apogee_rk2(-1.0, &state, &rocket) - simulate_apogee_rk2(1.0, &state, &rocket);
+        log_info!("rail-to-rail spread {spread} m");
+        // One tick of hold gave 10.3 m here, which is what the final
+        // interpolation has to resolve a command out of. The stroke-length
+        // hold roughly triples it.
+        assert!(spread > 25.0, "rail-to-rail spread collapsed to {spread} m");
+    }
+
+    /// `predicted_apogee_asl` must describe the extension actually commanded.
+    ///
+    /// It used to clamp the drag percentage to [0, 1] -- the *extension*
+    /// range applied to the drag axis -- so every command below neutral was
+    /// reported at drag 0.0. Asking for stowed flaps came back with the
+    /// apogee for ~60% flaps.
+    #[test]
+    fn predicted_apogee_belongs_to_the_commanded_extension() {
+        init_logger();
+        let (rocket, state) = vlf5();
+
+        // Far above anything this coast can reach, so the solve stows.
+        let solution = AirBrakesMPC::new(rocket.clone(), 20000.0)
+            .update(state.altitude_asl, state.velocity);
+        assert!(
+            solution.extension_percentage < 1e-6,
+            "expected a stowed command, got {}",
+            solution.extension_percentage
+        );
+
+        let stowed = simulate_apogee_rk2(-1.0, &state, &rocket);
+        let neutral = simulate_apogee_rk2(0.0, &state, &rocket);
+        log_info!(
+            "reported {}, stowed {stowed}, neutral {neutral}",
+            solution.predicted_apogee_asl
+        );
+        assert_relative_eq!(solution.predicted_apogee_asl, stowed, epsilon = 1e-2);
+        assert!(
+            (solution.predicted_apogee_asl - neutral).abs() > 1.0,
+            "reported apogee is still the neutral-tail number"
+        );
     }
 
     /// A pathological horizontal velocity must terminate, and must not come

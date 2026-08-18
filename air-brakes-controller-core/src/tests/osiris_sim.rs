@@ -1286,11 +1286,14 @@ fn nominal_o3400_flight() {
     // again by apogee.
     assert!(open >= born, "gate opened at {open}s, before birth at {born}s");
     assert!(close <= apogee_t + 0.5, "gate still open at {close}s, past apogee");
-    // Command profile. The MPC predicts apogee for "brake for one 0.1 s
-    // tick, then coast stowed", so one tick is worth a couple of metres and
-    // the solution is necessarily bang-bang: hold full extension until the
-    // stowed-from-here prediction has fallen to the target, then modulate
-    // off. What has to be true is that it does both.
+    // Command profile. The MPC predicts apogee for "brake for the servo's
+    // stroke time, half-brake one tick, then hold neutral" -- neutral being
+    // drag 0.0, ~60% extension, not stowed, and the hold being
+    // `CANDIDATE_HOLD_STEPS`. That is worth tens of metres against a coast of
+    // hundreds, so while the target is out of reach the solve simply
+    // saturates: hold full extension until the prediction has fallen to the
+    // target, then modulate off toward the neutral the tail already assumes.
+    // What has to be true is that it does both.
     let samples_at: Vec<String> = [0.0f32, 2.0, 5.0, 10.0, 15.0, 19.0]
         .iter()
         .filter_map(|dt| {
