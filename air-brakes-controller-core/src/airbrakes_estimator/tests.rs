@@ -604,8 +604,8 @@ fn lc25_clipped_accel_replay() {
     );
 
     // Within 5 s of birth the baro must have pulled vv to within 15 m/s
-    // of the honest reference (the born/reanchor velocity variance is
-    // what makes this fast).
+    // of the honest reference (the birth velocity variance is what makes
+    // this fast).
     let check_t = birth_t + 5_000_000;
     let check_i = rows.iter().position(|r| r.timestamp_us > check_t).unwrap();
     let vv_est = result
@@ -1197,8 +1197,8 @@ fn forced_birth_backstop_flies_the_rest_of_the_flight() {
     );
     // Altitude at a forced birth comes from the same 9-sample baro median as
     // any other birth, so it must land on the barometer immediately —
-    // measured 0.07 m out. 20 m is the ejection-blast-free slack the
-    // innovation gate itself works in.
+    // measured 0.07 m out. 20 m is loose enough that this is a check on the
+    // median and not on baro noise.
     assert!(
         (alt_half - rows[i_half].altitude_asl).abs() < 20.0,
         "altitude {alt_half} is {:.1} m off the raw baro {:.1} half a second after a \

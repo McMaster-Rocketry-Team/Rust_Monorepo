@@ -1,21 +1,5 @@
 use nalgebra::{Matrix2, Vector2};
 
-use crate::baro_gate::BaroGateOutcome;
-
-/// Innovation gate on the baro channel: reject a (port-corrected) baro
-/// altitude whose disagreement with the prediction exceeds this. Genuine
-/// disagreement stays small once the filter is running; anything this
-/// large is an ejection-blast transient or bus garbage.
-const ALT_INNOVATION_GATE_M: f32 = 100.0;
-/// If the baro disagrees continuously for this long (s), the filter is
-/// wrong, not the baro — re-anchor to the baro. Unlike a plain
-/// force-accept, `reanchor` re-opens the VELOCITY channel too (red-team
-/// finding: snapping only altitude leaves a velocity error alive forever).
-const MAX_REJECTED_S: f32 = 2.0;
-/// Velocity std-dev added on every re-anchor so the next seconds of baro
-/// pull velocity back quickly.
-const REANCHOR_VELOCITY_STD: f32 = 20.0;
-
 /// The v2 vertical channel: a plain linear 2-state Kalman filter
 /// [altitude ASL, vertical velocity], constructed only once the baro is
 /// trusted ("born subsonic" — see the plan doc). Predicts with the
@@ -23,6 +7,17 @@ const REANCHOR_VELOCITY_STD: f32 = 20.0;
 /// corrects with port-corrected baro altitude. Linear, 2x2, no Jacobians,
 /// no cross-covariance path into attitude — that whole bug class from the
 /// v1 EKF cannot be expressed here.
+///
+/// Every baro sample is fused; there is no innovation gate. One stood here
+/// until 2026-08-18, rejecting altitudes more than 100 m from the prediction
+/// and re-anchoring after 2 s of continuous disagreement. What it was built
+/// for was an ejection-blast transient or a shock-disturbed static port, and
+/// this filter cannot meet either: it is born subsonic and after burnout, and
+/// it is retired at apogee, so its whole life is the one window of the flight
+/// with no shock front ahead of the ports and no charge fired behind them.
+/// A gate that cannot fire is not free — it is a threshold, a streak clock and
+/// a recovery path that no flight exercises, in the code the brakes fly on.
+/// The deployment estimator keeps its gate: that one flies through both.
 ///
 /// All steps take measured dt; nothing assumes a sample rate.
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
@@ -38,8 +33,6 @@ pub struct VerticalKF {
     q_accel_std: f32,
     /// Baro altitude measurement noise std-dev (m), after port correction.
     r_alt_std: f32,
-    /// Time spent continuously rejecting baro samples (s).
-    rejected_s: f32,
 }
 
 impl VerticalKF {
@@ -58,7 +51,6 @@ impl VerticalKF {
             p: Matrix2::new(r_alt_std * r_alt_std, 0.0, 0.0, velocity_std * velocity_std),
             q_accel_std,
             r_alt_std,
-            rejected_s: 0.0,
         }
     }
 
@@ -85,21 +77,10 @@ impl VerticalKF {
         self.p[(1, 1)] = p11 + q * dt * dt;
     }
 
-    /// Fuse one port-corrected baro altitude. `dt` is the time since the
-    /// previous sample (for the rejection-streak clock). The returned
-    /// [`BaroGateOutcome`] is the only report of what the gate did — a
-    /// re-anchor happens on one sample and cannot be polled for afterwards.
-    pub fn update(&mut self, corrected_alt_asl: f32, dt: f32) -> BaroGateOutcome {
+    /// Fuse one port-corrected baro altitude. Unconditionally: see the type
+    /// doc for why this filter has no gate to refuse one.
+    pub fn update(&mut self, corrected_alt_asl: f32) {
         let innovation = corrected_alt_asl - self.x[0];
-        if innovation.abs() > ALT_INNOVATION_GATE_M {
-            self.rejected_s += dt;
-            if self.rejected_s >= MAX_REJECTED_S {
-                self.reanchor(corrected_alt_asl);
-                return BaroGateOutcome::Resynced;
-            }
-            return BaroGateOutcome::Rejected;
-        }
-        self.rejected_s = 0.0;
 
         let r = self.r_alt_std * self.r_alt_std;
         let s = self.p[(0, 0)] + r;
@@ -116,20 +97,6 @@ impl VerticalKF {
         self.p[(0, 1)] = a * (p01 - k1 * p00) + k0 * k1 * r;
         self.p[(1, 0)] = a * (p10 - k1 * p00) + k0 * k1 * r;
         self.p[(1, 1)] = p11 - k1 * (p01 + p10) + k1 * k1 * p00 + k1 * k1 * r;
-        BaroGateOutcome::Accepted
-    }
-
-    /// Re-anchor to the baro: altitude snaps to the measurement, the
-    /// altitude/velocity cross terms are cut, and velocity uncertainty is
-    /// re-opened so the following baro samples pull velocity back fast.
-    /// Velocity itself is kept — it is re-corrected, not guessed.
-    pub fn reanchor(&mut self, corrected_alt_asl: f32) {
-        self.x[0] = corrected_alt_asl;
-        self.p[(0, 0)] = self.r_alt_std * self.r_alt_std;
-        self.p[(0, 1)] = 0.0;
-        self.p[(1, 0)] = 0.0;
-        self.p[(1, 1)] += REANCHOR_VELOCITY_STD * REANCHOR_VELOCITY_STD;
-        self.rejected_s = 0.0;
     }
 }
 
@@ -150,15 +117,14 @@ mod tests {
             true_alt_asl += true_vv * dt + 0.5 * accel * dt * dt;
             true_vv += accel * dt;
             kf.predict(accel, dt);
-            kf.update(true_alt_asl, dt);
+            kf.update(true_alt_asl);
         }
         assert!((kf.altitude_asl() - true_alt_asl).abs() < 1.0);
         assert!((kf.vertical_velocity() - true_vv).abs() < 0.5);
     }
 
     /// A wrong velocity at birth must be pulled back by the baro within a
-    /// couple of seconds (this is what the born/reanchor velocity variance
-    /// is for).
+    /// couple of seconds (this is what the birth velocity variance is for).
     #[test]
     fn recovers_from_wrong_birth_velocity() {
         let mut kf = VerticalKF::born(1000.0, 250.0, 30.0, 0.5, 3.0);
@@ -170,7 +136,7 @@ mod tests {
             true_alt_asl += true_vv * dt + 0.5 * accel * dt * dt;
             true_vv += accel * dt;
             kf.predict(accel, dt);
-            kf.update(true_alt_asl, dt);
+            kf.update(true_alt_asl);
         }
         assert!(
             (kf.vertical_velocity() - true_vv).abs() < 10.0,
@@ -179,41 +145,25 @@ mod tests {
         );
     }
 
-    /// A blast transient (huge baro spike) is rejected by the gate; a
-    /// persistent offset re-anchors BOTH states' uncertainty, and the
-    /// velocity recovers afterwards.
+    /// A baro spike now goes straight into the filter, because nothing can
+    /// produce one where this filter flies. What the old gate bought — and
+    /// what is being given up — is bounded by this: one 500 m garbage sample
+    /// moves altitude by the Kalman gain, not by 500 m.
     #[test]
-    fn gate_rejects_transient_and_reanchor_recovers_velocity() {
+    fn a_spike_is_fused_not_rejected() {
         let mut kf = VerticalKF::born(1000.0, 100.0, 5.0, 0.5, 3.0);
         let dt = 1.0 / 416.0;
-        // transient: 2 samples of +500 m garbage — must be rejected
-        let alt_before_asl = kf.altitude_asl();
         kf.predict(-15.0, dt);
-        // One rejected sample is the gate working, not the filter failing:
-        // it reports `Rejected`, never `Resynced`.
-        assert_eq!(
-            kf.update(alt_before_asl + 500.0, dt),
-            BaroGateOutcome::Rejected
+        let before = kf.altitude_asl();
+        kf.update(before + 500.0);
+        let jump = kf.altitude_asl() - before;
+        // p00 at birth is r^2, so the gain is 1/2 and the filter takes half
+        // the spike. That is the cost of no gate on a single bad sample, and
+        // it is why the deployment estimator — which flies through ejection
+        // charges — keeps one.
+        assert!(
+            jump > 200.0 && jump < 300.0,
+            "a 500 m spike moved altitude {jump} m"
         );
-
-        // persistent offset: after 2 s of continuous disagreement the
-        // filter re-anchors to the baro
-        let mut t = 0.0;
-        let mut resyncs = 0;
-        while t < 2.5 {
-            kf.predict(-15.0, dt);
-            // always out of gate
-            if kf.update(kf.altitude_asl() + 300.0 + 200.0, dt) == BaroGateOutcome::Resynced {
-                resyncs += 1;
-            }
-            t += dt;
-        }
-        // The resync is reported on the one sample it happens, which is the
-        // only chance the SD log gets to see it.
-        assert_eq!(resyncs, 1);
-        // after the re-anchor the altitude is near the (shifted) baro
-        let target = kf.altitude_asl();
-        assert!(kf.p[(1, 1)] > REANCHOR_VELOCITY_STD * REANCHOR_VELOCITY_STD * 0.9);
-        let _ = target;
     }
 }

@@ -8,7 +8,6 @@ use crate::{
         AirbrakesConfig, ImuSample, MAX_DT_S, dead_reckoner::DeadReckoner,
         vertical_kf::VerticalKF,
     },
-    baro_gate::BaroGateOutcome,
     ignition_detector::IgnitionDetector,
     utils::{approximate_air_density, approximate_speed_of_sound},
 };
@@ -400,18 +399,12 @@ impl AirbrakesEstimator {
     /// Feed one IMU sample, the time it was taken (us, one monotonic clock)
     /// and the baro altitude ASL (m) from the same instant.
     ///
-    /// Returns what the vertical filter's innovation gate did with this
-    /// sample's baro reading — returned rather than stored, so there is no
-    /// stale value for a later reader to pick up (see
-    /// [`crate::BaroGateOutcome`]). Only [`State::AirbrakesEnabled`] runs a gate, so
-    /// every other state answers `Accepted`: there is nothing to reject
-    /// against before the filter is born.
-    pub fn update(
-        &mut self,
-        timestamp_us: u64,
-        imu: &ImuSample,
-        altitude_asl: f32,
-    ) -> BaroGateOutcome {
+    /// Returns nothing. It used to return what the vertical filter's
+    /// innovation gate made of this sample's baro reading; the filter has no
+    /// gate any more (see [`super::vertical_kf::VerticalKF`]), and there is
+    /// nothing else about one sample that a caller cannot ask the estimator
+    /// for afterwards.
+    pub fn update(&mut self, timestamp_us: u64, imu: &ImuSample, altitude_asl: f32) {
         // The very first sample has no predecessor to difference against, so
         // it carries no elapsed time and is stepped by 0. That is not a
         // special case anyone has to reason about: `saturating_sub` plus this
@@ -437,10 +430,6 @@ impl AirbrakesEstimator {
 
         let acc = imu.acc;
         let gyro = imu.gyro;
-
-        // Only `Tracking` runs a gate; every other state leaves this at
-        // `Accepted`, which is what "no gate to reject anything" means.
-        let mut baro_gate = BaroGateOutcome::Accepted;
 
         match &mut self.state {
             State::Armed {
@@ -539,14 +528,12 @@ impl AirbrakesEstimator {
                 // deliberately NOT detected. `calibration_complete()`
                 // surfaces this as an arming/self-test condition — the
                 // rocket must not leave the rail before it is true.
-                // Both early exits leave the pad state untouched, and no
-                // vertical filter exists there, so there is no gate outcome
-                // to report but `Accepted`.
+                // Both early exits leave the pad state untouched.
                 let Some(cal) = *calibration else {
-                    return BaroGateOutcome::Accepted;
+                    return;
                 };
                 if !accel_says_ignition {
-                    return BaroGateOutcome::Accepted;
+                    return;
                 }
                 log_info!("ignition detected, rewinding pad buffer");
                 log_info!(
@@ -607,8 +594,8 @@ impl AirbrakesEstimator {
                 reckoner.update(&acc, &(gyro - *gyro_bias), dt);
                 *elapsed += dt;
                 if *elapsed < STAGE1_DURATION_S {
-                    // Still aligning; no vertical filter, so no gate.
-                    return BaroGateOutcome::Accepted;
+                    // Still aligning; no vertical filter yet.
+                    return;
                 }
 
                 // The mean thrust direction IS the airframe axis in the
@@ -810,10 +797,10 @@ impl AirbrakesEstimator {
                 };
 
                 // Still dead reckoning, or born on this very sample — either
-                // way the gate has not run yet, since the filter fuses its
-                // first baro on the NEXT call.
+                // way nothing to fuse yet, since the filter takes its first
+                // baro on the NEXT call.
                 if !born {
-                    return BaroGateOutcome::Accepted;
+                    return;
                 }
 
                 // Birth ("born subsonic"): nothing from the garbage period
@@ -822,7 +809,7 @@ impl AirbrakesEstimator {
                 let alt0_asl = match ring_median(baro_ring, timestamp_us, vv0) {
                     Some(m) => m,
                     // no baro at all yet — wait
-                    None => return BaroGateOutcome::Accepted,
+                    None => return,
                 };
 
                 // The second Mach test, and the last one: the dead
@@ -851,7 +838,7 @@ impl AirbrakesEstimator {
                 // to stop waiting for a broken drag model, not to open the
                 // brakes at any speed.
                 if vv0 > self.config.max_open_mach * approximate_speed_of_sound(alt0_asl) {
-                    return BaroGateOutcome::Accepted;
+                    return;
                 }
 
                 let kf = VerticalKF::born(
@@ -903,13 +890,10 @@ impl AirbrakesEstimator {
                 // what the MPC flies on.
                 //
                 // Nothing follows this. There is no apogee transition to
-                // make: the estimator runs until the wrapper drops it, so
-                // the gate outcome is the last thing this state produces.
-                baro_gate = kf.update(altitude_asl, dt);
+                // make: the estimator runs until the wrapper drops it.
+                kf.update(altitude_asl);
             }
         }
-
-        baro_gate
     }
 
     /// Altitude ASL from the vertical filter, `None` until it is born.

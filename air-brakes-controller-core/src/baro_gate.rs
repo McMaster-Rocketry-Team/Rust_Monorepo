@@ -1,12 +1,18 @@
-//! What a baro innovation gate did with one sample.
+//! What the deployment estimator's baro innovation gate did with one sample.
 //!
-//! Both estimators gate their baro channel the same way — reject a reading
-//! that disagrees with the prediction by more than a threshold, and give up
-//! and resync if the disagreement persists — so both report the outcome in
-//! this shape. It is the return value of the update, all the way out through
+//! Reject a reading that disagrees with the prediction by more than a
+//! threshold, and give up and resync if the disagreement persists. It is the
+//! return value of the update, all the way out through
 //! [`FlightEstimators::update`], and is stored nowhere.
 //!
-//! Both estimators used to keep it in a `last_baro_gate` field with an
+//! The deployment estimator is the only one that gates now. The airbrakes
+//! filter did until 2026-08-18, which is why this type reads as if it were
+//! shared: it was. That filter is born subsonic and after burnout and retired
+//! at apogee, so it lives in the one window with no shock front ahead of the
+//! static ports and no charge fired behind them — nothing it can see is what
+//! a gate is for. The deployment filter flies pad to landing through both.
+//!
+//! The estimator used to keep this in a `last_baro_gate` field with an
 //! accessor, and this doc used to justify that with a polling gap that did
 //! not exist: the SD log has never polled on a clock of its own — its one
 //! caller read the outcome in the same critical section as the `update` that
@@ -14,13 +20,6 @@
 //! immediately after `update`, before the next sample overwrites it") that
 //! the type could not enforce. Returning the value deletes the contract:
 //! there is no stale value to read because there is no value to read.
-//!
-//! The one behaviour this changed is the sample with no IMU on it. The
-//! airbrakes half is skipped there, so its stored field used to hold the
-//! PREVIOUS sample's outcome and the SD record repeated it. Now
-//! [`FlightEstimators::update`] synthesises `Accepted` for that sample —
-//! nothing was fused, so nothing was rejected — which is what every other
-//! "no gate ran" path in both estimators already reported.
 //!
 //! [`FlightEstimators::update`]: crate::FlightEstimators::update
 

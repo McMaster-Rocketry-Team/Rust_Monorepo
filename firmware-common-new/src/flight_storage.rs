@@ -68,6 +68,15 @@ pub const DEFAULT_TARGET_APOGEE_AGL: f32 = 4000.0;
 ///     resolves command-to-servo latency. The fast record grows 16 B to 160 B
 ///     and still packs three to a block; the slow record loses 24 B and now
 ///     packs two, so the SD block rate goes slightly DOWN, not up.
+///     The airbrakes flag byte loses its innovation-gate pair in the same
+///     version (`AIRBRAKES_BARO_GATE_REJECT`, `AIRBRAKES_BARO_RESYNC`), along
+///     with the gate itself: that filter is born subsonic and after burnout
+///     and retired at apogee, so neither a shock front nor an ejection charge
+///     can reach it and the gate could never fire. The remaining three flags
+///     and the two-bit state repack from bit 0 with no hole — bit 3 had been
+///     empty since v18, and a hole only earns its keep if something might
+///     still decode the old numbering, which nothing can. The deployment
+///     estimator keeps its gate and both of its bits; it flies through both.
 /// v18: the airbrakes estimator's state is logged outright, as a two-bit
 ///     `AirbrakesState` in the top of the airbrakes flags byte. The
 ///     `AIRBRAKES_ENABLED` bit it replaces was true in exactly one state and

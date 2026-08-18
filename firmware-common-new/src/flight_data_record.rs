@@ -79,8 +79,7 @@ pub struct AirbrakesEstimatorRecord {
     /// Tilt from vertical (deg). `None` before ignition.
     pub kf_tilt_deg: Option<f32>,
     /// Status bits (`AIRBRAKES_*` consts): the two-bit [`AirbrakesState`],
-    /// the drag check, the burnout latch, and what its baro innovation gate
-    /// did with THIS sample.
+    /// the drag check, the burnout latch and the pad calibration.
     pub flags: u8,
 }
 
@@ -554,29 +553,24 @@ pub const DEPLOYMENT_BARO_RESYNC: u8 = 1 << 1;
 
 /// `AirbrakesEstimatorRecord::flags` bits — the airbrakes estimator's status.
 ///
+/// Three flags and a two-bit state, packed from the bottom with bits 5-7
+/// free. There is no reserved hole: bit 3 was one for a while, held by
+/// `AIRBRAKES_BARO_TRUSTED` and then briefly `AIRBRAKES_ENABLED`, and bits 2
+/// and 4 were the baro innovation gate's pair. Nothing decodes an older
+/// layout — a card at any other `STORAGE_VERSION` is rejected outright — so a
+/// hole in this byte protects nobody and only makes the next reader wonder
+/// what used to be in it.
+///
 /// The mach-lockout exit is a single drag measurement (the drag-inverted
 /// airspeed below Mach 0.8, sustained 1 s), so there is one bit for it;
 /// logging it per sample reconstructs the exit post-flight.
 pub const AIRBRAKES_SUBSONIC_DRAG: u8 = 1 << 0;
-/// The vertical filter's innovation gate threw out this sample's baro
-/// altitude. Per-sample, like the `DEPLOYMENT_*` pair above, so a run of set
-/// bits is one rejection episode — an ejection transient, or a port the shock
-/// front has disturbed. Only ever set while the vertical filter exists
-/// ([`AirbrakesState::AirbrakesEnabled`]).
-pub const AIRBRAKES_BARO_GATE_REJECT: u8 = 1 << 2;
 /// The axial-sign burnout latch has fired: the motor is out and the drag
 /// channel is honest. Nothing can birth the vertical filter before this, on
 /// either the supersonic or the subsonic path, so it separates "the brakes
 /// never opened because the motor never looked out" from "because the drag
 /// check never passed".
 pub const AIRBRAKES_BURNOUT: u8 = 1 << 1;
-// bit 3 unallocated: it held `AIRBRAKES_BARO_TRUSTED`, then briefly
-// `AIRBRAKES_ENABLED`, both of which the state field below now answers.
-/// This sample ended a rejection run by re-anchoring: altitude snapped to the
-/// baro and velocity uncertainty was re-opened. Set together with
-/// `AIRBRAKES_BARO_GATE_REJECT`. A run that ends without this bit is the gate
-/// doing its job; a run that ends with it is a diverged filter.
-pub const AIRBRAKES_BARO_RESYNC: u8 = 1 << 4;
 /// The pad calibration completed: gyro bias, pad orientation and pad altitude
 /// exist, and the estimator is willing to detect ignition.
 ///
@@ -587,12 +581,12 @@ pub const AIRBRAKES_BARO_RESYNC: u8 = 1 << 4;
 /// no-deployment. Expect it set within ~6 s of the estimator starting and to
 /// stay set; it is re-derived every 2 s and CAN drop if the airframe is
 /// picked up or turned.
-pub const AIRBRAKES_PAD_CALIBRATED: u8 = 1 << 5;
+pub const AIRBRAKES_PAD_CALIBRATED: u8 = 1 << 2;
 
 /// The two bits of `AirbrakesEstimatorRecord::flags` holding
 /// [`AirbrakesState`].
-pub const AIRBRAKES_STATE_SHIFT: u32 = 6;
-pub const AIRBRAKES_STATE_MASK: u8 = 0b1100_0000;
+pub const AIRBRAKES_STATE_SHIFT: u32 = 3;
+pub const AIRBRAKES_STATE_MASK: u8 = 0b0001_1000;
 
 /// Which state of the airbrakes estimator produced this sample.
 ///

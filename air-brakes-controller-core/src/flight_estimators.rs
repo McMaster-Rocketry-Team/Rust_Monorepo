@@ -170,22 +170,13 @@ impl FlightEstimators {
             self.deployment
                 .update(timestamp_us, imu.map(|imu| imu.acc), baro_altitude_asl);
 
-        // (b) Airbrakes, only when this sample actually carries IMU data.
-        //
-        // The gate outcome is SYNTHESISED on every other sample rather than
-        // carried over: no IMU means the vertical filter did not step and no
-        // baro was fused, so nothing was rejected, and `Accepted` is what
-        // every "no gate ran" path in either estimator already reports. The
-        // stored field this replaced would instead have repeated the previous
-        // sample's outcome into the SD record — a rejection run would have
-        // read one sample longer than it was for every IMU-less sample inside
-        // it.
-        let airbrakes_baro_gate = match (self.airbrakes.as_mut(), imu) {
-            (Some(airbrakes), Some(imu)) => {
-                airbrakes.update(timestamp_us, imu, baro_altitude_asl)
-            }
-            _ => BaroGateOutcome::Accepted,
-        };
+        // (b) Airbrakes, only when this sample actually carries IMU data. A
+        // sample without it is skipped whole: the vertical filter predicts
+        // with the dead reckoner's attitude, so there is nothing to step it
+        // with and nothing to fuse against.
+        if let (Some(airbrakes), Some(imu)) = (self.airbrakes.as_mut(), imu) {
+            airbrakes.update(timestamp_us, imu, baro_altitude_asl);
+        }
 
         // (c) Retirement. Checked every sample, IMU or not, so clause 3
         // still bites while the airbrakes half is starved of IMU data.
@@ -223,7 +214,6 @@ impl FlightEstimators {
                 subsonic_by_drag: ab.subsonic_by_drag(),
                 burnout_detected: ab.burnout_detected(),
                 state: ab.state(),
-                baro_gate: airbrakes_baro_gate,
                 calibration_complete: ab.calibration_complete(),
             }),
         };
@@ -357,13 +347,13 @@ pub struct AirbrakesLogSample {
     /// entering the last state they were the same fact, and once they were
     /// the same fact the honest thing to log was the state.
     pub state: AirbrakesState,
-    /// No `is_apogee` twin: the airbrakes half has no apogee state to report
-    /// from. It is retired at apogee instead (see
-    /// [`FlightEstimators::update`]), and this whole struct goes absent on
-    /// that sample — which is the same information, dated to the same tick,
-    /// and reaches the SD log as the airbrakes group disappearing rather than
-    /// as a bit that flips.
-    pub baro_gate: BaroGateOutcome,
+    //
+    // No `is_apogee` twin and no baro-gate field: the airbrakes half has no
+    // apogee state to report from (it is retired at apogee, and this whole
+    // struct goes absent on that sample), and its vertical filter has no
+    // gate to report on — it fuses every baro sample. Both facts are in
+    // [`FlightEstimators::update`] and
+    // [`super::airbrakes_estimator::vertical_kf::VerticalKF`].
     /// The pad calibration exists (see
     /// [`AirbrakesEstimator::calibration_complete`]).
     ///
