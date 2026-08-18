@@ -1429,23 +1429,33 @@ fn clipped_accel_still_flies_the_profile() {
         born > m08,
         "clipping opened the lockout at {born}s, while still supersonic ({m08}s)"
     );
-    // This is the thinnest margin in the suite, and worth knowing as a
-    // number: born 17.84 s against a true crossing at 17.56 s, so +0.28 s.
-    // It is thin for two reasons at once, which is why this flight and not
-    // the nominal one is the case to watch. Clipping drags the
-    // dead-reckoned altitude low, which reads the density high and the
-    // inverted airspeed low, so the drag check speaks early; and it drags
-    // the dead-reckoned VELOCITY low too (-10.1% at birth here), which is
-    // the unsafe direction for the inertial Mach test that would otherwise
-    // catch an early vote. Both of the lockout's independent checks are
-    // biased the same way by the same cause.
+    // Clipping splits the two lockout checks apart, and this is the flight
+    // that measures which one survives it.
     //
-    // The check used to have to hold for a second before it could conclude,
-    // which absorbed all of this. It does not any more (see
-    // `SUBSONIC_SUSTAIN_S`'s removal on 2026-08-18), so the margin here is
-    // the drag check's own lead over the crossing and nothing else. If a
-    // future airframe cannot show at least a few tenths here, the honest fix
-    // is a later `earliest_subsonic_after_ignition_us`, not a sustain.
+    // The drag check does not notice at all. Measured against the unclipped
+    // run at the deciding sample: a_drag 6.0208 vs 6.0209 m/s^2, voting at
+    // the same t. It cannot notice — the coast deceleration it inverts is
+    // ~0.6 g, nowhere near the +-16 g rail, and the air density comes from
+    // `subsonic_crossing_altitude_asl`, a configured constant rather than
+    // anything integrated. Its only exposure to the clipped boost is the
+    // stage-1 thrust axis, and that survives too, since the airframe is
+    // near-axial and clipping barely moves the mean direction.
+    //
+    // The inertial Mach test at the birth site is the one that is hurt, in
+    // the unsafe direction: vv0 218.6 m/s here against 242.8 on the clean
+    // run, both against the same ~251 m/s limit. 10% low means it would
+    // clear a rocket that is genuinely at Mach 0.88. Note how little margin
+    // it has even clean — 242.8 against 251.0 — which is the honest reading
+    // of "the dead reckoner is a backstop, not a measurement".
+    //
+    // So under clipping the guard is the drag check plus
+    // `earliest_subsonic_after_ignition_us`, with the inertial test
+    // contributing nothing it can be trusted for. That is survivable
+    // because birth needs BOTH to agree and clipping only corrupts one of
+    // them — but it is why the floor is the thing to raise if a future
+    // airframe cannot show a few tenths of margin here, and why bringing
+    // the 1 s sustain back would not help: the sustain sat on the check,
+    // which is the half that was never in trouble.
     //
     // The span loop below still bites in the other case: a span is recorded
     // only when the check voted and the birth was REFUSED, so anything it
