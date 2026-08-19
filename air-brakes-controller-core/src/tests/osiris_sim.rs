@@ -101,15 +101,25 @@ fn osiris_config() -> FlightConfig {
         },
         airbrakes: AirbrakesConfig {
             mach_lockout: Some(MachLockoutConfig {
-                earliest_subsonic_after_ignition_us: 17_700_000,
+                earliest_subsonic_after_ignition_us: 17_200_000,
                 force_birth_after_ignition_us: 25_000_000,
                 subsonic_crossing_altitude_asl: 6800.0,
             }),
-            max_open_mach: 0.8,
+            max_open_mach: MAX_OPEN_MACH,
             rocket: osiris_rocket(),
         },
     }
 }
+
+/// The Mach the flaps are permitted to open at, in one place: the config
+/// below and every assertion that references "the crossing" read it, so
+/// raising it cannot leave a test still asserting against the old value.
+///
+/// It is deliberately ABOVE the Mach the Cd table is tabulated at (0.8) —
+/// see `AirbrakesConfig::max_open_mach`. 0.83 is not a round number: it is
+/// the largest value `transonic_static_port_error_is_absorbed_by_the_lockout`
+/// still passes at, and that test is what bounds it.
+const MAX_OPEN_MACH: f32 = 0.83;
 
 const O3400_CSV: &str = "./test_data/osiris_o3400.csv";
 const N2900_CSV: &str = "./test_data/osiris_n2900.csv";
@@ -1033,11 +1043,13 @@ fn mach_lockout_timers_bracket_every_simulation() {
 
     for path in [O3400_CSV, N2900_CSV] {
         let truth = Truth::load(path);
-        let m08 = truth.mach_down_crossing(0.8);
+        let m08 = truth.mach_down_crossing(MAX_OPEN_MACH);
+        // The DEPLOYMENT half's own lockout Mach, which is unrelated to the
+        // airbrakes permission above and does not move with it.
         let m075 = truth.mach_down_crossing(0.75);
         let (apogee_t, apogee_asl) = truth.apogee();
         eprintln!(
-            "{path}: Mach 0.8 at {m08:.2}s ({:.0} m ASL), Mach 0.75 at {m075:.2}s, \
+            "{path}: Mach {MAX_OPEN_MACH} at {m08:.2}s ({:.0} m ASL), Mach 0.75 at {m075:.2}s, \
              apogee {apogee_asl:.0} m pressure-ASL at {apogee_t:.2}s",
             truth.at(m08).altitude_asl
         );
@@ -1051,7 +1063,7 @@ fn mach_lockout_timers_bracket_every_simulation() {
         assert!(
             t_early >= m08,
             "{path}: the check could approve a birth at {t_early}s, while the \
-             airframe is still above Mach 0.8 until {m08}s"
+             airframe is still above Mach {MAX_OPEN_MACH} until {m08}s"
         );
         // Erring late is safe but costs control window; say how much.
         if t_early > m08 {
@@ -1208,9 +1220,9 @@ fn nominal_o3400_flight() {
 
     // --- lockout exit --------------------------------------------------
     let (born, forced) = r.birth.expect("airbrakes filter never born");
-    let m08 = truth.mach_down_crossing(0.8);
+    let m08 = truth.mach_down_crossing(MAX_OPEN_MACH);
     eprintln!(
-        "nominal: born {born:.2}s (forced: {forced}); true Mach 0.8 at {m08:.2}s; \
+        "nominal: born {born:.2}s (forced: {forced}); true Mach {MAX_OPEN_MACH} at {m08:.2}s; \
          drag-check spans {:?}",
         r.subsonic_spans
     );
@@ -1220,7 +1232,7 @@ fn nominal_o3400_flight() {
     );
     assert!(
         born > m08,
-        "filter born at {born}s, while the airframe was still above Mach 0.8 ({m08}s)"
+        "filter born at {born}s, while the airframe was still above Mach {MAX_OPEN_MACH} ({m08}s)"
     );
     assert!(
         born < m08 + 3.0,
@@ -1232,7 +1244,7 @@ fn nominal_o3400_flight() {
         assert!(
             *start >= m08,
             "drag check read subsonic at {start}s..{end}s, before the true \
-             Mach 0.8 crossing at {m08}s"
+             Mach {MAX_OPEN_MACH} crossing at {m08}s"
         );
     }
     // The filter is born after the motor is out, always.
@@ -1350,11 +1362,11 @@ fn transonic_static_port_error_is_absorbed_by_the_lockout() {
     );
 
     let (born, forced) = r.birth.expect("filter never born");
-    let m08 = truth.mach_down_crossing(0.8);
+    let m08 = truth.mach_down_crossing(MAX_OPEN_MACH);
     assert!(!forced, "birth fell through to the T_max timeout");
     assert!(
         born > m08,
-        "born at {born}s while still supersonic ({m08}s) — the drag check was \
+        "born at {born}s while still above Mach {MAX_OPEN_MACH} ({m08}s) — the drag check was \
          poisoned by the baro"
     );
     for (start, end) in &r.subsonic_spans {
@@ -1413,8 +1425,8 @@ fn clipped_accel_still_flies_the_profile() {
     );
 
     let (born, forced) = r.birth.expect("filter never born");
-    let m08 = truth.mach_down_crossing(0.8);
-    eprintln!("clipped: born {born:.2}s (forced: {forced}), true Mach 0.8 at {m08:.2}s");
+    let m08 = truth.mach_down_crossing(MAX_OPEN_MACH);
+    eprintln!("clipped: born {born:.2}s (forced: {forced}), true Mach {MAX_OPEN_MACH} at {m08:.2}s");
 
     // The one number that says how much the clipping actually cost: the
     // velocity the filter is BORN with is the dead-reckoned one, integrated
@@ -1457,7 +1469,7 @@ fn clipped_accel_still_flies_the_profile() {
         assert!(
             *start >= m08 - CHECK_MAY_LEAD_S,
             "drag check read subsonic at {start}s..{end}s under clipping, \
-             {:.3}s before the true Mach 0.8 crossing at {m08}s",
+             {:.3}s before the true Mach {MAX_OPEN_MACH} crossing at {m08}s",
             m08 - *start
         );
     }
@@ -1518,7 +1530,7 @@ fn backup_motor_n2900_flight() {
     let r = replay(&samples, osiris_config(), apogee_asl - 150.0);
 
     let (born, forced) = r.birth.expect("filter never born");
-    let m08 = truth.mach_down_crossing(0.8);
+    let m08 = truth.mach_down_crossing(MAX_OPEN_MACH);
     let t_early = osiris_config()
         .airbrakes
         .mach_lockout
@@ -1526,7 +1538,7 @@ fn backup_motor_n2900_flight() {
         .earliest_subsonic_after_ignition_us as f32
         * 1e-6;
     eprintln!(
-        "n2900: true Mach 0.8 at {m08:.2}s, check may not open before {t_early:.2}s, \
+        "n2900: true Mach {MAX_OPEN_MACH} at {m08:.2}s, check may not open before {t_early:.2}s, \
          born {born:.2}s (forced: {forced}) — {:.1}s of control window lost to the \
          O3400-sized timer",
         born - m08 - 1.0
@@ -1848,7 +1860,7 @@ fn any_mounting_orientation_flies_the_same_flight() {
     init_logger();
     let truth = Truth::load(O3400_CSV);
     let (apogee_t, apogee_asl) = truth.apogee();
-    let m08 = truth.mach_down_crossing(0.8);
+    let m08 = truth.mach_down_crossing(MAX_OPEN_MACH);
 
     let orientations: [(&str, UnitQuaternion<f32>); 6] = [
         ("flat, axis on +Z", UnitQuaternion::identity()),
@@ -1912,7 +1924,7 @@ fn any_mounting_orientation_flies_the_same_flight() {
         assert!(!forced, "{name}: birth fell through to the T_max timeout");
         assert!(
             born > m08,
-            "{name}: born at {born}s while still above Mach 0.8 ({m08}s)"
+            "{name}: born at {born}s while still above Mach {MAX_OPEN_MACH} ({m08}s)"
         );
         for (start, end) in &r.subsonic_spans {
             assert!(

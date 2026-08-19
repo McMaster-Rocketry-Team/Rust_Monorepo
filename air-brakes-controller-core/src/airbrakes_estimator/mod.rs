@@ -135,10 +135,43 @@ pub struct AirbrakesConfig {
     ///   states while the filter's own vertical velocity is above it, which
     ///   is what actually keeps the flaps shut.
     ///
-    /// Per-airframe because it is the Mach [`Self::rocket`]'s stowed `cd[0]`
-    /// is tabulated at. The two must agree — the check inverts the drag with
-    /// that Cd to decide whether it is below this speed — and while the
-    /// threshold was hard-coded they could disagree silently.
+    /// Per-airframe, and no longer tied to the Mach [`Self::rocket`]'s stowed
+    /// `cd[0]` is tabulated at. Those were required to be equal until
+    /// 2026-08-18, on the argument that the check inverts the drag with that
+    /// Cd to decide whether it is below this speed. They are now allowed to
+    /// differ, and Osiris sets this ABOVE the tabulation Mach (0.83 against a
+    /// Cd table taken at 0.8), because the direction of the resulting error
+    /// is the safe one and the control window it buys is worth ~38 m of
+    /// apogee authority.
+    ///
+    /// Why it is safe to set this high: inverting with a Cd measured at a
+    /// LOWER Mach than the airframe is actually flying under-reads the drag
+    /// coefficient, which over-reads the inverted airspeed, which holds the
+    /// lockout shut LONGER. So the mismatch delays the birth rather than
+    /// advancing it, and it grows with the gap — measured, the birth lands
+    /// 0.015-0.021 Mach under this threshold rather than at it.
+    ///
+    /// The bound that replaces the old equality is therefore not a config
+    /// invariant but a physical one, and it belongs to the airframe, not to
+    /// the Cd table: **do not set this above the Mach the flaps and their
+    /// interaction with the fins have been analysed at**. Osiris's CFD
+    /// (FDR Table 10) covers Mach 0.8 and nothing else, so 0.83 is already
+    /// extrapolating; the measured birth at 0.809-0.815 is ~2% outside the
+    /// analysed condition and that is the whole of the margin being spent.
+    /// `mach_lockout_timers_bracket_every_simulation` asserts the vote stays
+    /// under this value; nothing can assert the aerodynamics.
+    ///
+    /// The OTHER bound, and the one that actually set 0.83 rather than a
+    /// rounder number, is
+    /// `osiris_sim::transonic_static_port_error_is_absorbed_by_the_lockout`.
+    /// Opening earlier is being born deeper into the window where the static
+    /// port is still lying, and that test's coast velocity error climbs
+    /// 5.53 -> 6.68 -> 7.44 -> 8.13 m/s at 0.80 / 0.82 / 0.83 / 0.84 against
+    /// its 8 m/s bound. 0.84 fails. Raising this is therefore not a
+    /// judgement call: it is bounded by a test already in the tree, and the
+    /// bound is a real one — simulated end to end, a port error worth ~240 m
+    /// of altitude at the gate makes 0.85 WORSE than 0.80, because the extra
+    /// authority is bought with robustness that the fault then spends.
     ///
     /// This IS the requirement, not the requirement minus margin. The margin
     /// arrives on its own, from two places that are already load-bearing:
@@ -157,8 +190,8 @@ pub struct AirbrakesConfig {
     /// velocity, tested once at the birth site) enforced it more tightly
     /// until 2026-08-18; what it cost is in `estimator.rs` at the birth
     /// site, and what its removal costs is +0.01 Mach at a 0.6 ceiling,
-    /// nothing at the flown 0.8, and 0.857 rather than 0.787 if `Cd*A/m` is
-    /// a third too large.
+    /// nothing at the 0.8 flown until 2026-08-18, and 0.857 rather than
+    /// 0.787 if `Cd*A/m` is a third too large.
     ///
     /// This was two constants until 2026-08-17 — a 0.8 exit and a 0.85
     /// ceiling with an invariant between them. The 0.85 was never derived
