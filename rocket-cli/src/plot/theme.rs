@@ -58,6 +58,10 @@ pub fn stage_hue(stage: u8) -> RGBColor {
         0 | 1 => RGBColor(0x77, 0x82, 0x93), // LowPower / SelfTest
         2 => RGBColor(0x8D, 0x98, 0xA8),     // Armed
         3 => AMBER,                          // Ascent
+        // Violet, not a tint of Ascent's amber: it is the stretch the KF is
+        // frozen, which is why the deployment traces are blank across it, and
+        // that has to be findable at a glance rather than inferred.
+        MACH_LOCKOUT => VIOLET,
         4 => CYAN,                           // DrogueChute
         5 => GREEN,                          // MainChute
         6 => RGBColor(0x77, 0x82, 0x93),     // Landed
@@ -71,7 +75,8 @@ pub fn stage_hue(stage: u8) -> RGBColor {
 /// these are lower than the equivalent dark-theme values would be.
 pub fn stage_color(stage: u8) -> RGBAColor {
     let opacity = match stage {
-        6 => 0.14,          // Landed reads as "the flight is over"
+        6 => 0.14,               // Landed reads as "the flight is over"
+        MACH_LOCKOUT => 0.10,    // it explains a blank panel; it has to be seen
         0 | 1 | 2 => 0.11,  // LowPower / SelfTest / Armed
         7 => 0.11,          // FailedToReachMinApogee
         _ => 0.075,         // the airborne stages, behind the densest traces
@@ -111,8 +116,19 @@ pub fn brakes_color() -> RGBAColor {
     RGBColor(0x62, 0xB6, 0xE0).mix(0.16)
 }
 
+/// The Mach lockout, as a stage code.
+///
+/// `FlightStage` is three bits on the wire with all eight codes spent, so the
+/// firmware folds the deployment estimator's `MachLockout` into `Ascent` on
+/// its way into the log — the variant is not recorded and has to be
+/// reconstructed. 8 is the code it gets back here: outside the range the
+/// format can ever carry, so it cannot collide with a stage a future log
+/// actually stores.
+pub const MACH_LOCKOUT: u8 = 8;
+
 pub fn stage_name(stage: u8) -> &'static str {
     match stage {
+        MACH_LOCKOUT => "Mach lockout",
         0 => "LowPower",
         1 => "SelfTest",
         2 => "Armed",

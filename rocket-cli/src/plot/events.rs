@@ -11,7 +11,7 @@
 //! says when the charge actually went. They are usually within a few hundred
 //! milliseconds and get merged, but when they are not, that gap is the finding.
 
-use crate::plot::theme::stage_name;
+use crate::plot::theme::{MACH_LOCKOUT, stage_name};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Event {
@@ -66,20 +66,38 @@ pub fn detect(
 
     // Stage transitions, except the one at the window's own start — the flight
     // begins with a transition into Ascent by construction, and a rule on the
-    // left edge marks nothing.
-    for i in (start + 1)..end {
-        if let Some(stage) = stages[i]
-            && stages[i - 1] != Some(stage)
-            && stages[i - 1].is_some()
+    // left edge marks nothing. The first row that carries a stage only seeds
+    // the comparison.
+    //
+    // Compared against the last row that named a stage rather than against the
+    // row before, which is not the same thing in a log where a row exists
+    // because some record was written and not because every column had a
+    // value: a change that happened to land on a blank row used to be dropped
+    // entirely, leaving a background band that begins where no rule does.
+    let mut previous: Option<u8> = None;
+    for i in start..end {
+        let Some(stage) = stages[i] else { continue };
+        if let Some(prev) = previous
+            && prev != stage
         {
             // Ascent-onset is the flight computer deciding the motor has lit,
             // which is what "ignition" names. It is not called liftoff because
             // the detector is an acceleration threshold, not a break-wire: it
             // fires while the rocket is still on the rail, and the burn band
             // this rule opens is measured from it.
-            let label = if stage == 3 { "ignition" } else { stage_name(stage) };
+            // Leaving the pad is "ignition" whichever airborne stage comes
+            // first — on the deployment figure that is the Mach lockout
+            // rather than `Ascent`, and both name the same moment: the
+            // flight computer decided the motor lit, which is what T+0 is
+            // measured from.
+            let label = if prev <= 2 && matches!(stage, 3 | MACH_LOCKOUT) {
+                "ignition"
+            } else {
+                stage_name(stage)
+            };
             raw.push((times[i], label.to_string()));
         }
+        previous = Some(stage);
     }
 
     for (column, label) in [
@@ -195,5 +213,18 @@ mod tests {
         let events = detect(&times(4), &stages, None, None, None, None, 0, 4, 0.0);
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].label, "Drogue");
+    }
+
+    /// The other half of that: a change that lands across a blank row is still
+    /// a change. Dropping it left the stage band starting at a boundary with
+    /// no rule through it.
+    #[test]
+    fn a_transition_across_a_blank_row_is_still_found() {
+        let stages = vec![Some(3), Some(3), None, Some(4), Some(4)];
+        let events = detect(&times(5), &stages, None, None, None, None, 0, 5, 0.0);
+        assert_eq!(
+            events,
+            vec![Event { at_s: 3.0, label: "Drogue".into() }]
+        );
     }
 }

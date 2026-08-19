@@ -99,6 +99,45 @@ pub fn decimate(
     Some(Trace { runs, min, max })
 }
 
+/// How long a column may say nothing before the silence means something.
+///
+/// A CSV row exists because *some* record was logged, not because every column
+/// had a value: the slow telemetry record carries no estimator state, so a
+/// fast flag reads `NaN` on every row the slow record produced — scattered
+/// single rows, a few milliseconds of quiet each. That is not the flag going
+/// false, and treating it as false shatters one continuous band into one
+/// rectangle per interleaved row.
+///
+/// The opposite mistake is just as real: a node that drops off the bus stops
+/// logging its flags entirely, and a band drawn through that would claim a
+/// state nobody reported for the rest of the flight.
+///
+/// So the threshold is taken from the column's own cadence rather than from a
+/// constant: ten times the median spacing of the rows that did carry a value.
+/// A 1 kHz flag tolerates a couple of dozen milliseconds of quiet, a 1 Hz flag
+/// tolerates ten seconds, and neither number has to be known here. Columns too
+/// sparse to establish a cadence get no threshold — nothing can be inferred
+/// from silence in a column that is almost all silence.
+fn silence_threshold(times: &[f64], present: impl Fn(usize) -> bool, start: usize, end: usize) -> f64 {
+    let mut gaps: Vec<f64> = Vec::new();
+    let mut prev: Option<f64> = None;
+    for i in start..end {
+        if present(i) {
+            if let Some(p) = prev
+                && times[i] > p
+            {
+                gaps.push(times[i] - p);
+            }
+            prev = Some(times[i]);
+        }
+    }
+    if gaps.is_empty() {
+        return f64::INFINITY;
+    }
+    gaps.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    gaps[gaps.len() / 2] * 10.0
+}
+
 /// Time ranges where a flag column reads true, as `(from_s, to_s)`.
 ///
 /// Computed on raw rows rather than on decimated ones: a pyro fire flag is set
@@ -106,13 +145,27 @@ pub fn decimate(
 /// which side of the boundary it fell on. The spans are merged afterwards
 /// instead, which keeps the edges exact.
 ///
-/// `NaN` ends a span. An absent flag is not a false one, and drawing it as false
-/// would assert continuity across a stretch where the log says nothing.
+/// `NaN` is not false, and it is not true either: it is a row that did not
+/// carry this column, so it neither opens a span nor closes one. What closes a
+/// span is silence long enough to mean it — see [`silence_threshold`] — and
+/// then it closes at the last row that actually said "true", never at the row
+/// where the log resumed.
 pub fn true_spans(times: &[f64], values: &[f32], start: usize, end: usize) -> Vec<(f64, f64)> {
     let end = end.min(values.len()).min(times.len());
+    let max_gap = silence_threshold(times, |i| values[i].is_finite(), start, end);
     let mut spans = Vec::new();
     let mut open: Option<f64> = None;
+    let mut spoke_at: Option<f64> = None;
     for i in start..end {
+        if !values[i].is_finite() {
+            continue;
+        }
+        if let (Some(from), Some(prev)) = (open, spoke_at)
+            && times[i] - prev > max_gap
+        {
+            spans.push((from, prev));
+            open = None;
+        }
         let on = values[i] >= 0.5;
         match (open, on) {
             (None, true) => open = Some(times[i]),
@@ -122,16 +175,47 @@ pub fn true_spans(times: &[f64], values: &[f32], start: usize, end: usize) -> Ve
             }
             _ => {}
         }
+        spoke_at = Some(times[i]);
     }
     if let Some(from) = open
-        && end > start
+        && let Some(last) = spoke_at
     {
-        spans.push((from, times[end - 1]));
+        spans.push((from, last));
     }
     spans
 }
 
+/// Widen spans to a pixel floor, clip them to the axis, and merge what then
+/// touches.
+///
+/// The merge is the point. Spans are drawn as translucent rectangles, and two
+/// of them over the same pixels wash it twice — so a band that happens to be
+/// finely divided comes out darker than one that is not, which reads as a
+/// stronger claim about a state that is merely binary. Widening a short pulse
+/// to three pixels is what makes the divisions overlap in the first place, so
+/// the merge belongs here, after the widening, rather than at either end.
+pub fn widen_and_merge(spans: &[(f64, f64)], min_width: f64, clip: (f64, f64)) -> Vec<(f64, f64)> {
+    let mut out: Vec<(f64, f64)> = Vec::new();
+    for &(a, b) in spans {
+        let a = a.max(clip.0);
+        let b = b.max(a + min_width).min(clip.1);
+        if b <= a {
+            continue;
+        }
+        match out.last_mut() {
+            Some(last) if a <= last.1 => last.1 = last.1.max(b),
+            _ => out.push((a, b)),
+        }
+    }
+    out
+}
+
 /// Contiguous runs of one `flight_stage` value, as `(from_s, to_s, stage)`.
+///
+/// A row with no stage is read the same way [`true_spans`] reads a `NaN`: as a
+/// row that did not carry the column, not as the stage ending. Only silence
+/// past this column's own cadence closes a band, and it closes at the last row
+/// that named a stage.
 pub fn stage_spans(
     times: &[f64],
     stages: &[Option<u8>],
@@ -139,26 +223,32 @@ pub fn stage_spans(
     end: usize,
 ) -> Vec<(f64, f64, u8)> {
     let end = end.min(stages.len()).min(times.len());
+    let max_gap = silence_threshold(times, |i| stages[i].is_some(), start, end);
     let mut spans: Vec<(f64, f64, u8)> = Vec::new();
     let mut open: Option<(f64, u8)> = None;
+    let mut spoke_at: Option<f64> = None;
     for i in start..end {
-        match (open, stages[i]) {
-            (None, Some(s)) => open = Some((times[i], s)),
-            (Some((from, prev)), Some(s)) if s != prev => {
+        let Some(stage) = stages[i] else { continue };
+        if let (Some((from, prev)), Some(at)) = (open, spoke_at)
+            && times[i] - at > max_gap
+        {
+            spans.push((from, at, prev));
+            open = None;
+        }
+        match open {
+            None => open = Some((times[i], stage)),
+            Some((from, prev)) if stage != prev => {
                 spans.push((from, times[i], prev));
-                open = Some((times[i], s));
-            }
-            (Some((from, prev)), None) => {
-                spans.push((from, times[i], prev));
-                open = None;
+                open = Some((times[i], stage));
             }
             _ => {}
         }
+        spoke_at = Some(times[i]);
     }
     if let Some((from, s)) = open
-        && end > start
+        && let Some(last) = spoke_at
     {
-        spans.push((from, times[end - 1], s));
+        spans.push((from, last, s));
     }
     spans
 }
@@ -235,14 +325,54 @@ mod tests {
         assert_eq!(spans, vec![(1.0, 3.0), (5.0, 6.0)]);
     }
 
-    /// An absent flag is not a false one; it ends the span rather than extending
-    /// it through a stretch the log says nothing about.
+    /// The interleaved-record case, which is what every real log looks like:
+    /// the slow record carries no estimator state, so the fast flag is blank on
+    /// scattered single rows. Reading those as false shattered one band into
+    /// one rectangle per blank row, and the translucent fills then stacked into
+    /// a gradient across what is a single binary state.
     #[test]
-    fn a_nan_flag_closes_the_span_rather_than_reading_as_true() {
-        let values = vec![1.0f32, 1.0, f32::NAN, f32::NAN, 1.0];
+    fn a_row_that_did_not_carry_the_flag_does_not_break_the_span() {
+        let mut values = vec![1.0f32; 40];
+        for i in (3..40).step_by(7) {
+            values[i] = f32::NAN;
+        }
+        assert_eq!(true_spans(&times(40), &values, 0, 40), vec![(0.0, 39.0)]);
+    }
+
+    /// The other half of the rule: silence far past the column's own cadence is
+    /// the log going quiet — a node off the bus — and the band ends at the last
+    /// row that reported, not where the log happens to resume.
+    #[test]
+    fn silence_past_the_columns_cadence_does_close_the_span() {
+        let mut values = vec![1.0f32; 60];
+        for v in values.iter_mut().take(50).skip(10) {
+            *v = f32::NAN;
+        }
         assert_eq!(
-            true_spans(&times(5), &values, 0, 5),
-            vec![(0.0, 2.0), (4.0, 4.0)]
+            true_spans(&times(60), &values, 0, 60),
+            vec![(0.0, 9.0), (50.0, 59.0)]
+        );
+    }
+
+    /// Same reading for the stage column, which fragments the background bands
+    /// the same way when a row does not carry it.
+    #[test]
+    fn stage_bands_survive_rows_that_did_not_carry_a_stage() {
+        let mut stages: Vec<Option<u8>> = vec![Some(3); 30];
+        for i in (2..30).step_by(5) {
+            stages[i] = None;
+        }
+        assert_eq!(stage_spans(&times(30), &stages, 0, 30), vec![(0.0, 29.0, 3)]);
+    }
+
+    /// Widening a sub-pixel pulse is what makes neighbours overlap, so the
+    /// merge has to happen after it, and the clip has to survive both.
+    #[test]
+    fn widening_merges_what_it_pushes_together() {
+        let spans = [(1.0, 1.01), (1.2, 1.21), (5.0, 6.0)];
+        assert_eq!(
+            widen_and_merge(&spans, 0.5, (0.0, 10.0)),
+            vec![(1.0, 1.7), (5.0, 6.0)]
         );
     }
 

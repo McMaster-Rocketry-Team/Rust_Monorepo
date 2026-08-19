@@ -35,7 +35,7 @@ use plotters::style::text_anchor::{HPos, Pos, VPos};
 
 use crate::plot::events::{self, Event};
 use crate::plot::log_csv::FlightLog;
-use crate::plot::series::{Trace, decimate, stage_spans, true_spans};
+use crate::plot::series::{Trace, decimate, stage_spans, true_spans, widen_and_merge};
 use crate::plot::session::{Session, WindowSource};
 use crate::plot::theme::{self, stage_color};
 
@@ -285,6 +285,47 @@ fn experiment_lanes(channel: usize) -> [(&'static str, &'static str, RGBColor); 
     }
 }
 
+/// Put the deployment estimator's Mach lockout back into the stage column.
+///
+/// `FlightStage` has no code for it — three bits, all eight spent — so the
+/// firmware folds it into `Ascent` and the log stores no trace of the variant.
+/// It is still recoverable exactly: through the lockout the KF is frozen and
+/// publishes no altitude, while the record for the tick keeps arriving. An
+/// `Ascent` row with a deployment record and no altitude was locked out, and
+/// nothing else in the log looks like that — `OnPad` publishes no altitude
+/// either, which is why the stage is part of the test.
+///
+/// A row with no deployment record cannot be told apart either way, so it
+/// comes back as no stage at all rather than as the `Ascent` the log claims —
+/// the interleaved slow records carry no estimator output, and reading them as
+/// `Ascent` chopped the band into one island per slow row. Both the bands and
+/// the dividers already carry an unknown row across.
+fn restore_mach_lockout(
+    stages: &[Option<u8>],
+    gate: Option<&[f32]>,
+    altitude: Option<&[f32]>,
+) -> Vec<Option<u8>> {
+    // Nothing to reconstruct from: a log that carries no deployment columns
+    // keeps every stage it has, rather than losing its whole ascent to a
+    // lockout that cannot be ruled out.
+    let (Some(gate), Some(altitude)) = (gate, altitude) else {
+        return stages.to_vec();
+    };
+    stages
+        .iter()
+        .enumerate()
+        .map(|(i, &stage)| {
+            let recorded = gate[i].is_finite();
+            let has_altitude = altitude[i].is_finite();
+            match stage {
+                Some(3) if !recorded => None,
+                Some(3) if !has_altitude => Some(theme::MACH_LOCKOUT),
+                other => other,
+            }
+        })
+        .collect()
+}
+
 pub struct Renderer<'a> {
     log: &'a FlightLog,
     session: &'a Session,
@@ -311,6 +352,11 @@ pub struct Renderer<'a> {
     /// limit — or a barometer that loses trust — closes it again. Drawing it
     /// as spans is what makes that visible instead of assumed.
     brakes_spans: Vec<(f64, f64)>,
+    /// Flight stages per row. The log's own column, except on the deployment
+    /// figure — see [`for_deployment`](Self::for_deployment).
+    stages: Vec<Option<u8>>,
+    /// Put each panel's trace legend in its top *right* corner.
+    legend_right: bool,
     x_range: (f64, f64),
     events: Vec<Event>,
     source_name: String,
@@ -376,6 +422,48 @@ impl<'a> Renderer<'a> {
                 })
                 .collect();
             derived.insert("vertical_acc_earth", vertical);
+        }
+
+        // Vertical acceleration for the deployment figure, differentiated from
+        // that estimator's own vertical velocity rather than projected from
+        // the IMU the way `vertical_acc_earth` is. The projection needs a tilt
+        // estimate and tilt is retired at apogee — the half of the flight this
+        // figure is mostly about — and under a chute there is no body axis
+        // that points up to project along anyway.
+        //
+        // Centred over 0.2 s. The KF publishes at the fast rate but is driven
+        // by the barometer, so a shorter window differentiates the
+        // sample-to-sample staircase instead of the motion; 0.2 s still
+        // resolves a canopy opening, which takes the best part of a second to
+        // change the descent rate.
+        //
+        // The endpoints are the nearest live samples either side, so the
+        // interleaved rows that carry no estimator output do not punch holes
+        // in the trace — but a window that would have to reach across the Mach
+        // lockout is left absent instead, because the step in velocity either
+        // side of a frozen filter is not an acceleration the rocket underwent.
+        if let Some(v) = log.column("deployment_kf_vertical_velocity") {
+            const HALF_WINDOW_S: f64 = 0.1;
+            let live: Vec<usize> = (0..log.row_count).filter(|&i| v[i].is_finite()).collect();
+            let mut acc = vec![f32::NAN; log.row_count];
+            let (mut lo, mut hi) = (0usize, 0usize);
+            for &i in &live {
+                while lo + 1 < live.len() && times[live[lo + 1]] <= times[i] - HALF_WINDOW_S {
+                    lo += 1;
+                }
+                while hi < live.len() && times[live[hi]] < times[i] + HALF_WINDOW_S {
+                    hi += 1;
+                }
+                if hi == live.len() {
+                    break;
+                }
+                let (before, after) = (live[lo], live[hi]);
+                let dt = times[after] - times[before];
+                if dt > 0.0 && dt <= HALF_WINDOW_S * 4.0 {
+                    acc[i] = ((v[after] - v[before]) as f64 / dt) as f32;
+                }
+            }
+            derived.insert("deployment_kf_vertical_acc", acc);
         }
 
         // Every altitude on the card is ASL, which is the unit the barometer
@@ -473,6 +561,7 @@ impl<'a> Renderer<'a> {
             .collect();
         let brakes_spans = true_spans(&times, &brakes_flag, window.start, window.end);
 
+
         // Half a percent of the flight. Two events closer together than that
         // cannot be told apart on the axis, so they are drawn as one.
         let merge_within = (x_range.1 - x_range.0) * 0.005;
@@ -497,10 +586,50 @@ impl<'a> Renderer<'a> {
             apogee_agl,
             burn_span,
             brakes_spans,
+            stages: log.stage.clone(),
+            legend_right: false,
             x_range,
             events,
             source_name,
         }
+    }
+
+    /// Draw the deployment estimator's own states instead of the air brakes'.
+    ///
+    /// Two changes, both about whose story the figure tells. The Mach lockout
+    /// goes back into the stage column — see [`restore_mach_lockout`] — so it
+    /// bands and divides like the stage it is. And the burn, the brakes and
+    /// the burnout and apogee rules come off: they are the air brakes' marks,
+    /// and on a 500 s axis they crowd the first seconds with decisions no
+    /// panel here plots. Apogee is still on the figure as the peak of the
+    /// altitude trace and in the header line.
+    pub fn for_deployment(mut self) -> Self {
+        // The legend moves right with them. Upper left is empty by physics on
+        // the other figures — every trace there starts on the pad at rest —
+        // but this figure's altitude panel is at its highest just after the
+        // lockout ends, so the box sat on the one part of the climb worth
+        // looking at. The upper right is where this figure has nothing: it
+        // ends at the ground.
+        self.legend_right = true;
+        self.burn_span = None;
+        self.brakes_spans.clear();
+        self.stages = restore_mach_lockout(
+            &self.log.stage,
+            self.log.column("deployment_baro_gate_reject"),
+            self.log.column("deployment_kf_altitude_asl"),
+        );
+        self.events = events::detect(
+            &self.times,
+            &self.stages,
+            None,
+            self.log.column("pyro_drogue_fire"),
+            self.log.column("pyro_main_fire"),
+            None,
+            self.window.0,
+            self.window.1,
+            (self.x_range.1 - self.x_range.0) * 0.005,
+        );
+        self
     }
 
     /// Every vertical rule on this figure, in time order.
@@ -700,8 +829,13 @@ impl<'a> Renderer<'a> {
         let (header, body) = root.split_vertically(HEADER_H);
         self.draw_header(&header, "Deployment")?;
 
-        let (p1, rest) = body.split_vertically(820);
-        let (p2, p3) = rest.split_vertically(600);
+        // The lanes are seven binary rows, not curves: they need a fraction of
+        // the height a trace panel does, and every pixel they give back is a
+        // pixel of altitude and vertical speed — where a deployment is judged.
+        let lanes_h = 296;
+        let panel_h = HEIGHT - HEADER_H - lanes_h;
+        let (p1, rest) = body.split_vertically(panel_h / 2);
+        let (p2, p3) = rest.split_vertically(panel_h / 2);
 
         self.draw_panel(
             &p1,
@@ -724,7 +858,7 @@ impl<'a> Renderer<'a> {
         self.draw_panel(
             &p2,
             &Panel::new(
-                "Vertical speed",
+                "Vertical speed & acceleration",
                 "m/s",
                 vec![Line::new(
                     "deployment KF",
@@ -734,7 +868,25 @@ impl<'a> Renderer<'a> {
             )
             // Zero is apogee, and the two descent rates either side of the main
             // are read off this panel against it.
-            .with_zero(),
+            .with_zero()
+            // On its own axis rather than sharing the speed's, which the air
+            // brakes figure can do because its two are the same order of
+            // magnitude. Here the speed spans hundreds of m/s and the
+            // acceleration single digits, and one axis would draw the
+            // acceleration as a flat line on zero.
+            //
+            // What it is here for is the two canopies: an opening shows up as
+            // the descent rate bending, and the bend is much easier to see —
+            // and to time against the pyro lanes below — as a spike in its
+            // derivative than as a change of slope.
+            .with_secondary(Secondary::new(
+                "m/s²",
+                vec![Line::new(
+                    "vertical acceleration (d/dt of KF speed)",
+                    "deployment_kf_vertical_acc",
+                    theme::AMBER,
+                )],
+            )),
             Y_GUTTER,
         )?;
         self.draw_lanes(
@@ -1186,12 +1338,7 @@ impl<'a> Renderer<'a> {
     }
 
     fn stage_spans_in_window(&self) -> Vec<(f64, f64, u8)> {
-        stage_spans(
-            &self.times,
-            &self.log.stage,
-            self.window.0,
-            self.window.1,
-        )
+        stage_spans(&self.times, &self.stages, self.window.0, self.window.1)
     }
 
     /// Pick the vertical range for a panel.
@@ -1493,16 +1640,22 @@ impl<'a> Renderer<'a> {
                     rows as f64 * (theme::F_LEGEND as f64 + 12.0) + 24.0,
                 )
             });
+            let legend = if self.legend_right { None } else { legend };
             self.draw_event_labels(&mut chart, y_lo, y_hi, legend)?;
         }
 
         chart
             .configure_series_labels()
             // Top left, where the eye starts. It is also the corner the data
-            // is least likely to be in on these figures: every trace here
-            // begins on the pad at rest, so the upper left is the one region
-            // that is empty by physics rather than by luck.
-            .position(SeriesLabelPosition::UpperLeft)
+            // is least likely to be in on most of these figures: a trace that
+            // begins on the pad at rest leaves the upper left empty by physics
+            // rather than by luck. Where that is not true the figure asks for
+            // the other corner — see [`for_deployment`](Self::for_deployment).
+            .position(if self.legend_right {
+                SeriesLabelPosition::UpperRight
+            } else {
+                SeriesLabelPosition::UpperLeft
+            })
             // plotters sizes the swatch gutter from this, not from the element
             // the closure draws; leaving it at the default puts the last few
             // pixels of every swatch through the first letter of its label.
@@ -1751,19 +1904,12 @@ impl<'a> Renderer<'a> {
                     )))
                     .plot()?;
 
-                let spans = true_spans(
-                    &self.times,
-                    values,
-                    self.window.0,
-                    self.window.1,
-                );
+                let spans = true_spans(&self.times, values, self.window.0, self.window.1);
+                let spans = widen_and_merge(&spans, min_width, self.x_range);
                 chart
                     .draw_series(spans.iter().map(|&(a, b)| {
                         Rectangle::new(
-                            [
-                                (a, bottom + inset),
-                                (b.max(a + min_width), top - inset),
-                            ],
+                            [(a, bottom + inset), (b, top - inset)],
                             color.mix(0.9).filled(),
                         )
                     }))
@@ -1804,22 +1950,20 @@ impl<'a> Renderer<'a> {
         // the gate is evaluated per sample and its first opening can be a
         // couple of dozen milliseconds before the filter's birth transient
         // shuts it again. That is a finding, and at 25 ms on a 45 s axis it is
-        // a third of a pixel wide — drawn honestly, it would not be drawn.
+        // a third of a pixel wide — drawn honestly, it would not be drawn. The
+        // merge that follows the widening is what keeps the fill one layer
+        // deep: this band is translucent, and two rectangles over the same
+        // pixels would shade it darker than the state it stands for.
         let min_width = {
             let (px, _) = chart.plotting_area().get_pixel_range();
             (self.x_range.1 - self.x_range.0) / (px.end - px.start).max(1) as f64 * 3.0
         };
-        for &(a, b) in &self.brakes_spans {
-            let (a, b) = (a.max(self.x_range.0), b.max(a + min_width).min(self.x_range.1));
-            if b > a {
-                chart
-                    .draw_series(std::iter::once(Rectangle::new(
-                        [(a, y_lo), (b, y_hi)],
-                        theme::brakes_color().filled(),
-                    )))
-                    .plot()?;
-            }
-        }
+        let brakes = widen_and_merge(&self.brakes_spans, min_width, self.x_range);
+        chart
+            .draw_series(brakes.iter().map(|&(a, b)| {
+                Rectangle::new([(a, y_lo), (b, y_hi)], theme::brakes_color().filled())
+            }))
+            .plot()?;
         if let Some((a, b)) = self.burn_span {
             // Clipped to the axis: the airbrakes figure ends at apogee and the
             // others do not, but the burn is the same span of seconds on all
@@ -1984,5 +2128,32 @@ impl<'a> Renderer<'a> {
                 .plot()?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The one piece of inference in the plotter, and the three cases it has to
+    /// tell apart: a frozen KF, a live one, and a row that cannot say.
+    #[test]
+    fn the_mach_lockout_comes_back_only_where_the_kf_was_frozen() {
+        let stages = vec![Some(2), Some(3), Some(3), Some(3), Some(4)];
+        //               on pad    frozen    no record live      drogue
+        let gate = [1.0f32, 1.0, f32::NAN, 1.0, 1.0];
+        let altitude = [f32::NAN, f32::NAN, f32::NAN, 100.0, 90.0];
+        assert_eq!(
+            restore_mach_lockout(&stages, Some(&gate), Some(&altitude)),
+            vec![Some(2), Some(theme::MACH_LOCKOUT), None, Some(3), Some(4)]
+        );
+    }
+
+    /// A log without the deployment columns at all keeps every stage it has,
+    /// rather than turning its whole ascent into a lockout.
+    #[test]
+    fn a_log_without_the_deployment_columns_is_left_alone() {
+        let stages = vec![Some(2), Some(3), Some(4)];
+        assert_eq!(restore_mach_lockout(&stages, None, None), stages);
     }
 }

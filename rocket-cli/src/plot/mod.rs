@@ -89,6 +89,7 @@ pub fn plot_flight_log(args: &PlotFlightLogArgs) -> Result<()> {
         .render_airbrakes(&paths.airbrakes)
         .with_context(|| format!("writing {}", paths.airbrakes.display()))?;
     Renderer::new(&log, session, source_name.clone(), to_landing)
+        .for_deployment()
         .render_deployment(&paths.deployment)
         .with_context(|| format!("writing {}", paths.deployment.display()))?;
     Renderer::new(&log, session, source_name.clone(), to_landing)
