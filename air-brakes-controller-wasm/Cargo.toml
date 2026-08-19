@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 air-brakes-controller-core = { path = "../air-brakes-controller-core", default-features = false}
+firmware-common-new = { path = "../firmware-common-new", default-features = false }
 nalgebra = { version = "0.34.0", default-features = false, features = ["libm-force"] }
 
 [lib]

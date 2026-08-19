@@ -181,6 +181,7 @@ name = "air-brakes-controller-wasm"
 version = "0.1.0"
 dependencies = [
  "air-brakes-controller-core",
+ "firmware-common-new",
  "nalgebra 0.34.0",
 ]
 
