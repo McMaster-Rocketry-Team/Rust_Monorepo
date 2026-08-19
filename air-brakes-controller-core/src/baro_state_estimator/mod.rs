@@ -110,10 +110,11 @@ const LANDED_DETECTION_S: f32 = 5.0;
 const PAD_WINDOW_S: f32 = 1.0;
 
 /// Ring of recent raw baro samples kept through the Mach lockout, used for
-/// exactly one thing: picking the altitude the filter is born at when the
-/// lockout ends, by median. Same idiom, and the same nine-pick median, as
-/// the airbrakes half's `BARO_RING_CAP` / `ring_median` — see
-/// [`ring_median`] for why this is a copy rather than a shared function.
+/// exactly one thing: the state the filter is born in when the lockout ends
+/// — where the airframe is and how fast it is climbing, both by median. Same
+/// idiom, and the same nine picks, as the airbrakes half's `BARO_RING_CAP` /
+/// `ring_median` — see [`ring_birth_state`] for why this is a copy rather
+/// than a shared function, and for where the two differ.
 ///
 /// It exists because a birth seeded from ONE raw sample is a birth that
 /// inherits whatever that sample happened to be, and the exit sample is not
@@ -131,12 +132,24 @@ const PAD_WINDOW_S: f32 = 1.0;
 /// A median outvotes it. `BARO_RING_SPAN_S` = 0.25 s is the whole margin:
 /// long enough that a transient has to hold for more than half the window
 /// (5 of the 9 picks, ~0.13 s) to move the answer, short enough that the
-/// median's half-window lag costs only ~17 m of seed altitude at the
-/// +137 m/s the airframe is doing at lockout exit on Osiris. That lag is
-/// paid twice and matters neither time: the newborn filter's velocity prior
-/// is (300 m/s)^2 wide and closes it in a fraction of a second, and
-/// `peak_altitude_asl` is a running maximum that only ever revises upward.
-/// Seeding the peak LOW is harmless; seeding it high is the defect above.
+/// half-window lag it comes with is one the ring can measure its way out of.
+///
+/// That lag used to be paid, and the claim here used to be that it did not
+/// matter — the newborn filter's (300 m/s)^2 velocity prior would close it
+/// in a fraction of a second. It closed it by *exploding*: the HIL replay
+/// exits the lockout at 141 m/s, which puts the median 17.8 m below where
+/// the airframe is, and the first update turned that into a published
+/// vertical velocity of 2858 m/s and 3.6 m of altitude overshoot. The
+/// velocity feeds only the log and the downlink and the overshoot is far
+/// under `APOGEE_DROP_M`, so nothing was mis-fired — but the lag scales with
+/// exit speed, and a supersonic exit would put the overshoot in the same
+/// order as the drop test that calls apogee.
+///
+/// So the ring hands over a climb rate as well, and the seed is carried
+/// forward to the exit sample with it. `peak_altitude_asl` is seeded from
+/// the same number: it is a running maximum that only ever revises upward,
+/// and seeding it where the airframe actually is beats seeding it half a
+/// span behind.
 ///
 /// RAM, measured: the `Deque` is 2072 B (128 * 16 B of `(u64, f32)` plus
 /// its indices), and it sizes the whole `Stage` enum rather than just the
@@ -624,25 +637,30 @@ impl RocketStateEstimator {
 
             *remaining_s -= dt;
             if *remaining_s <= 0.0 {
-                // Born from the median of the last BARO_RING_SPAN_S rather
-                // than from this one sample, so that one bad reading landing
-                // on the exit sample cannot decide both where the filter
-                // starts and what counts as the peak — see
-                // [`BARO_RING_CAP`] for the 28.67 s drogue that costs.
+                // Born from the last BARO_RING_SPAN_S rather than from this
+                // one sample, so that one bad reading landing on the exit
+                // sample cannot decide both where the filter starts and what
+                // counts as the peak — see [`BARO_RING_CAP`] for the 28.67 s
+                // drogue that costs. The ring gives up a climb rate as well
+                // as an altitude, which is what lets the altitude be the one
+                // at *this* sample rather than the one half a ring span ago;
+                // see [`ring_birth_state`].
                 //
                 // `unwrap_or` cannot fire: this sample was just pushed. It is
                 // spelt as a fallback rather than an `expect` because this is
                 // the code path that fires pyros, and the honest degradation
                 // of an empty ring is the old single-sample behaviour, not a
                 // panic that resets the board mid-flight.
-                let seed_asl = ring_median(baro_ring).unwrap_or(baro_altitude_asl);
+                let (seed_asl, seed_velocity) =
+                    ring_birth_state(baro_ring, timestamp_us).unwrap_or((baro_altitude_asl, 0.0));
                 log_info!(
-                    "mach lockout over, building KF in flight at {}m (median of the last {}s; this sample read {}m)",
+                    "mach lockout over, building KF in flight at {}m climbing {}m/s (from the last {}s; this sample read {}m)",
                     seed_asl,
+                    seed_velocity,
                     BARO_RING_SPAN_S,
                     baro_altitude_asl
                 );
-                self.kf = Some(BaroAltitudeKF::born_in_flight(seed_asl));
+                self.kf = Some(BaroAltitudeKF::born_in_flight(seed_asl, seed_velocity));
                 self.stage = Stage::Ascent {
                     launch_pad_altitude_asl: *launch_pad_altitude_asl,
                     peak_altitude_asl: seed_asl,
@@ -1001,27 +1019,61 @@ impl RocketStateEstimator {
 /// robustness a median buys is set by how many of the picks a transient can
 /// reach, not by how many samples were available to pick from.
 ///
-/// A deliberate copy of `airbrakes_estimator::estimator::ring_median`,
-/// which is private to that module. The two halves are kept free of each
-/// other on purpose — the airbrakes half may be retired mid-flight, and the
-/// half that fires the pyros does not call into anything that can be — so
-/// twelve duplicated lines are the cheaper coupling. If a third caller ever
-/// wants this, that is the point at which it should move to a shared
-/// module rather than gain a second copy.
-fn ring_median(ring: &Deque<(u64, f32), BARO_RING_CAP>) -> Option<f32> {
+/// The airbrakes half's `ring_median` solves the lag by carrying every pick
+/// forward with the dead reckoner's velocity. There is no reckoner on this
+/// side — the deployment half is baro-only and may not call into a half that
+/// can be retired mid-flight — so the ring supplies its own rate: median the
+/// older half of the picks, median the newer half, and the difference over
+/// the gap between them is the climb. Medians on both sides, so the property
+/// the single median was chosen for survives intact — a transient still has
+/// to outvote a half to be believed.
+///
+fn ring_birth_state(
+    ring: &Deque<(u64, f32), BARO_RING_CAP>,
+    now_us: u64,
+) -> Option<(f32, f32)> {
     let n = ring.len();
     if n == 0 {
         return None;
     }
-    let mut picks = [0.0f32; 9];
+    let mut picks = [(0u64, 0.0f32); 9];
     let mut count = 0usize;
-    for (i, (_, alt)) in ring.iter().enumerate() {
+    for (i, sample) in ring.iter().enumerate() {
         while count < 9 && i == (count * (n - 1)) / 8 {
-            picks[count] = *alt;
+            picks[count] = *sample;
             count += 1;
         }
     }
     let picks = &mut picks[..count];
+    // The middle pick belongs to neither half. The rate is two medians
+    // differenced over the gap between them, so the gap is worth keeping as
+    // wide as the ring allows — it is what divides their noise.
+    let half = (count / 2).max(1);
+    let older = median_by_altitude(&mut picks[..half]);
+    let newer = median_by_altitude(&mut picks[count - half..]);
+
+    let gap_s = (newer.0.saturating_sub(older.0)) as f32 * 1e-6;
+    // A one-sample ring, or picks that all carry one timestamp: no rate can
+    // be taken, and the honest answer is the one this function used to give
+    // — the median, at rest, lag and all.
+    let climb = if gap_s > 0.0 {
+        (newer.1 - older.1) / gap_s
+    } else {
+        0.0
+    };
+    let age_s = (now_us.saturating_sub(newer.0)) as f32 * 1e-6;
+    Some((newer.1 + climb * age_s, climb))
+}
+
+/// The middle sample of a few, ranked by altitude, with its own timestamp.
+///
+/// The timestamp is the point: it is what the two halves are differenced
+/// over. Ranking by altitude and reading off the time is sound because the
+/// airframe is climbing monotonically through a 0.25 s window at a few
+/// hundred m/s — the picks are tens of metres apart against 0.36 m of baro
+/// noise, so their altitude order *is* their time order, and a pick that
+/// somehow ranks out of order is one the median did not choose.
+fn median_by_altitude(picks: &mut [(u64, f32)]) -> (u64, f32) {
     // `total_cmp`, not `partial_cmp(..).unwrap()`: this half cannot be
     // retired mid-flight, so a panic here is the flight. A NaN altitude
     // should not reach the ring at all — VLF5's `sensor_tasks.rs` rejects a
@@ -1029,6 +1081,6 @@ fn ring_median(ring: &Deque<(u64, f32), BARO_RING_CAP>) -> Option<f32> {
     // lives in another repo, and the cost of not depending on it is one
     // token. `total_cmp` orders NaN rather than refusing to; the median of a
     // ring that somehow contains one is then merely wrong, not fatal.
-    picks.sort_unstable_by(f32::total_cmp);
-    Some(picks[count / 2])
+    picks.sort_unstable_by(|a, b| a.1.total_cmp(&b.1));
+    picks[picks.len() / 2]
 }

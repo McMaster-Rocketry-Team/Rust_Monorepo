@@ -86,11 +86,23 @@ const INNOVATION_GATE_M: f32 = 500.0;
 /// re-converge instead of flying blind.
 const MAX_REJECTED_SAMPLES: u32 = SAMPLES_PER_S as u32;
 
-/// Velocity variance used by [`BaroAltitudeKF::born_in_flight`]: after a Mach lockout
-/// the velocity is unknown; (300 m/s)^2 covers any post-lockout speed and lets
-/// the filter pull the true velocity out of the altitude stream within a few
-/// hundred ms.
-const RESEED_VELOCITY_VARIANCE: f32 = 300.0 * 300.0;
+/// Velocity variance used by [`BaroAltitudeKF::born_in_flight`]: the
+/// uncertainty of the climb rate the ring measured, not "unknown".
+///
+/// It was (300 m/s)^2 — a prior wide enough for any post-lockout speed —
+/// back when the velocity was seeded at rest and had to be pulled out of the
+/// altitude stream. That prior is what turned the seed's small altitude error
+/// into an enormous velocity: one predict makes p01 = p11*dt, so a (300 m/s)^2
+/// prior hands the first update a velocity gain of 152 m/s per metre of
+/// innovation, and the 17.8 m the seed was behind on the HIL replay came out
+/// as 2858 m/s.
+///
+/// The ring now measures the climb rate to a few m/s (two medians of four
+/// picks each, ~0.36 m of baro noise apiece, over a gap of ~0.19 s), and the
+/// coast's own curvature biases a slope that short by well under 1 m/s.
+/// (30 m/s)^2 is an order of magnitude of headroom over that and keeps the
+/// birth gain at ~7 m/s per metre.
+const RESEED_VELOCITY_VARIANCE: f32 = 30.0 * 30.0;
 
 impl BaroAltitudeKF {
     pub fn new(initial_altitude_asl: f32) -> Self {
@@ -200,17 +212,21 @@ impl BaroAltitudeKF {
     /// lockout has just ended and this is the first honest baro reading
     /// since ignition.
     ///
-    /// Same altitude seed as [`Self::new`], but the velocity prior is wide
-    /// open rather than "at rest": the airframe is doing a few hundred m/s
-    /// and a confident zero would take a second of altitude data to argue
-    /// down through the innovation gate.
+    /// Both numbers come from the baro ring the lockout kept — the altitude
+    /// it was at on this sample and the rate it is climbing at — rather than
+    /// an altitude alone with the velocity left at rest for the filter to
+    /// work out. Seeding the velocity is what lets the altitude be seeded at
+    /// *now* instead of at the ring's centre, and the two together are what
+    /// make the first innovation baro noise rather than half a ring span of
+    /// climb; see [`ring_birth_state`](super::ring_birth_state).
     ///
     /// A constructor and not a reset, because nothing survives the lockout.
     /// The estimator drops its filter outright at ignition rather than
     /// freezing one, so there is no stale state here to overwrite — see
     /// [`RocketStateEstimator::update`](super::RocketStateEstimator::update).
-    pub fn born_in_flight(altitude_asl: f32) -> Self {
+    pub fn born_in_flight(altitude_asl: f32, vertical_velocity: f32) -> Self {
         let mut kf = Self::new(altitude_asl);
+        kf.velocity = vertical_velocity;
         kf.p00 = BARO_ALTITUDE_MEASUREMENT_VARIANCE;
         kf.p01 = 0.0;
         kf.p11 = RESEED_VELOCITY_VARIANCE;
