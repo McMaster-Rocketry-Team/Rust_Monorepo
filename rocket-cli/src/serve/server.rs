@@ -4,12 +4,14 @@ use std::time::Instant;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 use anyhow::Result;
+use firmware_common_new::can_bus::messages::amp_overwrite::PowerOutputOverwrite;
 use firmware_common_new::vlp::packets::VLPDownlinkPacket;
+use firmware_common_new::vlp::packets::VLPUplinkPacket;
 use lora_phy::mod_params::PacketStatus;
 use std::time::Duration;
 
 use axum::{
-    Json, Router, extract::{WebSocketUpgrade, State, ws::{Message, WebSocket}}, http::StatusCode, response::Response, routing::{any, get, post},
+    Json, extract::Request, Router, extract::{WebSocketUpgrade, State, ws::{Message, WebSocket}}, http::{header, Method, StatusCode}, middleware::{self, Next}, response::{IntoResponse, Response}, routing::{any, get, post},
 };
 
 use serde::{Deserialize, Serialize};
@@ -31,11 +33,10 @@ pub async fn start_server(
         let mut last_packet_time = Instant::now();
         loop {
             if let Some((packet, status)) = client.try_receive() {
-                println!("{:#?}", packet);
-                println!("rssi {}, snr {}", status.rssi, status.snr);
+                // println!("{:#?}", packet);
+                // println!("rssi {}, snr {}", status.rssi, status.snr);
                 /* 
-                TODO: at the moment just sending with JSON to test the server functionality. 
-                Need to implement correct sending method (from NICK/docs/BACKEND_WIRING-4.2, copied here)
+                TODO: sending timestamps instead of received ones
                 Packet decoding and unit corrections can be seen in the formatting in gs/downlink_packet_display/sections (L259)
 
                 on each received `VLPDownlinkPacket`, decode it and flatten it
@@ -70,6 +71,7 @@ pub async fn start_server(
     let app = Router::new()
         .route("/ws", any(ws_handler))
         .route("/cmd", post(command_handler))
+        .layer(middleware::from_fn(cors_middleware))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
@@ -77,26 +79,136 @@ pub async fn start_server(
     Ok(())
 }
 
+// CORS
+async fn cors_middleware(req: Request, next: Next) -> Response {
+    let is_preflight = req.method() == Method::OPTIONS;
+
+    // Return 204 for OPTIONS, or forward actual requests to handlers
+    let mut response = if is_preflight {
+        StatusCode::NO_CONTENT.into_response()
+    } else {
+        next.run(req).await
+    };
+
+    let headers = response.headers_mut();
+    headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".parse().unwrap());
+    headers.insert(
+        header::ACCESS_CONTROL_ALLOW_METHODS,
+        "POST, GET, OPTIONS".parse().unwrap(),
+    );
+    headers.insert(
+        header::ACCESS_CONTROL_ALLOW_HEADERS,
+        "content-type, accept".parse().unwrap(),
+    );
+
+    response
+}
+
 #[derive(Clone)]
 struct AppState {
     tx: broadcast::Sender<String>
 }
 
-#[derive(Deserialize)]
-struct PostCommandRequest {
-    command: String,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum UplinkCommand {
+    SetTargetApogee {
+        altitude: f64,
+    },
+    ChangeMode {
+        mode: Mode,
+    },
+    Reset {
+        device: DeviceToReset,
+    },
+    AMPOutputOverwrite(AMPOverwrite),
+    PayloadEPSOutputOverwrite(EPSOverwrite),
+    FirePyro {
+        pyro: String,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Mode {
+    LowPower,
+    SelfTest,
+    Armed,
+    Landed,
+    Demo,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DeviceToReset {
+    All,
+    VoidLake,
+    AMP,
+    AMPOut1,
+    AMPOut2,
+    AMPOut3,
+    AMPOut4,
+    Icarus,
+    PayloadActivationPCB,
+    RocketWifi,
+    OzysAll,
+    MainBulkhead,
+    DrogueBulkhead,
+    PayloadEPS1,
+    PayloadEPS2,
+    AeroRust,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AMPOverwrite {
+    pub out1: PowerOutputOverwrite,
+    pub out2: PowerOutputOverwrite,
+    pub out3: PowerOutputOverwrite,
+    pub out4: PowerOutputOverwrite,
+}
+
+// Define the fields present on your TS EPSOverwrite type
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EPSOverwrite {
+    pub eps1_3v3: PowerOutputOverwrite,
+    pub eps1_5v: PowerOutputOverwrite,
+    pub eps1_9v: PowerOutputOverwrite,
+    pub eps2_3v3: PowerOutputOverwrite,
+    pub eps2_5v: PowerOutputOverwrite,
+    pub eps2_9v: PowerOutputOverwrite,
 }
 
 #[derive(Serialize)]
-struct PostCommandResponse {
-    id: u64,
-    response: String,
+struct UplinkResponse {
+    rssi: u64,
+    snr: u64
 }
 
-async fn command_handler(Json(payload): Json<PostCommandRequest>) -> (StatusCode, Json<PostCommandResponse>) {
-    let res = PostCommandResponse {
-        id: 1,
-        response: format!("response to {}", payload.command)
+async fn command_handler(Json(payload): Json<UplinkCommand>) -> (StatusCode, Json<UplinkResponse>) {
+    match payload {
+        UplinkCommand::SetTargetApogee { altitude } => {
+            println!("Setting target apogee to: {altitude}m");
+        }
+        UplinkCommand::ChangeMode { mode } => {
+            println!("Transitioning mode to: {mode:?}");
+        }
+        UplinkCommand::Reset { device } => {
+            println!("Resetting subsystem: {device:?}");
+        }
+        UplinkCommand::AMPOutputOverwrite(amp_data) => {
+            println!("Applying AMP overwrite: {amp_data:?}");
+        }
+        UplinkCommand::PayloadEPSOutputOverwrite(eps_data) => {
+            println!("Applying EPS overwrite: {eps_data:?}");
+        }
+        UplinkCommand::FirePyro { pyro } => {
+            println!("Firing pyro channel: {pyro:?}");
+        }
+    }
+    // let packet: VLPUplinkPacket;
+
+    // client.send_nb(packet.clone());
+    let res = UplinkResponse {
+        rssi: 1,
+        snr: 4
     };
     (StatusCode::CREATED, Json(res))
 }

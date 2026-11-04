@@ -54,6 +54,10 @@ pub enum ModeSelect {
     #[clap(subcommand)]
     #[command(about = "functions used for testing")]
     Testing(TestingModeSelect),
+
+    #[cfg(feature = "server")]
+    #[command(about = "run the server for web based NICK. needs VLF ground station connected")]
+    Server,
 }
 
 #[derive(Parser, Debug)]

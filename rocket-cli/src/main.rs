@@ -42,6 +42,8 @@ use crate::testing::mock_ground_station::mock_ground_station_tui;
 use crate::testing::send_fake_vlp_telemetry::send_fake_vlp_telemetry;
 #[cfg(feature = "server")]
 use crate::testing::mock_server::mock_server;
+#[cfg(feature = "server")]
+use crate::serve::run_live_server;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -70,6 +72,11 @@ async fn main() -> Result<()> {
         ModeSelect::GroundStation => {
             let serial_path = find_ground_station().await?;
             ground_station_tui(&serial_path).await
+        }
+        #[cfg(feature = "server")]
+        ModeSelect::Server => {
+            let serial_path = find_ground_station().await?;
+            run_live_server(&serial_path).await
         }
         ModeSelect::Control(args) => {
             let serial_path = find_ground_station().await?;

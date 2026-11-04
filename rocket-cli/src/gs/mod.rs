@@ -35,11 +35,10 @@ use lora_phy::mod_params::PacketStatus;
 use tokio::task::spawn_blocking;
 
 use crate::{
-    enable_stdout_logging,
-    gs::{
+    enable_stdout_logging, gs::{
         config::GroundStationConfig, downlink_packet_display::DownlinkPacketDisplay,
         rpc_radio::RpcRadio, serial_wrapper::SerialWrapper, vlp_client::VLPClientTrait,
-    },
+    }
 };
 
 pub mod config;
