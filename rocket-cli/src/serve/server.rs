@@ -20,13 +20,13 @@ use tokio::sync::broadcast;
 use crate::gs::{config::GroundStationConfig, vlp_client::VLPClientTrait};
 
 pub async fn start_server(
-    client: &'static impl VLPClientTrait,
+    client: &'static (dyn VLPClientTrait + Sync),
     config: Arc<RwLock<GroundStationConfig>>,
 ) -> Result<()> {
 
     let (tx, _rx) = broadcast::channel::<String>(100);
 
-    let state = AppState {tx: tx.clone()};
+    let state = AppState {tx: tx.clone(), client: client};
 
     // spawn data polling task from client
     tokio::spawn(async move {
@@ -106,74 +106,8 @@ async fn cors_middleware(req: Request, next: Next) -> Response {
 
 #[derive(Clone)]
 struct AppState {
-    tx: broadcast::Sender<String>
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum UplinkCommand {
-    SetTargetApogee {
-        altitude: f64,
-    },
-    ChangeMode {
-        mode: Mode,
-    },
-    Reset {
-        device: DeviceToReset,
-    },
-    AMPOutputOverwrite(AMPOverwrite),
-    PayloadEPSOutputOverwrite(EPSOverwrite),
-    FirePyro {
-        pyro: String,
-    },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Mode {
-    LowPower,
-    SelfTest,
-    Armed,
-    Landed,
-    Demo,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum DeviceToReset {
-    All,
-    VoidLake,
-    AMP,
-    AMPOut1,
-    AMPOut2,
-    AMPOut3,
-    AMPOut4,
-    Icarus,
-    PayloadActivationPCB,
-    RocketWifi,
-    OzysAll,
-    MainBulkhead,
-    DrogueBulkhead,
-    PayloadEPS1,
-    PayloadEPS2,
-    AeroRust,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AMPOverwrite {
-    pub out1: PowerOutputOverwrite,
-    pub out2: PowerOutputOverwrite,
-    pub out3: PowerOutputOverwrite,
-    pub out4: PowerOutputOverwrite,
-}
-
-// Define the fields present on your TS EPSOverwrite type
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EPSOverwrite {
-    pub eps1_3v3: PowerOutputOverwrite,
-    pub eps1_5v: PowerOutputOverwrite,
-    pub eps1_9v: PowerOutputOverwrite,
-    pub eps2_3v3: PowerOutputOverwrite,
-    pub eps2_5v: PowerOutputOverwrite,
-    pub eps2_9v: PowerOutputOverwrite,
+    tx: broadcast::Sender<String>,
+    client: &'static (dyn VLPClientTrait + Sync),
 }
 
 #[derive(Serialize)]
@@ -182,30 +116,30 @@ struct UplinkResponse {
     snr: u64
 }
 
-async fn command_handler(Json(payload): Json<UplinkCommand>) -> (StatusCode, Json<UplinkResponse>) {
+async fn command_handler(State(state): State<AppState>, Json(payload): Json<VLPUplinkPacket>) -> (StatusCode, Json<UplinkResponse>) {
     match payload {
-        UplinkCommand::SetTargetApogee { altitude } => {
-            println!("Setting target apogee to: {altitude}m");
+        VLPUplinkPacket::SetTargetApogee(ref apogee) => {
+            println!("Setting target apogee to: {apogee:?}m");
         }
-        UplinkCommand::ChangeMode { mode } => {
+        VLPUplinkPacket::ChangeMode(ref mode) => {
             println!("Transitioning mode to: {mode:?}");
         }
-        UplinkCommand::Reset { device } => {
+        VLPUplinkPacket::Reset(ref device) => {
             println!("Resetting subsystem: {device:?}");
         }
-        UplinkCommand::AMPOutputOverwrite(amp_data) => {
+        VLPUplinkPacket::AMPOutputOverwrite(ref amp_data) => {
             println!("Applying AMP overwrite: {amp_data:?}");
         }
-        UplinkCommand::PayloadEPSOutputOverwrite(eps_data) => {
-            println!("Applying EPS overwrite: {eps_data:?}");
-        }
-        UplinkCommand::FirePyro { pyro } => {
+        // VLPUplinkPacket::PayloadEPSOutputOverwrite(eps_data) => {
+        //     println!("Applying EPS overwrite: {eps_data:?}");
+        // }
+        VLPUplinkPacket::FirePyro(ref pyro) => {
             println!("Firing pyro channel: {pyro:?}");
         }
     }
     // let packet: VLPUplinkPacket;
 
-    // client.send_nb(packet.clone());
+    state.client.send_nb(payload.clone());
     let res = UplinkResponse {
         rssi: 1,
         snr: 4
