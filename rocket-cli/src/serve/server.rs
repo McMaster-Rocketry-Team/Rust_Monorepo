@@ -4,18 +4,18 @@ use std::time::Instant;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 use anyhow::Result;
-use firmware_common_new::can_bus::messages::amp_overwrite::PowerOutputOverwrite;
 use firmware_common_new::vlp::packets::VLPDownlinkPacket;
 use firmware_common_new::vlp::packets::VLPUplinkPacket;
 use lora_phy::mod_params::PacketStatus;
 use std::time::Duration;
 
 use axum::{
-    Json, extract::Request, Router, extract::{WebSocketUpgrade, State, ws::{Message, WebSocket}}, http::{header, Method, StatusCode}, middleware::{self, Next}, response::{IntoResponse, Response}, routing::{any, get, post},
+    Json, extract::Request, Router, extract::{WebSocketUpgrade, State, ws::{Message, WebSocket}}, http::{header, Method, StatusCode}, middleware::{self, Next}, response::{IntoResponse, Response}, routing::{any, post},
 };
 
-use serde::{Deserialize, Serialize};
-use tokio::sync::broadcast;
+use serde::{Serialize};
+// use serde_json::json;
+use tokio::sync::{broadcast, Mutex};
 
 use crate::gs::{config::GroundStationConfig, vlp_client::VLPClientTrait};
 
@@ -26,7 +26,7 @@ pub async fn start_server(
 
     let (tx, _rx) = broadcast::channel::<String>(100);
 
-    let state = AppState {tx: tx.clone(), client: client};
+    let state = AppState {tx: tx.clone(), client: client, uplink_lock: Arc::new(Mutex::new(()))};
 
     // spawn data polling task from client
     tokio::spawn(async move {
@@ -108,15 +108,27 @@ async fn cors_middleware(req: Request, next: Next) -> Response {
 struct AppState {
     tx: broadcast::Sender<String>,
     client: &'static (dyn VLPClientTrait + Sync),
+    uplink_lock: Arc<Mutex<()>>,
 }
 
 #[derive(Serialize)]
 struct UplinkResponse {
-    rssi: u64,
-    snr: u64
+    rssi: i16,
+    snr: i16,
+    message: String,
 }
 
 async fn command_handler(State(state): State<AppState>, Json(payload): Json<VLPUplinkPacket>) -> (StatusCode, Json<UplinkResponse>) {
+    // let _lock = match state.uplink_lock.lock().await {
+    //     Ok(guard) => guard,
+    //     Err(_) => {
+    //         return (
+    //             StatusCode::CONFLICT,
+    //             Json(UplinkResponse { rssi: 404, snr: 404, message: "Uplink already in progess".to_string() }),
+    //         )
+    //     }
+    // };
+    let _lock = state.uplink_lock.lock().await;
     match payload {
         VLPUplinkPacket::SetTargetApogee(ref apogee) => {
             println!("Setting target apogee to: {apogee:?}m");
@@ -138,13 +150,48 @@ async fn command_handler(State(state): State<AppState>, Json(payload): Json<VLPU
         }
     }
     // let packet: VLPUplinkPacket;
-
     state.client.send_nb(payload.clone());
-    let res = UplinkResponse {
-        rssi: 1,
-        snr: 4
+    let timeout = Duration::from_secs(5);
+    let start = Instant::now();
+
+    let send_result = loop {
+        if let Some(res) = state.client.try_get_send_result() {
+            break res;
+        }
+
+        if start.elapsed() > timeout {
+            return (
+                StatusCode::GATEWAY_TIMEOUT,
+                Json(UplinkResponse {
+                    rssi: 404,
+                    snr: 404,
+                    message: "TIMEOUT".to_string(),
+                }),
+            );
+        }
+
+        tokio::time::sleep(Duration::from_millis(15)).await;
     };
-    (StatusCode::CREATED, Json(res))
+
+    match send_result {
+        Ok(status) => (
+            StatusCode::OK,
+            Json(UplinkResponse {
+                rssi: status.rssi,
+                snr: status.snr,
+                message: "OK".to_string(),
+            }),
+        ),
+        Err(err) => (
+            StatusCode::BAD_GATEWAY,
+            Json(UplinkResponse {
+                rssi: 404,
+                snr: 404,
+                message: format!("Uplink transmission failed: {err:?}").to_string(),
+            }),
+        )
+    }
+
 }
 
 async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {

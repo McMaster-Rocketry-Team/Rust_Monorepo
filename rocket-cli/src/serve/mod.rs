@@ -5,20 +5,13 @@ use std::{
 
 use anyhow::Result;
 
-use embassy_sync::blocking_mutex::raw::RawMutex;
 use firmware_common_new::{
-    can_bus::messages::amp_overwrite::PowerOutputOverwrite,
     rpc::lora_rpc::LoraRpcClient,
     vlp::{
         client::{VLPGroundStation, VLPTXError},
         lora_config::LoraConfig,
         packets::{
             VLPDownlinkPacket, VLPUplinkPacket,
-            amp_output_overwrite::AMPOutputOverwritePacket,
-            change_mode::{ChangeModePacket, Mode},
-            fire_pyro::{FirePyroPacket, PyroSelect},
-            reset::{DeviceToReset, ResetPacket},
-            set_target_apogee::SetTargetApogeePacket,
         },
     },
 };

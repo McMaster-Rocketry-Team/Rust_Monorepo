@@ -5,7 +5,7 @@ use anyhow::Result;
 
 use tokio::spawn;
 
-use crate::gs::{config::GroundStationConfig, vlp_client::VLPClientTrait};
+use crate::gs::config::GroundStationConfig;
 use crate::testing::mock_ground_station::MockVLPClient;
 #[cfg(feature = "server")]
 use crate::serve::server::start_server;
