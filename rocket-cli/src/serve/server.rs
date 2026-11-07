@@ -220,24 +220,24 @@ fn downlink_triples(packet: &VLPDownlinkPacket, status: &PacketStatus, timestamp
             triples.push(("gsd_packet_type", 1.0, timestamp));
             triples.push(("gsd_unix_clock_ready", p.unix_clock_ready().into(), timestamp));
             triples.push(("gsd_num_of_fix_satellites", p.num_of_fix_satellites().into(), timestamp));
-            let (lat, lon) = match p.lat_lon() {
+            let lat_lon = p.lat_lon();
+            let (lat, lon) = match lat_lon {
                 Some(t) => t,
-                None => (0.0,0.0) // TODO: what should defaults be in this case?
+                None => (0.0,0.0)
             };
+            triples.push(("gsd_lat_lon_valid", lat_lon.is_some().into(), timestamp));
             triples.push(("gsd_lat", lat, timestamp));
             triples.push(("gsd_lon", lon, timestamp));
-            // lat_lon_valid: true,
             triples.push(("gsd_air_temperature", p.air_temperature().into(), timestamp));
             triples.push(("gsd_vl_battery_v", p.vl_battery_v().into(), timestamp));
 
             triples.push(("gsd_pyro_main_continuity", p.pyro_main_continuity().into(), timestamp));
             triples.push(("gsd_pyro_drogue_continuity", p.pyro_drogue_continuity().into(), timestamp));
 
-            triples.push(("gsd_flight_stage", p.flight_stage() as i8 as f64, timestamp)); // TODO: the flightstage definition here does not match the one given in NICK documentation
+            triples.push(("gsd_flight_stage", p.flight_stage() as i8 as f64, timestamp));
             let alt_agl = match p.deployment_kf_altitude_agl() {
                 Some(t) => t,
-                None => 0.0 // TODO: is there really no velocity or altitude tracking at all during mach lockout? 
-                // TODO: frontend doesn't have keys for altitude or velocity validity - should these be added?
+                None => 0.0 // TODO: is there really no velocity or altitude tracking at all during mach lockout? This doesn't seem consistent with DTEGs
             };
             let max_alt_agl = match p.max_deployment_kf_altitude_agl() {
                 Some(t) => t,
@@ -250,7 +250,8 @@ fn downlink_triples(packet: &VLPDownlinkPacket, status: &PacketStatus, timestamp
             triples.push(("gsd_altitude_agl", alt_agl.into(), timestamp));
             triples.push(("gsd_max_altitude_agl", max_alt_agl.into(), timestamp));
             triples.push(("gsd_air_speed", vert_velo.into(), timestamp));
-            // deployment_kf_valid: false,
+            triples.push(("gsd_alt_and_vel_valid", p.deployment_kf_altitude_agl().is_some().into(), timestamp));
+            
             // deployment_kf_altitude_agl: 162,
             // deployment_kf_vertical_velocity: 282,
 
@@ -258,19 +259,23 @@ fn downlink_triples(packet: &VLPDownlinkPacket, status: &PacketStatus, timestamp
             // max_deployment_kf_altitude_agl: 2595,
 
             // airbrakes_kf_tilt_valid: true,
-            // airbrakes_kf_tilt_deg: 133,
             let tilt_deg = match p.airbrakes_kf_tilt_deg() {
                 Some(t) => t,
                 None => 0.0
             };
-            triples.push(("gsd_tilt_deg", tilt_deg.into(), timestamp)); // TODO: again, frontend does not expect validity key
-
-            // TODO: frontend expects none of these, should it?
-            // airbrakes_enabled: true,
-            // airbrakes_calibrated: true,
-            // mpc_predicted_apogee_valid: true,
-            // mpc_predicted_apogee_agl: 4704,
-            // target_apogee_agl: 5028,
+            triples.push(("gsd_tilt_deg", tilt_deg.into(), timestamp));
+            triples.push(("gsd_airbrakes_tilt_valid", p.airbrakes_kf_tilt_deg().is_some().into(), timestamp));
+            
+            let pred_apog = match p.mpc_predicted_apogee_agl() {
+                Some(t) => t,
+                None => 0.0
+            };
+            triples.push(("gsd_airbrakes_enabled", p.airbrakes_enabled().into(), timestamp));
+            triples.push(("gsd_airbrakes_calibrated", p.airbrakes_calibrated().into(), timestamp));
+            triples.push(("gsd_mpc_predicted_apogee", pred_apog.into(), timestamp));
+            triples.push(("gsd_mpc_predicted_apogee_valid", p.mpc_predicted_apogee_agl().is_some().into(), timestamp));
+            triples.push(("gsd_target_apogee_agl", p.target_apogee_agl().into(), timestamp));
+            
             
             triples.push(("gsd_shared_battery_v", p.shared_battery_v().unwrap_or_else(||0.0).into(), timestamp));
             triples.push(("gsd_amp_online", p.amp_online().into(), timestamp));
@@ -355,17 +360,19 @@ fn downlink_triples(packet: &VLPDownlinkPacket, status: &PacketStatus, timestamp
         VLPDownlinkPacket::LowPowerTelemetry(p) => {
             triples.push(("gsd_packet_type", 2.0, timestamp)); // PacketType enum from NICK docs has LowPowerTelemetry as 2
             triples.push(("gsd_num_of_fix_satellites", p.num_of_fix_satellites().into(), timestamp));
-            let (lat, lon) = match p.lat_lon() {
+            let lat_lon = p.lat_lon();
+            let (lat, lon) = match lat_lon {
                 Some(t) => t,
-                None => (0.0,0.0) // TODO: what should defaults be in this case?
+                None => (0.0,0.0)
             };
+            triples.push(("gsd_lat_lon_valid", lat_lon.is_some().into(), timestamp));
             triples.push(("gsd_lat", lat, timestamp));
             triples.push(("gsd_lon", lon, timestamp));
             triples.push(("gsd_air_temperature", p.air_temperature().into(), timestamp));
             triples.push(("gsd_vl_battery_v", p.vl_battery_v().into(), timestamp));
             triples.push(("gsd_shared_battery_v", p.shared_battery_v().unwrap_or_else(||0.0).into(), timestamp)); // again here, what is the default?
             triples.push(("gsd_amp_online", p.amp_online.into(), timestamp));
-            // "gps_fixed": p.gps_fixed(), this was not specified in NICK expected keys, but is present here
+            triples.push(("gsd_gps_fixed", p.gps_fixed().into(), timestamp));
             //TODO: what are these? are these an old version of EPS?
             // "epm_batt_v": p.epm_batt_v().volts(),
             // "epm_batt_below_range": p.epm_batt_v() == EpmBattV::BelowRange,
@@ -375,15 +382,16 @@ fn downlink_triples(packet: &VLPDownlinkPacket, status: &PacketStatus, timestamp
         },
         VLPDownlinkPacket::LandedTelemetry(p) => {
             triples.push(("gsd_packet_type", 3.0, timestamp));
-            let (lat, lon) = match p.lat_lon() {
+            let lat_lon = p.lat_lon();
+            let (lat, lon) = match lat_lon {
                 Some(t) => t,
-                None => (0.0,0.0) // TODO: what should defaults be in this case?
+                None => (0.0,0.0)
             };
+            triples.push(("gsd_lat_lon_valid", lat_lon.is_some().into(), timestamp));
             triples.push(("gsd_lat", lat, timestamp));
             triples.push(("gsd_lon", lon, timestamp));
             triples.push(("gsd_num_of_fix_satellites", p.num_of_fix_satellites().into(), timestamp));
-            // lat_lon_valid: true,
-            // battery_v: 801, Is this vl_battery_v?
+            triples.push(("gsd_vl_battery_v", p.battery_v().into(), timestamp));
             triples.push(("gsd_shared_battery_v", p.shared_battery_v().unwrap_or_else(||0.0).into(), timestamp));
             triples.push(("gsd_amp_online", p.amp_online().into(), timestamp));
             triples.push(("gsd_amp_rebooted_in_last_5s", p.amp_rebooted_in_last_5s().into(), timestamp));
