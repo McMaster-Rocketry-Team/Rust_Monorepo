@@ -60,7 +60,9 @@ pub fn sqrt(x: f32) -> f32 {
 #[inline(always)]
 pub fn sqrt(x: f32) -> f32 {
     // Lowers to VSQRT.F32 on this target.
-    core::intrinsics::sqrtf32(x)
+    unsafe {
+        core::intrinsics::sqrtf32(x)
+    }
 }
 
 /// Speed of sound (m/s) at altitude ASL (m): linear fit to the standard

@@ -71,15 +71,18 @@ async fn main() -> Result<()> {
         }
         ModeSelect::GroundStation => {
             let serial_path = find_ground_station().await?;
+            println!("{}", serial_path);
             ground_station_tui(&serial_path).await
         }
         #[cfg(feature = "server")]
         ModeSelect::Server => {
             let serial_path = find_ground_station().await?;
+            println!("{}", serial_path);
             run_live_server(&serial_path).await
         }
         ModeSelect::Control(args) => {
             let serial_path = find_ground_station().await?;
+            println!("{}", serial_path);
             let params = LinkParams::resolve(args.frequency, args.power, args.vlp_key)?;
             control_session(&serial_path, params).await
         }

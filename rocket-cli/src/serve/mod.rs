@@ -79,9 +79,7 @@ pub async fn run_live_server(serial_path: &str) -> Result<()>{
 
     tokio::select! {
         _ = daemon.run() => {}
-        _ = spawn_blocking(move || {
-            start_server(vlp_client, config)
-        }) => {}
+        _ = start_server(vlp_client, config) => {}
     }
 
     Ok(())

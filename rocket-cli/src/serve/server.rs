@@ -6,6 +6,13 @@ use std::time::UNIX_EPOCH;
 use anyhow::Result;
 use firmware_common_new::vlp::packets::VLPDownlinkPacket;
 use firmware_common_new::vlp::packets::VLPUplinkPacket;
+use firmware_common_new::vlp::packets::{
+    reset::ResetPacket, 
+    change_mode::ChangeModePacket, 
+    amp_output_overwrite::AMPOutputOverwritePacket, 
+    fire_pyro::FirePyroPacket, 
+    set_target_apogee::SetTargetApogeePacket
+};
 use lora_phy::mod_params::PacketStatus;
 use std::time::Duration;
 
@@ -33,8 +40,8 @@ pub async fn start_server(
         let mut last_packet_time = Instant::now();
         loop {
             if let Some((packet, status)) = client.try_receive() {
-                // println!("{:#?}", packet);
-                // println!("rssi {}, snr {}", status.rssi, status.snr);
+                println!("{:#?}", packet);
+                println!("rssi {}, snr {}", status.rssi, status.snr);
                 /* 
                 TODO: sending timestamps instead of received ones
                 Packet decoding and unit corrections can be seen in the formatting in gs/downlink_packet_display/sections (L259)
@@ -118,7 +125,19 @@ struct UplinkResponse {
     message: String,
 }
 
-async fn command_handler(State(state): State<AppState>, Json(payload): Json<VLPUplinkPacket>) -> (StatusCode, Json<UplinkResponse>) {
+
+// This duplicate of VLPUplinkPacket is needed because we cannot use the Deserialize trait on VLPUplinkPacket due to use in firmware
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type")]
+pub enum ServerUplinkPacket {
+    ChangeMode(ChangeModePacket),
+    Reset(ResetPacket),
+    AMPOutputOverwrite(AMPOutputOverwritePacket),
+    FirePyro(FirePyroPacket),
+    SetTargetApogee(SetTargetApogeePacket)
+}
+
+async fn command_handler(State(state): State<AppState>, Json(srv_payload): Json<ServerUplinkPacket>) -> (StatusCode, Json<UplinkResponse>) {
     // let _lock = match state.uplink_lock.lock().await {
     //     Ok(guard) => guard,
     //     Err(_) => {
@@ -129,6 +148,13 @@ async fn command_handler(State(state): State<AppState>, Json(payload): Json<VLPU
     //     }
     // };
     let _lock = state.uplink_lock.lock().await;
+    let payload = match srv_payload {
+        ServerUplinkPacket::AMPOutputOverwrite(t) => VLPUplinkPacket::AMPOutputOverwrite(t),
+        ServerUplinkPacket::ChangeMode(t) => VLPUplinkPacket::ChangeMode(t),
+        ServerUplinkPacket::FirePyro(t) => VLPUplinkPacket::FirePyro(t),
+        ServerUplinkPacket::Reset(t) => VLPUplinkPacket::Reset(t),
+        ServerUplinkPacket::SetTargetApogee(t) => VLPUplinkPacket::SetTargetApogee(t),
+    };
     match payload {
         VLPUplinkPacket::SetTargetApogee(ref apogee) => {
             println!("Setting target apogee to: {apogee:?}m");
