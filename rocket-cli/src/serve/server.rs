@@ -126,7 +126,7 @@ struct UplinkResponse {
 }
 
 
-// This duplicate of VLPUplinkPacket is needed because we cannot use the Deserialize trait on VLPUplinkPacket due to use in firmware
+// This duplicate of VLPUplinkPacket is needed because we cannot use the type trait on VLPUplinkPacket due to use in firmware
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type")]
 pub enum ServerUplinkPacket {
@@ -138,15 +138,6 @@ pub enum ServerUplinkPacket {
 }
 
 async fn command_handler(State(state): State<AppState>, Json(srv_payload): Json<ServerUplinkPacket>) -> (StatusCode, Json<UplinkResponse>) {
-    // let _lock = match state.uplink_lock.lock().await {
-    //     Ok(guard) => guard,
-    //     Err(_) => {
-    //         return (
-    //             StatusCode::CONFLICT,
-    //             Json(UplinkResponse { rssi: 404, snr: 404, message: "Uplink already in progess".to_string() }),
-    //         )
-    //     }
-    // };
     let _lock = state.uplink_lock.lock().await;
     let payload = match srv_payload {
         ServerUplinkPacket::AMPOutputOverwrite(t) => VLPUplinkPacket::AMPOutputOverwrite(t),
@@ -243,6 +234,7 @@ fn downlink_triples(packet: &VLPDownlinkPacket, status: &PacketStatus, timestamp
     triples.push(("gsd_seconds_since_received", time_since_last.into(), timestamp));
     match packet {
         VLPDownlinkPacket::Telemetry(p) => {
+            // Tested with hardware through to NICK
             triples.push(("gsd_packet_type", 1.0, timestamp));
             triples.push(("gsd_unix_clock_ready", p.unix_clock_ready().into(), timestamp));
             triples.push(("gsd_num_of_fix_satellites", p.num_of_fix_satellites().into(), timestamp));
@@ -384,6 +376,7 @@ fn downlink_triples(packet: &VLPDownlinkPacket, status: &PacketStatus, timestamp
             // payload_exp3_monitoring: false,
         },
         VLPDownlinkPacket::LowPowerTelemetry(p) => {
+            // Tested hardware thru NICK
             triples.push(("gsd_packet_type", 2.0, timestamp)); // PacketType enum from NICK docs has LowPowerTelemetry as 2
             triples.push(("gsd_num_of_fix_satellites", p.num_of_fix_satellites().into(), timestamp));
             let lat_lon = p.lat_lon();
@@ -404,9 +397,37 @@ fn downlink_triples(packet: &VLPDownlinkPacket, status: &PacketStatus, timestamp
             // "epm_batt_below_range": p.epm_batt_v() == EpmBattV::BelowRange,
         },
         VLPDownlinkPacket::SelfTestResult(p) => {
+            // Tested hardware to NICK
             triples.push(("gsd_packet_type", 4.0, timestamp));
+            
+
+            triples.push(("gsd_selftest_imu_ok", p.imu_ok.into(), timestamp));
+            triples.push(("gsd_selftest_baro_ok", p.baro_ok.into(), timestamp));
+            triples.push(("gsd_selftest_mag_ok", p.mag_ok.into(), timestamp));
+            triples.push(("gsd_selftest_gps_ok", p.gps_ok.into(), timestamp));
+            triples.push(("gsd_selftest_sd_ok", p.sd_ok.into(), timestamp));
+            triples.push(("gsd_selftest_can_bus_ok", p.can_bus_ok.into(), timestamp));
+
+            triples.push(("gsd_selftest_amp_out1_power_good", p.amp_out1_power_good.into(), timestamp));
+            triples.push(("gsd_selftest_amp_out2_power_good", p.amp_out2_power_good.into(), timestamp));
+            triples.push(("gsd_selftest_amp_out3_power_good", p.amp_out3_power_good.into(), timestamp));
+            triples.push(("gsd_pyro_main_continuity", p.main_continuity.into(), timestamp));
+            triples.push(("gsd_pyro_drogue_continuity", p.drogue_continuity.into(), timestamp));
+
+            // TODO: custom statuses: NodeStatus::custom_status. are they necessary?
+
+            triples.push(("gsd_selftest_amp_health", p.amp.health as i8 as f64, timestamp));
+            triples.push(("gsd_selftest_amp_mode", p.amp.mode as i8 as f64, timestamp));
+            triples.push(("gsd_amp_rebooted_in_last_5s", p.amp.rebooted_in_last_5s.into(), timestamp));
+            triples.push(("gsd_selftest_icarus_health", p.icarus.health  as i8 as f64, timestamp));
+            triples.push(("gsd_selftest_icarus_mode", p.icarus.mode as i8 as f64, timestamp));
+            triples.push(("gsd_icarus_rebooted_in_last_5s", p.icarus.rebooted_in_last_5s.into(), timestamp));
+            triples.push(("gsd_selftest_ozys1_health", p.ozys.health as i8 as f64, timestamp));
+            triples.push(("gsd_selftest_ozys1_mode", p.ozys.mode as i8 as f64, timestamp));
+            triples.push(("gsd_ozys1_rebooted_in_last_5s", p.ozys.rebooted_in_last_5s.into(), timestamp));
         },
         VLPDownlinkPacket::LandedTelemetry(p) => {
+            // Tested hardware thru NICK
             triples.push(("gsd_packet_type", 3.0, timestamp));
             let lat_lon = p.lat_lon();
             let (lat, lon) = match lat_lon {

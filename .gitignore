@@ -11,3 +11,4 @@ secret.key
 logs
 **/flight_log_*.csv
 **/flight_log_*.png
+rocket-cli/set-key.sh

@@ -14,7 +14,8 @@ impl Default for GroundStationConfig {
     fn default() -> Self {
         Self {
             vlp_key: [42u8; 32],
-            frequency: 915_100_000,
+            // frequency: 915_100_000,
+            frequency: 920_000_000,
             power: 22,
         }
     }

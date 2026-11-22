@@ -267,8 +267,8 @@ impl VLPDownlinkPacket {
 }
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
-#[serde(tag = "type")]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+// #[serde(tag = "type")]
 pub enum VLPUplinkPacket {
     ChangeMode(ChangeModePacket),
     Reset(ResetPacket),
